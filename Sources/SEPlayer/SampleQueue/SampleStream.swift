@@ -8,6 +8,7 @@
 import CoreMedia
 
 protocol SampleStream {
+    var format: CMFormatDescription { get }
     func isReady() -> Bool
     func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult
     func skipData(to time: CMTime) -> Int

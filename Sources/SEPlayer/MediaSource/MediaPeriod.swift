@@ -7,13 +7,13 @@
 
 import CoreMedia
 
-protocol MediaPeriod: SequenceableLoader {
-    var trackGroups: Set<TrackGroup> { get }
+protocol MediaPeriod: SequenceableLoader, AnyObject {
+    var trackGroups: [TrackGroup] { get }
 
     func prepare(callback: any MediaPeriodCallback, on time: CMTime)
     func discardBuffer(to time: CMTime, toKeyframe: Bool)
     func seek(to time: CMTime)
-    func selectTrack(selections: [Void], on time: CMTime) -> [SampleStream]
+    func selectTrack(selections: [any SETrackSelection], on time: CMTime, delegate: SampleQueueDelegate) -> [SampleStream]
 }
 
 protocol MediaPeriodCallback: SequenceableLoaderCallback where Source == any MediaPeriod {

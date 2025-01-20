@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
+
 struct BoxParser {
     func parseTraks(moov: ContainerBox) throws -> [TrackSampleTable] {
         return try moov.containerChildren
@@ -13,14 +15,14 @@ struct BoxParser {
                 guard let track = try? parseTrak(trak: atom, mvhd: moov
                     .getLeafBoxOfType(type: .mvhd).checkNotNil(BoxParserErrors.missingBox(type: .mvhd))
                 ) else { return nil }
-                
+
                 let stbl = try atom.getContainerBoxOfType(type: .mdia)
                     .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
                     .getContainerBoxOfType(type: .minf)
                     .checkNotNil(BoxParserErrors.missingBox(type: .minf))
                     .getContainerBoxOfType(type: .stbl)
                     .checkNotNil(BoxParserErrors.missingBox(type: .stbl))
-                
+
                 return try parseStbl(track: track, stblBox: stbl)
             }
     }
@@ -28,7 +30,7 @@ struct BoxParser {
     func parseTrak(trak: ContainerBox, mvhd: LeafBox) throws -> Track? {
         let mdia = try trak.getContainerBoxOfType(type: .mdia)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
-        
+
         let trackType = try TrackType(rawValue: parseHdlr(
                 hdlr: mdia.getLeafBoxOfType(type: .hdlr)
                     .checkNotNil(BoxParserErrors.missingBox(type: .hdlr)).data
@@ -36,12 +38,12 @@ struct BoxParser {
         )
 
         guard trackType != .unknown else { return nil }
-        
+
         let tkhdData = try TkhdData(tkhd: trak
             .getLeafBoxOfType(type: .tkhd)
             .checkNotNil(BoxParserErrors.missingBox(type: .tkhd)).data
         )
-        
+
         let movieTimescale = try Mp4TimestampData(mvhd: mvhd.data).timescale
 //        let durationUs = if dura
         let stbl = try mdia.getContainerBoxOfType(type: .minf)
@@ -53,7 +55,7 @@ struct BoxParser {
             .getLeafBoxOfType(type: .mdhd)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdhd)).data
         )
-        
+
         guard let stsd = stbl.getLeafBoxOfType(type: .stsd) else {
             throw BoxParserErrors.badBoxContent(type: .stbl, reason: "Sample table (stbl) missing sample description (stsd)")
         }
@@ -64,13 +66,12 @@ struct BoxParser {
             id: tkhdData.trackId,
             type: trackType,
             formats: stsdData.descriptions,
-            timescale: Int(mdhdData.timescale),
-            movieTimescale: Int(movieTimescale),
-            duration: Int(mdhdData.mediaDuration)
+            timescale: CMTimeScale(mdhdData.timescale),
+            movieTimescale: CMTimeScale(movieTimescale),
+            duration: CMTimeValue(mdhdData.mediaDuration)
         )
     }
-    
-//    func parseStbl(stblBox: ContainerBox)
+
     func parseHdlr(hdlr: ByteBuffer) throws -> UInt32 {
         var hdlr = hdlr
         hdlr.moveReaderIndex(to: Int(MP4Box.fullHeaderSize) + 4)
@@ -118,7 +119,7 @@ extension BoxParser {
             }
         }
     }
-    
+
     struct MdhdData {
         let timescale: UInt32
         let mediaDuration: UInt64
@@ -168,7 +169,7 @@ extension BoxParser {
 
     static func readFullboxVersionNoFlags(reader: inout ByteBuffer) throws -> UInt8 {
         let (version, flags) = try readFullboxExtra(reader: &reader)
-        
+
         if flags != 0 {
             throw BoxParserErrors.flagsNotZeroInBoxExtra
         }

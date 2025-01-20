@@ -20,9 +20,9 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
         self.extractorQueue = extractorQueue
     }
 
-    func prepare(dataReader: DataReader, url: URL, response: URLResponse?, position: Int, lenght: Int, output: ExtractorOutput) throws {
+    func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws {
         assert(queue.isCurrent())
-        extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: extractorQueue)
+        extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: extractorQueue, range: range)
         guard extractor == nil else { return }
         extractor = MP4Extractor(queue: extractorQueue, extractorOutput: output)
     }

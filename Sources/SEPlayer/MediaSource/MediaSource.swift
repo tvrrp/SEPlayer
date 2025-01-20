@@ -8,7 +8,7 @@
 import CoreMedia
 import Foundation
 
-protocol MediaSource {
+protocol MediaSource: AnyObject {
     var mediaItem: MediaItem? { get }
     var isSingleWindow: Bool { get }
 
@@ -16,6 +16,7 @@ protocol MediaSource {
     func removeEventListener(_ listener: MediaSourceEventListener)
     func getInitialTimeline() -> Timeline?
     func prepareSource(delegate: MediaSourceDelegate, mediaTransferListener: TransferListener?, playerId: UUID)
+    func enable(delegate: MediaSourceDelegate)
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
@@ -24,6 +25,7 @@ protocol MediaSource {
         mediaSourceEventDelegate: MediaSourceEventListener
     ) -> MediaPeriod
     func release(mediaPeriod: MediaPeriod)
+    func disable(delegate: MediaSourceDelegate)
     func continueLoadingRequested(with source: any MediaSource)
 }
 
@@ -32,11 +34,6 @@ extension MediaSource {
     var isSingleWindow: Bool { true }
 
     func getInitialTimeline() -> Timeline? { nil }
-}
-
-struct MediaPeriodId: Hashable {
-    let periodId: UUID
-    let windowSequenceNumber: Int
 }
 
 protocol MediaSourceEventListener: AnyObject {
@@ -78,6 +75,7 @@ class BaseMediaSource: MediaSource {
     func prepareSourceInternal(mediaTransferListener: TransferListener?) { fatalError("To override") }
     func releaseSourceInternal() { fatalError("To override") }
     func updateMediaItem() { fatalError("To override") }
+    func enableInternal() { fatalError("To override") }
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
@@ -88,6 +86,7 @@ class BaseMediaSource: MediaSource {
         fatalError("To override")
     }
     func release(mediaPeriod: any MediaPeriod) { fatalError("To override") }
+    func disableInternal() { fatalError("To override") }
     func continueLoadingRequested(with source: any MediaSource) { fatalError("To override") }
 
     final func refreshSourceInfo(timeline: Timeline) {
@@ -113,6 +112,22 @@ class BaseMediaSource: MediaSource {
         prepareSourceInternal(mediaTransferListener: mediaTransferListener)
         if let _timeline {
             delegate.mediaSource(self, sourceInfo: _timeline)
+        }
+    }
+
+    final func enable(delegate: MediaSourceDelegate) {
+        let wasDisabled = mediaSourceDelegates.count == 0
+        mediaSourceDelegates.addDelegate(delegate)
+        if wasDisabled {
+            enableInternal()
+        }
+    }
+
+    final func disable(delegate: MediaSourceDelegate) {
+        let wasEnabled = mediaSourceDelegates.count > 0
+        mediaSourceDelegates.removeDelegate(delegate)
+        if wasEnabled && mediaSourceDelegates.count == 0 {
+            disableInternal()
         }
     }
 

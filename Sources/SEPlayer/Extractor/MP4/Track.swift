@@ -13,9 +13,9 @@ struct Track {
     let id: Int
     let type: TrackType
     let formats: [TrackFormat]
-    let timescale: Int
-    let movieTimescale: Int
-    let duration: Int
+    let timescale: CMTimeScale
+    let movieTimescale: CMTimeScale
+    let duration: CMTimeValue
 
     enum TrackFormat {
         case video(CMVideoFormatDescription)
@@ -29,14 +29,5 @@ struct Track {
                 return audioFormat
             }
         }
-    }
-
-    init(id: Int, type: TrackType, formats: [TrackFormat], timescale: Int, movieTimescale: Int, duration: Int) {
-        self.id = id
-        self.type = type
-        self.formats = formats
-        self.timescale = timescale
-        self.movieTimescale = movieTimescale
-        self.duration = duration
     }
 }

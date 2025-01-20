@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
+
 extension BoxParser {
     func parseStbl(track: Track, stblBox: ContainerBox) throws -> TrackSampleTable {
         var sampleSizeBox: SampleSizeBox = if let stszAtom = stblBox.getLeafBoxOfType(type: .stsz) {
@@ -19,14 +21,14 @@ extension BoxParser {
 
         let sampleCount = sampleSizeBox.sampleCount
         if sampleCount == 0 {
-            return TrackSampleTable(track: track, offsets: [], sizes: [], maximumSize: 0, timestamps: [], flags: [], duration: 0)
+            return TrackSampleTable(track: track, maximumSize: 0, duration: .zero, samples: [])
         }
 
 //        if case .video = track.type {
             // TODO: calc
 //            let frameRate = Float(sampleCount / (track.duration))
 //        }
-        
+
         var chunkOffsetsType: any FixedWidthInteger.Type = UInt32.self
         let chunkOffsetsAtom: LeafBox
         if let stblBox = stblBox.getLeafBoxOfType(type: .stco) {
@@ -50,11 +52,11 @@ extension BoxParser {
         stts.moveReaderIndex(to: MP4Box.fullHeaderSize)
         var remainingTimestampDeltaChanges = try stts.readInt(as: UInt32.self) - 1
         var remainingSamplesAtTimestampDelta = try stts.readInt(as: UInt32.self)
-        var timestampDeltaInTimeUnits: Int32 = try Int32(stts.readInt(as: UInt32.self))
+        var timestampDeltaInTimeUnits = try CMTimeValue(stts.readInt(as: UInt32.self))
         
         var remainingSamplesAtTimestampOffset: UInt32 = 0
         var remainingTimestampOffsetChanges: UInt32 = 0
-        var timestampOffset: Int = 0
+        var timestampOffset: CMTimeValue = 0
         try ctts.withTransform { ctts in
             ctts.moveReaderIndex(to: MP4Box.fullHeaderSize)
             remainingTimestampOffsetChanges = try ctts.readInt(as: UInt32.self)
@@ -74,19 +76,16 @@ extension BoxParser {
                 stss = nil
             }
         }
-        
-        var offsets: [Int] = []
-        var sizes: [Int] = []
+
         var maximumSize = 0
-        var timestamps: [Int] = []
-        var timestampTimeUnits = 0
-        var flags: [SampleFlags] = []
-        var durarion = 0
+        var timestampTimeUnits: CMTimeValue = 0
+        var samples = [TrackSampleTable.Sample]()
+        var durarion: CMTimeValue = 0
 
         var offset = 0
         var remainingSamplesInChunk = 0
 
-        for i in 0..<sampleCount {
+        for index in 0..<sampleCount {
             while remainingSamplesInChunk == 0, try chunkIterator.moveNext() {
                 offset = chunkIterator.offset
                 remainingSamplesInChunk = chunkIterator.numberOfSamples
@@ -100,23 +99,20 @@ extension BoxParser {
                     // signed integers instead. It's safe to always decode sample offsets as signed integers
                     // here, because unsigned integers will still be parsed correctly (unless their top bit
                     // is set, which is never true in practice because sample offsets are always small).
-                    timestampOffset = try Int(ctts.readInt(as: Int32.self))
+                    timestampOffset = try CMTimeValue(ctts.readInt(as: Int32.self))
                     remainingTimestampOffsetChanges -= 1
                 }
                 remainingSamplesAtTimestampOffset -= 1
             }
 
-            offsets.append(offset)
             let size = try sampleSizeBox.readNextSampleSize()
-            sizes.append(size)
             if size > maximumSize {
                 maximumSize = size
             }
-            timestamps.append(timestampTimeUnits + timestampOffset)
 
-            flags.append(stss == nil ? .keyframe : [])
-            if i == nextSynchronizationSampleIndex {
-                flags[i] = .keyframe
+            var flags: SampleFlags = [stss == nil ? .keyframe : []]
+            if index == nextSynchronizationSampleIndex {
+                flags = [.keyframe]
                 remainingSynchronizationSamples -= 1
                 if remainingSynchronizationSamples > 0 {
                     var stssBox = try stss.checkNotNil(BoxParserErrors.missingBox(type: .stss))
@@ -125,8 +121,17 @@ extension BoxParser {
                 }
             }
 
+            samples.append(.init(
+                offset: offset,
+                size: size,
+                duration: CMTime(value: timestampDeltaInTimeUnits, timescale: track.timescale),
+                presentationTimeStamp: CMTime(value: timestampTimeUnits + timestampOffset, timescale: track.timescale),
+                decodeTimeStamp: CMTime(value: timestampTimeUnits, timescale: track.timescale),
+                flags: flags
+            ))
+
             // Add on the duration of this sample.
-            timestampTimeUnits += Int(timestampDeltaInTimeUnits)
+            timestampTimeUnits += timestampDeltaInTimeUnits
             remainingSamplesAtTimestampDelta -= 1
             if remainingSamplesAtTimestampDelta == 0 && remainingTimestampDeltaChanges > 0 {
                 remainingSamplesAtTimestampDelta = try stts.readInt(as: UInt32.self)
@@ -136,7 +141,7 @@ extension BoxParser {
                 // because unsigned integers will still be parsed correctly
                 // (unless their top bit is set, which is never true in practice because sample
                 // deltas are always small).
-                timestampDeltaInTimeUnits = try stts.readInt(as: Int32.self)
+                timestampDeltaInTimeUnits = try CMTimeValue(stts.readInt(as: Int32.self))
                 remainingTimestampDeltaChanges -= 1
             }
 
@@ -167,44 +172,59 @@ extension BoxParser {
             // Inconsistent stbl box for track
         }
 
-        return TrackSampleTable(track: track, offsets: offsets, sizes: sizes, maximumSize: maximumSize, timestamps: timestamps, flags: flags, duration: durarion)
+        return TrackSampleTable(
+            track: track,
+            maximumSize: maximumSize,
+            duration: CMTime(value: durarion, timescale: track.timescale),
+            samples: samples
+        )
     }
 
     struct TrackSampleTable {
         let track: Track
         let sampleCount: Int
-        let offsets: [Int]
-        let sizes: [Int]
         let maximumSize: Int
-        let timestamps: [Int]
-        let flags: [SampleFlags]
-        let duration: Int
+        let duration: CMTime
+        let samples: [Sample]
 
-        init(track: Track, offsets: [Int], sizes: [Int], maximumSize: Int, timestamps: [Int], flags: [SampleFlags], duration: Int) {
+        struct Sample {
+            let offset: Int
+            let size: Int
+            let duration: CMTime
+            let presentationTimeStamp: CMTime
+            let decodeTimeStamp: CMTime
+            let flags: SampleFlags
+        }
+
+        init(track: Track, maximumSize: Int, duration: CMTime, samples: [Sample]) {
             self.track = track
-            self.offsets = offsets
-            self.sizes = sizes
+            self.sampleCount = samples.count
             self.maximumSize = maximumSize
-            self.timestamps = timestamps
-            var flags = flags
-            if !flags.isEmpty {
-                flags[flags.endIndex - 1] = [.endOfStream, flags[flags.endIndex - 1]]
-            }
-            self.flags = flags
-            
             self.duration = duration
-            sampleCount = offsets.count
+            var samples = samples
+            if !samples.isEmpty {
+                let updatedSample = samples[samples.count - 1]
+                samples[samples.count - 1] = Sample(
+                    offset: updatedSample.offset,
+                    size: updatedSample.size,
+                    duration: updatedSample.duration,
+                    presentationTimeStamp: updatedSample.presentationTimeStamp,
+                    decodeTimeStamp: updatedSample.decodeTimeStamp,
+                    flags: [updatedSample.flags, .endOfStream]
+                )
+            }
+            self.samples = samples
         }
     }
 }
 
-private protocol SampleSizeBox {
-    var sampleCount: Int { get }
-    var fixedSampleSize: Int? { get }
-    mutating func readNextSampleSize() throws -> Int
-}
-
 private extension BoxParser {
+    private protocol SampleSizeBox {
+        var sampleCount: Int { get }
+        var fixedSampleSize: Int? { get }
+        mutating func readNextSampleSize() throws -> Int
+    }
+
     struct StszSampleSizeBox: SampleSizeBox {
         let fixedSampleSize: Int?
         let sampleCount: Int

@@ -25,18 +25,11 @@ public final class TypedCMBufferQueue<T: CMBuffer> {
     private let bufferQueue: CMBufferQueue
     private let capacity: CMItemCount
 
-    init(capacity: CMItemCount = 120, shouldCompare: Bool = true) throws {
+    init(capacity: CMItemCount = 120, handlers: CMBufferQueue.Handlers = .outputPTSSortedSampleBuffers) throws {
         self.capacity = capacity
-//        bufferQueue = try CMBufferQueue(capacity: capacity, handlers: .init(withHandlers: {
-//            $0.getDuration(callBackProvider.getDuration)
-//            $0.getDecodeTimeStamp(callBackProvider.getDecodeTime)
-//            $0.getPresentationTimeStamp(callBackProvider.getPresentationTime)
-//            $0.compare(callBackProvider.compareBuffers)
-//            $0.getSize(callBackProvider.getSize)
-//        }))
         bufferQueue = try CMBufferQueue(
             capacity: capacity,
-            handlers: shouldCompare ? .outputPTSSortedSampleBuffers : .unsortedSampleBuffers
+            handlers: handlers
         )
     }
 

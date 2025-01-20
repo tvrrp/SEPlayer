@@ -9,7 +9,7 @@ import CoreMedia
 import Foundation
 
 protocol ProgressiveMediaExtractor {
-    func prepare(dataReader: DataReader, url: URL, response: URLResponse?, position: Int, lenght: Int, output: ExtractorOutput) throws
+    func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws
     func release()
     func getCurrentInputPosition() -> Int?
     func seek(position: Int, time: CMTime)

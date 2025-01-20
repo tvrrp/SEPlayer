@@ -78,8 +78,8 @@ final class MP4Extractor: Extractor {
             enterReadingAtomHeaderState()
         } else {
             for index in 0..<tracks.count {
-                if let syncSample = tracks[index].sampleTable.syncSample(for: time) {
-                    tracks[index].sampleIndex = syncSample
+                if let (index, _) = tracks[index].sampleTable.syncSample(for: time) {
+                    tracks[index].sampleIndex = index
                 }
             }
         }
@@ -111,21 +111,16 @@ extension MP4Extractor: SeekMap {
             if let mainTrackIndex {
                 let mainTrack = tracks[mainTrackIndex]
                 let sampleTable = mainTrack.sampleTable
-                guard let syncSampleIndex = sampleTable.syncSample(for: time) else {
+                guard let (syncSampleIndex, syncSample) = sampleTable.syncSample(for: time) else {
                     return SeekPoints(first: .start())
                 }
-                firstTime = CMTime(
-                    value: CMTimeValue(sampleTable.timestamps[syncSampleIndex]),
-                    timescale: CMTimeScale(mainTrack.track.timescale)
-                )
-                firstOffset = sampleTable.offsets[syncSampleIndex]
+                firstTime = syncSample.decodeTimeStamp
+                firstOffset = syncSample.offset
+
                 if firstTime < time && syncSampleIndex < sampleTable.sampleCount - 1 {
-                    if let secondSampleIndex = sampleTable.laterOrEqualSyncSample(for: time) {
-                        secondTime = CMTime(
-                            value: CMTimeValue(sampleTable.timestamps[secondSampleIndex]),
-                            timescale: CMTimeScale(mainTrack.track.timescale)
-                        )
-                        secondOffset = sampleTable.offsets[secondSampleIndex]
+                    if let (_, secondSyncSample) = sampleTable.laterOrEqualSyncSample(for: time) {
+                        secondTime = secondSyncSample.decodeTimeStamp
+                        secondOffset = secondSyncSample.offset
                     }
                 }
             } else {
@@ -274,15 +269,12 @@ private extension MP4Extractor {
         let track = tracks[sampleTrackIndex]
         let trackOutput = track.trackOutput
         let sampleIndex = track.sampleIndex
-        let position = track.sampleTable.offsets[sampleIndex]
-        let sampleSize = track.sampleTable.sizes[sampleIndex]
-        let sampleTimestamp = track.sampleTable.timestamps[sampleIndex]
-        let sampleFlags = track.sampleTable.flags[sampleIndex]
-        let timescale = track.track.timescale
-        let skipAmount = position - inputPosition
+        let sample = track.sampleTable.samples[sampleIndex]
+
+        let skipAmount = sample.offset - inputPosition
 
         if skipAmount < 0 || skipAmount >= .reloadMinimumSeekDistance {
-            completion(.seek(offset: position))
+            completion(.seek(offset: sample.offset))
             return
         }
 
@@ -293,9 +285,11 @@ private extension MP4Extractor {
             }
 
             let sampleMedatada = SampleMetadata(
-                time: CMTime(value: CMTimeValue(sampleTimestamp), timescale: CMTimeScale(timescale)),
-                flags: sampleFlags,
-                size: sampleSize
+                duration: sample.duration,
+                presentationTimeStamp: sample.presentationTimeStamp,
+                decodeTimeStamp: sample.decodeTimeStamp,
+                flags: sample.flags,
+                size: sample.size
             )
 
             trackOutput.sampleData(input: input, allowEndOfInput: false, metadata: sampleMedatada, completionQueue: self.queue) { error in
@@ -303,7 +297,7 @@ private extension MP4Extractor {
                     completion(.error(error)); return
                 }
 
-                self.sampleBytesRead += sampleSize
+                self.sampleBytesRead += sample.size
                 self.sampleTrackIndex = nil
                 self.tracks[sampleTrackIndex].sampleIndex += 1
                 completion(.continueRead)
@@ -378,7 +372,7 @@ private extension MP4Extractor {
         atomHeaderBytesRead = 0
         atomHeader.clear(minimumCapacity: 16)
     }
-    
+
     func nextReadSample(inputPosition: Int) -> Int? {
         var preferredSkipAmount = Int.max
         var preferredRequiresReload = true
@@ -393,7 +387,8 @@ private extension MP4Extractor {
             if sampleIndex == track.sampleTable.sampleCount {
                 continue
             }
-            let sampleOffset = track.sampleTable.offsets[sampleIndex]
+
+            let sampleOffset = track.sampleTable.samples[sampleIndex].offset
             let sampleAccumulatedBytes = accumulatedSampleSizes[trackIndex][sampleIndex]
             let skipAmount = sampleOffset - inputPosition
             let requiresReload = skipAmount < 0 || skipAmount >= .reloadMinimumSeekDistance
@@ -418,18 +413,18 @@ private extension MP4Extractor {
     func calculateAccumulatedSampleSizes(tracks: [MP4Track]) -> [[Int]] {
         var accumulatedSampleSizes = tracks.map { Array(repeating: 0, count: $0.sampleTable.sampleCount) }
         var nextSampleIndex = Array(repeating: 0, count: tracks.count)
-        var nextSampleTimes = tracks.map { $0.sampleTable.timestamps[0] }
+        var nextSampleTimes = tracks.map { $0.sampleTable.samples[0].decodeTimeStamp }
         var tracksFinished = Array(repeating: false, count: tracks.count)
 
         for (index, track) in tracks.enumerated() {
             accumulatedSampleSizes[index] = Array(repeating: 0, count: track.sampleTable.sampleCount)
-            nextSampleTimes[index] = track.sampleTable.timestamps[0]
+            nextSampleTimes[index] = track.sampleTable.samples[0].decodeTimeStamp
         }
 
         var accumulatedSampleSize = 0
         var finishedTracks = 0
         while finishedTracks < tracks.count {
-            var minTime = Int.max
+            var minTime = CMTime.positiveInfinity
             var minTimeTrackIndex = -1
             for i in 0..<tracks.count {
                 if !tracksFinished[i] && nextSampleTimes[i] <= minTime {
@@ -439,11 +434,11 @@ private extension MP4Extractor {
             }
             var trackSampleIndex = nextSampleIndex[minTimeTrackIndex]
             accumulatedSampleSizes[minTimeTrackIndex][trackSampleIndex] = accumulatedSampleSize
-            accumulatedSampleSize += tracks[minTimeTrackIndex].sampleTable.sizes[trackSampleIndex]
+            accumulatedSampleSize += tracks[minTimeTrackIndex].sampleTable.samples[trackSampleIndex].size
             trackSampleIndex += 1
             nextSampleIndex[minTimeTrackIndex] = trackSampleIndex
             if trackSampleIndex < accumulatedSampleSizes[minTimeTrackIndex].count {
-                nextSampleTimes[minTimeTrackIndex] = tracks[minTimeTrackIndex].sampleTable.timestamps[trackSampleIndex]
+                nextSampleTimes[minTimeTrackIndex] = tracks[minTimeTrackIndex].sampleTable.samples[trackSampleIndex].decodeTimeStamp
             } else {
                 tracksFinished[minTimeTrackIndex] = true
                 finishedTracks += 2
@@ -454,8 +449,8 @@ private extension MP4Extractor {
     }
 
     func adjustSeekOffset(sampleTable: BoxParser.TrackSampleTable, seekTime: CMTime, offset: Int) -> Int {
-        if let syncSampleIndex = sampleTable.syncSample(for: seekTime) {
-            return min(offset, sampleTable.offsets[syncSampleIndex])
+        if let (_, syncSample) = sampleTable.syncSample(for: seekTime) {
+            return min(offset, syncSample.offset)
         } else {
             return offset
         }
@@ -519,31 +514,29 @@ private extension Int {
 }
 
 private extension BoxParser.TrackSampleTable {
-    func syncSample(for time: CMTime) -> Int? {
+    func syncSample(for time: CMTime) -> (index: Int, sample: Sample)? {
         return earlierOrEqualSyncSample(for: time) ?? laterOrEqualSyncSample(for: time)
     }
 
-    func earlierOrEqualSyncSample(for time: CMTime) -> Int? {
-        let requestedTimestamp = time.value
-        guard let startIndex = timestamps.firstIndex(where: { $0 >= requestedTimestamp}) else {
+    func earlierOrEqualSyncSample(for time: CMTime) -> (index: Int, sample: Sample)? {
+        guard let startIndex = samples.firstIndex(where: { $0.decodeTimeStamp >= time}) else {
             return nil
         }
 
         for index in (0..<startIndex).reversed() {
-            if flags[index].contains(.keyframe) { return index }
+            if samples[index].flags.contains(.keyframe) { return (index, samples[index]) }
         }
 
         return nil
     }
 
-    func laterOrEqualSyncSample(for time: CMTime) -> Int? {
-        let requestedTimestamp = time.value
-        guard let startIndex = timestamps.firstIndex(where: { $0 >= requestedTimestamp}) else {
+    func laterOrEqualSyncSample(for time: CMTime) -> (index: Int, sample: Sample)? {
+        guard let startIndex = samples.firstIndex(where: { $0.decodeTimeStamp >= time}) else {
             return nil
         }
 
-        for index in (startIndex..<timestamps.count) {
-            if flags[index].contains(.keyframe) { return index }
+        for index in (startIndex..<samples.count) {
+            if samples[index].flags.contains(.keyframe) { return (index, samples[index]) }
         }
 
         return nil

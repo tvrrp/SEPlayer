@@ -16,8 +16,8 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     var bufferedPosition: CMTime = .invalid
     var nextLoadPosition: CMTime = .invalid
     var isLoading: Bool { queue.sync { loader.isLoading } }
-    var trackGroups: Set<TrackGroup> {
-        assert(queue.isCurrent()); return Set(trackGroupState.map { $0.trackGroup })
+    var trackGroups: [TrackGroup] {
+        assert(queue.isCurrent()); return trackGroupState.map { $0.trackGroup }
     }
 
     private let url: URL
@@ -95,12 +95,18 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     }
 
     func selectTrack(
-        selections: [Void],
-        on time: CMTime
+        selections: [any SETrackSelection],
+        on time: CMTime,
+        delegate: SampleQueueDelegate
     ) -> [SampleStream] {
-        selections.enumerated().map { index, selection in
-            SampleStreamHolder(
-                track: index,
+        return selections.compactMap { selection in
+            guard let trackIndex = trackGroupState.firstIndex(where: { $0.trackGroup == selection.trackGroup }) else {
+                return nil
+            }
+            sampleQueues[trackIndex]?.delegate = delegate
+            return SampleStreamHolder(
+                format: selection.selectedFormat,
+                track: trackIndex,
                 isReadyClosure: { [weak self] track in
                     self?.isReady(track: track) ?? false
                 }, readDataClosure: { [weak self] track, decoderInput in
@@ -186,10 +192,9 @@ extension ProgressiveMediaPeriod {
     func readData(track: Int, to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult {
         assert(queue.isCurrent())
         guard !suppressRead(), let sampleQueue = sampleQueues[track] else { return .nothingRead }
-        if suppressRead() { return .nothingRead }
         
         let result = try sampleQueue.readData(to: decoderInput)
-        
+
         if result == .nothingRead {
             // TODO: maybeStartDeferredRetry
         }
@@ -241,7 +246,8 @@ private extension ProgressiveMediaPeriod {
         guard !didRelease, !isPrepared, sampleQueuesBuild, seekMap != nil else { return }
 
         do {
-            trackGroupState = try sampleQueues.map { index, sampleQueue in
+            let sampleQueues = sampleQueues.map { ($0.key, $0.value) }.sorted(by: { $0.0 < $1.0 }).map { $0.1 }
+            trackGroupState = try sampleQueues.map { sampleQueue in
                 let trackGroup = try TrackGroup(formats: [sampleQueue.format])
                 return TrackState(
                     trackGroup: trackGroup,
@@ -260,6 +266,7 @@ private extension ProgressiveMediaPeriod {
 
 private extension ProgressiveMediaPeriod {
     struct SampleStreamHolder: SampleStream {
+        let format: CMFormatDescription
         let track: Int
         let isReadyClosure: ((_ track: Int) -> Bool)
         let readDataClosure: ((_ track: Int, _ decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult)
@@ -336,7 +343,11 @@ private extension ProgressiveMediaPeriod {
                     switch result {
                     case let .success(lenght):
                         try progressiveMediaExtractor.prepare(
-                            dataReader: dataSource, url: url, response: dataSource.urlResponce, position: position, lenght: lenght, output: extractorOutput
+                            dataReader: dataSource,
+                            url: url,
+                            response: dataSource.urlResponce,
+                            range: NSRange(location: position, length: lenght),
+                            output: extractorOutput
                         )
                         if let seekTime {
                             progressiveMediaExtractor.seek(position: position, time: seekTime)
@@ -368,10 +379,9 @@ private extension ProgressiveMediaPeriod {
         }
 
         func setLoadPosition(position: Int, time: CMTime) {
-            queue.async {
-                self.position = position
-                self.seekTime = time
-            }
+            assert(queue.isCurrent())
+            self.position = position
+            self.seekTime = time
         }
 
         private func startLoad(loadCompletion: @escaping (ExtractorReadResult) -> Void) {

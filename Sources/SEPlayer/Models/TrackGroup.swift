@@ -8,7 +8,8 @@
 import CoreMedia
 
 struct TrackGroup: Hashable {
-    let id: String?
+    let id: String
+    var length: Int { formats.count }
     let type: TrackType
     let formats: [CMFormatDescription]
 
@@ -17,7 +18,7 @@ struct TrackGroup: Hashable {
     }
 
     init(id: String? = nil, formats: [CMFormatDescription]) throws(TrackGroupError) {
-        self.id = id
+        self.id = id ?? ""
         self.type = try TrackGroup.verify(formats: formats)
         self.formats = formats
     }
@@ -39,15 +40,15 @@ struct TrackGroup: Hashable {
     }
 }
 
-extension Set where Element == TrackGroup {
-    func trackTypes() -> [TrackType] {
-        return map { $0.type }
-    }
-
-    func indexOf(trackGroup: TrackGroup) {
-        
-    }
-}
+//extension Array where Element == TrackGroup {
+//    func trackTypes() -> [TrackType] {
+//        return map { $0.type }
+//    }
+//
+//    func indexOf(trackGroup: TrackGroup) -> Int? {
+//        firstIndex(of: trackGroup)
+//    }
+//}
 
 enum TrackType {
     case video

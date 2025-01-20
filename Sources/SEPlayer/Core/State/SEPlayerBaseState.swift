@@ -60,8 +60,8 @@ class SEPlayerBaseState: SEPlayerState {
 
     func play() {
         assert(queue.isCurrent())
-//        let state = SEPlayerPlayingState(dependencies: dependencies, statable: statable)
-//        statable?.perform(state)
+        let state = SEPlayerPlayingState(dependencies: dependencies, statable: statable)
+        statable?.perform(state)
     }
 
     func stall() {
