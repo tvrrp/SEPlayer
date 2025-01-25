@@ -20,6 +20,15 @@ public final class SEPlayer {
 
     private lazy var _state: SEPlayerState = SEPlayerBaseState(dependencies: _dependencies, statable: self)
     private let _dependencies: SEPlayerStateDependencies
+    private let timer: DispatchSourceTimer
+
+    private var rendererPosition: Int64 = 1_000_000_000_000
+    private var rendererPositionElapsedRealtime: Int64 = .zero
+
+    private var output: SEPlayerBufferView?
+    
+    var clockLastTime = Int64.zero
+    var isReady: Bool = false
 
     public var videoRenderer: CALayer {
         queue.sync { _dependencies.videoRenderer }
@@ -42,6 +51,8 @@ public final class SEPlayer {
             playerId: identifier,
             allocator: allocator
         )
+        self.timer = DispatchSource.makeTimerSource(flags: .strict, queue: queue.queue)
+        setupTimer()
     }
 
     public func set(content: URL) {
@@ -124,15 +135,25 @@ extension SEPlayer: MediaPeriodCallback {
         )
         do {
             _dependencies.decoders = try mediaPeriodHolder.sampleStreams.compactMap { stream in
-                let decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .max)
                 let format = stream.format
                 switch stream.format.mediaType {
                 case .video:
+                    let decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .max, handlers: .unsortedSampleBuffers)
+                    try _dependencies.renderers.append(
+                        VTRenderer(
+                            formatDescription: format,
+                            clock: _dependencies.clock,
+                            queue: queue,
+                            displayLink: _dependencies.displayLink,
+                            sampleStream: stream
+                        )
+                    )
+
                     return try SEPlayerStateDependencies.SampleStreamData(
                         decoder: VTDecoder(
                             formatDescription: format,
                             sampleStream: stream,
-                            decoderQueue: Queues.decoderQueue,
+                            decoderQueue: queue,
                             returnQueue: queue,
                             decompressedSamplesQueue: decompressedSamplesQueue
                         ),
@@ -146,11 +167,20 @@ extension SEPlayer: MediaPeriodCallback {
                         )
                     )
                 case .audio:
+                    let decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .max)
+                    try _dependencies.renderers.append(
+                        ATRenderer(
+                            format: format,
+                            clock: _dependencies.clock,
+                            queue: queue,
+                            sampleStream: stream
+                        )
+                    )
                     return try SEPlayerStateDependencies.SampleStreamData(
                         decoder: ACDecoder(
                             formatDescription: format,
                             sampleStream: stream,
-                            decoderQueue: Queues.decoderQueue,
+                            decoderQueue: queue,
                             returnQueue: queue,
                             decompressedSamplesQueue: decompressedSamplesQueue
                         ),
@@ -171,7 +201,15 @@ extension SEPlayer: MediaPeriodCallback {
             fatalError()
         }
 
-        _dependencies.taskQueue.start()
+        if let output {
+            for renderer in _dependencies.renderers.compactMap { $0 as? VTRenderer } {
+                renderer.setBufferOutput(output)
+            }
+        }
+        
+        _dependencies.standaloneClock.resetPosition(position: rendererPosition)
+        timer.resume()
+        doSomeWork()
     }
 
     func continueLoadingRequested(with source: any MediaPeriod) {
@@ -210,34 +248,6 @@ extension SEPlayer: LoadConditionCheckable {
 
 extension SEPlayer: SampleQueueDelegate {
     func sampleQueue(_ sampleQueue: SampleQueue, didProduceSample onTime: CMSampleTimingInfo) {
-        assert(queue.isCurrent())
-        guard let index = _dependencies.decoders.firstIndex(where: { $0.format == sampleQueue.format }) else {
-            return
-        }
-
-        var readyCallback: () -> Void = { [weak self] in
-            self?._dependencies.decoders[index].isReady = true
-            self?.testIfAllReady()
-            
-        }
-
-        let wrapper = _dependencies.decoders[index]
-        let decoderTask = DecoderReadSampleTask(
-            decoder: wrapper.decoder,
-            enqueueDecodedSample: true,
-            sampleReleaser: wrapper.sampleReleaser,
-            readyCallback: wrapper.isReady ? nil : readyCallback
-        )
-
-        _dependencies.taskQueue.addTask(decoderTask)
-        _dependencies.taskQueue.doNextTask()
-    }
-
-    func testIfAllReady() {
-        assert(queue.isCurrent())
-        if _dependencies.decoders.allSatisfy(\.isReady) {
-            _state.play()
-        }
     }
 }
 
@@ -248,8 +258,62 @@ extension SEPlayer: MediaSourceList.Delegate {
 }
 
 private extension SEPlayer {
-    func createMediaPeriodHolder(mediaPeriodInfo: MediaPeriodInfo, renderPositionOffset: CMTime) {
-        
+    private func setupTimer() {
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            rendererPositionElapsedRealtime = _dependencies.clock.microseconds
+            doSomeWork(renderers: _dependencies.renderers)
+        }
+    }
+
+    private func doSomeWork(currentTime: DispatchTime? = nil, renderers: [BaseSERenderer] = []) {
+        assert(queue.isCurrent())
+        let clockLastTime = _dependencies.clock.microseconds
+        let currentTime = currentTime ?? DispatchTime.now()
+        var renderers = renderers
+
+        guard !renderers.isEmpty else {
+            rendererPosition = _dependencies.standaloneClock.getPosition()
+            timer.schedule(deadline: currentTime + .milliseconds(10)); return
+        }
+
+        let currentRenderer = renderers.removeFirst()
+        render(with: currentRenderer) {
+            self.doSomeWork(currentTime: currentTime, renderers: renderers)
+        }
+    }
+
+    func render(with renderer: BaseSERenderer, completion: @escaping () -> Void) {
+        try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime) {
+            if renderer.isReady() {
+                self.isReady = true
+                renderer.start()
+                self._dependencies.standaloneClock.start()
+            }
+            completion()
+        }
+    }
+}
+
+extension SEPlayer {
+    func setBufferOutput(_ output: SEPlayerBufferView) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.output = output
+            for renderer in _dependencies.renderers.compactMap { $0 as? VTRenderer } {
+                renderer.setBufferOutput(output)
+            }
+        }
+    }
+
+    func removeBufferOutput(_ output: SEPlayerBufferView) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.output = nil
+            for renderer in _dependencies.renderers.compactMap { $0 as? VTRenderer } {
+                renderer.setBufferOutput(output)
+            }
+        }
     }
 }
 

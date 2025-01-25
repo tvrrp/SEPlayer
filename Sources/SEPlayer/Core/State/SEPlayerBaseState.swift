@@ -11,7 +11,7 @@ import Foundation
 class SEPlayerBaseState: SEPlayerState {
     weak var statable: (any SEPlayerStatable)?
 
-    var state: SEPlayer.State { fatalError("not implemented") }
+    var state: SEPlayer.State { .idle }
     let dependencies: SEPlayerStateDependencies
 
     var mediaSource: MediaSource? {

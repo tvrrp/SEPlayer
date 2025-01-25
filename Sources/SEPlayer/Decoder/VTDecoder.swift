@@ -16,6 +16,12 @@ final class VTDecoder: SEDecoder {
             decoderQueue.sync { !_isDecodingSample && decompressedSamplesQueue.bufferCount <= .highWaterMark }
         }
     }
+    
+    var isReady: Bool {
+        get {
+            decoderQueue.sync { _totalVideoFrames > 2 }
+        }
+    }
 
     private var decompressionSession: VTDecompressionSession?
     private let sampleStream: SampleStream
@@ -67,17 +73,23 @@ final class VTDecoder: SEDecoder {
             case .didReadBuffer:
                 guard let buffer = complessedSampleQueue.dequeue() else { fallthrough }
                 self.didProducedSample = didProducedSample
-                enqueueSample(sampleBuffer: buffer, displaying: enqueueDecodedSample) { [weak self] error in
-                    guard let self else { return }
-                    if let error {
-                        returnQueue.async { completion(error) }
-                        return
-                    }
-
-                    returnQueue.async {
-                        self.readSamples(enqueueDecodedSample: enqueueDecodedSample, didProducedSample: didProducedSample, completion: completion)
-                    }
+                try decompressedSamplesQueue.enqueue(buffer)
+                _totalVideoFrames += 1
+                returnQueue.async {
+                    didProducedSample()
+                    self.readSamples(enqueueDecodedSample: enqueueDecodedSample, didProducedSample: didProducedSample, completion: completion)
                 }
+//                enqueueSample(sampleBuffer: buffer, displaying: enqueueDecodedSample) { [weak self] error in
+//                    guard let self else { return }
+//                    if let error {
+//                        returnQueue.async { completion(error) }
+//                        return
+//                    }
+//
+//                    returnQueue.async {
+//                        self.readSamples(enqueueDecodedSample: enqueueDecodedSample, didProducedSample: didProducedSample, completion: completion)
+//                    }
+//                }
             case .nothingRead:
                 completion(DecoderErrors.nothingToRead)
             }
@@ -202,10 +214,10 @@ private extension VTDecoder {
     private func decodeSample(sampleBuffer: CMSampleBuffer, displaying: Bool, completion: @escaping (Result<VTDecoderResponce, DecoderErrors>) -> Void) {
         guard let decompressionSession else { return }
 
-        print("Video New sample!!!, pts = \(sampleBuffer.presentationTimeStamp.seconds)")
         var infoFlagsOut: VTDecodeInfoFlags = []
 
-        var flags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
+//        var flags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
+        var flags: VTDecodeFrameFlags = []
         if !displaying { flags.insert(._DoNotOutputFrame) }
 
         let decoderQueue = decoderQueue
@@ -215,7 +227,7 @@ private extension VTDecoder {
             flags: flags,
             infoFlagsOut: &infoFlagsOut
         ) { status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
-            decoderQueue.async {
+            decoderQueue.sync {
                 completion(.success(
                     .init(status: status, infoFlags: infoFlags, imageBuffer: imageBuffer, presentationTimeStamp: presentationTimeStamp, presentationDuration: presentationDuration)
                 ))
@@ -258,7 +270,7 @@ private extension VTDecoder {
 }
 
 extension VTDecoder {
-    private struct VTDecoderResponce {
+    struct VTDecoderResponce {
         let status: OSStatus
         let infoFlags: VTDecodeInfoFlags
         let imageBuffer: CVImageBuffer?
@@ -326,7 +338,7 @@ extension VTDecoder {
 
 private extension CMItemCount {
     static let maximumCapacity = 120
-    static let highWaterMark = 30
+    static let highWaterMark = 10
     static let lowWaterMark = 15
     static let maxDecodingFrames = 10
 }

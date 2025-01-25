@@ -22,3 +22,13 @@ extension CMTime: @retroactive Hashable {
         hasher.combine(flags.rawValue)
     }
 }
+
+extension CMTime {
+    var microseconds: Int64 {
+        Int64(seconds * 1_000_000)
+    }
+
+    var nanoseconds: Int64 {
+        Int64(seconds * 1_000_000_000)
+    }
+}

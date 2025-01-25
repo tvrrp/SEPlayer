@@ -30,6 +30,16 @@ class SEPlayerTask {
     }
 }
 
+//struct SEPlayerTask {
+//    let type: TaskType
+//    let isCancelled: Bool
+//    let deadline: DispatchTime
+//
+//    enum TaskType {
+//        case doSomeWork
+//    }
+//}
+
 final class SEPlayerTaskQueue {
     private(set) var isRunning = false
     private(set) var isSuspended = false
@@ -115,7 +125,7 @@ private extension SEPlayerTaskQueue {
             self?.performNextTask()
         }
 
-        let timeout: Double = 1 / 60
+        let timeout: Double = 1 / 120
         let time = DispatchTime.now() + timeout
         timer.schedule(deadline: time, repeating: timeout)
     }

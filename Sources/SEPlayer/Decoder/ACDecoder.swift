@@ -18,13 +18,13 @@ final class ACDecoder: SEDecoder {
     private let sampleStream: SampleStream
     private let decoderQueue: Queue
     private let returnQueue: Queue
-    private let formatDescription: AVAudioFormat
+    private let audioFormat: AVAudioFormat
     private let complessedSampleQueue: TypedCMBufferQueue<CMSampleBuffer>
     private let decompressedSamplesQueue: TypedCMBufferQueue<CMSampleBuffer>
 
     private var _isDecodingSample: Bool = false
     private var _samplesInDecode: Int = 0
-    private var _totalVideoFrames: Int = 0
+    private var _totalAudioSamples: Int = 0
 
     private var _totalDroppedVideoFrames: Int = 0
     private var _corruptedVideoFrames = 0
@@ -32,6 +32,12 @@ final class ACDecoder: SEDecoder {
 
     private var isInvalidated = false
     private var didProducedSample: (() -> Void)?
+    
+    var isReady: Bool {
+        get {
+            decoderQueue.sync { _totalAudioSamples > 2 }
+        }
+    }
 
     init(
         formatDescription: CMVideoFormatDescription,
@@ -40,7 +46,7 @@ final class ACDecoder: SEDecoder {
         returnQueue: Queue,
         decompressedSamplesQueue: TypedCMBufferQueue<CMSampleBuffer>
     ) throws {
-        self.formatDescription = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        self.audioFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
         self.sampleStream = sampleStream
         self.decoderQueue = decoderQueue
         self.returnQueue = returnQueue
@@ -50,8 +56,11 @@ final class ACDecoder: SEDecoder {
         )
         self.decompressedSamplesQueue = decompressedSamplesQueue
 
-        guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 44100, channels: 1, interleaved: false),
-              let converter = AVAudioConverter(from: AVAudioFormat(cmAudioFormatDescription: formatDescription), to: outFormat) else {
+        guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                            sampleRate: audioFormat.sampleRate,
+                                            channels: audioFormat.channelCount,
+                                            interleaved: audioFormat.isInterleaved),
+              let converter = AVAudioConverter(from: audioFormat, to: outFormat) else {
             throw DecoderErrors.cannotCreateConverter
         }
         self.converter = converter
@@ -68,18 +77,24 @@ final class ACDecoder: SEDecoder {
             case .didReadBuffer:
                 guard let buffer = complessedSampleQueue.dequeue() else { fallthrough }
                 self.didProducedSample = didProducedSample
-                enqueueSample(sampleBuffer: buffer) { [weak self] error in
-                    guard let self else { return }
-                    if let error {
-                        returnQueue.async { completion(error) }
-                        return
-                    }
-
-                    returnQueue.async {
-                        didProducedSample()
-                        self.readSamples(enqueueDecodedSample: enqueueDecodedSample, didProducedSample: didProducedSample, completion: completion)
-                    }
+                try decompressedSamplesQueue.enqueue(buffer)
+                _totalAudioSamples += 1
+                returnQueue.async {
+                    didProducedSample()
+                    self.readSamples(enqueueDecodedSample: enqueueDecodedSample, didProducedSample: didProducedSample, completion: completion)
                 }
+//                enqueueSample(sampleBuffer: buffer) { [weak self] error in
+//                    guard let self else { return }
+//                    if let error {
+//                        returnQueue.async { completion(error) }
+//                        return
+//                    }
+//
+//                    returnQueue.async {
+//                        didProducedSample()
+//                        self.readSamples(enqueueDecodedSample: enqueueDecodedSample, didProducedSample: didProducedSample, completion: completion)
+//                    }
+//                }
             case .nothingRead:
                 completion(DecoderErrors.nothingToRead)
             }
@@ -154,6 +169,7 @@ private extension ACDecoder {
                     presentationTimeStamp: sampleBuffer.sampleTimingInfo(at: i).presentationTimeStamp
                 )
                 try! decompressedSamplesQueue.enqueue(decodedSample)
+                _totalAudioSamples += 1
                 returnQueue.async { self.didProducedSample?() }
                 offset += sampleSize
             }
@@ -164,7 +180,11 @@ private extension ACDecoder {
     }
 
     private func makeInputBuffer(size: Int) -> AVAudioBuffer? {
-        return AVAudioCompressedBuffer(format: formatDescription, packetCapacity: 2, maximumPacketSize: 1024)
+        return AVAudioCompressedBuffer(
+            format: audioFormat,
+            packetCapacity: 1,
+            maximumPacketSize: 1024
+        )
     }
 
     private func convert(
@@ -176,7 +196,7 @@ private extension ACDecoder {
         // input each buffer only once
         var newBufferAvailable = true
 
-        let inputBlock : AVAudioConverterInputBlock = { inNumPackets, outStatus in
+        let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
             if newBufferAvailable {
                 outStatus.pointee = .haveData
                 newBufferAvailable = false
@@ -278,7 +298,7 @@ private extension ACDecoder {
 
 private extension CMItemCount {
     static let maximumCapacity = 240
-    static let highWaterMark = 120
+    static let highWaterMark = 30
     static let lowWaterMark = 15
     static let maxDecodingFrames = 10
 }

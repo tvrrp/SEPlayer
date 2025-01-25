@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
+
 enum ExtractorInputReadResult {
     case bytesRead(ByteBuffer, Int)
     case endOfInput

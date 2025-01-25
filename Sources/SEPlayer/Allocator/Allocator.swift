@@ -73,36 +73,43 @@ final class DefaultAllocator: Allocator {
         assert(queue.isCurrent())
         let allocation: Allocation
 
-        if capacity <= individualAllocationSize && availableCount > 0 {
-            availableCount -= 1
-            allocation = availableAllocations.removeLast()
-        } else {
-            let size = max(capacity, individualAllocationSize)
-            allocation = Allocation(
-                queue: queue,
-                data: UnsafeMutableRawBufferPointer.allocateUInt8(byteCount: size),
-                size: size
-            )
-
-            if allocatedCount > availableAllocations.count {
-                availableAllocations.reserveCapacity(availableAllocations.count * 2)
-            }
-        }
+//        if capacity <= individualAllocationSize && availableCount > 0 {
+//            availableCount -= 1
+//            allocation = availableAllocations.removeLast()
+//        } else {
+//            let size = max(capacity, individualAllocationSize)
+//            allocation = Allocation(
+//                queue: queue,
+//                data: UnsafeMutableRawBufferPointer.allocateUInt8(byteCount: size),
+//                size: size
+//            )
+//
+//            if allocatedCount > availableAllocations.count {
+//                availableAllocations.reserveCapacity(availableAllocations.count * 2)
+//            }
+//        }
+        let size = capacity
+        allocation = Allocation(
+            queue: queue,
+            data: UnsafeMutableRawBufferPointer.allocateUInt8(byteCount: size),
+            size: size
+        )
 
         return allocation
     }
 
     func release(allocation: Allocation) {
         assert(queue.isCurrent())
-        guard !allocation.isNode else { return}
-
-        if allocation.data.count > individualAllocationSize || availableCount >= 50 {
-            allocation.data.deallocate()
-        } else {
-            availableCount += 1
-            availableAllocations.append(allocation)
-        }
-        allocatedCount -= 1
+//        guard !allocation.isNode else { return}
+//
+//        if allocation.data.count > individualAllocationSize || availableCount >= 50 {
+//            allocation.data.deallocate()
+//        } else {
+//            availableCount += 1
+//            availableAllocations.append(allocation)
+//        }
+//        allocatedCount -= 1
+        allocation.data.deallocate()
     }
 
     func trim() {

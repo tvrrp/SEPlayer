@@ -8,14 +8,14 @@
 final class Allocation {
     var data: UnsafeMutableRawBufferPointer {
         get {
-            assert(queue.isCurrent())
+//            assert(queue.isCurrent())
             return _data
         }
     }
 
     var baseAddress: UnsafeMutableRawPointer! {
         get {
-            assert(queue.isCurrent())
+//            assert(queue.isCurrent())
             return _data.baseAddress!.advanced(by: offset)
         }
     }
@@ -36,7 +36,8 @@ final class Allocation {
     }
 
     func getData<T>(_ body: (UnsafeMutableRawBufferPointer) throws -> T) rethrows -> T {
-        try queue.sync { try body(self._data) }
+//        try queue.sync { try body(self._data) }
+        try body(self._data)
     }
 
     func createNode(from offset: Int) -> Allocation {

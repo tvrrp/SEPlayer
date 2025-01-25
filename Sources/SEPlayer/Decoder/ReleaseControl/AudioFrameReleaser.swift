@@ -68,6 +68,7 @@ final class AudioFrameReleaser: SampleReleaser {
         } else {
             return false
         }
+        print()
     }
 
     private func didProduceEnothSamples() -> Bool {

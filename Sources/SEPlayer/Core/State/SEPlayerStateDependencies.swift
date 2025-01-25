@@ -13,6 +13,8 @@ final class SEPlayerStateDependencies {
     let returnQueue: Queue
     let sessionLoader: IPlayerSessionLoader
     let allocator: Allocator
+    let standaloneClock: StandaloneClock
+    let clock: CMClock
 
     let taskQueue: SEPlayerTaskQueue
 
@@ -26,6 +28,9 @@ final class SEPlayerStateDependencies {
     var mediaSource: MediaSource?
     var mediaPeriod: MediaPeriod?
     var decoders: [SampleStreamData] = []
+    var renderers: [BaseSERenderer] = []
+    
+    let displayLink: DisplayLinkProvider
 
     init(
         queue: Queue,
@@ -41,8 +46,14 @@ final class SEPlayerStateDependencies {
         self.allocator = allocator
         self.taskQueue = SEPlayerTaskQueue(queue: queue)
 
-        renderSynchronizer.addRenderer(audioRenderer)
-        renderSynchronizer.addRenderer(videoRenderer)
+        var clock: CMClock!
+        try! CMAudioClockCreate(allocator: nil, clockOut: &clock).validate()
+        self.clock = clock
+        self.standaloneClock = StandaloneClock(clock: clock)
+        self.displayLink = CADisplayLinkProvider(queue: queue)
+
+//        renderSynchronizer.addRenderer(audioRenderer)
+//        renderSynchronizer.addRenderer(videoRenderer)
     }
 }
 

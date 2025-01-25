@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CoreMedia
 
 final class DefautlHTTPDataSource: DataSource {
     let components: DataSourceOpaque
@@ -143,6 +144,43 @@ final class DefautlHTTPDataSource: DataSource {
         }
     }
 
+    func read(blockBuffer: CMBlockBuffer, offset: Int, length: Int, completionQueue: any Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
+        queue.async { [weak self] in
+            guard let self, let currentDataSpec else { completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return }
+
+            do {
+                if intermidateBuffer.readableBytes >= length {
+                    try readFully(to: blockBuffer, offset: offset, length: length)
+                    completionQueue.async { completion(.success(length)) }
+                } else {
+                    let requestedReadAmount = min(length, currentDataSpec.range.length + 1 - intermidateBuffer.readerIndex)
+                    if requestedReadAmount == intermidateBuffer.readableBytes {
+                        try readFully(to: blockBuffer, offset: offset, length: requestedReadAmount)
+                        completionQueue.async { completion(.success(requestedReadAmount)) }; return
+                    }
+
+                    self.requestedReadAmount = requestedReadAmount
+                    readCompletion = { [weak self] result in
+                        guard let self else { completionQueue.async { completion(.failure(CancellationError())) }; return }
+                        do {
+                            switch result {
+                            case let .success(availableBytesCount):
+                                try self.readFully(to: blockBuffer, offset: offset, length: availableBytesCount)
+                                completionQueue.async { completion(.success((availableBytesCount))) }
+                            case let .failure(error):
+                                completionQueue.async { completion(.failure(error)) }
+                            }
+                        } catch {
+                            completionQueue.async { completion(.failure(error)) }
+                        }
+                    }
+                }
+            } catch {
+                completionQueue.async { completion(.failure(error)) }
+            }
+        }
+    }
+
     private func readFully(to buffer: ByteBuffer, offset: Int, length: Int) throws -> ByteBuffer {
         let data = try intermidateBuffer.readData(count: length)
         var buffer = buffer
@@ -152,26 +190,30 @@ final class DefautlHTTPDataSource: DataSource {
     }
 
     private func readFully(to buffer: Allocation, offset: Int, length: Int) throws {
-//        let data = try intermidateBuffer.readData(count: length)
         try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
             guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
             try buffer.getData { buffer in
                 guard let bufferBaseAdress = buffer.baseAddress else { throw DataReaderError.endOfInput }
                 bufferBaseAdress
                     .advanced(by: offset)
-                    .copyMemory(from: pointer.baseAddress!, byteCount: length)
+                    .copyMemory(from: baseAdress, byteCount: length)
             }
             return length
         }
-//        buffer.getData { pointer in
-//            data.copyBytes(
-//                to: pointer
-//                    .baseAddress!
-//                    .advanced(by: offset)
-//                    .assumingMemoryBound(to: UInt8.self),
-//                count: length
-//            )
-//        }
+    }
+
+    private func readFully(to buffer: CMBlockBuffer, offset: Int, length: Int) throws {
+        try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
+            intermidateBuffer
+            guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
+            try CMBlockBufferReplaceDataBytes(
+                with: baseAdress,
+                blockBuffer: buffer,
+                offsetIntoDestination: offset,
+                dataLength: length
+            ).validate()
+            return length
+        }
     }
 }
 

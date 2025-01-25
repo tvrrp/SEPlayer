@@ -7,6 +7,7 @@
 
 protocol SEDecoder {
     var isReadyForMoreMediaData: Bool { get }
+    var isReady: Bool { get }
     func readSamples(enqueueDecodedSample: Bool, didProducedSample: @escaping () -> Void, completion: @escaping (Error?) -> Void)
     func flush()
     func invalidate()
