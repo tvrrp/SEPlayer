@@ -134,64 +134,23 @@ extension SEPlayer: MediaPeriodCallback {
             playbackSpeed: 1.0, timeline: SinglePeriodTimeline(), playWhenReady: true, delegate: self
         )
         do {
-            _dependencies.decoders = try mediaPeriodHolder.sampleStreams.compactMap { stream in
+            _dependencies.renderers = try mediaPeriodHolder.sampleStreams.compactMap { stream in
                 let format = stream.format
                 switch stream.format.mediaType {
                 case .video:
-                    let decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .max, handlers: .unsortedSampleBuffers)
-                    try _dependencies.renderers.append(
-                        VTRenderer(
-                            formatDescription: format,
-                            clock: _dependencies.clock,
-                            queue: queue,
-                            displayLink: _dependencies.displayLink,
-                            sampleStream: stream
-                        )
-                    )
-
-                    return try SEPlayerStateDependencies.SampleStreamData(
-                        decoder: VTDecoder(
-                            formatDescription: format,
-                            sampleStream: stream,
-                            decoderQueue: queue,
-                            returnQueue: queue,
-                            decompressedSamplesQueue: decompressedSamplesQueue
-                        ),
-                        format: format,
-                        renderer: _dependencies.videoRenderer,
-                        sampleReleaser: VideoFrameReleaser(
-                            queue: Queues.playerOutputsQueue,
-                            decompressedSamplesQueue: decompressedSamplesQueue,
-                            videoRenderer: _dependencies.videoRenderer,
-                            timebase: _dependencies.renderSynchronizer.timebase
-                        )
+                    return try VTRenderer(
+                        formatDescription: format,
+                        clock: _dependencies.clock,
+                        queue: queue,
+                        displayLink: _dependencies.displayLink,
+                        sampleStream: stream
                     )
                 case .audio:
-                    let decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .max)
-                    try _dependencies.renderers.append(
-                        ATRenderer(
-                            format: format,
-                            clock: _dependencies.clock,
-                            queue: queue,
-                            sampleStream: stream
-                        )
-                    )
-                    return try SEPlayerStateDependencies.SampleStreamData(
-                        decoder: ACDecoder(
-                            formatDescription: format,
-                            sampleStream: stream,
-                            decoderQueue: queue,
-                            returnQueue: queue,
-                            decompressedSamplesQueue: decompressedSamplesQueue
-                        ),
-                        format: stream.format,
-                        renderer: _dependencies.audioRenderer,
-                        sampleReleaser: AudioFrameReleaser(
-                            queue: Queues.playerOutputsQueue,
-                            decompressedSamplesQueue: decompressedSamplesQueue,
-                            audioRenderer: _dependencies.audioRenderer,
-                            timebase: _dependencies.renderSynchronizer.timebase
-                        )
+                    return try ATRenderer(
+                        format: format,
+                        clock: _dependencies.clock,
+                        queue: queue,
+                        sampleStream: stream
                     )
                 default:
                     return nil
@@ -206,7 +165,7 @@ extension SEPlayer: MediaPeriodCallback {
                 renderer.setBufferOutput(output)
             }
         }
-        
+
         _dependencies.standaloneClock.resetPosition(position: rendererPosition)
         timer.resume()
         doSomeWork()
