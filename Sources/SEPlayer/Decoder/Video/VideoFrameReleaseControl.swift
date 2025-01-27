@@ -57,6 +57,7 @@ struct VideoFrameReleaseControl {
         frameReleaseHelper.frameRateDidChanged(new: frameRate)
     }
 
+    @discardableResult
     mutating func didReleaseFrame() -> Bool {
         let firstFrame = firstFrameState != .rendered
         firstFrameState = .rendered
@@ -124,7 +125,7 @@ struct VideoFrameReleaseControl {
                 action: treatDropAsSkip ? .skip : .drop
             )
         } else if earlyTime > .maxEarlyTreashold {
-            return .init(earlyTime: earlyTime, releaseTime: releaseTime, action: .tryAgainLater)
+            return .init(earlyTime: earlyTime, releaseTime: .zero, action: .tryAgainLater)
         }
 
         return .init(earlyTime: earlyTime, releaseTime: releaseTime, action: .scheduled)

@@ -40,7 +40,7 @@ final class StandaloneClock {
         var position = baseTime
         if started {
             let elapsedSinceBase = clock.microseconds - baseElapsed
-            position += elapsedSinceBase
+            position += Int64(Double(elapsedSinceBase) * 2.0)
         }
 
         return position

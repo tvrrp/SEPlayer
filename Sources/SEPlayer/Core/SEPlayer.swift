@@ -30,9 +30,7 @@ public final class SEPlayer {
     var clockLastTime = Int64.zero
     var isReady: Bool = false
 
-    public var videoRenderer: CALayer {
-        queue.sync { _dependencies.videoRenderer }
-    }
+    var started = false
 
     init(
         identifier: UUID = UUID(),
@@ -130,9 +128,7 @@ extension SEPlayer: MediaPeriodCallback {
         guard let mediaPeriodHolder = _dependencies.mediaPeriodHolder else {
             return
         }
-        mediaPeriodHolder.handlePrepared(
-            playbackSpeed: 1.0, timeline: SinglePeriodTimeline(), playWhenReady: true, delegate: self
-        )
+        mediaPeriodHolder.handlePrepared(playbackSpeed: 1.0, timeline: SinglePeriodTimeline(), playWhenReady: true)
         do {
             _dependencies.renderers = try mediaPeriodHolder.sampleStreams.compactMap { stream in
                 let format = stream.format
@@ -161,14 +157,16 @@ extension SEPlayer: MediaPeriodCallback {
         }
 
         if let output {
-            for renderer in _dependencies.renderers.compactMap { $0 as? VTRenderer } {
+            for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
                 renderer.setBufferOutput(output)
             }
         }
 
         _dependencies.standaloneClock.resetPosition(position: rendererPosition)
-        timer.resume()
-        doSomeWork()
+        queue.after(1) {
+            self.timer.resume()
+            self.doSomeWork()
+        }
     }
 
     func continueLoadingRequested(with source: any MediaPeriod) {
@@ -205,11 +203,6 @@ extension SEPlayer: LoadConditionCheckable {
     }
 }
 
-extension SEPlayer: SampleQueueDelegate {
-    func sampleQueue(_ sampleQueue: SampleQueue, didProduceSample onTime: CMSampleTimingInfo) {
-    }
-}
-
 extension SEPlayer: MediaSourceList.Delegate {
     func playlistUpdateRequested() {
         
@@ -219,37 +212,46 @@ extension SEPlayer: MediaSourceList.Delegate {
 private extension SEPlayer {
     private func setupTimer() {
         timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            rendererPositionElapsedRealtime = _dependencies.clock.microseconds
-            doSomeWork(renderers: _dependencies.renderers)
+            self?.doSomeWork()
         }
     }
 
-    private func doSomeWork(currentTime: DispatchTime? = nil, renderers: [BaseSERenderer] = []) {
+    private func doSomeWork() {
         assert(queue.isCurrent())
-        let clockLastTime = _dependencies.clock.microseconds
-        let currentTime = currentTime ?? DispatchTime.now()
-        var renderers = renderers
+        let currentTime = DispatchTime.now()
 
-        guard !renderers.isEmpty else {
-            rendererPosition = _dependencies.standaloneClock.getPosition()
+        rendererPosition = _dependencies.standaloneClock.getPosition()
+        rendererPositionElapsedRealtime = _dependencies.clock.microseconds
+
+        renderAndWait(with: _dependencies.renderers) { [weak self] in
+            guard let self else { return }
+
+            if _dependencies.renderers.allSatisfy({ $0.isReady() }) {
+                if !started {
+                    _dependencies.standaloneClock.start()
+                    _dependencies.renderers.forEach { $0.start() }
+                    started = true
+                }
+            } else {
+//                _dependencies.standaloneClock.stop()
+//                _dependencies.renderers.forEach { $0.sto() }
+            }
+
             timer.schedule(deadline: currentTime + .milliseconds(10)); return
         }
-
-        let currentRenderer = renderers.removeFirst()
-        render(with: currentRenderer) {
-            self.doSomeWork(currentTime: currentTime, renderers: renderers)
-        }
     }
 
-    func render(with renderer: BaseSERenderer, completion: @escaping () -> Void) {
-        try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime) {
-            if renderer.isReady() {
-                self.isReady = true
-                renderer.start()
-                self._dependencies.standaloneClock.start()
-            }
-            completion()
+    func renderAndWait(with renderers: [BaseSERenderer], completion: @escaping () -> Void) {
+        assert(queue.isCurrent())
+        guard !renderers.isEmpty else { completion(); return }
+
+        var renderers = renderers
+        let currentRenderer = renderers.removeFirst()
+        try! currentRenderer.render(
+            position: rendererPosition,
+            elapsedRealtime: rendererPositionElapsedRealtime
+        ) {
+            self.renderAndWait(with: renderers, completion: completion)
         }
     }
 }
@@ -259,7 +261,7 @@ extension SEPlayer {
         queue.async { [weak self] in
             guard let self else { return }
             self.output = output
-            for renderer in _dependencies.renderers.compactMap { $0 as? VTRenderer } {
+            for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
                 renderer.setBufferOutput(output)
             }
         }
@@ -269,7 +271,7 @@ extension SEPlayer {
         queue.async { [weak self] in
             guard let self else { return }
             self.output = nil
-            for renderer in _dependencies.renderers.compactMap { $0 as? VTRenderer } {
+            for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
                 renderer.setBufferOutput(output)
             }
         }

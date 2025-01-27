@@ -10,7 +10,6 @@ final class SEPlayerPlayingState: SEPlayerBaseState {
 
     override func didLoad() {
         super.didLoad()
-        dependencies.renderSynchronizer.setRate(1, time: .zero)
     }
 
     override func play() {}

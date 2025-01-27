@@ -63,14 +63,12 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     func addOutput(_ output: SEPlayerBufferView) {
         assert(queue.isCurrent())
         observers.addDelegate(output)
-        addObserver()
         updateScreenFrameRateIfNeeded()
     }
 
     func removeOutput(_ output: SEPlayerBufferView) {
         assert(queue.isCurrent())
         observers.removeDelegate(output)
-        removeObserver()
     }
 
     private func startIfNeeded() {

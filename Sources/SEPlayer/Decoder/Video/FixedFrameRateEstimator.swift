@@ -47,7 +47,7 @@ struct FixedFrameRateEstimator {
                 candidateMatcher.onNextFrame(framePresentationTime: framePresentationTime)
             }
             candidateMatcherActive = true
-            candidateMatcher.onNextFrame(framePresentationTime: framePresentationTime)
+            candidateMatcher.onNextFrame(framePresentationTime: lastFramePresentationTime)
         }
 
         if candidateMatcherActive && candidateMatcher.isSynced {

@@ -204,7 +204,6 @@ final class DefautlHTTPDataSource: DataSource {
 
     private func readFully(to buffer: CMBlockBuffer, offset: Int, length: Int) throws {
         try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
-            intermidateBuffer
             guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
             try CMBlockBufferReplaceDataBytes(
                 with: baseAdress,

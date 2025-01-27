@@ -94,16 +94,11 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         
     }
 
-    func selectTrack(
-        selections: [any SETrackSelection],
-        on time: CMTime,
-        delegate: SampleQueueDelegate
-    ) -> [SampleStream] {
+    func selectTrack(selections: [any SETrackSelection], on time: CMTime) -> [SampleStream] {
         return selections.compactMap { selection in
             guard let trackIndex = trackGroupState.firstIndex(where: { $0.trackGroup == selection.trackGroup }) else {
                 return nil
             }
-            sampleQueues[trackIndex]?.delegate = delegate
             return SampleStreamHolder(
                 format: selection.selectedFormat,
                 track: trackIndex,

@@ -40,6 +40,7 @@ public final class SEPlayerView: UIView {
 
     private weak var _player: SEPlayer?
     private var sampleQueue: TypedCMBufferQueue<VTRenderer.SampleReleaseWrapper>?
+    private var currentSample: CMSampleBuffer?
 
     public init() {
         super.init(frame: .zero)
@@ -75,6 +76,7 @@ extension SEPlayerView: SEPlayerBufferView {
 
     private func displaySample(_ sample: CMSampleBuffer) {
         guard let imageBuffer = sample.imageBuffer else { return }
+        currentSample = sample
         #if targetEnvironment(simulator)
         layer.contents = CVPixelBufferGetIOSurface(imageBuffer)?.takeUnretainedValue()
         #else

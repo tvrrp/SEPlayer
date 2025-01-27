@@ -96,9 +96,10 @@ public final class MulticastDelegate<T> {
 
     private func conformsToClass(_ delegate: T) -> Bool {
         #if DEBUG
-            let mirror = Mirror(reflecting: delegate)
-            return mirror.displayStyle == .class
-        #endif
+        let mirror = Mirror(reflecting: delegate)
+        return mirror.displayStyle == .class
+        #else
         return true
+        #endif
     }
 }

@@ -70,7 +70,7 @@ class BaseSERenderer {
 
     private var startStream: Int64 = 1_000_000_000_000
 
-    private var lastResetPosition: Int64 = .zero
+    private var lastResetPosition: Int64 = .min
     private var lastSampleInStreamPTS: Int64 = .zero
     private var largestQueuedPTS: Int64 = .zero
 
@@ -93,7 +93,7 @@ class BaseSERenderer {
             handlers: .unsortedSampleBuffers
         )
         self.decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(
-            capacity: 20,
+            capacity: 10,
             handlers: .unsortedSampleBuffers
         )
     }
@@ -107,7 +107,6 @@ class BaseSERenderer {
     }
 
     func render(position: Int64, elapsedRealtime: Int64, completion: @escaping () -> Void) throws {
-        let renderStartTime = clock.microseconds
         while try drainOutputQueue(position: position, elapsedRealtime: elapsedRealtime) {}
         try drainInputQueueContiniously(position: position, elapsedRealtime: elapsedRealtime, completion: completion)
     }
@@ -119,16 +118,12 @@ class BaseSERenderer {
         guard let sample else { return false }
 
         isDecodeOnlyOutputSample = sample.presentationTimeStamp.microseconds < lastResetPosition
-//        try sample.setOutputPresentationTimeStamp(
-//            CMTime(value: startStream + sample.presentationTimeStamp.microseconds, timescale: 1_000_000)
-//        )
-
         isLastOutputSample = lastSampleInStreamPTS != .zero && lastSampleInStreamPTS <= sample.presentationTimeStamp.microseconds
 
         if processOutputSample(position: position,
                                elapsedRealtime: elapsedRealtime,
                                outputStreamStartPosition: startStream,
-                               presenationTime: startStream + sample.presentationTimeStamp.microseconds - 100000,
+                               presenationTime: startStream + sample.presentationTimeStamp.microseconds,
                                sample: sample,
                                isDecodeOnlySample: isDecodeOnlyOutputSample,
                                isLastOutputSample: isLastOutputSample) {
@@ -169,10 +164,7 @@ class BaseSERenderer {
 
         guard let sample else { completion(false); return }
         largestQueuedPTS = max(largestQueuedPTS, sample.outputPresentationTimeStamp.microseconds)
-        queueInputSample(sampleBuffer: sample) { [weak self] result in
-            if !result {
-                self?.inputSample = sample
-            }
+        queueInputSample(sampleBuffer: sample) { result in
             completion(result)
         }
     }

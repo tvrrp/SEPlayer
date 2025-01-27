@@ -7,19 +7,8 @@
 
 import CoreMedia
 
-protocol SampleQueueDelegate: AnyObject {
-    func sampleQueue(_ sampleQueue: SampleQueue, didProduceSample onTime: CMSampleTimingInfo)
-}
-
 final class SampleQueue: TrackOutput {
     let format: CMFormatDescription
-
-    weak var delegate: SampleQueueDelegate? {
-        didSet {
-            assert(queue.isCurrent())
-            allocations.forEach { delegate?.sampleQueue(self, didProduceSample: $0.metadata.sampleTimings) }
-        }
-    }
 
     private let queue: Queue
     private let allocator: Allocator
@@ -109,7 +98,6 @@ final class SampleQueue: TrackOutput {
                 switch result {
                 case .success(_):
                     self.allocations.append(allocationWrapper)
-                    self.delegate?.sampleQueue(self, didProduceSample: metadata.sampleTimings)
                     completionQueue.async { completion(nil) }
                 case let .failure(error):
                     self.releaseAllocation(from: allocationWrapper)

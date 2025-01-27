@@ -38,19 +38,19 @@ final class MediaPeriodHolder {
         )
     }
 
-    func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool, delegate: SampleQueueDelegate) {
+    func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) {
         assert(queue.isCurrent())
         isPrepared = true
         trackGroups = mediaPeriod.trackGroups
         let trackGroups = mediaPeriod.trackGroups
         let requestedStartPosition = info.startPosition
         let selectorResult = selectTracks(playbackSpeed: playbackSpeed, timeline: timeline, playWhenReady: playWhenReady)
-        applyTrackSelection(trackSelectorResult: selectorResult, time: requestedStartPosition, delegate: delegate)
+        applyTrackSelection(trackSelectorResult: selectorResult, time: requestedStartPosition)
     }
 
-    func applyTrackSelection(trackSelectorResult: TrackSelectionResult, time: CMTime, delegate: SampleQueueDelegate) {
+    func applyTrackSelection(trackSelectorResult: TrackSelectionResult, time: CMTime) {
         assert(queue.isCurrent())
-        sampleStreams = mediaPeriod.selectTrack(selections: trackSelectorResult.selections, on: time, delegate: delegate)
+        sampleStreams = mediaPeriod.selectTrack(selections: trackSelectorResult.selections, on: time)
     }
 
     func prepare(callback: any MediaPeriodCallback, on time: CMTime) {

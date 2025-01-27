@@ -33,14 +33,9 @@ final class VTRenderer: BaseSERenderer {
     ) throws {
         self.formatDescription = formatDescription
         self.displayLink = displayLink
-        outputSampleQueue = try TypedCMBufferQueue<SampleReleaseWrapper>(capacity: 10) { lhs, rhs in
-            if lhs.releaseTime == rhs.releaseTime {
-                return .compareEqualTo
-            } else if lhs.releaseTime > rhs.releaseTime {
-                return .compareGreaterThan
-            } else {
-                return .compareLessThan
-            }
+        outputSampleQueue = try TypedCMBufferQueue<SampleReleaseWrapper>(capacity: .highWaterMark) { lhs, rhs in
+            guard lhs.releaseTime != rhs.releaseTime else { return .compareEqualTo }
+            return lhs.releaseTime > rhs.releaseTime ? .compareGreaterThan : .compareLessThan
         }
         try super.init(
             clock: clock,
@@ -49,13 +44,12 @@ final class VTRenderer: BaseSERenderer {
         )
 
         videoFrameReleaseControl.enable(releaseFirstFrameBeforeStarted: true)
-        videoFrameReleaseControl.setPlaybackSpeed(1.0)
+        videoFrameReleaseControl.setPlaybackSpeed(2.0)
         try initializeVideoDecoder()
     }
 
     override func start() {
         super.start()
-        let elapsedRealtime = clock.microseconds
         videoFrameReleaseControl.start()
     }
 
@@ -81,7 +75,7 @@ final class VTRenderer: BaseSERenderer {
 
     override func queueInputSample(sampleBuffer: CMSampleBuffer, completion: @escaping (Bool) -> Void) {
         assert(queue.isCurrent())
-        guard let decompressionSession, !_isDecodingSample, !outputSampleQueue.isFull else { completion(false); return }
+        guard let decompressionSession, !_isDecodingSample else { completion(false); return }
 
         _isDecodingSample = true
         let decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
@@ -109,7 +103,7 @@ final class VTRenderer: BaseSERenderer {
         }
 
         if status != noErr {
-            let error = VTDecoder.DecoderErrors.vtError(.init(rawValue: status), status)
+            let error = DecoderErrors.vtError(.init(rawValue: status), status)
             print(error)
         }
     }
@@ -124,7 +118,7 @@ final class VTRenderer: BaseSERenderer {
         isLastOutputSample: Bool
     ) -> Bool {
         assert(queue.isCurrent())
-        guard !outputSampleQueue.isFull else { return false }
+        guard outputSampleQueue.bufferCount < .highWaterMark - 1 else { return false }
         let frameReleaseInfo = videoFrameReleaseControl.frameReleaseAction(
             presentationTime: presenationTime,
             position: position,
@@ -133,25 +127,29 @@ final class VTRenderer: BaseSERenderer {
             isLastFrame: isLastOutputSample
         )
 
-        if frameReleaseInfo.action == .immediately {
-            Queues.mainQueue.async {
-                self.output?.enqueueSampleImmideatly(sample)
+        switch frameReleaseInfo.action {
+        case .immediately:
+            Queues.mainQueue.async { self.output?.enqueueSampleImmideatly(sample) }
+            videoFrameReleaseControl.didReleaseFrame()
+            return true
+        case .skip, .drop:
+            return true
+        case .ignore, .tryAgainLater:
+            return false
+        case .scheduled:
+            do {
+                try outputSampleQueue.enqueue(.init(
+                    sample: sample, releaseTime: frameReleaseInfo.releaseTime
+                ))
+                videoFrameReleaseControl.didReleaseFrame()
+                return true
+            } catch {
+                return false
             }
-
-            videoFrameReleaseControl.didReleaseFrame()
-            return true
-        } else if frameReleaseInfo.action == .scheduled {
-            try! outputSampleQueue.enqueue(.init(
-                sample: sample, releaseTime: frameReleaseInfo.releaseTime
-            ))
-            videoFrameReleaseControl.didReleaseFrame()
-            return true
         }
-
-        return false
     }
 
-    private func handleSample(response: VTDecoder.VTDecoderResponce, completion: @escaping (Bool) -> Void) {
+    private func handleSample(response: VTDecoderResponce, completion: @escaping (Bool) -> Void) {
         do {
             _isDecodingSample = false
             guard let imageBuffer = response.imageBuffer else {
@@ -182,11 +180,11 @@ extension VTRenderer: VideoFrameReleaseControl.FrameTimingEvaluator {
     }
 
     func shouldDropFrame(earlyTime: Int64, elapsedSinceLastRelease: Int64, isLast: Bool) -> Bool {
-        return false
+        return earlyTime < -30_000 && !isLast
     }
 
     func shouldIgnoreFrame(earlyTime: Int64, position: Int64, elapsedRealtime: Int64, isLast: Bool, treatDroppedAsSkipped: Bool) -> Bool {
-        return false
+        return (earlyTime < -500_000 && !isLast)
     }
 }
 
@@ -214,7 +212,7 @@ private extension VTRenderer {
         )
 
         if status != noErr {
-            throw VTDecoder.DecoderErrors.vtError(.init(rawValue: status), status)
+            throw DecoderErrors.vtError(.init(rawValue: status), status)
         }
     }
 }
@@ -229,4 +227,75 @@ extension VTRenderer {
             self.releaseTime = releaseTime
         }
     }
+}
+
+extension VTRenderer {
+    struct VTDecoderResponce {
+        let status: OSStatus
+        let infoFlags: VTDecodeInfoFlags
+        let imageBuffer: CVImageBuffer?
+        let presentationTimeStamp: CMTime
+        let presentationDuration: CMTime
+    }
+
+    enum DecoderErrors: Error, Equatable {
+        case vtError(VTError?, OSStatus)
+        case droppedFrame
+        case decoderIsInvalidated
+        case nothingToRead
+        case decoderQueueIsFull
+
+        enum VTError: OSStatus {
+            case propertyNotSupported = -12900
+            case propertyReadOnly = -12901
+            case wrongParameter = -12902
+            case invalidSession = -12903
+            case allocationFailed = -12904
+            case pixelTransferNotSupported_1 = -12905
+            case pixelTransferNotSupported_2 = -8961
+            case couldNotFindVideoDecoder = -12906
+            case couldNotCreateInstance = -12907
+            case couldNotFindVideoEncoder = -12908
+            case videoDecoderBadData_1 = -12909
+            case videoDecoderBadData_2 = -8969
+            case videoDecoderUnsupportedDataFormat_1 = -12910
+            case videoDecoderUnsupportedDataFormat_2 = -8970
+            case videoDecoderMalfunction_1 = -12911
+            case videoDecoderMalfunction_2 = -8960
+            case videoEncoderMalfunction = -12912
+            case videoDecoderNotAvailableNow = -12913
+            case pixelRotationNotSupported = -12914
+            case videoEncoderNotAvailableNow = -12915
+            case formatDescriptionChangeNotSupported = -12916
+            case insufficientSourceColorData = -12917
+            case couldNotCreateColorCorrectionData = -12918
+            case colorSyncTransformConvertFailed = -12919
+            case videoDecoderAuthorization = -12210
+            case videoEncoderAuthorization = -12211
+            case colorCorrectionPixelTransferFailed = -12212
+            case multiPassStorageIdentifierMismatch = -12213
+            case multiPassStorageInvalid = -12214
+            case frameSiloInvalidTimeStamp = -12215
+            case frameSiloInvalidTimeRange = -12216
+            case couldNotFindTemporalFilter = -12217
+            case pixelTransferNotPermitted = -12218
+            case colorCorrectionImageRotationFailed = -12219
+            case videoDecoderRemoved = -17690
+            case sessionMalfunction = -17691
+            case videoDecoderNeedsRosetta = -17692
+            case videoEncoderNeedsRosetta = -17693
+            case videoDecoderReferenceMissing = -17694
+            case videoDecoderCallbackMessaging = -17695
+            case videoDecoderUnknown = -17696
+            case extensionDisabled = -17697
+            case videoEncoderMVHEVCVideoLayerIDsMismatch = -17698
+            case couldNotOutputTaggedBufferGroup = -17699
+            case couldNotFindExtension = -19510
+            case extensionConflict = -19511
+        }
+    }
+}
+
+private extension CMItemCount {
+    static let highWaterMark = 10
 }

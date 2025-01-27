@@ -42,32 +42,46 @@ final class ATRenderer: BaseSERenderer {
     override func queueInputSample(sampleBuffer: CMSampleBuffer, completion: @escaping (Bool) -> Void) {
         guard let converter else { completion(false); return }
 
-        let dataObject = DataObject(sample: sampleBuffer)
+        var dataObject = DataObject(sample: sampleBuffer)
+        let bufferSize: UInt32 = destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024
         let outputPointer = UnsafeMutableRawPointer.allocate(
-            byteCount: 35280,
+            byteCount: Int(bufferSize),
             alignment: MemoryLayout<UInt8>.alignment
         )
-        var outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
+        let outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
         var outBufferRef = outputBufferList.unsafeMutablePointer.pointee
         outBufferRef.mBuffers.mNumberChannels = destinationFormat.mChannelsPerFrame
-        outBufferRef.mBuffers.mDataByteSize = 35280
+        outBufferRef.mBuffers.mDataByteSize = bufferSize
         outBufferRef.mBuffers.mData = outputPointer
+        var ioOutputDataPackets: UInt32 = bufferSize
 
-        var ioOutputDataPackets: UInt32 = 1024
-        let result = AudioConverterFillComplexBuffer(
-            converter, // inAudioConverter
-            converterComplexBufferCallback, // inInputDataProc
-            Unmanaged.passUnretained(dataObject).toOpaque(), // inInputDataProcUserData
-            &ioOutputDataPackets, // ioOutputDataPacketSize
-            &outBufferRef, // outOutputData
-            nil // outPacketDescription
+        let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
+            AudioConverterFillComplexBuffer(
+                converter, // inAudioConverter
+                converterComplexBufferCallback, // inInputDataProc
+                dataObjectRef, // inInputDataProcUserData
+                &ioOutputDataPackets, // ioOutputDataPacketSize
+                &outBufferRef, // outOutputData
+                nil // outPacketDescription
+            )
+        }
+
+        let sampleBuffer = try! CMSampleBuffer(
+            dataBuffer: nil,
+            formatDescription: nil,
+            numSamples: 1,
+            sampleTimings: sampleBuffer.sampleTimingInfos(),
+            sampleSizes: []
         )
+        try! decompressedSamplesQueue.enqueue(sampleBuffer)
 
-        if result != noErr {
+        outputBufferList.unsafeMutablePointer.deallocate()
+        outputPointer.deallocate()
+        if result != noErr && result != ConverterErrors.custom_noMoreData.rawValue {
             completion(false)
         }
-        print()
-        completion(true)
+
+        completion(false)
     }
 
     override func processOutputSample(
@@ -79,7 +93,7 @@ final class ATRenderer: BaseSERenderer {
         isDecodeOnlySample: Bool,
         isLastOutputSample: Bool
     ) -> Bool {
-        return false
+        return true
     }
 }
 
@@ -117,20 +131,17 @@ extension ATRenderer {
             case noHardwarePermission = 1885696621
 
             case custom_nilDataObjectPointer = -1001
-            case custom_sampleBufferAudioBufferListEmpty = -1002
-            case custom_unknown = -1003
+            case custom_sampleBufferAudioBufferEmpty = -1002
+            case custom_noMoreData = -1003
+            case custom_unknown = -1004
         }
     }
 }
 
-private final class DataObject {
+private struct DataObject {
     let sample: CMSampleBuffer
     var didReadData: Bool = false
     var error: Error?
-
-    init(sample: CMSampleBuffer) {
-        self.sample = sample
-    }
 }
 
 private typealias ConverterErrors = ATRenderer.DecoderErrors.AudioToolboxErrors
@@ -142,30 +153,31 @@ private func converterComplexBufferCallback(
     outDataPacketDescription: UnsafeMutablePointer<UnsafeMutablePointer<AudioStreamPacketDescription>?>?,
     userData: UnsafeMutableRawPointer?
 ) -> OSStatus {
-    guard let userData else { return ConverterErrors.custom_nilDataObjectPointer.rawValue  }
-    let dataObject = Unmanaged<DataObject>.fromOpaque(userData).takeUnretainedValue()
-
-    guard !dataObject.didReadData else {
-        dataPacketsCount.pointee = 0
-        ioData.pointee.mBuffers.mDataByteSize = 0
-        return noErr
+    guard let dataObject = userData?.assumingMemoryBound(to: DataObject.self) else {
+        return ConverterErrors.custom_nilDataObjectPointer.rawValue
     }
 
-    if let packetDescriptionRef = outDataPacketDescription?.pointee {
-        packetDescriptionRef.pointee.mStartOffset = 0
-        packetDescriptionRef.pointee.mVariableFramesInPacket = 0
-        packetDescriptionRef.pointee.mDataByteSize = UInt32(dataObject.sample.totalSampleSize)
+    guard !dataObject.pointee.didReadData else {
+        ioData.pointee.mBuffers.mDataByteSize = 0
+        return ConverterErrors.custom_noMoreData.rawValue
     }
 
     do {
-        try dataObject.sample.withAudioBufferList() { pointer, blockBuffer in
+        if let packetDescriptionRef = outDataPacketDescription?.pointee {
+            try dataObject.pointee.sample.withUnsafeAudioStreamPacketDescriptions { pointer in
+                packetDescriptionRef.pointee = pointer[0]
+            }
+        }
+
+        try dataObject.pointee.sample.withAudioBufferList() { pointer, blockBuffer in
             ioData.pointee = pointer.unsafeMutablePointer.pointee
         }
     } catch {
-        dataObject.error = error
-        return ConverterErrors.custom_sampleBufferAudioBufferListEmpty.rawValue
+        dataObject.pointee.error = error
+        return ConverterErrors.custom_sampleBufferAudioBufferEmpty.rawValue
     }
 
-    dataObject.didReadData = true
+    dataObject.pointee.didReadData = true
+    dataPacketsCount.pointee = 1
     return noErr
 }

@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import AVFoundation
+import CoreMedia
 
 final class SEPlayerStateDependencies {
     let playerId: UUID
@@ -16,18 +16,12 @@ final class SEPlayerStateDependencies {
     let standaloneClock: StandaloneClock
     let clock: CMClock
 
-    let taskQueue: SEPlayerTaskQueue
-
-    let renderSynchronizer = AVSampleBufferRenderSynchronizer()
-    let videoRenderer = AVSampleBufferDisplayLayer()
-    let audioRenderer = AVSampleBufferAudioRenderer()
     var mediaPeriodHolder: MediaPeriodHolder?
 
     var nextState: SEPlayer.State?
 
     var mediaSource: MediaSource?
     var mediaPeriod: MediaPeriod?
-    var decoders: [SampleStreamData] = []
     var renderers: [BaseSERenderer] = []
     
     let displayLink: DisplayLinkProvider
@@ -44,25 +38,9 @@ final class SEPlayerStateDependencies {
         self.sessionLoader = sessionLoader
         self.playerId = playerId
         self.allocator = allocator
-        self.taskQueue = SEPlayerTaskQueue(queue: queue)
 
-        var clock: CMClock!
-        try! CMAudioClockCreate(allocator: nil, clockOut: &clock).validate()
-        self.clock = clock
+        self.clock = CMClockGetHostTimeClock()
         self.standaloneClock = StandaloneClock(clock: clock)
         self.displayLink = CADisplayLinkProvider(queue: queue)
-
-//        renderSynchronizer.addRenderer(audioRenderer)
-//        renderSynchronizer.addRenderer(videoRenderer)
-    }
-}
-
-extension SEPlayerStateDependencies {
-    struct SampleStreamData {
-        let decoder: SEDecoder
-        let format: CMFormatDescription
-        let renderer: AVQueuedSampleBufferRendering
-        let sampleReleaser: SampleReleaser
-        var isReady: Bool = false
     }
 }
