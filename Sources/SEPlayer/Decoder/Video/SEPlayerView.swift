@@ -5,24 +5,17 @@
 //  Created by Damir Yackupov on 25.01.2025.
 //
 
-import CoreMedia
+import AVFoundation
 import UIKit
 
-internal protocol SEPlayerBufferView {
-    var outputWindowScene: UIWindowScene? { get }
-    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<VTRenderer.SampleReleaseWrapper>)
-    func enqueueSampleImmideatly(_ sample: CMSampleBuffer)
-    func displayLinkTick(_ displayLink: CADisplayLink)
+protocol SEPlayerBufferView: DisplayLinkListener {
+    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<CMSampleBuffer>)
+    func enqueueSampleImmediately(_ sample: CMSampleBuffer)
 }
 
 public final class SEPlayerView: UIView {
     public override class var layerClass: AnyClass {
         CALayer.self
-    }
-
-    var outputWindowScene: UIWindowScene? {
-        assert(Queues.mainQueue.isCurrent())
-        return self.window?.windowScene
     }
 
     public weak var player: SEPlayer? {
@@ -39,7 +32,7 @@ public final class SEPlayerView: UIView {
     }
 
     private weak var _player: SEPlayer?
-    private var sampleQueue: TypedCMBufferQueue<VTRenderer.SampleReleaseWrapper>?
+    private var sampleQueue: TypedCMBufferQueue<CMSampleBuffer>?
     private var currentSample: CMSampleBuffer?
 
     public init() {
@@ -52,24 +45,27 @@ public final class SEPlayerView: UIView {
 }
 
 extension SEPlayerView: SEPlayerBufferView {
-    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<VTRenderer.SampleReleaseWrapper>) {
+    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<CMSampleBuffer>) {
+        assert(Thread.isMainThread)
         self.sampleQueue = bufferQueue
     }
 
-    func enqueueSampleImmideatly(_ sample: CMSampleBuffer) {
+    func enqueueSampleImmediately(_ sample: CMSampleBuffer) {
+        assert(Thread.isMainThread)
         displaySample(sample)
     }
 
-    func displayLinkTick(_ displayLink: CADisplayLink) {
-        assert(Queues.mainQueue.isCurrent())
-        guard let sampleQueue else { return }
-        let frameDeadlineRange = displayLink.timestampNs..<displayLink.targetTimestampNs
+    func displayLinkTick(_ info: DisplayLinkInfo) {
+        assert(Thread.isMainThread)        
+        let deadline = info.currentTimestampNs...info.targetTimestampNs
 
-        if let sampleWrapper = sampleQueue.dequeue() {
-            if frameDeadlineRange.contains(sampleWrapper.releaseTime) {
-                displaySample(sampleWrapper.sample)
-            } else if sampleWrapper.releaseTime > frameDeadlineRange.upperBound {
-                try! sampleQueue.enqueue(sampleWrapper)
+        if let sampleBuffer = sampleQueue?.dequeue() {
+            if sampleBuffer.presentationTimeStamp.nanoseconds > info.targetTimestampNs {
+                try! sampleQueue?.enqueue(sampleBuffer)
+            } else if deadline.contains(sampleBuffer.presentationTimeStamp.nanoseconds) {
+                displaySample(sampleBuffer)
+            } else {
+                displayLinkTick(info)
             }
         }
     }
@@ -94,15 +90,5 @@ private extension SEPlayerView  {
         sampleQueue = nil
         player?.setBufferOutput(self)
         _player = player
-    }
-}
-
-private extension CADisplayLink {
-    var timestampNs: Int64 {
-        Int64(timestamp * 1_000_000_000)
-    }
-
-    var targetTimestampNs: Int64 {
-        Int64(targetTimestamp * 1_000_000_000)
     }
 }

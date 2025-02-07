@@ -11,6 +11,8 @@
     func player(_ player: SEPlayer, didChangeLoadedTime time: Double, progress: Double)
 }
 
-extension SEPlayerDelegate {
-    public func player(_ player: SEPlayer, didChangeLoadedTime time: Double, progress: Double) {}
+public extension SEPlayerDelegate {
+    func player(_ player: SEPlayer, didChangeState state: SEPlayer.State) {}
+    func player(_ player: SEPlayer, didChangeTime time: Double) {}
+    func player(_ player: SEPlayer, didChangeLoadedTime time: Double, progress: Double) {}
 }

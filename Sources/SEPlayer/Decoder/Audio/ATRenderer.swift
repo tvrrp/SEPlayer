@@ -9,79 +9,72 @@ import AudioToolbox
 import AVFoundation
 
 final class ATRenderer: BaseSERenderer {
-    var format: AudioStreamBasicDescription
-    var destinationFormat: AudioStreamBasicDescription
-    var converter: AudioConverterRef?
+    private var format: AudioStreamBasicDescription
+    private var destinationFormat: AudioStreamBasicDescription
+    private var converter: AudioConverterRef?
+    
+    private let audioSync: AudioSync
+    private let bufferSize: UInt32
+    private let outputBufferList: UnsafeMutableAudioBufferListPointer
+    private let outputPointer: UnsafeMutableRawPointer
+    private let outputQueue: TypedCMBufferQueue<CMSampleBuffer>
+
+    private var _pendingSamples = [CMSampleBuffer]()
+    private var _isDecodingSample = false
+    private var _samplesBeingDecoded = 0
 
     init(
         format: CMAudioFormatDescription,
         clock: CMClock,
         queue: Queue,
-        sampleStream: SampleStream
+        sampleStream: SampleStream,
+        audioRenderer: AVSampleBufferAudioRenderer
     ) throws {
         self.format = format.audioStreamBasicDescription!
+        let outputSampleRate = AVAudioSession.sharedInstance().sampleRate
         destinationFormat = AudioStreamBasicDescription(
-            mSampleRate: AVAudioSession.sharedInstance().sampleRate,
+            mSampleRate: outputSampleRate,
             mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
             mBytesPerPacket: 4 * self.format.mChannelsPerFrame,
             mFramesPerPacket: 1,
             mBytesPerFrame: 4 * self.format.mChannelsPerFrame,
-            mChannelsPerFrame: 2,
+            mChannelsPerFrame: self.format.mChannelsPerFrame,
             mBitsPerChannel: 32,
             mReserved: 0
         )
+        outputQueue = try .init(capacity: .highWaterMark)
+        audioSync = AudioSync(queue: queue, audioRenderer: audioRenderer, outputQueue: outputQueue, outputSampleRate: outputSampleRate)
+        outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
+        bufferSize = destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024
+        outputPointer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(bufferSize),
+            alignment: MemoryLayout<UInt8>.alignment
+        )
+        outputBufferList.unsafeMutablePointer.pointee.mBuffers.mNumberChannels = destinationFormat.mChannelsPerFrame
+        outputBufferList.unsafeMutablePointer.pointee.mBuffers.mDataByteSize = bufferSize
+        outputBufferList.unsafeMutablePointer.pointee.mBuffers.mData = outputPointer
+
         try super.init(clock: clock, queue: queue, sampleStream: sampleStream)
         try createAudioConverter()
     }
 
     override func isReady() -> Bool {
-        true
+        return super.isReady() && audioSync.hasPendingData()
     }
 
-    override func queueInputSample(sampleBuffer: CMSampleBuffer, completion: @escaping (Bool) -> Void) {
-        guard let converter else { completion(false); return }
+    override func start() {
+        super.start()
+        audioSync.start()
+    }
 
-        var dataObject = DataObject(sample: sampleBuffer)
-        let bufferSize: UInt32 = destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024
-        let outputPointer = UnsafeMutableRawPointer.allocate(
-            byteCount: Int(bufferSize),
-            alignment: MemoryLayout<UInt8>.alignment
-        )
-        let outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
-        var outBufferRef = outputBufferList.unsafeMutablePointer.pointee
-        outBufferRef.mBuffers.mNumberChannels = destinationFormat.mChannelsPerFrame
-        outBufferRef.mBuffers.mDataByteSize = bufferSize
-        outBufferRef.mBuffers.mData = outputPointer
-        var ioOutputDataPackets: UInt32 = bufferSize
-
-        let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
-            AudioConverterFillComplexBuffer(
-                converter, // inAudioConverter
-                converterComplexBufferCallback, // inInputDataProc
-                dataObjectRef, // inInputDataProcUserData
-                &ioOutputDataPackets, // ioOutputDataPacketSize
-                &outBufferRef, // outOutputData
-                nil // outPacketDescription
-            )
-        }
-
-        let sampleBuffer = try! CMSampleBuffer(
-            dataBuffer: nil,
-            formatDescription: nil,
-            numSamples: 1,
-            sampleTimings: sampleBuffer.sampleTimingInfos(),
-            sampleSizes: []
-        )
-        try! decompressedSamplesQueue.enqueue(sampleBuffer)
-
-        outputBufferList.unsafeMutablePointer.deallocate()
-        outputPointer.deallocate()
-        if result != noErr && result != ConverterErrors.custom_noMoreData.rawValue {
-            completion(false)
-        }
-
-        completion(false)
+    override func queueInputSample(sampleBuffer: CMSampleBuffer) -> Bool {
+        assert(queue.isCurrent())
+        guard _samplesBeingDecoded < .highWaterMark else { return false }
+        _pendingSamples.append(sampleBuffer)
+        _samplesBeingDecoded += 1
+        decodeNextSampleIfNeeded()
+        return true
     }
 
     override func processOutputSample(
@@ -93,6 +86,24 @@ final class ATRenderer: BaseSERenderer {
         isDecodeOnlySample: Bool,
         isLastOutputSample: Bool
     ) -> Bool {
+        guard !outputQueue.isFull else { return false }
+        let sampleBuffer = try! CMSampleBuffer(
+            copying: sample,
+            withNewTiming: sample.sampleTimingInfos().map { oldTiming in
+                CMSampleTimingInfo(
+                    duration: oldTiming.duration,
+                    presentationTimeStamp: .from(microseconds: presenationTime),
+                    decodeTimeStamp: .zero
+                )
+            }
+        )
+
+        if isStarted || audioSync.hasPendingData() {
+            try! outputQueue.enqueue(sampleBuffer)
+        } else {
+            audioSync.enqueueImmediately(sample)
+        }
+
         return true
     }
 }
@@ -109,6 +120,97 @@ extension ATRenderer {
             let error = DecoderErrors.osStatus(.init(rawValue: status), status)
             throw error
         }
+    }
+
+    private func decodeNextSampleIfNeeded() {
+        guard !_isDecodingSample, !_pendingSamples.isEmpty else { return }
+        _isDecodingSample = true
+        let sample = _pendingSamples.removeFirst()
+
+        // async as AudioConverterFillComplexBuffer is sync
+        queue.async {
+            self.decodeSample(sample)
+        }
+    }
+
+    private func decodeSample(_ sampleBuffer: CMSampleBuffer) {
+        guard let converter else { return }
+
+        var ioOutputDataPackets: UInt32 = bufferSize
+
+        do {
+            let result = try sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
+                var description = description[0]
+                return try sampleBuffer.withAudioBufferList { audioBuffer, _ in
+                    var dataObject = DataObject(
+                        bufferList: audioBuffer.unsafeMutablePointer,
+                        packetDescription: &description
+                    )
+                    
+                    let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
+                        AudioConverterFillComplexBuffer(
+                            converter, // inAudioConverter
+                            converterComplexBufferCallback, // inInputDataProc
+                            dataObjectRef, // inInputDataProcUserData
+                            &ioOutputDataPackets, // ioOutputDataPacketSize
+                            outputBufferList.unsafeMutablePointer, // outOutputData
+                            nil // outPacketDescription
+                        )
+                    }
+                    
+                    return result
+                }
+            }
+
+            if result != noErr && result != ConverterErrors.custom_noMoreData.rawValue {
+                throw DecoderErrors.osStatus(.init(rawValue: result), result)
+            }
+        } catch {
+            print(error)
+        }
+
+        enqueueSample(
+            from: outputBufferList.unsafeMutablePointer,
+            compressedSample: sampleBuffer
+        )
+    }
+
+    private func enqueueSample(from audioBufferList: UnsafeMutablePointer<AudioBufferList>, compressedSample: CMSampleBuffer) {
+        do {
+            let itemsCount = audioBufferList.pointee.mBuffers.mDataByteSize
+            let formatDescription = try CMFormatDescription(audioStreamBasicDescription: destinationFormat)
+            let blockBuffer = try makeBlockBuffer(from: audioBufferList)
+
+            let sampleBuffer = try CMSampleBuffer(
+                dataBuffer: blockBuffer,
+                formatDescription: formatDescription,
+                numSamples: Int(itemsCount),
+                presentationTimeStamp: compressedSample.presentationTimeStamp,
+                packetDescriptions: []
+            )
+
+            try decompressedSamplesQueue.enqueue(sampleBuffer)
+        } catch {
+            print(error)
+        }
+        _samplesBeingDecoded -= 1
+        _isDecodingSample = false
+        decodeNextSampleIfNeeded()
+    }
+
+    private func makeBlockBuffer(from audioListBuffer: UnsafeMutablePointer<AudioBufferList>) throws -> CMBlockBuffer {
+        let dataByteSize = Int(audioListBuffer.pointee.mBuffers.mDataByteSize)
+        let outBlockListBuffer = try CMBlockBuffer()
+
+        for audioBuffer in UnsafeMutableAudioBufferListPointer(audioListBuffer) {
+            let dataByteSize = Int(audioBuffer.mDataByteSize)
+            let outBlockBuffer = try CMBlockBuffer(length: dataByteSize, flags: .assureMemoryNow)
+            let pointer = UnsafeRawBufferPointer(start: audioBuffer.mData!, count: dataByteSize)
+            try outBlockBuffer.replaceDataBytes(with: pointer)
+            try outBlockListBuffer.append(bufferReference: outBlockBuffer)
+        }
+
+        return outBlockListBuffer
     }
 }
 
@@ -139,7 +241,8 @@ extension ATRenderer {
 }
 
 private struct DataObject {
-    let sample: CMSampleBuffer
+    let bufferList: UnsafeMutablePointer<AudioBufferList>
+    let packetDescription: UnsafeMutablePointer<AudioStreamPacketDescription>
     var didReadData: Bool = false
     var error: Error?
 }
@@ -158,26 +261,19 @@ private func converterComplexBufferCallback(
     }
 
     guard !dataObject.pointee.didReadData else {
+        dataPacketsCount.pointee = 0
         ioData.pointee.mBuffers.mDataByteSize = 0
         return ConverterErrors.custom_noMoreData.rawValue
     }
 
-    do {
-        if let packetDescriptionRef = outDataPacketDescription?.pointee {
-            try dataObject.pointee.sample.withUnsafeAudioStreamPacketDescriptions { pointer in
-                packetDescriptionRef.pointee = pointer[0]
-            }
-        }
-
-        try dataObject.pointee.sample.withAudioBufferList() { pointer, blockBuffer in
-            ioData.pointee = pointer.unsafeMutablePointer.pointee
-        }
-    } catch {
-        dataObject.pointee.error = error
-        return ConverterErrors.custom_sampleBufferAudioBufferEmpty.rawValue
-    }
+    outDataPacketDescription?.pointee = dataObject.pointee.packetDescription
+    ioData.pointee = dataObject.pointee.bufferList.pointee
 
     dataObject.pointee.didReadData = true
     dataPacketsCount.pointee = 1
     return noErr
+}
+
+private extension CMItemCount {
+    static let highWaterMark = 30
 }

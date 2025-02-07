@@ -61,6 +61,7 @@ final class TypedCMBufferQueue<T: CMBuffer> {
         try bufferQueue.enqueue(buffer)
     }
 
+    @discardableResult
     func dequeue() -> T? {
         return (bufferQueue.dequeue() as! T?)
     }

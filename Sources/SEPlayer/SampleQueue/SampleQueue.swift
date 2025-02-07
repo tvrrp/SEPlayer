@@ -64,6 +64,25 @@ final class SampleQueue: TrackOutput {
         return .didReadBuffer
     }
 
+    func readData(to buffer: UnsafeMutableRawPointer) throws -> DecoderInputBuffer? {
+        assert(queue.isCurrent())
+        guard !allocations.isEmpty && !endOfQueue else { return nil }
+        let wrapper = allocations.removeFirst()
+
+        let pointer = malloc(wrapper.allocation.size).assumingMemoryBound(to: UInt8.self)
+        buffer.copyMemory(
+            from: wrapper.allocation.baseAddress,
+            byteCount: wrapper.metadata.size
+        )
+
+        return .init(
+            bufferFlags: wrapper.metadata.flags,
+            format: format,
+            data: buffer,
+            sampleTimings: wrapper.metadata.sampleTimings
+        )
+    }
+
 //    func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult {
 //        assert(queue.isCurrent())
 //        guard !blocks.isEmpty && !endOfQueue else { return .nothingRead }

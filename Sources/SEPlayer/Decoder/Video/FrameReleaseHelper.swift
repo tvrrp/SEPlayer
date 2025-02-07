@@ -30,13 +30,14 @@ final class VideoFrameReleaseHelper {
         self.queue = queue
         self.displayLink = displayLink
         self.frameRateEstimator = FixedFrameRateEstimator()
+        displayLink.addObserver()
     }
 
     func start() {
         assert(queue.isCurrent())
         started = true
-        displayLink.addObserver()
-        
+        resetAdjustment()
+
         updateDefaultDisplayRefreshRateParams()
         updateDisplayLinkFrameRate(forceUpdate: false)
     }
@@ -93,14 +94,12 @@ final class VideoFrameReleaseHelper {
         pendingLastAdjustedFrameIndex = frameIndex
         pendingLastAdjustedReleaseTime = adjustedReleaseTime
 
+        updateDefaultDisplayRefreshRateParams()
         guard let vsyncDuration, let sampledVsyncTime = displayLink.sampledVsyncTime else { return adjustedReleaseTime }
 
-        let snappedTime = closestVsync(
-            releaseTime: adjustedReleaseTime,
-            sampledVsyncTime: sampledVsyncTime,
-            vsyncDuration: vsyncDuration
-        )
-        return snappedTime - vsyncOffset
+        let vsyncCount = (releaseTime - sampledVsyncTime) / vsyncDuration
+        let snappedTime = sampledVsyncTime + (vsyncDuration * vsyncCount)
+        return snappedTime + vsyncOffset
     }
 
     private func resetAdjustment() {
@@ -111,27 +110,6 @@ final class VideoFrameReleaseHelper {
 
     private func adjustmentAllowed(unadjustedReleaseTime: Int64, adjustedReleaseTime: Int64) -> Bool {
         abs(unadjustedReleaseTime - adjustedReleaseTime) <= .maxAllowedAdjustment
-    }
-
-    private func closestVsync(releaseTime: Int64, sampledVsyncTime: Int64, vsyncDuration: Int64) -> Int64 {
-        let vsyncCount = (releaseTime - sampledVsyncTime) / vsyncDuration
-        let snappedTime = sampledVsyncTime + (vsyncDuration * vsyncCount)
-
-        let snappedBefore: Int64
-        let snappedAfter: Int64
-
-        if releaseTime <= snappedTime {
-            snappedBefore = snappedTime - vsyncDuration
-            snappedAfter = snappedTime
-        } else {
-            snappedBefore = snappedTime
-            snappedAfter = snappedTime + vsyncDuration
-        }
-
-        let snappedAfterDiff = snappedAfter - releaseTime
-        let snappedBeforeDiff = releaseTime - snappedBefore
-
-        return snappedAfterDiff < snappedBeforeDiff ? snappedAfter : snappedBefore
     }
 
     private func updateMediaFrameRate() {
@@ -166,8 +144,7 @@ final class VideoFrameReleaseHelper {
     }
 
     private func updateDefaultDisplayRefreshRateParams() {
-        let maximumFramesPerSecond = displayLink.screenFrameRate
-        let vsyncDuration = 1_000_000_000 / Int64(maximumFramesPerSecond)
+        guard let vsyncDuration = displayLink.vsyncDuration else { return }
         vsyncOffset = vsyncDuration * 80 / 100
         self.vsyncDuration = vsyncDuration
     }

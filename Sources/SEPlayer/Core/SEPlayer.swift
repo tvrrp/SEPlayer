@@ -15,6 +15,11 @@ public final class SEPlayer {
     public var state: State { _internalStateQueue.sync { _state.state } }
     private let _internalStateQueue: Queue = Queues.internalStateQueue
 
+    public var playbackRate: Float {
+        get { queue.sync { _playbackRate } }
+        set { queue.async { self.updatePlaybackRate(new: newValue) } }
+    }
+
     private let returnQueue: Queue
     private let queue: Queue
 
@@ -22,11 +27,12 @@ public final class SEPlayer {
     private let _dependencies: SEPlayerStateDependencies
     private let timer: DispatchSourceTimer
 
+    private var _playbackRate: Float = 1.0
     private var rendererPosition: Int64 = 1_000_000_000_000
     private var rendererPositionElapsedRealtime: Int64 = .zero
 
     private var output: SEPlayerBufferView?
-    
+
     var clockLastTime = Int64.zero
     var isReady: Bool = false
 
@@ -125,9 +131,8 @@ extension SEPlayer: MediaSourceDelegate {
 extension SEPlayer: MediaPeriodCallback {
     func didPrepare(mediaPeriod: any MediaPeriod) {
         assert(queue.isCurrent())
-        guard let mediaPeriodHolder = _dependencies.mediaPeriodHolder else {
-            return
-        }
+        guard let mediaPeriodHolder = _dependencies.mediaPeriodHolder else { return }
+
         mediaPeriodHolder.handlePrepared(playbackSpeed: 1.0, timeline: SinglePeriodTimeline(), playWhenReady: true)
         do {
             _dependencies.renderers = try mediaPeriodHolder.sampleStreams.compactMap { stream in
@@ -146,7 +151,8 @@ extension SEPlayer: MediaPeriodCallback {
                         format: format,
                         clock: _dependencies.clock,
                         queue: queue,
-                        sampleStream: stream
+                        sampleStream: stream,
+                        audioRenderer: _dependencies.audioRenderer
                     )
                 default:
                     return nil
@@ -163,10 +169,8 @@ extension SEPlayer: MediaPeriodCallback {
         }
 
         _dependencies.standaloneClock.resetPosition(position: rendererPosition)
-        queue.after(1) {
-            self.timer.resume()
-            self.doSomeWork()
-        }
+        self.timer.resume()
+        self.doSomeWork()
     }
 
     func continueLoadingRequested(with source: any MediaPeriod) {
@@ -223,36 +227,34 @@ private extension SEPlayer {
         rendererPosition = _dependencies.standaloneClock.getPosition()
         rendererPositionElapsedRealtime = _dependencies.clock.microseconds
 
-        renderAndWait(with: _dependencies.renderers) { [weak self] in
-            guard let self else { return }
-
-            if _dependencies.renderers.allSatisfy({ $0.isReady() }) {
-                if !started {
-                    _dependencies.standaloneClock.start()
-                    _dependencies.renderers.forEach { $0.start() }
-                    started = true
-                }
-            } else {
-//                _dependencies.standaloneClock.stop()
-//                _dependencies.renderers.forEach { $0.sto() }
-            }
-
-            timer.schedule(deadline: currentTime + .milliseconds(10)); return
+        var renderersReady = true
+        for renderer in _dependencies.renderers {
+            try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime)
+            renderersReady = renderersReady && renderer.isReady()
         }
+
+        if renderersReady && !isReady {
+            isReady = true
+            updatePlaybackRate(new: 1.0)
+            _dependencies.renderers.forEach { $0.start() }
+            _dependencies.standaloneClock.start()
+        }
+
+        if !renderersReady && isReady {
+            isReady = false
+//            _dependencies.renderers.forEach { $0.pause() }
+            _dependencies.standaloneClock.stop()
+        }
+
+        timer.schedule(deadline: currentTime + .milliseconds(10))
     }
 
-    func renderAndWait(with renderers: [BaseSERenderer], completion: @escaping () -> Void) {
+    private func updatePlaybackRate(new playbackRate: Float) {
         assert(queue.isCurrent())
-        guard !renderers.isEmpty else { completion(); return }
-
-        var renderers = renderers
-        let currentRenderer = renderers.removeFirst()
-        try! currentRenderer.render(
-            position: rendererPosition,
-            elapsedRealtime: rendererPositionElapsedRealtime
-        ) {
-            self.renderAndWait(with: renderers, completion: completion)
-        }
+        let clampedPlaybackRate = min(max(0.1, playbackRate), 2.5)
+        self._playbackRate = clampedPlaybackRate
+        _dependencies.standaloneClock.setPlaybackRate(new: playbackRate)
+        _dependencies.renderers.forEach { $0.setPlaybackRate(new: playbackRate) }
     }
 }
 
@@ -261,6 +263,7 @@ extension SEPlayer {
         queue.async { [weak self] in
             guard let self else { return }
             self.output = output
+
             for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
                 renderer.setBufferOutput(output)
             }

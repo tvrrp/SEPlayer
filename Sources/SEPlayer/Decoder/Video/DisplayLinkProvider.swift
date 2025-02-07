@@ -5,38 +5,48 @@
 //  Created by Damir Yackupov on 24.01.2025.
 //
 
-import QuartzCore
+import UIKit
 
 protocol DisplayLinkProvider {
     var sampledVsyncTime: Int64? { get }
-    var screenFrameRate: Int { get }
+    var vsyncDuration: Int64? { get }
     func addOutput(_ output: SEPlayerBufferView)
     func removeOutput(_ output: SEPlayerBufferView)
     func addObserver()
     func removeObserver()
 }
 
+protocol DisplayLinkListener: AnyObject {
+    func displayLinkTick(_ info: DisplayLinkInfo)
+}
+
+struct DisplayLinkInfo {
+    let currentTimestampNs: Int64
+    let targetTimestampNs: Int64
+}
+
 final class CADisplayLinkProvider: DisplayLinkProvider {
     var sampledVsyncTime: Int64? {
-        assert(queue.isCurrent())
-        if let _sampledVsyncTime {
-            return Int64(_sampledVsyncTime * 1_000_000_000)
-        }
-        return nil
+        lock()
+        var value = _sampledVsyncTime
+        unlock()
+        return value
     }
 
-    var screenFrameRate: Int {
-        assert(queue.isCurrent())
-        return _screenFrameRate
+    var vsyncDuration: Int64? {
+        lock()
+        var value = _vsyncDuration
+        unlock()
+        return value
     }
 
-    private let observers = MulticastDelegate<SEPlayerBufferView>()
+    private let observers = MulticastDelegate<DisplayLinkListener>()
     private let queue: Queue
     private var displayLink: CADisplayLink?
 
     private var observersCount: Int = 0
-    private var _sampledVsyncTime: TimeInterval?
-    private var _screenFrameRate: Int = 60
+    private var _sampledVsyncTime: Int64?
+    private var _vsyncDuration: Int64?
     private var onDisplayLinkExecuting: Bool = false
 
     init(queue: Queue) {
@@ -63,7 +73,6 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     func addOutput(_ output: SEPlayerBufferView) {
         assert(queue.isCurrent())
         observers.addDelegate(output)
-        updateScreenFrameRateIfNeeded()
     }
 
     func removeOutput(_ output: SEPlayerBufferView) {
@@ -91,26 +100,30 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
         guard !onDisplayLinkExecuting else { return }
         onDisplayLinkExecuting = true
         defer { onDisplayLinkExecuting = false }
-        queue.sync { _sampledVsyncTime = displayLink.timestamp }
-        observers.invokeDelegates { $0.displayLinkTick(displayLink) }
-        updateScreenFrameRateIfNeeded()
+
+        let currentTimestampNs = displayLink.timestamp.nanosecondsPerSecond
+        let targetTimestampNs = displayLink.targetTimestamp.nanosecondsPerSecond
+        let duration = displayLink.duration.nanosecondsPerSecond
+
+        lock()
+        self._sampledVsyncTime = targetTimestampNs
+        self._vsyncDuration = duration
+        unlock()
+
+        observers.invokeDelegates {
+            $0.displayLinkTick(.init(
+                currentTimestampNs: currentTimestampNs,
+                targetTimestampNs: targetTimestampNs
+            ))
+        }
     }
 
-    private func updateScreenFrameRateIfNeeded() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            let currentFrameRate = self.screenFrameRate
-            var newFrameRate = currentFrameRate
-            Queues.mainQueue.async {
-                self.observers.invokeDelegates {
-                    if let frameRate = $0.outputWindowScene?.screen.maximumFramesPerSecond {
-                        newFrameRate = max(newFrameRate, frameRate)
-                    }
-                }
-                if newFrameRate != currentFrameRate {
-                    self.queue.async { self._screenFrameRate = newFrameRate }
-                }
-            }
-        }
+    private var unfairLock = os_unfair_lock_s()
+    func lock() {
+        os_unfair_lock_lock(&unfairLock)
+    }
+
+    func unlock() {
+        os_unfair_lock_unlock(&unfairLock)
     }
 }

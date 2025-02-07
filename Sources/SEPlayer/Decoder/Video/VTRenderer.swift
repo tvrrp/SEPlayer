@@ -20,9 +20,13 @@ final class VTRenderer: BaseSERenderer {
         displayLink: displayLink
     )
 
-    private var _isDecodingSample = false
     private var output: SEPlayerBufferView?
-    private let outputSampleQueue: TypedCMBufferQueue<SampleReleaseWrapper>
+    private let outputSampleQueue: TypedCMBufferQueue<CMSampleBuffer>
+
+    private var _pendingSamples = [CMSampleBuffer]()
+    private var _isDecodingSample = false
+    private var _framedBeingDecoded = 0
+    private var lastFrameReleaseTime: Int64 = .zero
 
     init(
         formatDescription: CMVideoFormatDescription,
@@ -33,24 +37,27 @@ final class VTRenderer: BaseSERenderer {
     ) throws {
         self.formatDescription = formatDescription
         self.displayLink = displayLink
-        outputSampleQueue = try TypedCMBufferQueue<SampleReleaseWrapper>(capacity: .highWaterMark) { lhs, rhs in
-            guard lhs.releaseTime != rhs.releaseTime else { return .compareEqualTo }
-            return lhs.releaseTime > rhs.releaseTime ? .compareGreaterThan : .compareLessThan
-        }
+        outputSampleQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .highWaterMark)
         try super.init(
             clock: clock,
             queue: queue,
             sampleStream: sampleStream
         )
 
+        _pendingSamples.reserveCapacity(.highWaterMark)
         videoFrameReleaseControl.enable(releaseFirstFrameBeforeStarted: true)
-        videoFrameReleaseControl.setPlaybackSpeed(2.0)
         try initializeVideoDecoder()
+    }
+
+    override func setPlaybackRate(new playbackRate: Float) {
+        super.setPlaybackRate(new: playbackRate)
+        videoFrameReleaseControl.setPlaybackSpeed(playbackRate)
     }
 
     override func start() {
         super.start()
         videoFrameReleaseControl.start()
+        if let output { displayLink.addOutput(output) }
     }
 
     override func isReady() -> Bool {
@@ -64,7 +71,6 @@ final class VTRenderer: BaseSERenderer {
             output.setBufferQueue(self.outputSampleQueue)
         }
         self.output = output
-        displayLink.addOutput(output)
     }
 
     func removeBufferOutput(_ output: SEPlayerBufferView) {
@@ -73,39 +79,13 @@ final class VTRenderer: BaseSERenderer {
         displayLink.removeOutput(output)
     }
 
-    override func queueInputSample(sampleBuffer: CMSampleBuffer, completion: @escaping (Bool) -> Void) {
+    override func queueInputSample(sampleBuffer: CMSampleBuffer) -> Bool {
         assert(queue.isCurrent())
-        guard let decompressionSession, !_isDecodingSample else { completion(false); return }
-
-        _isDecodingSample = true
-        let decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
-        var infoFlagsOut: VTDecodeInfoFlags = []
-
-        let status = VTDecompressionSessionDecodeFrame(
-            decompressionSession,
-            sampleBuffer: sampleBuffer,
-            flags: decodeFlags,
-            infoFlagsOut: &infoFlagsOut
-        ) { [weak self] status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
-            guard let self else { return }
-            self.queue.async {
-                self.handleSample(
-                    response: .init(
-                        status: status,
-                        infoFlags: infoFlags,
-                        imageBuffer: imageBuffer,
-                        presentationTimeStamp: presentationTimeStamp,
-                        presentationDuration: presentationDuration
-                    ),
-                    completion: completion
-                )
-            }
-        }
-
-        if status != noErr {
-            let error = DecoderErrors.vtError(.init(rawValue: status), status)
-            print(error)
-        }
+        guard _framedBeingDecoded < .highWaterMark else { return false }
+        _framedBeingDecoded += 1
+        _pendingSamples.append(sampleBuffer)
+        decodeNextSampleIfNeeded()
+        return true
     }
 
     override func processOutputSample(
@@ -118,58 +98,40 @@ final class VTRenderer: BaseSERenderer {
         isLastOutputSample: Bool
     ) -> Bool {
         assert(queue.isCurrent())
+        let presentationTime = presenationTime //- 33333
         guard outputSampleQueue.bufferCount < .highWaterMark - 1 else { return false }
-        let frameReleaseInfo = videoFrameReleaseControl.frameReleaseAction(
-            presentationTime: presenationTime,
+        let frameReleaseAction = videoFrameReleaseControl.frameReleaseAction(
+            presentationTime: presentationTime,
             position: position,
             elapsedRealtime: elapsedRealtime,
             outputStreamStartPosition: outputStreamStartPosition,
             isLastFrame: isLastOutputSample
         )
 
-        switch frameReleaseInfo.action {
+        switch frameReleaseAction {
         case .immediately:
-            Queues.mainQueue.async { self.output?.enqueueSampleImmideatly(sample) }
+            Queues.mainQueue.async { self.output?.enqueueSampleImmediately(sample) }
             videoFrameReleaseControl.didReleaseFrame()
             return true
-        case .skip, .drop:
+        case .ignore:
             return true
-        case .ignore, .tryAgainLater:
+        case .skip:
+            return true
+        case .drop:
+            return true
+        case .tryAgainLater:
             return false
-        case .scheduled:
+        case let .scheduled(releaseTime):
             do {
-                try outputSampleQueue.enqueue(.init(
-                    sample: sample, releaseTime: frameReleaseInfo.releaseTime
-                ))
-                videoFrameReleaseControl.didReleaseFrame()
+                if releaseTime != lastFrameReleaseTime {
+                    try! outputSampleQueue.enqueue(sample.nanoseconds(releaseTime))
+                    videoFrameReleaseControl.didReleaseFrame()
+                }
+                lastFrameReleaseTime = releaseTime
                 return true
             } catch {
                 return false
             }
-        }
-    }
-
-    private func handleSample(response: VTDecoderResponce, completion: @escaping (Bool) -> Void) {
-        do {
-            _isDecodingSample = false
-            guard let imageBuffer = response.imageBuffer else {
-                completion(false); return
-            }
-            let formatDescription = try CMVideoFormatDescription(imageBuffer: imageBuffer)
-            let timingInfo = CMSampleTimingInfo(
-                duration: response.presentationDuration,
-                presentationTimeStamp: response.presentationTimeStamp,
-                decodeTimeStamp: response.presentationTimeStamp
-            )
-            let sampleBuffer = try CMSampleBuffer(
-                imageBuffer: imageBuffer,
-                formatDescription: formatDescription,
-                sampleTiming: timingInfo
-            )
-            try decompressedSamplesQueue.enqueue(sampleBuffer)
-            completion(true)
-        } catch {
-            completion(false)
         }
     }
 }
@@ -197,17 +159,12 @@ private extension VTRenderer {
         ]
         #endif
 
-        var outputCallbackRecord = VTDecompressionOutputCallbackRecord(
-            decompressionOutputCallback: nil,
-            decompressionOutputRefCon: Unmanaged.passUnretained(self).toOpaque()
-        )
-
         let status = VTDecompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             formatDescription: formatDescription,
             decoderSpecification: nil,
             imageBufferAttributes: imageBufferAttributes as CFDictionary,
-            outputCallback: &outputCallbackRecord,
+            outputCallback: nil,
             decompressionSessionOut: &decompressionSession
         )
 
@@ -215,17 +172,78 @@ private extension VTRenderer {
             throw DecoderErrors.vtError(.init(rawValue: status), status)
         }
     }
-}
 
-extension VTRenderer {
-    final class SampleReleaseWrapper {
-        let sample: CMSampleBuffer
-        let releaseTime: Int64
+    private func decodeNextSampleIfNeeded() {
+        guard !_isDecodingSample, !_pendingSamples.isEmpty else { return }
 
-        init(sample: CMSampleBuffer, releaseTime: Int64) {
-            self.sample = sample
-            self.releaseTime = releaseTime
+        _isDecodingSample = true
+        let pendingSample = _pendingSamples.removeFirst()
+        decodeSample(pendingSample)
+    }
+
+    private func decodeSample(_ sampleBuffer: CMSampleBuffer) {
+        assert(queue.isCurrent())
+        guard let decompressionSession else { return }
+
+        var decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
+
+        if playbackRate <= 1.0 {
+            decodeFlags.insert(._1xRealTimePlayback)
         }
+
+        var infoFlagsOut: VTDecodeInfoFlags = []
+
+        let status = VTDecompressionSessionDecodeFrame(
+            decompressionSession,
+            sampleBuffer: sampleBuffer,
+            flags: decodeFlags,
+            infoFlagsOut: &infoFlagsOut
+        ) { [weak self] status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
+            guard let self else { return }
+            queue.async {
+                self.handleSample(
+                    response: .init(
+                        status: status,
+                        infoFlags: infoFlags,
+                        imageBuffer: imageBuffer,
+                        presentationTimeStamp: presentationTimeStamp,
+                        presentationDuration: presentationDuration
+                    )
+                )
+            }
+        }
+
+        if status != noErr {
+            let error = DecoderErrors.vtError(.init(rawValue: status), status)
+            _isDecodingSample = false
+            _framedBeingDecoded -= 1
+            decodeNextSampleIfNeeded()
+        }
+    }
+
+    private func handleSample(response: VTDecoderResponce) {
+        do {
+            guard let imageBuffer = response.imageBuffer else {
+                fatalError()
+            }
+            let formatDescription = try CMVideoFormatDescription(imageBuffer: imageBuffer)
+            let timingInfo = CMSampleTimingInfo(
+                duration: response.presentationDuration,
+                presentationTimeStamp: response.presentationTimeStamp,
+                decodeTimeStamp: response.presentationTimeStamp
+            )
+            let sampleBuffer = try CMSampleBuffer(
+                imageBuffer: imageBuffer,
+                formatDescription: formatDescription,
+                sampleTiming: timingInfo
+            )
+            try decompressedSamplesQueue.enqueue(sampleBuffer)
+        } catch {
+            print(error)
+        }
+        _isDecodingSample = false
+        _framedBeingDecoded -= 1
+        decodeNextSampleIfNeeded()
     }
 }
 

@@ -25,10 +25,18 @@ extension CMTime: @retroactive Hashable {
 
 extension CMTime {
     var microseconds: Int64 {
-        Int64(seconds * 1_000_000)
+        seconds.microsecondsPerSecond
     }
 
     var nanoseconds: Int64 {
-        Int64(seconds * 1_000_000_000)
+        seconds.nanosecondsPerSecond
+    }
+
+    static func from(microseconds: Int64) -> CMTime {
+        CMTime(value: microseconds, timescale: 1_000_000)
+    }
+
+    static func from(nanoseconds: Int64) -> CMTime {
+        CMTime(value: nanoseconds, timescale: 1_000_000_000)
     }
 }

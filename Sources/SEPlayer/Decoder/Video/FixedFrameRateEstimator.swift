@@ -143,5 +143,4 @@ extension FixedFrameRateEstimator {
 
 private extension Int64 {
     static let maxMatchingFrameDifference: Int64 = 1_000_000
-    static let nanosecondsPerSecond: Int64 = 1_000_000_000
 }

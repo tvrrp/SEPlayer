@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import AVFoundation
 
 final class SEPlayerStateDependencies {
     let playerId: UUID
@@ -25,6 +25,8 @@ final class SEPlayerStateDependencies {
     var renderers: [BaseSERenderer] = []
     
     let displayLink: DisplayLinkProvider
+    let audioRenderer: AVSampleBufferAudioRenderer
+    let renderSynchronizer: AVSampleBufferRenderSynchronizer
 
     init(
         queue: Queue,
@@ -39,8 +41,14 @@ final class SEPlayerStateDependencies {
         self.playerId = playerId
         self.allocator = allocator
 
-        self.clock = CMClockGetHostTimeClock()
-        self.standaloneClock = StandaloneClock(clock: clock)
+        var clock: CMClock!
+        CMAudioClockCreate(allocator: nil, clockOut: &clock)
+        self.clock = clock
         self.displayLink = CADisplayLinkProvider(queue: queue)
+        renderSynchronizer = AVSampleBufferRenderSynchronizer()
+        audioRenderer = AVSampleBufferAudioRenderer()
+        renderSynchronizer.addRenderer(audioRenderer)
+//        self.standaloneClock = StandaloneClock(clock: clock)
+        self.standaloneClock = StandaloneClock(renderSynchronizer: renderSynchronizer)
     }
 }

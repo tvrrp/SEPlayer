@@ -40,16 +40,6 @@ struct TrackGroup: Hashable {
     }
 }
 
-//extension Array where Element == TrackGroup {
-//    func trackTypes() -> [TrackType] {
-//        return map { $0.type }
-//    }
-//
-//    func indexOf(trackGroup: TrackGroup) -> Int? {
-//        firstIndex(of: trackGroup)
-//    }
-//}
-
 enum TrackType {
     case video
     case audio

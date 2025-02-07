@@ -81,7 +81,7 @@ struct VideoFrameReleaseControl {
         elapsedRealtime: Int64,
         outputStreamStartPosition: Int64,
         isLastFrame: Bool
-    ) -> FrameReleaseInfo {
+    ) -> FrameReleaseAction {
         if initialPosition == nil {
             initialPosition = position
         }
@@ -98,11 +98,11 @@ struct VideoFrameReleaseControl {
         )
 
         if shouldForceRelease(position: position, earlyTime: earlyTime, outputStreamStartPosition: outputStreamStartPosition) {
-            return .init(earlyTime: earlyTime, releaseTime: .zero, action: .immediately)
+            return .immediately
         }
 
         if !started || position == initialPosition {
-            return .init(earlyTime: earlyTime, releaseTime: .zero, action: .tryAgainLater)
+            return .tryAgainLater
         }
 
         let clockTime = clock.nanoseconds
@@ -115,20 +115,16 @@ struct VideoFrameReleaseControl {
                                                   elapsedRealtime: elapsedRealtime,
                                                   isLast: isLastFrame,
                                                   treatDroppedAsSkipped: treatDropAsSkip) {
-            return .init(earlyTime: earlyTime, releaseTime: releaseTime, action: .ignore)
+            return .ignore
         } else if frameTimingEvaluator.shouldDropFrame(earlyTime: earlyTime,
                                                        elapsedSinceLastRelease: elapsedRealtime,
                                                        isLast: isLastFrame) {
-            return .init(
-                earlyTime: earlyTime,
-                releaseTime: releaseTime,
-                action: treatDropAsSkip ? .skip : .drop
-            )
+            return treatDropAsSkip ? .skip : .drop
         } else if earlyTime > .maxEarlyTreashold {
-            return .init(earlyTime: earlyTime, releaseTime: .zero, action: .tryAgainLater)
+            return .tryAgainLater
         }
 
-        return .init(earlyTime: earlyTime, releaseTime: releaseTime, action: .scheduled)
+        return .scheduled(releaseTime: releaseTime)
     }
 
     mutating func reset() {
@@ -140,7 +136,6 @@ struct VideoFrameReleaseControl {
     }
 
     mutating func setPlaybackSpeed(_ speed: Float) {
-        assert(speed > 0)
         guard speed != playbackSpeed else { return }
         self.playbackSpeed = speed
         frameReleaseHelper.playbackSpeedDidChanged(new: speed)
@@ -183,25 +178,13 @@ extension VideoFrameReleaseControl {
         ) -> Bool
     }
 
-    struct FrameReleaseInfo {
-        let earlyTime: Int64
-        let releaseTime: Int64
-        let action: FrameReleaseAction
-
-        fileprivate init(earlyTime: Int64, releaseTime: Int64, action: FrameReleaseAction) {
-            self.earlyTime = earlyTime
-            self.releaseTime = releaseTime
-            self.action = action
-        }
-
-        enum FrameReleaseAction {
-            case immediately
-            case scheduled
-            case drop
-            case skip
-            case ignore
-            case tryAgainLater
-        }
+    enum FrameReleaseAction {
+        case immediately
+        case scheduled(releaseTime: Int64)
+        case drop
+        case skip
+        case ignore
+        case tryAgainLater
     }
 
     enum FirstFrameState {
@@ -212,5 +195,5 @@ extension VideoFrameReleaseControl {
 }
 
 private extension Int64 {
-    static let maxEarlyTreashold: Int64 = 50_000_000
+    static let maxEarlyTreashold: Int64 = 50_000
 }
