@@ -112,6 +112,10 @@ class BaseSERenderer {
         return sampleStream.isReady() && !decompressedSamplesQueue.isEmpty //&& outputSample != nil
     }
 
+    func getMediaClock() -> MediaClock? {
+        return nil
+    }
+
     func render(position: Int64, elapsedRealtime: Int64) throws {
         let startTime = clock.microseconds
         while try drainOutputQueue(position: position, elapsedRealtime: elapsedRealtime),
@@ -148,7 +152,7 @@ class BaseSERenderer {
 //        return false
     }
 
-    func setPlaybackRate(new playbackRate: Float) {
+    func setPlaybackRate(new playbackRate: Float) throws {
         guard self.playbackRate != playbackRate else { return }
         self.playbackRate = playbackRate
     }

@@ -49,8 +49,8 @@ final class VTRenderer: BaseSERenderer {
         try initializeVideoDecoder()
     }
 
-    override func setPlaybackRate(new playbackRate: Float) {
-        super.setPlaybackRate(new: playbackRate)
+    override func setPlaybackRate(new playbackRate: Float) throws {
+        try super.setPlaybackRate(new: playbackRate)
         videoFrameReleaseControl.setPlaybackSpeed(playbackRate)
     }
 

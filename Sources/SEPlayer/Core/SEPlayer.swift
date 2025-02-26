@@ -151,8 +151,7 @@ extension SEPlayer: MediaPeriodCallback {
                         format: format,
                         clock: _dependencies.clock,
                         queue: queue,
-                        sampleStream: stream,
-                        audioRenderer: _dependencies.audioRenderer
+                        sampleStream: stream
                     )
                 default:
                     return nil
@@ -166,6 +165,10 @@ extension SEPlayer: MediaPeriodCallback {
             for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
                 renderer.setBufferOutput(output)
             }
+        }
+
+        for renderer in _dependencies.renderers {
+            _dependencies.standaloneClock.onRendererEnabled(renderer: renderer)
         }
 
         _dependencies.standaloneClock.resetPosition(position: rendererPosition)
@@ -235,7 +238,7 @@ private extension SEPlayer {
 
         if renderersReady && !isReady {
             isReady = true
-            updatePlaybackRate(new: 1.0)
+            updatePlaybackRate(new: 2.0)
             _dependencies.renderers.forEach { $0.start() }
             _dependencies.standaloneClock.start()
         }
@@ -254,7 +257,7 @@ private extension SEPlayer {
         let clampedPlaybackRate = min(max(0.1, playbackRate), 2.5)
         self._playbackRate = clampedPlaybackRate
         _dependencies.standaloneClock.setPlaybackRate(new: playbackRate)
-        _dependencies.renderers.forEach { $0.setPlaybackRate(new: playbackRate) }
+        _dependencies.renderers.forEach { try? $0.setPlaybackRate(new: playbackRate) }
     }
 }
 

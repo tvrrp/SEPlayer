@@ -46,17 +46,17 @@ public final class SEPlayerView: UIView {
 
 extension SEPlayerView: SEPlayerBufferView {
     func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<CMSampleBuffer>) {
-        assert(Thread.isMainThread)
+        assert(Queues.mainQueue.isCurrent())
         self.sampleQueue = bufferQueue
     }
 
     func enqueueSampleImmediately(_ sample: CMSampleBuffer) {
-        assert(Thread.isMainThread)
+        assert(Queues.mainQueue.isCurrent())
         displaySample(sample)
     }
 
     func displayLinkTick(_ info: DisplayLinkInfo) {
-        assert(Thread.isMainThread)        
+        assert(Queues.mainQueue.isCurrent())
         let deadline = info.currentTimestampNs...info.targetTimestampNs
 
         if let sampleBuffer = sampleQueue?.dequeue() {

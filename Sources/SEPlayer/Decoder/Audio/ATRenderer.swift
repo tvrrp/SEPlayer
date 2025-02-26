@@ -13,7 +13,7 @@ final class ATRenderer: BaseSERenderer {
     private var destinationFormat: AudioStreamBasicDescription
     private var converter: AudioConverterRef?
     
-    private let audioSync: AudioSync
+    private let audioSync: AudioSync2
     private let bufferSize: UInt32
     private let outputBufferList: UnsafeMutableAudioBufferListPointer
     private let outputPointer: UnsafeMutableRawPointer
@@ -27,8 +27,7 @@ final class ATRenderer: BaseSERenderer {
         format: CMAudioFormatDescription,
         clock: CMClock,
         queue: Queue,
-        sampleStream: SampleStream,
-        audioRenderer: AVSampleBufferAudioRenderer
+        sampleStream: SampleStream
     ) throws {
         self.format = format.audioStreamBasicDescription!
         let outputSampleRate = AVAudioSession.sharedInstance().sampleRate
@@ -44,7 +43,7 @@ final class ATRenderer: BaseSERenderer {
             mReserved: 0
         )
         outputQueue = try .init(capacity: .highWaterMark)
-        audioSync = AudioSync(queue: queue, audioRenderer: audioRenderer, outputQueue: outputQueue, outputSampleRate: outputSampleRate)
+        audioSync = try AudioSync2(queue: queue, outputQueue: outputQueue, outputFormat: destinationFormat, outputSampleRate: outputSampleRate)
         outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
         bufferSize = destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024
         outputPointer = UnsafeMutableRawPointer.allocate(
@@ -63,9 +62,18 @@ final class ATRenderer: BaseSERenderer {
         return super.isReady() && audioSync.hasPendingData()
     }
 
+    override func getMediaClock() -> MediaClock? {
+        return self
+    }
+
     override func start() {
         super.start()
-        audioSync.start()
+        try! audioSync.start(with: clock.microseconds)
+    }
+
+    override func setPlaybackRate(new playbackRate: Float) throws {
+        try super.setPlaybackRate(new: playbackRate)
+        try audioSync.setPlaybackRate(new: playbackRate)
     }
 
     override func queueInputSample(sampleBuffer: CMSampleBuffer) -> Bool {
@@ -87,24 +95,30 @@ final class ATRenderer: BaseSERenderer {
         isLastOutputSample: Bool
     ) -> Bool {
         guard !outputQueue.isFull else { return false }
-        let sampleBuffer = try! CMSampleBuffer(
-            copying: sample,
-            withNewTiming: sample.sampleTimingInfos().map { oldTiming in
-                CMSampleTimingInfo(
-                    duration: oldTiming.duration,
-                    presentationTimeStamp: .from(microseconds: presenationTime),
-                    decodeTimeStamp: .zero
-                )
-            }
-        )
+//        let sampleBuffer = try! CMSampleBuffer(
+//            copying: sample,
+//            withNewTiming: sample.sampleTimingInfos().map { oldTiming in
+//                CMSampleTimingInfo(
+//                    duration: oldTiming.duration,
+//                    presentationTimeStamp: .from(microseconds: presenationTime),
+//                    decodeTimeStamp: .zero
+//                )
+//            }
+//        )
 
-        if isStarted || audioSync.hasPendingData() {
-            try! outputQueue.enqueue(sampleBuffer)
-        } else {
-            audioSync.enqueueImmediately(sample)
-        }
+//        if isStarted || audioSync.hasPendingData() {
+//            try! outputQueue.enqueue(sampleBuffer)
+//        } else {
+//            audioSync.enqueueImmediately(sample)
+//        }
+       
+        return audioSync.enqueueImmediately(sample)
+    }
+}
 
-        return true
+extension ATRenderer: MediaClock {
+    func getPosition() -> Int64 {
+        return audioSync.getPosition()
     }
 }
 
@@ -146,7 +160,7 @@ extension ATRenderer {
                         bufferList: audioBuffer.unsafeMutablePointer,
                         packetDescription: &description
                     )
-                    
+
                     let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
                         AudioConverterFillComplexBuffer(
                             converter, // inAudioConverter
@@ -157,7 +171,7 @@ extension ATRenderer {
                             nil // outPacketDescription
                         )
                     }
-                    
+
                     return result
                 }
             }
