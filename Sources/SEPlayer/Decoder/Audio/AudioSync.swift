@@ -126,6 +126,9 @@ final class AudioSync2 {
     
     private var enquedBuffers: Int = 0
 
+    private let internalQueue = Queues.audioQueue
+    private let startCondition = NSCondition()
+
     init(
         queue: Queue,
         outputQueue: TypedCMBufferQueue<CMSampleBuffer>,
@@ -152,12 +155,38 @@ final class AudioSync2 {
     func start(with hostTime: Int64) throws {
         guard let audioQueue else { return }
 
-        let status = AudioQueueStart(audioQueue, nil)
+        try internalQueue.sync { [self] in
+            let status = AudioQueueStart(audioQueue, nil)
 
-        if status != noErr {
-            throw AudioQueueErrors.osStatus(.init(rawValue: status), status)
+            if status != noErr {
+                throw AudioQueueErrors.osStatus(.init(rawValue: status), status)
+            }
         }
+        startCondition.wait()
         state = .started
+    }
+
+    func cleanup() {
+        guard let audioQueue else { return }
+
+        if state == .started {
+            let userData = Unmanaged.passUnretained(self).toOpaque()
+            AudioQueueRemovePropertyListener(
+                audioQueue,
+                kAudioQueueProperty_IsRunning,
+                audioQueuePropertyCallback,
+                userData
+            )
+
+            AudioQueueStop(audioQueue, true)
+            state = .idle
+        }
+
+        AudioQueueDispose(audioQueue, true)
+        filledBufferIndex = 0
+        bytesFilled = 0
+        packetsFilled = 0
+        buffersInUse = buffersInUse.map { _ in false }
     }
 
     func getPosition() -> Int64 {
@@ -259,7 +288,7 @@ final class AudioSync2 {
 private extension AudioSync2 {
     private func createAudioQueue() throws {
         let createStatus = AudioQueueNewOutputWithDispatchQueue(
-            &audioQueue, &outputFormat, 0, queue.queue
+            &audioQueue, &outputFormat, 0, internalQueue.queue
         ) { [weak self] audioQueue, audioBuffer in
             self?.audioQueueDidRelease(audioQueue, buffer: audioBuffer)
         }
@@ -272,9 +301,9 @@ private extension AudioSync2 {
 
         for _ in 0..<Int.maxBufferInUse {
             var audioBuffer: AudioQueueBufferRef!
-            let error = AudioQueueAllocateBuffer(audioQueue, bufferSize, &audioBuffer)
+            let status = AudioQueueAllocateBuffer(audioQueue, bufferSize, &audioBuffer)
 
-            if error != noErr {
+            if status != noErr {
                 AudioQueueDispose(audioQueue, true)
                 throw AudioQueueErrors.osStatus(.init(rawValue: createStatus), createStatus)
             }
@@ -283,32 +312,61 @@ private extension AudioSync2 {
         
         var enableTimePitchConversion: UInt32 = 1
 
-        let error = AudioQueueSetProperty(
+        let timePitchStatus = AudioQueueSetProperty(
             audioQueue,
             kAudioQueueProperty_EnableTimePitch,
             &enableTimePitchConversion,
             UInt32(MemoryLayout.size(ofValue: enableTimePitchConversion))
         )
 
-        if error != noErr {
-            throw AudioQueueErrors.osStatus(.init(rawValue: error), error)
+        if timePitchStatus != noErr {
+            throw AudioQueueErrors.osStatus(.init(rawValue: timePitchStatus), timePitchStatus)
+        }
+
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        let propertyStatus = AudioQueueAddPropertyListener(
+            audioQueue,
+            kAudioQueueProperty_IsRunning,
+            audioQueuePropertyCallback,
+            userData
+        )
+
+        if propertyStatus != noErr {
+            throw AudioQueueErrors.osStatus(.init(rawValue: propertyStatus), propertyStatus)
         }
     }
 
     private func audioQueueDidRelease(_ audioQueue: AudioQueueRef, buffer: AudioQueueBufferRef) {
-        var bufferIndex: Int? = nil
+        queue.async { [self] in
+            var bufferIndex: Int? = nil
 
-        for index in 0..<Int.maxBufferInUse {
-            if buffer == audioQueueBuffers[index] {
-                bufferIndex = index
-                break
+            for index in 0..<Int.maxBufferInUse {
+                if buffer == audioQueueBuffers[index] {
+                    bufferIndex = index
+                    break
+                }
             }
+
+            guard let bufferIndex else { return }
+
+            buffersInUse[bufferIndex] = false
         }
-
-        guard let bufferIndex else { return }
-
-        buffersInUse[bufferIndex] = false
     }
+
+    fileprivate func handleAudioQueuePropertyCallback(propertyId: AudioQueuePropertyID) {
+        switch propertyId {
+        case kAudioQueueProperty_IsRunning:
+            startCondition.signal()
+        default:
+            return
+        }
+    }
+}
+
+private func audioQueuePropertyCallback(_ userData: UnsafeMutableRawPointer?, audioQueue: AudioQueueRef, propertyId: AudioQueuePropertyID) {
+    guard let userData else { return }
+    let audioSync = Unmanaged<AudioSync2>.fromOpaque(userData).takeUnretainedValue()
+    audioSync.handleAudioQueuePropertyCallback(propertyId: propertyId)
 }
 
 extension AudioSync2 {
@@ -355,5 +413,5 @@ extension AudioSync2 {
 }
 
 private extension Int {
-    static let maxBufferInUse: Int = 3
+    static let maxBufferInUse: Int = 10
 }

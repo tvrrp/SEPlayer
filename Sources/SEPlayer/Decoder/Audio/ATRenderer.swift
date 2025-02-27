@@ -23,6 +23,8 @@ final class ATRenderer: BaseSERenderer {
     private var _isDecodingSample = false
     private var _samplesBeingDecoded = 0
 
+    private let memoryPool: CMMemoryPool
+
     init(
         format: CMAudioFormatDescription,
         clock: CMClock,
@@ -53,6 +55,8 @@ final class ATRenderer: BaseSERenderer {
         outputBufferList.unsafeMutablePointer.pointee.mBuffers.mNumberChannels = destinationFormat.mChannelsPerFrame
         outputBufferList.unsafeMutablePointer.pointee.mBuffers.mDataByteSize = bufferSize
         outputBufferList.unsafeMutablePointer.pointee.mBuffers.mData = outputPointer
+
+        memoryPool = CMMemoryPoolCreate(options: nil)
 
         try super.init(clock: clock, queue: queue, sampleStream: sampleStream)
         try createAudioConverter()
@@ -218,7 +222,22 @@ extension ATRenderer {
 
         for audioBuffer in UnsafeMutableAudioBufferListPointer(audioListBuffer) {
             let dataByteSize = Int(audioBuffer.mDataByteSize)
-            let outBlockBuffer = try CMBlockBuffer(length: dataByteSize, flags: .assureMemoryNow)
+            let allocator = CMMemoryPoolGetAllocator(memoryPool)
+
+            var blockBuffer: CMBlockBuffer!
+            try CMBlockBufferCreateWithMemoryBlock(
+                allocator: nil,
+                memoryBlock: nil,
+                blockLength: dataByteSize,
+                blockAllocator: allocator,
+                customBlockSource: nil,
+                offsetToData: 0,
+                dataLength: dataByteSize,
+                flags: kCMBlockBufferAssureMemoryNowFlag,
+                blockBufferOut: &blockBuffer
+            ).validate()
+
+            let outBlockBuffer = try CMBlockBuffer(length: dataByteSize, allocator: CMMemoryPoolGetAllocator(memoryPool), flags: .assureMemoryNow)
             let pointer = UnsafeRawBufferPointer(start: audioBuffer.mData!, count: dataByteSize)
             try outBlockBuffer.replaceDataBytes(with: pointer)
             try outBlockListBuffer.append(bufferReference: outBlockBuffer)

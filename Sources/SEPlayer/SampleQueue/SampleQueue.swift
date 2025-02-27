@@ -12,7 +12,6 @@ final class SampleQueue: TrackOutput {
 
     private let queue: Queue
     private let allocator: Allocator
-    private let memoryPool: CMMemoryPool
 
     private var currentTime: CMTime = .zero
     private var allocations: [AllocationWrapper] = []
@@ -29,8 +28,6 @@ final class SampleQueue: TrackOutput {
         self.queue = queue
         self.allocator = allocator
         self.format = format
-
-        memoryPool = CMMemoryPoolCreate(options: nil)
     }
 
     func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult {

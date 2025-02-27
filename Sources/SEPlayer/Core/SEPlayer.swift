@@ -239,6 +239,7 @@ private extension SEPlayer {
         if renderersReady && !isReady {
             isReady = true
             updatePlaybackRate(new: 2.0)
+            sleep(2)
             _dependencies.renderers.forEach { $0.start() }
             _dependencies.standaloneClock.start()
         }
