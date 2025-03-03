@@ -33,6 +33,8 @@ public final class SEPlayer {
 
     private var output: SEPlayerBufferView?
 
+    public var isPlaying: Bool = false
+
     var clockLastTime = Int64.zero
     var isReady: Bool = false
 
@@ -62,6 +64,27 @@ public final class SEPlayer {
     public func set(content: URL) {
         queue.async { [weak self] in
             self?._set(content: content)
+        }
+    }
+
+    public func play() {
+        queue.async { [self] in
+            if !isPlaying {
+                timer.resume()
+                isPlaying = true
+            }
+        }
+    }
+
+    public func pause() {
+        queue.async { [self] in
+            if isPlaying {
+                timer.suspend()
+                isReady = false
+                isPlaying = false
+                _dependencies.renderers.forEach { $0.pause() }
+                _dependencies.standaloneClock.stop()
+            }
         }
     }
 }
@@ -237,16 +260,17 @@ private extension SEPlayer {
         }
 
         if renderersReady && !isReady {
+            isPlaying = true
             isReady = true
-            updatePlaybackRate(new: 2.0)
-            sleep(2)
+            updatePlaybackRate(new: 1.0)
+//            sleep(2)
             _dependencies.renderers.forEach { $0.start() }
             _dependencies.standaloneClock.start()
         }
 
         if !renderersReady && isReady {
             isReady = false
-//            _dependencies.renderers.forEach { $0.pause() }
+            _dependencies.renderers.forEach { $0.pause() }
             _dependencies.standaloneClock.stop()
         }
 

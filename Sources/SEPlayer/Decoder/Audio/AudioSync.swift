@@ -162,8 +162,25 @@ final class AudioSync2 {
                 throw AudioQueueErrors.osStatus(.init(rawValue: status), status)
             }
         }
-        startCondition.wait()
+        if state == .idle {
+            startCondition.wait()
+        }
         state = .started
+    }
+
+    func pause() throws {
+        guard let audioQueue else { return }
+        
+        try internalQueue.sync { [self] in
+            let status = AudioQueuePause(audioQueue)
+
+            if status != noErr {
+                throw AudioQueueErrors.osStatus(.init(rawValue: status), status)
+            }
+        }
+
+//        startCondition.wait()
+        state = .paused
     }
 
     func cleanup() {

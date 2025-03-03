@@ -75,6 +75,11 @@ final class ATRenderer: BaseSERenderer {
         try! audioSync.start(with: clock.microseconds)
     }
 
+    override func pause() {
+        super.pause()
+        try! audioSync.pause()
+    }
+
     override func setPlaybackRate(new playbackRate: Float) throws {
         try super.setPlaybackRate(new: playbackRate)
         try audioSync.setPlaybackRate(new: playbackRate)

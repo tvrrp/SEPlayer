@@ -30,11 +30,11 @@ final class VideoFrameReleaseHelper {
         self.queue = queue
         self.displayLink = displayLink
         self.frameRateEstimator = FixedFrameRateEstimator()
-        displayLink.addObserver()
     }
 
     func start() {
         assert(queue.isCurrent())
+        displayLink.addObserver()
         started = true
         resetAdjustment()
 

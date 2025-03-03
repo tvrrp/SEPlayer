@@ -99,7 +99,7 @@ class BaseSERenderer {
             handlers: .unsortedSampleBuffers
         )
         self.decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(
-            capacity: 30,
+            capacity: 100,
             handlers: .outputPTSSortedSampleBuffers
         )
     }
@@ -114,6 +114,10 @@ class BaseSERenderer {
 
     func getMediaClock() -> MediaClock? {
         return nil
+    }
+
+    func pause() {
+        isStarted = false
     }
 
     func render(position: Int64, elapsedRealtime: Int64) throws {

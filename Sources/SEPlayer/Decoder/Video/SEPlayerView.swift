@@ -9,7 +9,7 @@ import AVFoundation
 import UIKit
 
 protocol SEPlayerBufferView: DisplayLinkListener {
-    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<CMSampleBuffer>)
+    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<VTRenderer.SampleWrapper>)
     func enqueueSampleImmediately(_ sample: CMSampleBuffer)
 }
 
@@ -32,7 +32,7 @@ public final class SEPlayerView: UIView {
     }
 
     private weak var _player: SEPlayer?
-    private var sampleQueue: TypedCMBufferQueue<CMSampleBuffer>?
+    private var sampleQueue: TypedCMBufferQueue<VTRenderer.SampleWrapper>?
     private var currentSample: CMSampleBuffer?
 
     public init() {
@@ -45,7 +45,7 @@ public final class SEPlayerView: UIView {
 }
 
 extension SEPlayerView: SEPlayerBufferView {
-    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<CMSampleBuffer>) {
+    func setBufferQueue(_ bufferQueue: TypedCMBufferQueue<VTRenderer.SampleWrapper>) {
         assert(Queues.mainQueue.isCurrent())
         self.sampleQueue = bufferQueue
     }
@@ -59,12 +59,16 @@ extension SEPlayerView: SEPlayerBufferView {
         assert(Queues.mainQueue.isCurrent())
         let deadline = info.currentTimestampNs...info.targetTimestampNs
 
-        if let sampleBuffer = sampleQueue?.dequeue() {
-            if sampleBuffer.presentationTimeStamp.nanoseconds > info.targetTimestampNs {
-                try! sampleQueue?.enqueue(sampleBuffer)
-            } else if deadline.contains(sampleBuffer.presentationTimeStamp.nanoseconds) {
-                displaySample(sampleBuffer)
+        if let sampleWrapper = sampleQueue?.dequeue() {
+            print("time = \(sampleWrapper.timestamp), deadline = \(deadline)")
+            if sampleWrapper.timestamp > info.targetTimestampNs {
+                print("ENQUEUE")
+                try! sampleQueue?.enqueue(sampleWrapper)
+            } else if deadline.contains(sampleWrapper.timestamp) {
+                print("LATER")
+                displaySample(sampleWrapper.sample)
             } else {
+                print("❌ MISSED SAMPLE")
                 displayLinkTick(info)
             }
         }

@@ -21,7 +21,7 @@ final class VTRenderer: BaseSERenderer {
     )
 
     private var output: SEPlayerBufferView?
-    private let outputSampleQueue: TypedCMBufferQueue<CMSampleBuffer>
+    private let outputSampleQueue: TypedCMBufferQueue<SampleWrapper>
 
     private var _pendingSamples = [CMSampleBuffer]()
     private var _isDecodingSample = false
@@ -37,7 +37,11 @@ final class VTRenderer: BaseSERenderer {
     ) throws {
         self.formatDescription = formatDescription
         self.displayLink = displayLink
-        outputSampleQueue = try TypedCMBufferQueue<CMSampleBuffer>(capacity: .highWaterMark)
+        outputSampleQueue = try TypedCMBufferQueue<SampleWrapper>(capacity: .highWaterMark, handlers: .init(withHandlers: {
+            $0.getPresentationTimeStamp { CMTime.from(nanoseconds: ($0 as! SampleWrapper).timestamp) }
+            $0.getDuration { ($0 as! SampleWrapper).sample.duration }
+        }))
+
         try super.init(
             clock: clock,
             queue: queue,
@@ -58,6 +62,21 @@ final class VTRenderer: BaseSERenderer {
         super.start()
         videoFrameReleaseControl.start()
         if let output { displayLink.addOutput(output) }
+    }
+
+    override func pause() {
+        super.pause()
+        videoFrameReleaseControl.stop()
+
+        if let decompressionSession {
+            VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
+        }
+
+        if let output { displayLink.removeOutput(output) }
+
+        while let sampleWrapper = outputSampleQueue.dequeue() {
+            try! decompressedSamplesQueue.enqueue(sampleWrapper.sample)
+        }
     }
 
     override func isReady() -> Bool {
@@ -98,7 +117,7 @@ final class VTRenderer: BaseSERenderer {
         isLastOutputSample: Bool
     ) -> Bool {
         assert(queue.isCurrent())
-        let presentationTime = presenationTime //- 33333
+        let presentationTime = presenationTime
         guard outputSampleQueue.bufferCount < .highWaterMark - 1 else { return false }
         let frameReleaseAction = videoFrameReleaseControl.frameReleaseAction(
             presentationTime: presentationTime,
@@ -124,7 +143,7 @@ final class VTRenderer: BaseSERenderer {
         case let .scheduled(releaseTime):
             do {
                 if releaseTime != lastFrameReleaseTime {
-                    try! outputSampleQueue.enqueue(sample.nanoseconds(releaseTime))
+                    try outputSampleQueue.enqueue(.init(sample: sample, timestamp: releaseTime))
                     videoFrameReleaseControl.didReleaseFrame()
                 }
                 lastFrameReleaseTime = releaseTime
@@ -248,6 +267,16 @@ private extension VTRenderer {
 }
 
 extension VTRenderer {
+    final class SampleWrapper {
+        let sample: CMSampleBuffer
+        let timestamp: Int64
+
+        init(sample: CMSampleBuffer, timestamp: Int64) {
+            self.sample = sample
+            self.timestamp = timestamp
+        }
+    }
+
     struct VTDecoderResponce {
         let status: OSStatus
         let infoFlags: VTDecodeInfoFlags
