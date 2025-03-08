@@ -37,10 +37,11 @@ final class VTRenderer: BaseSERenderer {
     ) throws {
         self.formatDescription = formatDescription
         self.displayLink = displayLink
-        outputSampleQueue = try TypedCMBufferQueue<SampleWrapper>(capacity: .highWaterMark, handlers: .init(withHandlers: {
-            $0.getPresentationTimeStamp { CMTime.from(nanoseconds: ($0 as! SampleWrapper).timestamp) }
-            $0.getDuration { ($0 as! SampleWrapper).sample.duration }
-        }))
+        outputSampleQueue = try TypedCMBufferQueue<SampleWrapper>(capacity: .highWaterMark) { rhs, lhs in
+            guard rhs.timestamp != lhs.timestamp else { return .compareEqualTo }
+
+            return rhs.timestamp > lhs.timestamp ? .compareEqualTo : .compareLessThan
+        }
 
         try super.init(
             clock: clock,
@@ -188,7 +189,7 @@ private extension VTRenderer {
         )
 
         if status != noErr {
-            throw DecoderErrors.vtError(.init(rawValue: status), status)
+            throw DecoderErrors.vtError(.init(rawValue: status))
         }
     }
 
@@ -233,7 +234,7 @@ private extension VTRenderer {
         }
 
         if status != noErr {
-            let error = DecoderErrors.vtError(.init(rawValue: status), status)
+            let error = DecoderErrors.vtError(.init(rawValue: status))
             _isDecodingSample = false
             _framedBeingDecoded -= 1
             decodeNextSampleIfNeeded()
@@ -286,7 +287,7 @@ extension VTRenderer {
     }
 
     enum DecoderErrors: Error, Equatable {
-        case vtError(VTError?, OSStatus)
+        case vtError(VTError?)
         case droppedFrame
         case decoderIsInvalidated
         case nothingToRead

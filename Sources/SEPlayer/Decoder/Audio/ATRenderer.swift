@@ -140,7 +140,7 @@ extension ATRenderer {
         )
 
         if status != noErr {
-            let error = DecoderErrors.osStatus(.init(rawValue: status), status)
+            let error = DecoderErrors.osStatus(.init(rawValue: status))
             throw error
         }
     }
@@ -186,7 +186,7 @@ extension ATRenderer {
             }
 
             if result != noErr && result != ConverterErrors.custom_noMoreData.rawValue {
-                throw DecoderErrors.osStatus(.init(rawValue: result), result)
+                throw DecoderErrors.osStatus(.init(rawValue: result))
             }
         } catch {
             print(error)
@@ -254,7 +254,7 @@ extension ATRenderer {
 
 extension ATRenderer {
     enum DecoderErrors: Error {
-        case osStatus(AudioToolboxErrors?, OSStatus)
+        case osStatus(AudioToolboxErrors?)
 
         enum AudioToolboxErrors: OSStatus {
             case formatNotSupported = 1718449215
