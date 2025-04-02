@@ -62,7 +62,7 @@ final class PlayerSessionLoader: IPlayerSessionLoader {
     }
 }
 
-private final class _DataLoader: NSObject, URLSessionDataDelegate, URLSessionStreamDelegate {
+private final class _DataLoader: NSObject, URLSessionDataDelegate {
     private var delegateHandlers = [URLSessionTask: SessionHandler]()
     private var metricsHandlers = [URLSessionTask: MetricsHandler]()
 

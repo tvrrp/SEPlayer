@@ -31,22 +31,17 @@ protocol DataSource: DataReader {
 
 extension DataSource {
     func addTransferListener(_ listener: TransferListener) {
-        queue.async {
-            guard components.transferListeners[listener.id] == nil else { return }
-            components.transferListeners[listener.id] = listener
-        }
+        components.transferListeners.addDelegate(listener)
     }
 
     func transferInitializing(source: DataSource) {
-        assert(queue.isCurrent())
-        components.transferListeners.values.forEach {
+        components.transferListeners.invokeDelegates {
             $0.onTransferInitializing(source: source, isNetwork: components.isNetwork)
         }
     }
 
     func transferEnded(source: DataSource, metrics: URLSessionTaskMetrics) {
-        assert(queue.isCurrent())
-        components.transferListeners.values.forEach {
+        components.transferListeners.invokeDelegates {
             $0.onTransferEnd(source: source, isNetwork: components.isNetwork, metrics: metrics)
         }
     }
@@ -54,7 +49,7 @@ extension DataSource {
 
 final class DataSourceOpaque {
     fileprivate let isNetwork: Bool
-    fileprivate var transferListeners: [UUID: TransferListener] = [:]
+    fileprivate let transferListeners = MulticastDelegate<TransferListener>(isThreadSafe: true)
 
     init(isNetwork: Bool) { self.isNetwork = isNetwork }
 }
