@@ -49,7 +49,7 @@ final class MediaSourceList {
             for insertionIndex in index..<index + holders.count {
                 var holder = holders[insertionIndex - index]
                 if insertionIndex > 0 {
-                    let previousHolder = mediaSourceHolders[insertionIndex - 1]
+//                    let previousHolder = mediaSourceHolders[insertionIndex - 1]
                     holder.reset(firstWindowIndexInChild: 0) // TODO: implement real timeline
                 } else {
                     holder.reset(firstWindowIndexInChild: 0)

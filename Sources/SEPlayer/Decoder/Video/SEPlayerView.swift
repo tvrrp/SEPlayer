@@ -60,15 +60,11 @@ extension SEPlayerView: SEPlayerBufferView {
         let deadline = info.currentTimestampNs...info.targetTimestampNs
 
         if let sampleWrapper = sampleQueue?.dequeue() {
-            print("time = \(sampleWrapper.timestamp), deadline = \(deadline)")
             if sampleWrapper.timestamp > info.targetTimestampNs {
-                print("ENQUEUE")
-                try! sampleQueue?.enqueue(sampleWrapper)
+                try? sampleQueue?.enqueue(sampleWrapper)
             } else if deadline.contains(sampleWrapper.timestamp) {
-                print("LATER")
                 displaySample(sampleWrapper.sample)
             } else {
-                print("❌ MISSED SAMPLE")
                 displayLinkTick(info)
             }
         }

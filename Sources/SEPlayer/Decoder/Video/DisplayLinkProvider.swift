@@ -28,14 +28,14 @@ struct DisplayLinkInfo {
 final class CADisplayLinkProvider: DisplayLinkProvider {
     var sampledVsyncTime: Int64? {
         lock()
-        var value = _sampledVsyncTime
+        let value = _sampledVsyncTime
         unlock()
         return value
     }
 
     var vsyncDuration: Int64? {
         lock()
-        var value = _vsyncDuration
+        let value = _vsyncDuration
         unlock()
         return value
     }

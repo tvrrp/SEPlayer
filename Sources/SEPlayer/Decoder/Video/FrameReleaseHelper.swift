@@ -127,7 +127,7 @@ final class VideoFrameReleaseHelper {
                 ? .minFrameRateChangeHighConfidience
                 : .minFrameRateChangeLowConfidience
             shouldUpdate = abs(candidateFrameRate - displayLinkFrameRate) >= minimumChangeForUpdate
-        } else if let candidateFrameRate {
+        } else if candidateFrameRate != nil {
             shouldUpdate = true
         } else {
             shouldUpdate = frameRateEstimator.framesWithoutSyncCount >= .minimumFramesWithoutSyncToClearFrameRate

@@ -82,8 +82,7 @@ public final class SEPlayer {
                 timer.suspend()
                 isReady = false
                 isPlaying = false
-                _dependencies.renderers.forEach { $0.pause() }
-                _dependencies.standaloneClock.stop()
+                stopRenderers()
             }
         }
     }
@@ -262,19 +261,26 @@ private extension SEPlayer {
         if renderersReady && !isReady {
             isPlaying = true
             isReady = true
-            updatePlaybackRate(new: 1.0)
-//            sleep(2)
-            _dependencies.renderers.forEach { $0.start() }
+            updatePlaybackRate(new: 2.0)
             _dependencies.standaloneClock.start()
+            enableRenderers()
         }
 
         if !renderersReady && isReady {
             isReady = false
-            _dependencies.renderers.forEach { $0.pause() }
-            _dependencies.standaloneClock.stop()
+            stopRenderers()
         }
 
         timer.schedule(deadline: currentTime + .milliseconds(10))
+    }
+
+    private func enableRenderers() {
+        _dependencies.renderers.forEach { $0.start() }
+    }
+
+    private func stopRenderers() {
+        _dependencies.standaloneClock.stop()
+        _dependencies.renderers.forEach { $0.pause() }
     }
 
     private func updatePlaybackRate(new playbackRate: Float) {

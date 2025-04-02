@@ -26,7 +26,7 @@ final class DefautlHTTPDataSource: DataSource {
     private var _url: URL?
     private var _urlResponce: HTTPURLResponse?
 
-    private var openCompletion: ((Result<Int, Error>) -> Void)?
+    private var openCompletion: OpenCompletion?
     private var requestedReadAmount: Int?
     private var readCompletion: ((Result<Int, Error>) -> Void)?
 
@@ -40,7 +40,7 @@ final class DefautlHTTPDataSource: DataSource {
         queue.async { [weak self] in
             guard let self else { completionQueue.async { completion(.failure(CancellationError())) }; return }
             close()
-            openCompletion = completion
+            openCompletion = .init(completionQueue: completionQueue, completion: completion)
             createConnection(with: dataSpec, completionQueue: completionQueue)
         }
     }
@@ -54,7 +54,7 @@ final class DefautlHTTPDataSource: DataSource {
             self.openCompletion = nil
             self.readCompletion = nil
 
-            openCompletion?(.failure(CancellationError()))
+            openCompletion?.run(with: .failure(CancellationError()))
             readCompletion?(.failure(CancellationError()))
 
             isClosed = true
@@ -253,13 +253,13 @@ private extension DefautlHTTPDataSource {
         self.openCompletion = nil
 
         guard let urlResponce = response as? HTTPURLResponse else {
-            completionQueue.async { openCompletion?(.failure(DataReaderError.wrongURLResponce)) }
+            openCompletion?.run(with: .failure(DataReaderError.wrongURLResponce))
             return .cancel
         }
 
         self.currentDataSpec = dataSpec
         let contentLength = contentLength(from: urlResponce)
-        completionQueue.async { openCompletion?(.success(contentLength)) }
+        openCompletion?.run(with: .success(contentLength))
         return .allow
     }
 
@@ -288,7 +288,7 @@ private extension DefautlHTTPDataSource {
         self.openCompletion = nil
 
         if let error {
-            openCompletion?(.failure(error))
+            openCompletion?.run(with: .failure(error))
             readCompletion?(.failure(error))
         }
 
@@ -321,5 +321,23 @@ private extension HTTPURLResponse {
         return allHeaderFields
             .first { $0.key.description.caseInsensitiveCompare(key) == .orderedSame }?
             .value as? String
+    }
+}
+
+private extension DefautlHTTPDataSource {
+    struct OpenCompletion {
+        private let completionQueue: Queue
+        private let completion: (Result<Int, Error>) -> Void
+
+        init(completionQueue: Queue, completion: @escaping (Result<Int, Error>) -> Void) {
+            self.completionQueue = completionQueue
+            self.completion = completion
+        }
+
+        func run(with result: Result<Int, Error>) {
+            completionQueue.async {
+                completion(result)
+            }
+        }
     }
 }

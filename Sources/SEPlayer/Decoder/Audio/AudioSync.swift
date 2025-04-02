@@ -6,7 +6,7 @@
 //
 
 import AudioToolbox
-import AVFoundation
+import CoreMedia
 
 protocol IAudioSync {
     func start() throws
@@ -15,106 +15,18 @@ protocol IAudioSync {
     func enqueueImmediately(_ buffer: CMSampleBuffer) -> Bool
 }
 
-//final class AudioSync: IAudioSync {
-//    private let queue: Queue
-//    private let audioRenderer: AVSampleBufferAudioRenderer
-//    private let outputQueue: TypedCMBufferQueue<CMSampleBuffer>
-//    private let outputSampleRate: Double
-//
-//    private var writtenFrames: Int = 0
-//
-//    init(
-//        queue: Queue,
-//        audioRenderer: AVSampleBufferAudioRenderer,
-//        outputQueue: TypedCMBufferQueue<CMSampleBuffer>,
-//        outputSampleRate: Double
-//    ) {
-//        self.queue = queue
-//        self.audioRenderer = audioRenderer
-//        self.outputQueue = outputQueue
-//        self.outputSampleRate = outputSampleRate
-//    }
-//
-//    func hasPendingData() -> Bool {
-//        let currentPosition = audioRenderer.timebase.time.microseconds - 1_000_000_000_000
-//        return writtenFrames > durationToSampleCount(duration: currentPosition, sampleRate: Int(outputSampleRate))
-//    }
-//    
-//    func getPosition() -> Int64 {
-//        return 0
-//    }
-//
-//    func start() {
-//        audioRenderer.requestMediaDataWhenReady(on: queue.queue) { [weak self] in
-//            guard let self else { return }
-//            while audioRenderer.isReadyForMoreMediaData,
-//                  let sampleBuffer = outputQueue.dequeue() {
-//                enqueueImmediately(sampleBuffer)
-//            }
-//        }
-//    }
-//
-//    func enqueueImmediately(_ buffer: CMSampleBuffer) -> Bool {
-//        audioRenderer.enqueue(buffer)
-//        writtenFrames += buffer.numSamples
-//        return true
-//    }
-//}
-
-private extension AudioSync2 {
-    func durationToSampleCount(duration: Int64, sampleRate: Int) -> Int64 {
-        return scaleLargeValue(value: duration, multiplier: Int64(sampleRate), divisor: 1_000_000, roundingMode: .up)
-    }
-
-    func scaleLargeValue(value: Int64, multiplier: Int64, divisor: Int64, roundingMode: FloatingPointRoundingRule) -> Int64 {
-        if value == 0 || multiplier == 0 {
-            return 0
-        }
-
-        if divisor >= multiplier, divisor % multiplier == 0 {
-            let divisionFactor = divisor / multiplier
-            return divide(value, by: divisionFactor, roundingMode: roundingMode)
-        } else if divisor < multiplier, multiplier % divisor == 0 {
-            let multiplicationFactor = multiplier / divisor
-            return saturatedMultiply(value, by: multiplicationFactor)
-        } else if divisor >= value, divisor % value == 0 {
-            let divisionFactor = divisor / value
-            return divide(multiplier, by: divisionFactor, roundingMode: roundingMode)
-        } else if divisor < value, value % divisor == 0 {
-            let multiplicationFactor = value / divisor
-            return saturatedMultiply(multiplier, by: multiplicationFactor)
-        } else {
-            return scaleLargeValueFallback(value: value, multiplier: multiplier, divisor: divisor, roundingMode: roundingMode)
-        }
-    }
-
-    func divide(_ value: Int64, by divisor: Int64, roundingMode: FloatingPointRoundingRule) -> Int64 {
-        let result = Double(value) / Double(divisor)
-        return Int64(result.rounded(roundingMode))
-    }
-
-    func saturatedMultiply(_ value: Int64, by multiplier: Int64) -> Int64 {
-        let multipledResult = value.multipliedReportingOverflow(by: multiplier)
-        return multipledResult.overflow ? (value > 0 ? Int64.max : Int64.min) : multipledResult.partialValue
-    }
-
-    func scaleLargeValueFallback(value: Int64, multiplier: Int64, divisor: Int64, roundingMode: FloatingPointRoundingRule) -> Int64 {
-        let scaledValue = Double(value) * Double(multiplier) / Double(divisor)
-        return Int64(scaledValue.rounded(roundingMode))
-    }
-}
-
 final class AudioSync2 {
-    private var audioQueue: AudioQueueRef?
+    var audioQueue: AudioQueueRef!
+    private var timeline: AudioQueueTimelineRef?
     private var outputFormat: AudioStreamBasicDescription
     private let bufferSize: UInt32
 
     private let outputQueue: TypedCMBufferQueue<CMSampleBuffer>
     private let queue: Queue
-    private let outputSampleRate: Double
+    private let outputSampleRate: Float64
 
     private var state: State = .idle
-    private var writtenFrames: Int = 0
+    private var writtenFrames: Int64 = 0
 
     private var audioQueueBuffers: [AudioQueueBufferRef] = []
     private var packetDescriptions: [AudioStreamPacketDescription]
@@ -129,8 +41,12 @@ final class AudioSync2 {
     private let internalQueue = Queues.audioQueue
     private let startCondition = NSCondition()
 
+    private var mediaPositionParameters = MediaPositionParameters()
+    private var mediaPositionParametersCheckpoints: [MediaPositionParameters] = []
+
     init(
         queue: Queue,
+        clock: CMClock,
         outputQueue: TypedCMBufferQueue<CMSampleBuffer>,
         outputFormat: AudioStreamBasicDescription,
         outputSampleRate: Double
@@ -155,7 +71,7 @@ final class AudioSync2 {
     func start(with hostTime: Int64) throws {
         guard let audioQueue else { return }
 
-        try internalQueue.sync { [self] in
+        try internalQueue.sync {
             let status = AudioQueueStart(audioQueue, nil)
 
             if status != noErr {
@@ -170,8 +86,8 @@ final class AudioSync2 {
 
     func pause() throws {
         guard let audioQueue else { return }
-        
-        try internalQueue.sync { [self] in
+
+        try internalQueue.sync {
             let status = AudioQueuePause(audioQueue)
 
             if status != noErr {
@@ -179,7 +95,6 @@ final class AudioSync2 {
             }
         }
 
-//        startCondition.wait()
         state = .paused
     }
 
@@ -206,36 +121,50 @@ final class AudioSync2 {
         buffersInUse = buffersInUse.map { _ in false }
     }
 
-    func getPosition() -> Int64 {
-        guard state == .started else { return 1_000_000_000_000 }
-        var queueTime = AudioTimeStamp()
-        var discontinuity = DarwinBoolean(false)
+    func getPosition(sourceEnded: Bool) -> Int64 {
+        var position = audioQueueTime()
+        max(position, (Double(getWrittenFrames()) / outputSampleRate).microsecondsPerSecond)
+        return applyMediaPositionParameters(position: position)
+    }
 
-        let status = AudioQueueGetCurrentTime(audioQueue!, nil, &queueTime, &discontinuity)
-        if status != noErr {
-            let error = AudioQueueErrors.osStatus(.init(rawValue: status), status)
-            print(error)
+    private func applyMediaPositionParameters(position: Int64) -> Int64 {
+        while let first = mediaPositionParametersCheckpoints.first, position >= first.audioQueuePosition {
+            mediaPositionParameters = mediaPositionParametersCheckpoints.removeFirst()
         }
-        return (queueTime.mSampleTime / outputSampleRate).microsecondsPerSecond + 1_000_000_000_000
+
+        let playoutDurationSinceLastCheckpoint = position - mediaPositionParameters.audioQueuePosition
+        let estimatedMediaDurationSinceLastCheckpoint = AudioUtils.mediaDurationFor(
+            playoutDuration: playoutDurationSinceLastCheckpoint,
+            speed: mediaPositionParameters.playbackSpeed
+        )
+
+        if mediaPositionParametersCheckpoints.isEmpty {
+            let currentMediaPosition = mediaPositionParameters.mediaTime + playoutDurationSinceLastCheckpoint
+            mediaPositionParameters.mediaPositionDrift = playoutDurationSinceLastCheckpoint - estimatedMediaDurationSinceLastCheckpoint
+            return currentMediaPosition
+        } else {
+            return mediaPositionParameters.mediaTime + estimatedMediaDurationSinceLastCheckpoint + mediaPositionParameters.mediaPositionDrift
+        }
     }
 
     func hasPendingData() -> Bool {
-        guard let audioQueue else { return false }
+        let currentPosition = audioQueueTime()
+        return getWrittenFrames() > AudioUtils.durationToSampleCount(
+            duration: currentPosition,
+            sampleRate: Int(outputSampleRate)
+        )
+    }
 
-        let currentPosition: Int64
-        if state == .started {
-            var outTimestamp = AudioTimeStamp()
-            let status = AudioQueueGetCurrentTime(audioQueue, nil, &outTimestamp, nil)
-            guard status == noErr else {
-                let error = AudioQueueErrors.osStatus(.init(rawValue: status), status)
-                return false
-            }
-            currentPosition = (outTimestamp.mSampleTime / outputSampleRate).microsecondsPerSecond
-        } else {
-            currentPosition = 0
-        }
+    func audioQueueTime() -> Int64 {
+        guard let audioQueue else { return 0 }
+        var audioTimeStamp = AudioTimeStamp()
+        AudioQueueGetCurrentTime(audioQueue, nil, &audioTimeStamp, nil)
+        return (audioTimeStamp.mSampleTime / outputSampleRate).microsecondsPerSecond
+    }
 
-        return writtenFrames > durationToSampleCount(duration: currentPosition, sampleRate: Int(outputSampleRate))
+    private func getWrittenFrames() -> Int64 {
+        let bytesPerPacket = Int64(outputFormat.mBytesPerPacket)
+        return (writtenFrames + bytesPerPacket - 1) / bytesPerPacket
     }
 
     func setPlaybackRate(new playbackRate: Float) throws {
@@ -251,7 +180,6 @@ final class AudioSync2 {
         guard buffersInUse.contains(false) else {
             return false
         }
-        guard let audioQueue else { return false }
 
         try! buffer.withUnsafeAudioStreamPacketDescriptions { packetDesriptions in
             try buffer.withAudioBufferList { audioBufferListPointer, _ in
@@ -273,7 +201,7 @@ final class AudioSync2 {
                 enqueueBuffer()
             }
         }
-        writtenFrames += buffer.numSamples
+        writtenFrames += Int64(buffer.numSamples)
         return true
     }
 
@@ -351,6 +279,12 @@ private extension AudioSync2 {
         if propertyStatus != noErr {
             throw AudioQueueErrors.osStatus(.init(rawValue: propertyStatus), propertyStatus)
         }
+        
+        let timelineStatus = AudioQueueCreateTimeline(audioQueue, &timeline)
+
+        if timelineStatus != noErr {
+            throw AudioQueueErrors.osStatus(.init(rawValue: propertyStatus), propertyStatus)
+        }
     }
 
     private func audioQueueDidRelease(_ audioQueue: AudioQueueRef, buffer: AudioQueueBufferRef) {
@@ -370,7 +304,7 @@ private extension AudioSync2 {
         }
     }
 
-    fileprivate func handleAudioQueuePropertyCallback(propertyId: AudioQueuePropertyID) {
+    func handleAudioQueuePropertyCallback(propertyId: AudioQueuePropertyID) {
         switch propertyId {
         case kAudioQueueProperty_IsRunning:
             startCondition.signal()
@@ -378,12 +312,6 @@ private extension AudioSync2 {
             return
         }
     }
-}
-
-private func audioQueuePropertyCallback(_ userData: UnsafeMutableRawPointer?, audioQueue: AudioQueueRef, propertyId: AudioQueuePropertyID) {
-    guard let userData else { return }
-    let audioSync = Unmanaged<AudioSync2>.fromOpaque(userData).takeUnretainedValue()
-    audioSync.handleAudioQueuePropertyCallback(propertyId: propertyId)
 }
 
 extension AudioSync2 {
@@ -427,8 +355,28 @@ extension AudioSync2 {
         case stopped
         case flushed
     }
+
+    struct MediaPositionParameters {
+//        let playbackParameters: Float64
+        let playbackSpeed: Float
+        let mediaTime: Int64
+        let audioQueuePosition: Int64
+        var mediaPositionDrift: Int64 = 0
+
+        init(playbackSpeed: Float = 1.0, mediaTime: Int64 = 1_000_000_000_000, audioQueuePosition: Int64 = 0) {
+            self.playbackSpeed = playbackSpeed
+            self.mediaTime = mediaTime
+            self.audioQueuePosition = audioQueuePosition
+        }
+    }
 }
 
 private extension Int {
     static let maxBufferInUse: Int = 10
+}
+
+private func audioQueuePropertyCallback(_ userData: UnsafeMutableRawPointer?, audioQueue: AudioQueueRef, propertyId: AudioQueuePropertyID) {
+    guard let userData else { return }
+    let audioSync = Unmanaged<AudioSync2>.fromOpaque(userData).takeUnretainedValue()
+    audioSync.handleAudioQueuePropertyCallback(propertyId: propertyId)
 }

@@ -15,7 +15,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
     var bufferedPosition: CMTime = .invalid
     var nextLoadPosition: CMTime = .invalid
-    var isLoading: Bool { queue.sync { loader.isLoading } }
+    var isLoading: Bool { queue.sync { loader?.isLoading ?? false } }
     var trackGroups: [TrackGroup] {
         assert(queue.isCurrent()); return trackGroupState.map { $0.trackGroup }
     }
@@ -30,11 +30,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     weak var delegate: Delegate?
     weak var mediaSourceEventDelegate: MediaSourceEventListener?
 
-    private lazy var loader: ExtractingLoadable = {
-        ExtractingLoadable(
-            url: url, queue: queue, dataSource: dataSource, progressiveMediaExtractor: progressiveMediaExtractor, extractorOutput: self, loadCondition: loadCondition, continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
-        )
-    }()
+    private var loader: ExtractingLoadable?
 
     private var callback: (any MediaPeriodCallback)?
     private typealias TrackId = Int
@@ -84,13 +80,14 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         return false
     }
 
-    func reevaluateBuffer(position: CMTime) { return }
-
-    func discardBuffer(to time: CMTime, toKeyframe: Bool) {
-        
+    func discardBuffer(to position: Int64, toKeyframe: Bool) {
+        assert(isPrepared)
+        for sampleQueue in sampleQueues.values {
+            sampleQueue.discardTo(position: position, toKeyframe: toKeyframe)
+        }
     }
 
-    func seek(to time: CMTime) {
+    func seek(to position: Int64) {
         
     }
 
@@ -115,7 +112,17 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     func startLoading() {
         assert(queue.isCurrent())
         let delegate = mediaSourceEventDelegate
-        self.loader.startLoading { [weak self] error in
+        let loader = ExtractingLoadable(
+            url: url, queue: queue,
+            dataSource: dataSource,
+            progressiveMediaExtractor: progressiveMediaExtractor,
+            extractorOutput: self,
+            loadCondition: loadCondition,
+            continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
+        )
+        self.loader = loader
+
+        loader.startLoading { [weak self] error in
             guard let self else {
                 delegate?.loadCancelled(windowIndex: 0, mediaPeriodId: nil, loadEventInfo: Void(), mediaLoadData: Void())
                 return

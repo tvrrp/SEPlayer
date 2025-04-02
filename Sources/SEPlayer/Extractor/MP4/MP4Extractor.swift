@@ -310,9 +310,9 @@ private extension MP4Extractor {
     func processMoovAtom(moov: ContainerBox) throws {
         var tracks = [MP4Track]()
 
-        let mvhdMetadata = try BoxParser.Mp4TimestampData(
-            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
-        )
+//        let mvhdMetadata = try BoxParser.Mp4TimestampData(
+//            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
+//        )
 
         let trackSampleTables = try boxParser.parseTraks(moov: moov)
 

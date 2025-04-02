@@ -234,7 +234,7 @@ private extension VTRenderer {
         }
 
         if status != noErr {
-            let error = DecoderErrors.vtError(.init(rawValue: status))
+//            let error = DecoderErrors.vtError(.init(rawValue: status))
             _isDecodingSample = false
             _framedBeingDecoded -= 1
             decodeNextSampleIfNeeded()
@@ -243,7 +243,7 @@ private extension VTRenderer {
 
     private func handleSample(response: VTDecoderResponce) {
         do {
-            guard let imageBuffer = response.imageBuffer else {
+            guard response.status == noErr, let imageBuffer = response.imageBuffer else {
                 fatalError()
             }
             let formatDescription = try CMVideoFormatDescription(imageBuffer: imageBuffer)

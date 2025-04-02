@@ -58,46 +58,8 @@ final class SampleQueue: TrackOutput {
         readPosition += 1
         endOfQueue = wrapper.metadata.flags.contains(.lastSample)
 
-        return .didReadBuffer
+        return .didReadBuffer(bufferFlags: wrapper.metadata.flags)
     }
-
-    func readData(to buffer: UnsafeMutableRawPointer) throws -> DecoderInputBuffer? {
-        assert(queue.isCurrent())
-        guard !allocations.isEmpty && !endOfQueue else { return nil }
-        let wrapper = allocations.removeFirst()
-
-        let pointer = malloc(wrapper.allocation.size).assumingMemoryBound(to: UInt8.self)
-        buffer.copyMemory(
-            from: wrapper.allocation.baseAddress,
-            byteCount: wrapper.metadata.size
-        )
-
-        return .init(
-            bufferFlags: wrapper.metadata.flags,
-            format: format,
-            data: buffer,
-            sampleTimings: wrapper.metadata.sampleTimings
-        )
-    }
-
-//    func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult {
-//        assert(queue.isCurrent())
-//        guard !blocks.isEmpty && !endOfQueue else { return .nothingRead }
-//        let wrapper = blocks.removeFirst()
-//
-//        let sampleBuffer = try CMSampleBuffer(
-//            dataBuffer: wrapper.block,
-//            formatDescription: format,
-//            numSamples: 1,
-//            sampleTimings: [wrapper.metadata.sampleTimings],
-//            sampleSizes: [wrapper.metadata.size]
-//        )
-//        try decoderInput.enqueue(sampleBuffer)
-//        readPosition += 1
-//        endOfQueue = wrapper.metadata.flags.contains(.endOfStream)
-//
-//        return .didReadBuffer
-//    }
 
     func sampleData(input: DataReader, allowEndOfInput: Bool, metadata: SampleMetadata, completionQueue: Queue, completion: @escaping (Error?) -> Void) {
         queue.async { [weak self] in
@@ -122,37 +84,6 @@ final class SampleQueue: TrackOutput {
             }
         }
     }
-    
-//    func sampleData(input: any DataReader, allowEndOfInput: Bool, metadata: SampleMetadata, completionQueue: any Queue, completion: @escaping ((any Error)?) -> Void) {
-//        queue.async { [weak self] in
-//            guard let self else { return }
-//            
-//            var blockBuffer: CMBlockBuffer!
-//            try! CMBlockBufferCreateWithMemoryBlock(
-//                allocator: nil,
-//                memoryBlock: nil,
-//                blockLength: metadata.size,
-//                blockAllocator: CMMemoryPoolGetAllocator(memoryPool),
-//                customBlockSource: nil,
-//                offsetToData: 0,
-//                dataLength: metadata.size,
-//                flags: 0,
-//                blockBufferOut: &blockBuffer
-//            ).validate()
-//
-//            input.read(blockBuffer: blockBuffer, offset: 0, length: metadata.size, completionQueue: queue) { result in
-//                assert(self.queue.isCurrent())
-//                switch result {
-//                case .success(_):
-//                    self.blocks.append(.init(metadata: metadata, block: blockBuffer))
-//                    self.delegate?.sampleQueue(self, didProduceSample: metadata.sampleTimings)
-//                    completionQueue.async { completion(nil) }
-//                case let .failure(error):
-//                    completionQueue.async { completion(error) }
-//                }
-//            }
-//        }
-//    }
 
     func isReady(didFinish load: Bool) -> Bool {
         assert(queue.isCurrent())
@@ -166,41 +97,21 @@ final class SampleQueue: TrackOutput {
     func skip(count: Int) {
         readPosition += count
     }
+
+    func discardTo(position: Int64, toKeyframe: Bool) {
+        
+    }
 }
 
 private extension SampleQueue {
     func createAllocation(with metadata: SampleMetadata) -> AllocationWrapper {
         assert(queue.isCurrent())
-//        if let lastWrapper = allocations.last {
-//            let availableSize = lastWrapper.allocation.size - lastWrapper.metadata.size
-//            if availableSize >= metadata.size {
-//                let newWrapper = AllocationWrapper(
-//                    metadata: metadata, allocation: lastWrapper.allocation.createNode(from: lastWrapper.metadata.size)
-//                )
-//                newWrapper.parent = lastWrapper
-//                lastWrapper.node = newWrapper
-//                return newWrapper
-//            }
-//        }
 
         return .init(metadata: metadata, allocation: allocator.allocate(capacity: metadata.size))
     }
 
     func releaseAllocation(from wrapper: AllocationWrapper) {
         assert(queue.isCurrent())
-//        if let parent = wrapper.parent, wrapper.node == nil {
-//            wrapper.parent = nil
-//            parent.node = nil
-//            releaseAllocation(from: parent)
-//        } else if wrapper.node == nil {
-//            allocator.release(allocation: wrapper.allocation)
-//        }
-//        var currentNode = wrapper.node
-//        wrapper.node = nil
-//        while let node = currentNode {
-//            node.parent = nil
-//            currentNode = node.node
-//        }
         allocator.release(allocation: wrapper.allocation)
     }
 }

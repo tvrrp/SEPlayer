@@ -11,8 +11,8 @@ protocol MediaPeriod: SequenceableLoader, AnyObject {
     var trackGroups: [TrackGroup] { get }
 
     func prepare(callback: any MediaPeriodCallback, on time: CMTime)
-    func discardBuffer(to time: CMTime, toKeyframe: Bool)
-    func seek(to time: CMTime)
+    func discardBuffer(to position: Int64, toKeyframe: Bool)
+    func seek(to position: Int64)
     func selectTrack(selections: [any SETrackSelection], on time: CMTime) -> [SampleStream]
 }
 

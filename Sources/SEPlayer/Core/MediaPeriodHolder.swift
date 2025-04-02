@@ -42,7 +42,7 @@ final class MediaPeriodHolder {
         assert(queue.isCurrent())
         isPrepared = true
         trackGroups = mediaPeriod.trackGroups
-        let trackGroups = mediaPeriod.trackGroups
+//        let trackGroups = mediaPeriod.trackGroups
         let requestedStartPosition = info.startPosition
         let selectorResult = selectTracks(playbackSpeed: playbackSpeed, timeline: timeline, playWhenReady: playWhenReady)
         applyTrackSelection(trackSelectorResult: selectorResult, time: requestedStartPosition)

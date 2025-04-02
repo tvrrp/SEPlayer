@@ -17,5 +17,4 @@ protocol SequenceableLoader {
     var nextLoadPosition: CMTime { get }
     var isLoading: Bool { get }
     func continueLoading(with loadingInfo: Void) -> Bool
-    func reevaluateBuffer(position: CMTime)
 }

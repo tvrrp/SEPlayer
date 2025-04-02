@@ -10,11 +10,12 @@ import CoreMedia
 protocol SampleStream {
     var format: CMFormatDescription { get }
     func isReady() -> Bool
+    @discardableResult
     func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult
     func skipData(to time: CMTime) -> Int
 }
 
-enum SampleStreamReadResult {
+enum SampleStreamReadResult: Equatable {
     case nothingRead
-    case didReadBuffer
+    case didReadBuffer(bufferFlags: SampleFlags)
 }
