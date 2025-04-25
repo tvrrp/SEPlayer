@@ -81,7 +81,13 @@ final class MediaSourceList {
         isPrepared = true
     }
 
-    func createPeriod(id: MediaPeriodId, allocator: Allocator, loadCondition: LoadConditionCheckable, startPosition: CMTime) -> MediaPeriod {
+    func createPeriod(
+        id: MediaPeriodId,
+//        allocator: Allocator,
+        allocator: Allocator2,
+        loadCondition: LoadConditionCheckable,
+        startPosition: CMTime
+    ) -> MediaPeriod {
         var holder = mediaSourceHolders[0]
         enableMediaSource(holder: holder)
         holder.activeMediaPeriodIds.append(id)

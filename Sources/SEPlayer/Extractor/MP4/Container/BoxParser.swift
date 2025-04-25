@@ -65,7 +65,7 @@ struct BoxParser {
         return Track(
             id: tkhdData.trackId,
             type: trackType,
-            formats: stsdData.descriptions,
+            format: stsdData.description,
             timescale: CMTimeScale(mdhdData.timescale),
             movieTimescale: CMTimeScale(movieTimescale),
             duration: CMTimeValue(mdhdData.mediaDuration)

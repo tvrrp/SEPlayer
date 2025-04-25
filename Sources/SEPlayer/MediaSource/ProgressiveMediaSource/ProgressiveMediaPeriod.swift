@@ -13,18 +13,17 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         func sourceInfoRefreshed(duration: CMTime)
     }
 
+    var trackGroups: [TrackGroup] { trackGroupState.tracks }
     var bufferedPosition: CMTime = .invalid
     var nextLoadPosition: CMTime = .invalid
     var isLoading: Bool { queue.sync { loader?.isLoading ?? false } }
-    var trackGroups: [TrackGroup] {
-        assert(queue.isCurrent()); return trackGroupState.map { $0.trackGroup }
-    }
 
     private let url: URL
     private let queue: Queue
     private let dataSource: DataSource
     private let progressiveMediaExtractor: ProgressiveMediaExtractor
-    private let allocator: Allocator
+//    private let allocator: Allocator
+    private let allocator: Allocator2
     private let loadCondition: LoadConditionCheckable
     private let continueLoadingCheckIntervalBytes: Int
     weak var delegate: Delegate?
@@ -38,9 +37,10 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     private var duration: CMTime = .indefinite
 
     private var sampleQueues: [TrackId: SampleQueue] = [:]
+    private var sampleQueues2: [(id: Int, queue: SampleQueue2)] = []
     private var sampleQueuesBuild: Bool = false
     
-    private var trackGroupState: [TrackState] = []
+    private var trackGroupState = TrackState.empty
 
     private var pendingResetTime: CMTime?
     private var seekMap: SeekMap?
@@ -56,7 +56,8 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         progressiveMediaExtractor: ProgressiveMediaExtractor,
         mediaSourceEventDelegate: MediaSourceEventListener,
         delegate: Delegate,
-        allocator: Allocator,
+//        allocator: Allocator,
+        allocator: Allocator2,
         loadCondition: LoadConditionCheckable,
         continueLoadingCheckIntervalBytes: Int
     ) {
@@ -91,22 +92,47 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         
     }
 
-    func selectTrack(selections: [any SETrackSelection], on time: CMTime) -> [SampleStream] {
-        return selections.compactMap { selection in
-            guard let trackIndex = trackGroupState.firstIndex(where: { $0.trackGroup == selection.trackGroup }) else {
-                return nil
+    func selectTrack(
+        selections: [SETrackSelection?],
+        streams: inout [SampleStream2?],
+        position: Int64
+    ) -> Int64 {
+        let tracks = trackGroupState.tracks
+
+        for (index, selection) in selections.enumerated() {
+            if let selection, streams[index] == nil {
+                if let trackIndex = tracks.index(of: selection.trackGroup)  {
+                    streams[index] = SampleStreamHolder2(
+                        track: trackIndex,
+                        isReadyClosure: isReady2,
+                        readDataClosure: readData2,
+                        skipDataClosure: skipData2
+                    )
+                } else {
+                    streams[index] = nil
+                    continue
+                }
             }
-            return SampleStreamHolder(
-                format: selection.selectedFormat,
-                track: trackIndex,
-                isReadyClosure: { [weak self] track in
-                    self?.isReady(track: track) ?? false
-                }, readDataClosure: { [weak self] track, decoderInput in
-                    return try self?.readData(track: track, to: decoderInput) ?? .nothingRead
-                }, skipDataClosure: { [weak self] track, time in
-                    self?.skipData(track: track, to: time) ?? 0
-                })
         }
+
+        return 0
+//        return selections.compactMap { selection in
+//            guard let trackIndex = trackGroupState.firstIndex(where: { $0.trackGroup == selection.trackGroup }) else {
+//                return nil
+//            }
+//            return SampleStreamHolder(
+//                format: selection.selectedFormat,
+//                track: trackIndex,
+//                isReadyClosure: { [weak self] track in
+//                    self?.isReady(track: track) ?? false
+//                }, readDataClosure: { [weak self] track, decoderInput in
+//                    return try self?.readData(track: track, to: decoderInput) ?? .nothingRead
+//                }, readDataClosure2: { [weak self] track, decoderInput, flags in
+//                    return try self?.readData(track: track, to: decoderInput, flags: flags) ?? .nothingRead
+//                }, skipDataClosure: { [weak self] track, time in
+//                    self?.skipData(track: track, to: time) ?? 0
+//                })
+//        }
     }
 
     func startLoading() {
@@ -165,9 +191,14 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 }
 
 extension ProgressiveMediaPeriod: ExtractorOutput {
-    func track(for id: Int, trackType: TrackType, format: CMFormatDescription) -> TrackOutput {
+//    func track(for id: Int, trackType: TrackType, format: CMFormatDescription) -> TrackOutput {
+//        queue.sync {
+//            return prepareTrackOutput(id: id, format: format)
+//        }
+//    }
+    func track(for id: Int, trackType: TrackType) -> TrackOutput2 {
         queue.sync {
-            return prepareTrackOutput(id: id, format: format)
+            return prepareTrackOutput2(id: id)
         }
     }
 
@@ -195,7 +226,7 @@ extension ProgressiveMediaPeriod {
         assert(queue.isCurrent())
         guard !suppressRead(), let sampleQueue = sampleQueues[track] else { return .nothingRead }
         
-        let result = try sampleQueue.readData(to: decoderInput)
+        let result = try sampleQueue.readData(to: decoderInput, loadingFinished: loadingFinished)
 
         if result == .nothingRead {
             // TODO: maybeStartDeferredRetry
@@ -203,7 +234,19 @@ extension ProgressiveMediaPeriod {
         return result
     }
 
-    func skipData(track: Int, to time: CMTime) -> Int {
+    func readData(track: Int, to decoderInput: CMBlockBuffer, flags: ReadFlags) throws -> SampleStreamReadResult {
+        assert(queue.isCurrent())
+        guard !suppressRead(), let sampleQueue = sampleQueues[track] else { return .nothingRead }
+
+        let result = try sampleQueue.readData(to: decoderInput, flags: flags, loadingFinished: loadingFinished)
+
+        if result == .nothingRead {
+            // TODO: maybeStartDeferredRetry
+        }
+        return result
+    }
+
+    func skipData(track: Int, to time: Int64) -> Int {
         assert(queue.isCurrent())
         guard !suppressRead(), let sampleQueue = sampleQueues[track] else { return 0 }
         let skipCount = sampleQueue.skipCount(for: time, allowEndOfQueue: loadingFinished)
@@ -215,16 +258,53 @@ extension ProgressiveMediaPeriod {
     }
 }
 
-private extension ProgressiveMediaPeriod {
-    private func prepareTrackOutput(id: TrackId, format: CMFormatDescription) -> TrackOutput {
+extension ProgressiveMediaPeriod {
+    func isReady2(track: Int) -> Bool {
         assert(queue.isCurrent())
-        if let trackOutput = sampleQueues[id] {
-            return trackOutput
+        return !suppressRead() && sampleQueues2.queue(for: track)?.isReady(loadingFinished: loadingFinished) == true
+    }
+
+    func readData2(track: Int, to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult2 {
+        guard let sampleStream = sampleQueues2.queue(for: track) else {
+            return .nothingRead
         }
 
-        let queue = SampleQueue(queue: queue, allocator: allocator, format: format)
-        sampleQueues[id] = queue
-        return queue
+        return try sampleStream.read(
+            buffer: buffer,
+            readFlags: readFlags,
+            loadingFinished: loadingFinished
+        )
+    }
+
+    func skipData2(track: Int, position time: Int64) -> Int {
+//        sampleQueues2[track]?.
+        return 0
+    }
+}
+
+private extension ProgressiveMediaPeriod {
+//    private func prepareTrackOutput(id: TrackId, format: CMFormatDescription) -> TrackOutput {
+//        assert(queue.isCurrent())
+//        if let trackOutput = sampleQueues[id] {
+//            return trackOutput
+//        }
+//
+//        let queue = SampleQueue(queue: queue, allocator: allocator, format: format)
+//        sampleQueues[id] = queue
+//        return queue
+//    }
+    private func prepareTrackOutput2(id: TrackId) -> TrackOutput2 {
+        assert(queue.isCurrent())
+        for (sampleQueueId, sampleQueue) in sampleQueues2 {
+            if sampleQueueId == id {
+                return sampleQueue
+            }
+        }
+
+        let trackOutput = SampleQueue2(queue: queue, allocator: allocator)
+        trackOutput.delegate = self
+        sampleQueues2.append((id, trackOutput))
+        return trackOutput
     }
 
     func setSeekMap(_ seekMap: SeekMap) {
@@ -243,26 +323,35 @@ private extension ProgressiveMediaPeriod {
     }
 }
 
+extension ProgressiveMediaPeriod: SampleQueueDelegate {
+    func sampleQueue(_ sampleQueue: SampleQueue2, didChange format: CMFormatDescription) {
+        
+    }
+}
+
 private extension ProgressiveMediaPeriod {
     func maybeFinishPrepare() {
         guard !didRelease, !isPrepared, sampleQueuesBuild, seekMap != nil else { return }
 
-        do {
-            let sampleQueues = sampleQueues.map { ($0.key, $0.value) }.sorted(by: { $0.0 < $1.0 }).map { $0.1 }
-            trackGroupState = try sampleQueues.map { sampleQueue in
-                let trackGroup = try TrackGroup(formats: [sampleQueue.format])
-                return TrackState(
-                    trackGroup: trackGroup,
-                    isAudioOrVideo: trackGroup.type == .video || trackGroup.type == .audio
-                )
+        var trackGroups: [TrackGroup] = []
+        var isAudioOrVideo: [Bool] = []
+        for (id, sampleQueue) in sampleQueues2 {
+            guard let format = sampleQueue.getUpstreamFormat() else {
+                return
             }
 
-            delegate?.sourceInfoRefreshed(duration: duration)
-            isPrepared = true
-            callback?.didPrepare(mediaPeriod: self)
-        } catch {
-            
+            do {
+                try? trackGroups.append(TrackGroup(id: String(id), formats: [format]))
+                isAudioOrVideo.append(format.mediaType == .audio || format.mediaType == .video)
+            } catch {
+                continue
+            }
         }
+
+        trackGroupState = TrackState(tracks: trackGroups, isAudioOrVideo: isAudioOrVideo)
+        delegate?.sourceInfoRefreshed(duration: duration)
+        isPrepared = true
+        callback?.didPrepare(mediaPeriod: self)
     }
 }
 
@@ -272,7 +361,8 @@ private extension ProgressiveMediaPeriod {
         let track: Int
         let isReadyClosure: ((_ track: Int) -> Bool)
         let readDataClosure: ((_ track: Int, _ decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult)
-        let skipDataClosure: ((_ track: Int, _ time: CMTime) -> Int )
+        let readDataClosure2: ((_ track: Int, _ decoderInput: CMBlockBuffer, _ flags: ReadFlags) throws -> SampleStreamReadResult)
+        let skipDataClosure: ((_ track: Int, _ time: Int64) -> Int )
 
         func isReady() -> Bool {
             isReadyClosure(track)
@@ -282,14 +372,39 @@ private extension ProgressiveMediaPeriod {
             return try readDataClosure(track, decoderInput)
         }
 
-        func skipData(to time: CMTime) -> Int {
+        func readData(to decoderInput: CMBlockBuffer, flags: ReadFlags) throws -> SampleStreamReadResult {
+            return try readDataClosure2(track, decoderInput, flags)
+        }
+
+        func skipData(to time: Int64) -> Int {
+            skipDataClosure(track, time)
+        }
+    }
+
+    struct SampleStreamHolder2: SampleStream2 {
+        let track: Int
+        let isReadyClosure: ((_ track: Int) -> Bool)
+        let readDataClosure: ((_ track: Int, _ buffer: DecoderInputBuffer, _ readFlags: ReadFlags) throws -> SampleStreamReadResult2)
+        let skipDataClosure: ((_ track: Int, _ time: Int64) -> Int )
+
+        func isReady() -> Bool {
+            isReadyClosure(track)
+        }
+
+        func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult2 {
+            try readDataClosure(track, buffer, readFlags)
+        }
+
+        func skipData(position time: Int64) -> Int {
             skipDataClosure(track, time)
         }
     }
 
     struct TrackState {
-        let trackGroup: TrackGroup
-        let isAudioOrVideo: Bool
+        let tracks: [TrackGroup]
+        let isAudioOrVideo: [Bool]
+
+        static var empty: TrackState = .init(tracks: [], isAudioOrVideo: [])
     }
 }
 
@@ -419,5 +534,11 @@ private extension ProgressiveMediaPeriod {
         private func buildDataSpec(position: Int) -> DataSpec {
             return .spec(from: url, offset: position, length: 0)
         }
+    }
+}
+
+private extension Array where Element == (id: Int, queue: SampleQueue2) {
+    func queue(for id: Int) -> SampleQueue2? {
+        first(where: { $0.0 == id })?.1
     }
 }

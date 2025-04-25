@@ -30,7 +30,7 @@ final class SampleQueue: TrackOutput {
         self.format = format
     }
 
-    func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>) throws -> SampleStreamReadResult {
+    func readData(to decoderInput: TypedCMBufferQueue<CMSampleBuffer>, loadingFinished: Bool) throws -> SampleStreamReadResult {
         assert(queue.isCurrent())
         guard !allocations.isEmpty && !endOfQueue else { return .nothingRead }
         let wrapper = allocations.removeFirst()
@@ -58,7 +58,32 @@ final class SampleQueue: TrackOutput {
         readPosition += 1
         endOfQueue = wrapper.metadata.flags.contains(.lastSample)
 
-        return .didReadBuffer(bufferFlags: wrapper.metadata.flags)
+        return .didReadBuffer(metadata: wrapper.metadata)
+    }
+ 
+    func readData(to decoderInput: CMBlockBuffer, flags: ReadFlags, loadingFinished: Bool) throws -> SampleStreamReadResult {
+        assert(queue.isCurrent())
+        if flags.contains(.requireFormat) {
+            return .didReadFormat(format: format)
+        }
+        guard !allocations.isEmpty && !endOfQueue else { return .nothingRead }
+        let wrapper = allocations.removeFirst()
+        let buffer = try CMBlockBuffer(
+            length: wrapper.metadata.size,
+            allocator: { size in
+                return wrapper.allocation.baseAddress
+            },
+            deallocator: { _, _ in
+                self.queue.async { self.releaseAllocation(from: wrapper) }
+            },
+            flags: .assureMemoryNow
+        )
+
+        readPosition += 1
+        endOfQueue = wrapper.metadata.flags.contains(.lastSample)
+
+        try decoderInput.append(bufferReference: buffer)
+        return .didReadBuffer(metadata: wrapper.metadata)
     }
 
     func sampleData(input: DataReader, allowEndOfInput: Bool, metadata: SampleMetadata, completionQueue: Queue, completion: @escaping (Error?) -> Void) {
@@ -90,7 +115,7 @@ final class SampleQueue: TrackOutput {
         return !allocations.isEmpty
     }
 
-    func skipCount(for time: CMTime, allowEndOfQueue: Bool) -> Int {
+    func skipCount(for time: Int64, allowEndOfQueue: Bool) -> Int {
         return 0
     }
 

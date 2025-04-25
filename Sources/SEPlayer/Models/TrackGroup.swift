@@ -45,3 +45,9 @@ enum TrackType {
     case audio
     case unknown
 }
+
+extension Array where Element == TrackGroup {
+    func index(of group: TrackGroup) -> Int? {
+        return self.firstIndex(where: { $0 == group })
+    }
+}

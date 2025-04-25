@@ -1,0 +1,308 @@
+//
+//  AudioConverterDecoder.swift
+//  SEPlayer
+//
+//  Created by Damir Yackupov on 24.04.2025.
+//
+
+import AudioToolbox
+import CoreMedia
+
+final class AudioConverterDecoder: AQDecoder {
+    private let queue: Queue
+    private var sourceFormat: AudioStreamBasicDescription
+    private var destinationFormat: AudioStreamBasicDescription
+    private let decompressedSamplesQueue: TypedCMBufferQueue<AudioSampleWrapper>
+    private var audioConverter: AudioConverterRef?
+
+    private let outputBufferList: UnsafeMutableAudioBufferListPointer
+    private let individualBufferSize: Int
+    private var buffers: [UnsafeMutableRawPointer]
+    private var buffersInUse: [Bool]
+    private var bufferCounter = 0
+
+    private var decodedSamples: [UnsafeMutableRawPointer]
+    private var samplesInUse: [Bool]
+    private var samplesCounter = 0
+
+    private var _pendingSamples = [(Int, CMSampleBuffer, SampleFlags)]()
+    private var _isDecodingSample = false
+    private var _framedBeingDecoded = 0
+
+    init(queue: Queue, formatDescription: CMFormatDescription) throws {
+        guard let sourceFormat = formatDescription.audioStreamBasicDescription else { fatalError() }
+        self.queue = queue
+        self.sourceFormat = sourceFormat
+        destinationFormat = AudioStreamBasicDescription(
+            format: .pcmInt16,
+            sampleRate: sourceFormat.mSampleRate,
+            numOfChannels: sourceFormat.mChannelsPerFrame
+        )
+        decompressedSamplesQueue = try TypedCMBufferQueue<AudioSampleWrapper>(capacity: .highWaterMark) { rhs, lhs in
+            guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
+            
+            return rhs.presentationTime > lhs.presentationTime ? .compareGreaterThan : .compareLessThan
+        }
+        let size = 1024 * 10
+        buffers = (0..<Int.highWaterMark).map { _ in
+            UnsafeMutableRawPointer.allocate(
+                byteCount: size,
+                alignment: MemoryLayout<UInt8>.alignment
+            )
+        }
+        outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
+        let individualBufferSize = Int(destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024)
+        self.individualBufferSize = individualBufferSize
+        decodedSamples = (0..<Int.highWaterMark).map { _ in
+            UnsafeMutableRawPointer.allocate(
+                byteCount: individualBufferSize,
+                alignment: MemoryLayout<UInt8>.alignment
+            )
+        }
+        buffersInUse = Array(repeating: false, count: .highWaterMark)
+        samplesInUse = Array(repeating: false, count: .highWaterMark)
+    }
+
+    func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool {
+        return false
+    }
+
+    static func getCapabilities() -> RendererCapabilities {
+        EmptyRendererCapabilities()
+    }
+
+    func dequeueInputBufferIndex() -> Int? {
+        assert(queue.isCurrent())
+        guard !buffersInUse[bufferCounter], !samplesInUse[samplesCounter] else {
+            return nil
+        }
+
+        let index = bufferCounter
+        buffersInUse[bufferCounter] = true
+        bufferCounter += 1
+        if bufferCounter >= .highWaterMark {
+            bufferCounter = 0
+        }
+
+        samplesCounter += 1
+        if samplesCounter >= .highWaterMark {
+            samplesCounter = 0
+        }
+
+        return index
+    }
+
+    func dequeueInputBuffer(for index: Int) -> UnsafeMutableRawPointer {
+        assert(queue.isCurrent())
+        return buffers[index]
+    }
+
+    func queueInputBuffer(for index: Int, inputBuffer: DecoderInputBuffer) throws {
+        assert(queue.isCurrent())
+        let buffer = try inputBuffer.dequeue()
+
+        let blockBuffer = try CMBlockBuffer(
+            length: inputBuffer.size,
+            allocator: { _ in
+                return buffer
+            },
+            deallocator: { _, _ in },
+            flags: .assureMemoryNow
+        )
+
+        let formatDescription = try CMFormatDescription(audioStreamBasicDescription: sourceFormat)
+        let sampleBuffer = try CMSampleBuffer(
+            dataBuffer: blockBuffer,
+            formatDescription: formatDescription,
+            numSamples: 1,
+            sampleTimings: [inputBuffer.sampleTimings],
+            sampleSizes: [inputBuffer.size]
+        )
+        _pendingSamples.append((index, sampleBuffer, inputBuffer.flags))
+        decodeNextSampleIfNeeded()
+    }
+
+    func dequeueOutputBuffer() -> AudioSampleWrapper? {
+        assert(queue.isCurrent())
+        guard samplesInUse[samplesCounter] == true else {
+            return nil
+        }
+        
+        samplesInUse[samplesCounter] = false
+        samplesCounter += 1
+        if samplesCounter >= .highWaterMark {
+            samplesCounter = 0
+        }
+        
+        return decompressedSamplesQueue.dequeue()
+    }
+
+    func flush() {
+        assert(queue.isCurrent())
+        if let audioConverter {
+            AudioConverterReset(audioConverter)
+        }
+    }
+
+    func release() {
+        assert(queue.isCurrent())
+        if let audioConverter {
+            AudioConverterDispose(audioConverter)
+            self.audioConverter = nil
+        }
+        buffers.forEach { $0.deallocate() }
+    }
+
+    private func createAudioConverter() throws {
+        assert(queue.isCurrent())
+        let status = AudioConverterNew(&sourceFormat, &destinationFormat, &audioConverter)
+    }
+
+    private func decodeNextSampleIfNeeded() {
+        guard !_isDecodingSample, !_pendingSamples.isEmpty else { return }
+
+        _isDecodingSample = true
+        let pending = _pendingSamples.removeFirst()
+        queue.async {
+            self.decodeSample(index: pending.0, sampleBuffer: pending.1, sampleFlags: pending.2)
+        }
+    }
+
+    private func decodeSample(index: Int, sampleBuffer: CMSampleBuffer, sampleFlags: SampleFlags) {
+        assert(queue.isCurrent())
+        guard let audioConverter else { return }
+
+        var ioOutputDataPackets: UInt32 = UInt32(individualBufferSize)
+        var packetDescription = AudioStreamPacketDescription()
+        outputBufferList[0].mData = decodedSamples[index]
+
+        do {
+            let result = try sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
+                try sampleBuffer.withAudioBufferList { audioBuffer, _ in
+                    let descriptionPointer = UnsafeMutablePointer<AudioStreamPacketDescription>
+                        .allocate(capacity: 1)
+                    descriptionPointer.initialize(to: description[0])
+
+                    var dataObject = DataObject(
+                        bufferList: audioBuffer.unsafeMutablePointer,
+                        packetDescription: descriptionPointer
+                    )
+
+                    return withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
+                        AudioConverterFillComplexBuffer(
+                            audioConverter,
+                            converterComplexBufferCallback,
+                            dataObjectRef,
+                            &ioOutputDataPackets,
+                            outputBufferList.unsafeMutablePointer,
+                            &packetDescription
+                        )
+                    }
+                }
+            }
+
+            if result != noErr && result != ConverterErrors.custom_noMoreData.rawValue {
+                fatalError()
+            }
+
+            handleSample(
+                index: index,
+                itemsCount: Int(ioOutputDataPackets),
+                pts: sampleBuffer.presentationTimeStamp,
+                sampleFlags: sampleFlags
+            )
+        } catch {
+            fatalError()
+        }
+    }
+
+    func handleSample(index: Int, itemsCount: Int, pts: CMTime, sampleFlags: SampleFlags) {
+        do {
+            let buffer = decodedSamples[index]
+            let blockBuffer = try CMBlockBuffer(
+                length: itemsCount,
+                allocator: { _ in
+                    return buffer
+                },
+                deallocator: { [weak self] _, _ in
+                    guard let self else { return }
+                    queue.async {
+                        self.samplesInUse[index] = false
+                    }
+                },
+                flags: .assureMemoryNow
+            )
+            let formatDescription = try CMFormatDescription(audioStreamBasicDescription: destinationFormat)
+            let sampleBuffer = try CMSampleBuffer(
+                dataBuffer: blockBuffer,
+                formatDescription: formatDescription,
+                numSamples: Int(itemsCount),
+                presentationTimeStamp: pts,
+                packetDescriptions: []
+            )
+
+            try decompressedSamplesQueue.enqueue(.init(
+                sampleFlags: sampleFlags,
+                presentationTime: pts.microseconds,
+                audioBuffer: sampleBuffer
+            ))
+        } catch {
+            fatalError()
+        }
+    }
+}
+
+private extension Int {
+    static let highWaterMark = 30
+    static let defaultInputBufferSize: Int = 768 * 1024
+}
+
+private struct DataObject {
+    let bufferList: UnsafeMutablePointer<AudioBufferList>
+    let packetDescription: UnsafeMutablePointer<AudioStreamPacketDescription>
+    var didReadData: Bool = false
+    var error: Error?
+}
+
+final class AudioSampleWrapper: AQOutputBuffer {
+    let sampleFlags: SampleFlags
+    let presentationTime: Int64
+    let audioBuffer: CMSampleBuffer
+
+    init(
+        sampleFlags: SampleFlags,
+        presentationTime: Int64,
+        audioBuffer: CMSampleBuffer
+    ) {
+        self.sampleFlags = sampleFlags
+        self.presentationTime = presentationTime
+        self.audioBuffer = audioBuffer
+    }
+}
+
+private typealias ConverterErrors = ATRenderer.DecoderErrors.AudioToolboxErrors
+
+private func converterComplexBufferCallback(
+    _ converter: AudioConverterRef,
+    dataPacketsCount: UnsafeMutablePointer<UInt32>,
+    ioData: UnsafeMutablePointer<AudioBufferList>,
+    outDataPacketDescription: UnsafeMutablePointer<UnsafeMutablePointer<AudioStreamPacketDescription>?>?,
+    userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    guard let dataObject = userData?.assumingMemoryBound(to: DataObject.self) else {
+        return ConverterErrors.custom_nilDataObjectPointer.rawValue
+    }
+
+    guard !dataObject.pointee.didReadData else {
+        dataPacketsCount.pointee = 0
+        ioData.pointee.mBuffers.mDataByteSize = 0
+        return ConverterErrors.custom_noMoreData.rawValue
+    }
+
+    outDataPacketDescription?.pointee = dataObject.pointee.packetDescription
+    ioData.pointee = dataObject.pointee.bufferList.pointee
+
+    dataObject.pointee.didReadData = true
+    dataPacketsCount.pointee = 1
+    return noErr
+}

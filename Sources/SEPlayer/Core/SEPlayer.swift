@@ -16,7 +16,7 @@ public final class SEPlayer {
     private let _internalStateQueue: Queue = Queues.internalStateQueue
 
     public var playbackRate: Float {
-        get { queue.sync { _playbackRate } }
+        get { queue.sync { playbackParams.playbackRate } }
         set { queue.async { self.updatePlaybackRate(new: newValue) } }
     }
 
@@ -27,7 +27,7 @@ public final class SEPlayer {
     private let _dependencies: SEPlayerStateDependencies
     private let timer: DispatchSourceTimer
 
-    private var _playbackRate: Float = 1.0
+    private var playbackParams = PlaybackParameters.default
     private var rendererPosition: Int64 = 1_000_000_000_000
     private var rendererPositionElapsedRealtime: Int64 = .zero
 
@@ -49,13 +49,15 @@ public final class SEPlayer {
         self.identifier = identifier
         self.returnQueue = returnQueue
         let allocator = DefaultAllocator(queue: queue, trimOnReset: true)
+        let allocator2 = DefaultAllocator2(queue: queue, trimOnReset: true)
 
         _dependencies = SEPlayerStateDependencies(
             queue: queue,
             returnQueue: returnQueue,
             sessionLoader: sessionLoader,
             playerId: identifier,
-            allocator: allocator
+            allocator: allocator,
+            allocator2: allocator2
         )
         self.timer = DispatchSource.makeTimerSource(flags: .strict, queue: queue.queue)
         setupTimer()
@@ -69,6 +71,9 @@ public final class SEPlayer {
 
     public func play() {
         queue.async { [self] in
+            guard _dependencies.mediaPeriodHolder?.isPrepared == true else {
+                return
+            }
             if !isPlaying {
                 timer.resume()
                 isPlaying = true
@@ -114,7 +119,8 @@ private extension SEPlayer {
 
         let mediaPeriodHolder = MediaPeriodHolder(
             queue: queue,
-            allocator: _dependencies.allocator,
+            rendererCapabilities: _dependencies.newRenderers.map { $0.getCapabilities() },
+            allocator: _dependencies.allocator2,
             mediaSourceList: mediaSourceList,
             info: .init(
                 id: .init(periodId: UUID(), windowSequenceNumber: 0), startPosition: .zero, requestedContentPosition: .zero, endPosition: .zero, duration: .zero
@@ -157,26 +163,42 @@ extension SEPlayer: MediaPeriodCallback {
 
         mediaPeriodHolder.handlePrepared(playbackSpeed: 1.0, timeline: SinglePeriodTimeline(), playWhenReady: true)
         do {
-            _dependencies.renderers = try mediaPeriodHolder.sampleStreams.compactMap { stream in
-                let format = stream.format
-                switch stream.format.mediaType {
-                case .video:
-                    return try VTRenderer(
-                        formatDescription: format,
-                        clock: _dependencies.clock,
-                        queue: queue,
-                        displayLink: _dependencies.displayLink,
-                        sampleStream: stream
+//            _dependencies.renderers = try mediaPeriodHolder.sampleStreams.compactMap { stream in
+//                let format = stream.format
+//                switch stream.format.mediaType {
+//                case .video:
+//                    return try VTRenderer(
+//                        formatDescription: format,
+//                        clock: _dependencies.clock,
+//                        queue: queue,
+//                        displayLink: _dependencies.displayLink,
+//                        sampleStream: stream
+//                    )
+//                case .audio:
+//                    return try ATRenderer(
+//                        format: format,
+//                        clock: _dependencies.clock,
+//                        queue: queue,
+//                        sampleStream: stream
+//                    )
+//                default:
+//                    return nil
+//                }
+//            }
+            for (index, sampleStream) in mediaPeriodHolder.sampleStreams2.enumerated() {
+                if let sampleStream {
+                    try _dependencies.newRenderers[index].enable(
+                        formats: [],
+                        stream: sampleStream,
+                        position: 0,
+                        joining: false,
+                        mayRenderStartOfStream: true,
+                        startPosition: rendererPosition,
+                        offset: rendererPosition,
+                        mediaPeriodId: mediaPeriodHolder.info.id
                     )
-                case .audio:
-                    return try ATRenderer(
-                        format: format,
-                        clock: _dependencies.clock,
-                        queue: queue,
-                        sampleStream: stream
-                    )
-                default:
-                    return nil
+                } else {
+                    continue
                 }
             }
         } catch {
@@ -249,11 +271,15 @@ private extension SEPlayer {
         assert(queue.isCurrent())
         let currentTime = DispatchTime.now()
 
-        rendererPosition = _dependencies.standaloneClock.getPosition()
+        rendererPosition = _dependencies.standaloneClock.syncAndGetPosition(isReadingAhead: false)
         rendererPositionElapsedRealtime = _dependencies.clock.microseconds
 
         var renderersReady = true
-        for renderer in _dependencies.renderers {
+//        for renderer in _dependencies.renderers {
+//            try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime)
+//            renderersReady = renderersReady && renderer.isReady()
+//        }
+        for renderer in _dependencies.newRenderers {
             try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime)
             renderersReady = renderersReady && renderer.isReady()
         }
@@ -261,33 +287,33 @@ private extension SEPlayer {
         if renderersReady && !isReady {
             isPlaying = true
             isReady = true
-            updatePlaybackRate(new: 2.0)
             _dependencies.standaloneClock.start()
             enableRenderers()
         }
 
-        if !renderersReady && isReady {
-            isReady = false
-            stopRenderers()
-        }
+//        if !renderersReady && isReady {
+//            isReady = false
+//            stopRenderers()
+//        }
 
         timer.schedule(deadline: currentTime + .milliseconds(10))
     }
 
     private func enableRenderers() {
-        _dependencies.renderers.forEach { $0.start() }
+//        _dependencies.renderers.forEach { $0.start() }
+        _dependencies.newRenderers.forEach { try! $0.start() }
     }
 
     private func stopRenderers() {
         _dependencies.standaloneClock.stop()
-        _dependencies.renderers.forEach { $0.pause() }
+//        _dependencies.renderers.forEach { $0.pause() }
+        try! _dependencies.newRenderers.forEach { $0.stop() }
     }
 
     private func updatePlaybackRate(new playbackRate: Float) {
         assert(queue.isCurrent())
-        let clampedPlaybackRate = min(max(0.1, playbackRate), 2.5)
-        self._playbackRate = clampedPlaybackRate
-        _dependencies.standaloneClock.setPlaybackRate(new: playbackRate)
+        self.playbackParams = PlaybackParameters(playbackRate: playbackRate)
+        _dependencies.standaloneClock.setPlaybackParameters(new: playbackParams)
         _dependencies.renderers.forEach { try? $0.setPlaybackRate(new: playbackRate) }
     }
 }
@@ -313,6 +339,20 @@ extension SEPlayer {
             }
         }
     }
+    
+    func register(_ bufferable: PlayerBufferable) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            _dependencies.bufferableContainer.register(bufferable)
+        }
+    }
+
+    func remove(_ bufferable: PlayerBufferable) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            _dependencies.bufferableContainer.remove(bufferable)
+        }
+    }
 }
 
 public extension SEPlayer {
@@ -326,8 +366,6 @@ public extension SEPlayer {
         case loading
         case ended
         case error(Error?)
-
-        // MARK: - Static
 
         public static func == (lhs: State, rhs: State) -> Bool {
             if case .idle = lhs, case .idle = rhs { return true }

@@ -32,7 +32,11 @@ final class TypedCMBufferQueue<T: CMBuffer> {
         )
     }
 
-    init(capacity: CMItemCount = 120, compareHandler: @escaping (_ rhs: T, _ lhs: T) -> CFComparisonResult) throws {
+    init(
+        capacity: CMItemCount = 120,
+        compareHandler: @escaping (_ rhs: T, _ lhs: T) -> CFComparisonResult,
+        ptsHandler: ((T) -> CMTime)? = nil
+    ) throws {
         self.capacity = capacity
         let handlers = CMBufferQueue.Handlers.unsortedSampleBuffers.withHandlers {
             $0.compare { lhs, rhs in
@@ -40,7 +44,9 @@ final class TypedCMBufferQueue<T: CMBuffer> {
             }
             $0.getDecodeTimeStamp { _ in return .zero }
             $0.getDuration { _ in return .zero }
-            $0.getPresentationTimeStamp { _ in return .zero }
+            $0.getPresentationTimeStamp { buffer in
+                ptsHandler?(buffer as! T) ?? .zero
+            }
             $0.getSize { _ in return .zero }
         }
         bufferQueue = try CMBufferQueue(

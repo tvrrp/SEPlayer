@@ -107,7 +107,12 @@ extension MP4Extractor: SeekMap {
             var secondTime: CMTime?
             var secondOffset: Int?
 
-            let mainTrackIndex = trackId ?? tracks.firstIndex(where: { $0.track.formats[0].format.mediaType == .video })
+            let mainTrackIndex = trackId ?? tracks.firstIndex(where: { track in
+                if case .video = track.track.format {
+                    return true
+                }
+                return false
+            })
             if let mainTrackIndex {
                 let mainTrack = tracks[mainTrackIndex]
                 let sampleTable = mainTrack.sampleTable
@@ -129,7 +134,12 @@ extension MP4Extractor: SeekMap {
             }
 
             if trackId == nil {
-                let firstVideoTrackIndex = tracks.firstIndex(where: { $0.track.formats[0].format.mediaType == .video })
+                let firstVideoTrackIndex = tracks.firstIndex(where: { track in
+                    if case .video = track.track.format {
+                        return true
+                    }
+                    return false
+                })
                 for (index, track) in tracks.enumerated() {
                     if index != firstVideoTrackIndex {
                         firstOffset = adjustSeekOffset(sampleTable: track.sampleTable, seekTime: firstTime, offset: firstOffset)
@@ -284,23 +294,51 @@ private extension MP4Extractor {
                 completion(.error(error)); return
             }
 
-            let sampleMedatada = SampleMetadata(
-                duration: sample.duration,
-                presentationTimeStamp: sample.presentationTimeStamp,
-                decodeTimeStamp: sample.decodeTimeStamp,
-                flags: sample.flags,
-                size: sample.size
-            )
-
-            trackOutput.sampleData(input: input, allowEndOfInput: false, metadata: sampleMedatada, completionQueue: self.queue) { error in
+            loadToTrackOutput(input: input, trackOutput: trackOutput, amount: sample.size) { error in
                 if let error {
-                    completion(.error(error)); return
+                    completion(.error(error))
+                    return
                 }
+
+                trackOutput.sampleMetadata(
+                    time: sample.decodeTimeStamp.microseconds,
+                    flags: sample.flags,
+                    size: sample.size,
+                    offset: 0
+                )
 
                 self.sampleBytesRead += sample.size
                 self.sampleTrackIndex = nil
                 self.tracks[sampleTrackIndex].sampleIndex += 1
                 completion(.continueRead)
+            }
+//            trackOutput.sampleData(input: input, allowEndOfInput: false, metadata: sampleMedatada, completionQueue: self.queue) { error in
+//                if let error {
+//                    completion(.error(error)); return
+//                }
+//
+//                self.sampleBytesRead += sample.size
+//                self.sampleTrackIndex = nil
+//                self.tracks[sampleTrackIndex].sampleIndex += 1
+//                completion(.continueRead)
+//            }
+        }
+    }
+
+    func loadToTrackOutput(input: ExtractorInput, trackOutput: TrackOutput2, amount: Int, completion: @escaping (Error?) -> Void) {
+        trackOutput.loadSampleData(input: input, length: amount, completionQueue: queue) { [weak self] result in
+            guard let self else { return }
+            assert(queue.isCurrent())
+            switch result {
+            case let .success(loaded):
+                let amountToLoad = max(0, amount - loaded)
+                if amountToLoad > 0 {
+                    loadToTrackOutput(input: input, trackOutput: trackOutput, amount: amountToLoad, completion: completion)
+                } else {
+                    completion(nil)
+                }
+            case let .failure(error):
+                completion(error)
             }
         }
     }
@@ -324,14 +362,14 @@ private extension MP4Extractor {
                 sampleTable: trackSampleTable,
                 trackOutput: extractorOutput.track(
                     for: trackIndex,
-                    trackType: track.type,
-                    format: track.formats[0].format
+                    trackType: track.type
                 )
             )
             let trackDuration = CMTime(
                 value: CMTimeValue(track.duration),
                 timescale: CMTimeScale(track.timescale)
             )
+            mp4Track.trackOutput.setFormat(track.format.formatDescription)
 
             self.duration = max(duration, trackDuration)
 
@@ -467,7 +505,7 @@ private extension MP4Extractor {
     struct MP4Track {
         let track: Track
         let sampleTable: BoxParser.TrackSampleTable
-        let trackOutput: TrackOutput
+        let trackOutput: TrackOutput2
 
         var sampleIndex: Int = 0
     }

@@ -6,6 +6,7 @@
 //
 
 protocol MediaClock: AnyObject {
-    var playbackParameters: PlaybackParameters { get set }
+    func setPlaybackParameters(new playbackParameters: PlaybackParameters)
+    func getPlaybackParameters() -> PlaybackParameters
     func getPosition() -> Int64
 }

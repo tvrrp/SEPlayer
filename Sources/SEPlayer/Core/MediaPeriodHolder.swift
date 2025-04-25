@@ -10,7 +10,10 @@ import CoreMedia
 final class MediaPeriodHolder {
     let queue: Queue
     let mediaPeriod: any MediaPeriod
+    let rendererCapabilities: [RendererCapabilities]
+
     var sampleStreams: [SampleStream] = []
+    var sampleStreams2: [SampleStream2?]
     let info: MediaPeriodInfo
     let mediaSourceList: MediaSourceList
     let trackSelector: TrackSelector
@@ -22,13 +25,17 @@ final class MediaPeriodHolder {
 
     init(
         queue: Queue,
-        allocator: Allocator,
+        rendererCapabilities: [RendererCapabilities],
+//        allocator: Allocator,
+        allocator: Allocator2,
         mediaSourceList: MediaSourceList,
         info: MediaPeriodInfo,
         loadCondition: LoadConditionCheckable,
         trackSelector: TrackSelector
     ) {
         self.queue = queue
+        self.rendererCapabilities = rendererCapabilities
+        self.sampleStreams2 = Array(repeating: nil, count: rendererCapabilities.count)
         self.mediaSourceList = mediaSourceList
         self.info = info
         self.trackSelector = trackSelector
@@ -50,7 +57,11 @@ final class MediaPeriodHolder {
 
     func applyTrackSelection(trackSelectorResult: TrackSelectionResult, time: CMTime) {
         assert(queue.isCurrent())
-        sampleStreams = mediaPeriod.selectTrack(selections: trackSelectorResult.selections, on: time)
+        _ = mediaPeriod.selectTrack(
+            selections: trackSelectorResult.selections,
+            streams: &sampleStreams2,
+            position: time.microseconds
+        )
     }
 
     func prepare(callback: any MediaPeriodCallback, on time: CMTime) {
@@ -61,7 +72,10 @@ final class MediaPeriodHolder {
 extension MediaPeriodHolder {
     func selectTracks(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) -> TrackSelectionResult {
         let selectorResult = trackSelector.selectTracks(
-            trackGroups: trackGroups, periodId: info.id, timeline: timeline
+            rendererCapabilities: rendererCapabilities,
+            trackGroups: trackGroups,
+            periodId: info.id,
+            timeline: timeline
         )
         return selectorResult
     }

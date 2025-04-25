@@ -6,13 +6,11 @@
 //
 
 import CoreMedia
-import CoreVideo
-import CoreAudio
 
 struct Track {
     let id: Int
     let type: TrackType
-    let formats: [TrackFormat]
+    let format: TrackFormat
     let timescale: CMTimeScale
     let movieTimescale: CMTimeScale
     let duration: CMTimeValue
@@ -20,8 +18,8 @@ struct Track {
     enum TrackFormat {
         case video(CMVideoFormatDescription)
         case audio(CMAudioFormatDescription)
-        
-        var format: CMFormatDescription {
+
+        var formatDescription: CMFormatDescription {
             switch self {
             case let .video(videoFormat):
                 return videoFormat

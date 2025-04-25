@@ -13,13 +13,7 @@ final class VTRenderer: BaseSERenderer {
     private var decompressionSession: VTDecompressionSession?
     private let displayLink: DisplayLinkProvider
 
-    private lazy var videoFrameReleaseControl = VideoFrameReleaseControl(
-        queue: queue,
-        frameTimingEvaluator: self,
-        clock: clock,
-        displayLink: displayLink
-    )
-
+    private var videoFrameReleaseControl: VideoFrameReleaseControl
     private var output: SEPlayerBufferView?
     private let outputSampleQueue: TypedCMBufferQueue<SampleWrapper>
 
@@ -37,6 +31,7 @@ final class VTRenderer: BaseSERenderer {
     ) throws {
         self.formatDescription = formatDescription
         self.displayLink = displayLink
+        videoFrameReleaseControl = VideoFrameReleaseControl(queue: queue, clock: clock, displayLink: displayLink)
         outputSampleQueue = try TypedCMBufferQueue<SampleWrapper>(capacity: .highWaterMark) { rhs, lhs in
             guard rhs.timestamp != lhs.timestamp else { return .compareEqualTo }
 
@@ -48,6 +43,7 @@ final class VTRenderer: BaseSERenderer {
             queue: queue,
             sampleStream: sampleStream
         )
+        videoFrameReleaseControl.frameTimingEvaluator = self
 
         _pendingSamples.reserveCapacity(.highWaterMark)
         videoFrameReleaseControl.enable(releaseFirstFrameBeforeStarted: true)
@@ -82,13 +78,13 @@ final class VTRenderer: BaseSERenderer {
 
     override func isReady() -> Bool {
         let isRendererReady = super.isReady()
-        return videoFrameReleaseControl.isReady(isRendererReady: isRendererReady)
+        return videoFrameReleaseControl.isReady() && isRendererReady
     }
 
     func setBufferOutput(_ output: SEPlayerBufferView) {
         assert(queue.isCurrent())
         Queues.mainQueue.async {
-            output.setBufferQueue(self.outputSampleQueue)
+//            output.setBufferQueue(self.outputSampleQueue)
         }
         self.output = output
     }
@@ -99,7 +95,7 @@ final class VTRenderer: BaseSERenderer {
         displayLink.removeOutput(output)
     }
 
-    override func queueInputSample(sampleBuffer: CMSampleBuffer) -> Bool {
+    override func queueInputSample(sampleBuffer: CMSampleBuffer) throws -> Bool {
         assert(queue.isCurrent())
         guard _framedBeingDecoded < .highWaterMark else { return false }
         _framedBeingDecoded += 1
@@ -116,7 +112,7 @@ final class VTRenderer: BaseSERenderer {
         sample: CMSampleBuffer,
         isDecodeOnlySample: Bool,
         isLastOutputSample: Bool
-    ) -> Bool {
+    ) throws -> Bool {
         assert(queue.isCurrent())
         let presentationTime = presenationTime
         guard outputSampleQueue.bufferCount < .highWaterMark - 1 else { return false }
@@ -124,13 +120,13 @@ final class VTRenderer: BaseSERenderer {
             presentationTime: presentationTime,
             position: position,
             elapsedRealtime: elapsedRealtime,
-            outputStreamStartPosition: outputStreamStartPosition,
+            outputStreamStartPosition: outputStreamStartPosition, isDecodeOnlyFrame: false,
             isLastFrame: isLastOutputSample
         )
 
         switch frameReleaseAction {
         case .immediately:
-            Queues.mainQueue.async { self.output?.enqueueSampleImmediately(sample) }
+//            Queues.mainQueue.async { self.output?.enqueueSampleImmediately(sample) }
             videoFrameReleaseControl.didReleaseFrame()
             return true
         case .ignore:
@@ -142,16 +138,16 @@ final class VTRenderer: BaseSERenderer {
         case .tryAgainLater:
             return false
         case let .scheduled(releaseTime):
-            do {
-                if releaseTime != lastFrameReleaseTime {
-                    try outputSampleQueue.enqueue(.init(sample: sample, timestamp: releaseTime))
-                    videoFrameReleaseControl.didReleaseFrame()
-                }
-                lastFrameReleaseTime = releaseTime
-                return true
-            } catch {
+//            do {
+//                if releaseTime != lastFrameReleaseTime {
+////                    try outputSampleQueue.enqueue(.init(sample: sample, timestamp: releaseTime))
+//                    videoFrameReleaseControl.didReleaseFrame()
+//                }
+//                lastFrameReleaseTime = releaseTime
+//                return true
+//            } catch {
                 return false
-            }
+//            }
         }
     }
 }

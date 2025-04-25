@@ -47,7 +47,8 @@ final class ProgressiveMediaSource: BaseMediaSource {
 
     override func createPeriod(
         id: MediaPeriodId,
-        allocator: Allocator,
+//        allocator: Allocator,
+        allocator: Allocator2,
         startPosition: CMTime,
         loadCondition: LoadConditionCheckable,
         mediaSourceEventDelegate: MediaSourceEventListener

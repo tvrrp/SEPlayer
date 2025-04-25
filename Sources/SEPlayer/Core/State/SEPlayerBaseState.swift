@@ -33,19 +33,19 @@ class SEPlayerBaseState: SEPlayerState {
 
     func prepare() {
         assert(queue.isCurrent())
-        if let mediaSource, let statable {
-            mediaSource.prepareSource(
-                delegate: statable, mediaTransferListener: nil, playerId: dependencies.playerId
-            )
-            dependencies.mediaPeriod = mediaSource.createPeriod(
-                id: .init(periodId: UUID(), windowSequenceNumber: 0),
-                allocator: dependencies.allocator,
-                startPosition: .zero,
-                loadCondition: statable,
-                mediaSourceEventDelegate: statable
-            )
-            dependencies.mediaPeriod?.prepare(callback: statable, on: .zero)
-        }
+//        if let mediaSource, let statable {
+//            mediaSource.prepareSource(
+//                delegate: statable, mediaTransferListener: nil, playerId: dependencies.playerId
+//            )
+//            dependencies.mediaPeriod = mediaSource.createPeriod(
+//                id: .init(periodId: UUID(), windowSequenceNumber: 0),
+//                allocator: dependencies.allocator,
+//                startPosition: .zero,
+//                loadCondition: statable,
+//                mediaSourceEventDelegate: statable
+//            )
+//            dependencies.mediaPeriod?.prepare(callback: statable, on: .zero)
+//        }
     }
 
     func performNext(_ next: SEPlayer.State) {

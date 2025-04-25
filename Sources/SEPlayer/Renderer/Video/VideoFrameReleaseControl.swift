@@ -8,7 +8,7 @@
 import CoreMedia
 
 struct VideoFrameReleaseControl {
-    private let frameTimingEvaluator: FrameTimingEvaluator
+    weak var frameTimingEvaluator: FrameTimingEvaluator?
     private var frameReleaseHelper: VideoFrameReleaseHelper
 
     private var started: Bool = false
@@ -25,11 +25,9 @@ struct VideoFrameReleaseControl {
 
     init(
         queue: Queue,
-        frameTimingEvaluator: FrameTimingEvaluator,
         clock: CMClock,
         displayLink: DisplayLinkProvider
     ) {
-        self.frameTimingEvaluator = frameTimingEvaluator
         frameReleaseHelper = VideoFrameReleaseHelper(queue: queue, displayLink: displayLink)
         self.clock = clock
     }
@@ -71,8 +69,9 @@ struct VideoFrameReleaseControl {
         }
     }
 
-    func isReady(isRendererReady: Bool) -> Bool {
-        return isRendererReady && firstFrameState == .rendered
+    func isReady() -> Bool {
+        // TODO: joining
+        return firstFrameState == .rendered
     }
 
     mutating func frameReleaseAction(
@@ -80,8 +79,12 @@ struct VideoFrameReleaseControl {
         position: Int64,
         elapsedRealtime: Int64,
         outputStreamStartPosition: Int64,
+        isDecodeOnlyFrame: Bool,
         isLastFrame: Bool
     ) -> FrameReleaseAction {
+        guard let frameTimingEvaluator else {
+            assertionFailure(); return .tryAgainLater
+        }
         if initialPosition == nil {
             initialPosition = position
         }
@@ -96,6 +99,10 @@ struct VideoFrameReleaseControl {
             elapsedRealtime: elapsedRealtime,
             framePresentationTime: presentationTime
         )
+
+        if isDecodeOnlyFrame && !isLastFrame {
+            return .skip
+        }
 
         if shouldForceRelease(position: position, earlyTime: earlyTime, outputStreamStartPosition: outputStreamStartPosition) {
             return .immediately
@@ -151,6 +158,9 @@ struct VideoFrameReleaseControl {
     }
 
     private func shouldForceRelease(position: Int64, earlyTime: Int64, outputStreamStartPosition: Int64) -> Bool {
+        guard let frameTimingEvaluator else {
+            assertionFailure(); return false
+        }
         switch firstFrameState {
         case .notRenderedOnlyAllowedIfStarted:
             return started

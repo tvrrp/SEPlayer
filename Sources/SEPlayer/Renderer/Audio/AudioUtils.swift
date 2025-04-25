@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 01.04.2025.
 //
 
+import AudioToolbox
+
 enum AudioUtils {
     static func mediaDurationFor(playoutDuration: Int64, speed: Float) -> Int64 {
         guard speed != 1 else { return playoutDuration }
@@ -13,11 +15,11 @@ enum AudioUtils {
         return Int64(result)
     }
 
-    static func sampleCountToDuration(sampleCount: Int64, sampleRate: Int) -> Int64 {
+    static func sampleCountToDuration(sampleCount: Int64, sampleRate: Float64) -> Int64 {
         scaleLargeValue(value: sampleCount, multiplier: Int64.microsecondsPerSecond, divisor: Int64(sampleRate), roundingMode: .down)
     }
 
-    static func durationToSampleCount(duration: Int64, sampleRate: Int) -> Int64 {
+    static func durationToSampleCount(duration: Int64, sampleRate: Float64) -> Int64 {
         scaleLargeValue(value: duration, multiplier: Int64(sampleRate), divisor: Int64.microsecondsPerSecond, roundingMode: .up)
     }
 

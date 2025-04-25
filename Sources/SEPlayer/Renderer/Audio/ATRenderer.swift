@@ -13,7 +13,7 @@ final class ATRenderer: BaseSERenderer {
     private var destinationFormat: AudioStreamBasicDescription
     private var converter: AudioConverterRef?
     
-    private let audioSync: AudioSync2
+    private let audioSync: IAudioSink
     private let bufferSize: UInt32
     private let outputBufferList: UnsafeMutableAudioBufferListPointer
     private let outputPointer: UnsafeMutableRawPointer
@@ -25,6 +25,9 @@ final class ATRenderer: BaseSERenderer {
 
     private let memoryPool: CMMemoryPool
 
+    private var allowPositionDiscontinuity = false
+    private var currentPosition: Int64 = 1_000_000_000_000
+
     init(
         format: CMAudioFormatDescription,
         clock: CMClock,
@@ -35,18 +38,13 @@ final class ATRenderer: BaseSERenderer {
         let outputSampleRate = self.format.mSampleRate
 
         destinationFormat = AudioStreamBasicDescription(
-            mSampleRate: outputSampleRate,
-            mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-            mBytesPerPacket: 2 * self.format.mChannelsPerFrame,
-            mFramesPerPacket: 1,
-            mBytesPerFrame: 2 * self.format.mChannelsPerFrame,
-            mChannelsPerFrame: self.format.mChannelsPerFrame,
-            mBitsPerChannel: 16,
-            mReserved: 0
+            format: .pcmInt16,
+            sampleRate: outputSampleRate,
+            numOfChannels: self.format.mChannelsPerFrame
         )
+
         outputQueue = try .init(capacity: .highWaterMark)
-        audioSync = try AudioSync2(queue: queue, clock: clock, outputQueue: outputQueue, outputFormat: destinationFormat, outputSampleRate: outputSampleRate)
+        audioSync = try AudioSink(queue: queue, clock: clock)
         outputBufferList = AudioBufferList.allocate(maximumBuffers: 1)
         bufferSize = destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024
         outputPointer = UnsafeMutableRawPointer.allocate(
@@ -61,10 +59,12 @@ final class ATRenderer: BaseSERenderer {
 
         try super.init(clock: clock, queue: queue, sampleStream: sampleStream)
         try createAudioConverter()
+        try audioSync.configure(inputFormat: destinationFormat)
+        audioSync.delegate = self
     }
 
     override func isReady() -> Bool {
-        return super.isReady() && audioSync.hasPendingData()
+        return audioSync.hasPendingData() || super.isReady()
     }
 
     override func getMediaClock() -> MediaClock? {
@@ -73,20 +73,15 @@ final class ATRenderer: BaseSERenderer {
 
     override func start() {
         super.start()
-        try! audioSync.start(with: clock.microseconds)
+        audioSync.play()
     }
 
     override func pause() {
         super.pause()
-        try! audioSync.pause()
+        audioSync.pause()
     }
 
-    override func setPlaybackRate(new playbackRate: Float) throws {
-        try super.setPlaybackRate(new: playbackRate)
-        try audioSync.setPlaybackRate(new: playbackRate)
-    }
-
-    override func queueInputSample(sampleBuffer: CMSampleBuffer) -> Bool {
+    override func queueInputSample(sampleBuffer: CMSampleBuffer) throws -> Bool {
         assert(queue.isCurrent())
         guard _samplesBeingDecoded < .highWaterMark else { return false }
         _pendingSamples.append(sampleBuffer)
@@ -103,37 +98,34 @@ final class ATRenderer: BaseSERenderer {
         sample: CMSampleBuffer,
         isDecodeOnlySample: Bool,
         isLastOutputSample: Bool
-    ) -> Bool {
+    ) throws -> Bool {
         guard !outputQueue.isFull else { return false }
-//        let sampleBuffer = try! CMSampleBuffer(
-//            copying: sample,
-//            withNewTiming: sample.sampleTimingInfos().map { oldTiming in
-//                CMSampleTimingInfo(
-//                    duration: oldTiming.duration,
-//                    presentationTimeStamp: .from(microseconds: presenationTime),
-//                    decodeTimeStamp: .zero
-//                )
-//            }
-//        )
 
-//        if isStarted || audioSync.hasPendingData() {
-//            try! outputQueue.enqueue(sampleBuffer)
-//        } else {
-//            audioSync.enqueueImmediately(sample)
-//        }
-       
-        return audioSync.enqueueImmediately(sample)
+        return try audioSync.handleBuffer(sample, presentationTime: presenationTime)
     }
 }
 
 extension ATRenderer: MediaClock {
     func getPosition() -> Int64 {
-        return audioSync.getPosition(sourceEnded: false)
+        updateCurrentPosition()
+        return currentPosition
     }
 
-    var playbackParameters: PlaybackParameters {
-        get { .default }
-        set { try? setPlaybackRate(new: newValue.playbackRate) }
+    private func updateCurrentPosition() {
+        guard let newCurrentPosition = audioSync.getPosition() else {
+            return
+        }
+        currentPosition = allowPositionDiscontinuity ? newCurrentPosition : max(currentPosition, newCurrentPosition)
+        allowPositionDiscontinuity = false
+    }
+
+    func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
+        try! setPlaybackRate(new: playbackParameters.playbackRate)
+        audioSync.setPlaybackParameters(new: playbackParameters)
+    }
+
+    func getPlaybackParameters() -> PlaybackParameters {
+        return audioSync.getPlaybackParameters()
     }
 }
 
@@ -166,14 +158,19 @@ extension ATRenderer {
         guard let converter else { return }
 
         var ioOutputDataPackets: UInt32 = bufferSize
+        var packetDescription = AudioStreamPacketDescription()
 
         do {
             let result = try sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
-//                var description = description[0]
                 return try sampleBuffer.withAudioBufferList { audioBuffer, _ in
+                    let descriptionPointer = UnsafeMutablePointer<AudioStreamPacketDescription>
+                        .allocate(capacity: 1)
+
+                    descriptionPointer.initialize(to: description[0])
+
                     var dataObject = DataObject(
                         bufferList: audioBuffer.unsafeMutablePointer,
-                        packetDescription: description
+                        packetDescription: descriptionPointer
                     )
 
                     let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
@@ -183,7 +180,7 @@ extension ATRenderer {
                             dataObjectRef, // inInputDataProcUserData
                             &ioOutputDataPackets, // ioOutputDataPacketSize
                             outputBufferList.unsafeMutablePointer, // outOutputData
-                            nil // outPacketDescription
+                            &packetDescription // outPacketDescription
                         )
                     }
 
@@ -234,19 +231,6 @@ extension ATRenderer {
             let dataByteSize = Int(audioBuffer.mDataByteSize)
             let allocator = CMMemoryPoolGetAllocator(memoryPool)
 
-            var blockBuffer: CMBlockBuffer!
-            try CMBlockBufferCreateWithMemoryBlock(
-                allocator: nil,
-                memoryBlock: nil,
-                blockLength: dataByteSize,
-                blockAllocator: allocator,
-                customBlockSource: nil,
-                offsetToData: 0,
-                dataLength: dataByteSize,
-                flags: kCMBlockBufferAssureMemoryNowFlag,
-                blockBufferOut: &blockBuffer
-            ).validate()
-
             let outBlockBuffer = try CMBlockBuffer(length: dataByteSize, allocator: CMMemoryPoolGetAllocator(memoryPool), flags: .assureMemoryNow)
             let pointer = UnsafeRawBufferPointer(start: audioBuffer.mData!, count: dataByteSize)
             try outBlockBuffer.replaceDataBytes(with: pointer)
@@ -254,6 +238,12 @@ extension ATRenderer {
         }
 
         return outBlockListBuffer
+    }
+}
+
+extension ATRenderer: AudioSyncDelegate {
+    func onPositionDiscontinuity() {
+        allowPositionDiscontinuity = true
     }
 }
 
@@ -285,7 +275,7 @@ extension ATRenderer {
 
 private struct DataObject {
     let bufferList: UnsafeMutablePointer<AudioBufferList>
-    let packetDescription: UnsafeBufferPointer<AudioStreamPacketDescription>
+    let packetDescription: UnsafeMutablePointer<AudioStreamPacketDescription>
     var didReadData: Bool = false
     var error: Error?
 }
@@ -309,7 +299,7 @@ private func converterComplexBufferCallback(
         return ConverterErrors.custom_noMoreData.rawValue
     }
 
-    outDataPacketDescription?.pointee?.pointee = dataObject.pointee.packetDescription[0]
+    outDataPacketDescription?.pointee = dataObject.pointee.packetDescription
     ioData.pointee = dataObject.pointee.bufferList.pointee
 
     dataObject.pointee.didReadData = true

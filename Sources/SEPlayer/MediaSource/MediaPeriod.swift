@@ -13,7 +13,7 @@ protocol MediaPeriod: SequenceableLoader, AnyObject {
     func prepare(callback: any MediaPeriodCallback, on time: CMTime)
     func discardBuffer(to position: Int64, toKeyframe: Bool)
     func seek(to position: Int64)
-    func selectTrack(selections: [any SETrackSelection], on time: CMTime) -> [SampleStream]
+    func selectTrack(selections: [SETrackSelection?], streams: inout [SampleStream2?], position: Int64) -> Int64
 }
 
 protocol MediaPeriodCallback: SequenceableLoaderCallback where Source == any MediaPeriod {

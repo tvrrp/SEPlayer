@@ -144,18 +144,18 @@ final class DefautlHTTPDataSource: DataSource {
         }
     }
 
-    func read(blockBuffer: CMBlockBuffer, offset: Int, length: Int, completionQueue: any Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
+    func read(allocation: Allocation2, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
         queue.async { [weak self] in
             guard let self, let currentDataSpec else { completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return }
 
             do {
                 if intermidateBuffer.readableBytes >= length {
-                    try readFully(to: blockBuffer, offset: offset, length: length)
+                    try readFully(to: allocation, offset: offset, length: length)
                     completionQueue.async { completion(.success(length)) }
                 } else {
                     let requestedReadAmount = min(length, currentDataSpec.range.length + 1 - intermidateBuffer.readerIndex)
                     if requestedReadAmount == intermidateBuffer.readableBytes {
-                        try readFully(to: blockBuffer, offset: offset, length: requestedReadAmount)
+                        try readFully(to: allocation, offset: offset, length: requestedReadAmount)
                         completionQueue.async { completion(.success(requestedReadAmount)) }; return
                     }
 
@@ -165,7 +165,7 @@ final class DefautlHTTPDataSource: DataSource {
                         do {
                             switch result {
                             case let .success(availableBytesCount):
-                                try self.readFully(to: blockBuffer, offset: offset, length: availableBytesCount)
+                                try self.readFully(to: allocation, offset: offset, length: availableBytesCount)
                                 completionQueue.async { completion(.success((availableBytesCount))) }
                             case let .failure(error):
                                 completionQueue.async { completion(.failure(error)) }
@@ -202,15 +202,10 @@ final class DefautlHTTPDataSource: DataSource {
         }
     }
 
-    private func readFully(to buffer: CMBlockBuffer, offset: Int, length: Int) throws {
+    private func readFully(to allocation: Allocation2, offset: Int, length: Int) throws {
         try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
             guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
-            try CMBlockBufferReplaceDataBytes(
-                with: baseAdress,
-                blockBuffer: buffer,
-                offsetIntoDestination: offset,
-                dataLength: length
-            ).validate()
+            memcpy(allocation.data.advanced(by: offset), baseAdress, length)
             return length
         }
     }

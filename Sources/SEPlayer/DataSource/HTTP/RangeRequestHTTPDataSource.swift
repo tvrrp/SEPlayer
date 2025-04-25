@@ -128,13 +128,13 @@ final class RangeRequestHTTPDataSource: DataSource {
         }
     }
 
-    func read(blockBuffer: CMBlockBuffer, offset: Int, length: Int, completionQueue: any Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
+    func read(allocation: Allocation2, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
         queue.async { [weak self] in
             guard let self, let currentDataSpec else {
                 completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return
             }
 
-            requestHandler.read(blockBuffer: blockBuffer, offset: offset, length: length, completionQueue: queue) { [weak self] result in
+            requestHandler.read(allocation: allocation, offset: offset, length: length, completionQueue: queue) { [weak self] result in
                 guard let self else { return }
 
                 switch result {
@@ -151,7 +151,7 @@ final class RangeRequestHTTPDataSource: DataSource {
                         open(dataSpec: newDataSpec, completionQueue: queue) { openResult in
                             switch openResult {
                             case .success(_):
-                                self.read(blockBuffer: blockBuffer, offset: offset + bytesRead, length: length - bytesRead, completionQueue: self.queue) { result in
+                                self.read(allocation: allocation, offset: offset + bytesRead, length: length - bytesRead, completionQueue: self.queue) { result in
                                     switch result {
                                     case let .success(bytesReadAfterNewConnection):
                                         completionQueue.async { completion(.success(bytesRead + bytesReadAfterNewConnection)) }
@@ -170,7 +170,7 @@ final class RangeRequestHTTPDataSource: DataSource {
             }
         }
     }
-
+    
     @discardableResult
     func close() -> ByteBuffer? {
         queue.sync { [weak self] in

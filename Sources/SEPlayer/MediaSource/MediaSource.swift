@@ -19,7 +19,8 @@ protocol MediaSource: AnyObject {
     func enable(delegate: MediaSourceDelegate)
     func createPeriod(
         id: MediaPeriodId,
-        allocator: Allocator,
+//        allocator: Allocator,
+        allocator: Allocator2,
         startPosition: CMTime,
         loadCondition: LoadConditionCheckable,
         mediaSourceEventDelegate: MediaSourceEventListener
@@ -78,7 +79,8 @@ class BaseMediaSource: MediaSource {
     func enableInternal() { fatalError("To override") }
     func createPeriod(
         id: MediaPeriodId,
-        allocator: Allocator,
+//        allocator: Allocator,
+        allocator: Allocator2,
         startPosition: CMTime,
         loadCondition: LoadConditionCheckable,
         mediaSourceEventDelegate: MediaSourceEventListener

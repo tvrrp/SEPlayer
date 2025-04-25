@@ -24,45 +24,52 @@ enum TrackSelectionReason {
 }
 
 protocol TrackSelector {
-    func selectTracks(trackGroups: [TrackGroup], periodId: MediaPeriodId, timeline: Timeline) -> TrackSelectionResult
+    func selectTracks(
+        rendererCapabilities: [RendererCapabilities],
+        trackGroups: [TrackGroup],
+        periodId: MediaPeriodId,
+        timeline: Timeline
+    ) -> TrackSelectionResult
 }
 
 struct DefaultTrackSelector: TrackSelector {
-    func selectTracks(trackGroups: [TrackGroup], periodId: MediaPeriodId, timeline: Timeline) -> TrackSelectionResult {
-        let updatedGroups: [TrackGroup] = trackGroups.compactMap { group in
-            let format = group.formats[0]
-            switch format.mediaType {
-            case .video:
-                return supportsVideoFormat(format) ? group : nil
-            case .audio:
-                return supportsAudioFormat(format) ? group : nil
-            default:
-                return nil
+    func selectTracks(
+        rendererCapabilities: [RendererCapabilities],
+        trackGroups: [TrackGroup],
+        periodId: MediaPeriodId,
+        timeline: Timeline
+    ) -> TrackSelectionResult {
+        let updatedGroups: [TrackGroup?] = trackGroups.compactMap { group in
+            if findRenderer(rendererCapabilities: rendererCapabilities, group: group) != nil {
+                return group
             }
+            return nil
         }
+
         return TrackSelectionResult(
-            selections: updatedGroups.map { FixedTrackSelection(trackGroup: $0) },
+            selections: updatedGroups.map { group in
+                if let group {
+                    return FixedTrackSelection(trackGroup: group)
+                }
+                return nil
+            },
             tracks: Tracks.empty
         )
     }
 
-    private func supportsVideoFormat(_ format: CMFormatDescription) -> Bool {
-        switch format.mediaSubType.rawValue {
-        case kCMVideoCodecType_H264:
-            return true
-        case kCMVideoCodecType_HEVC, kCMVideoCodecType_VP9, kCMVideoCodecType_AV1:
-            return false
-        default:
-            return false
+    func findRenderer(rendererCapabilities: [RendererCapabilities], group: TrackGroup) -> Int? {
+        for format in group.formats {
+            for (index, rendererCapability) in rendererCapabilities.enumerated() {
+                if rendererCapability.supportsFormat(format) {
+                    return index
+                }
+            }
         }
+
+        return nil
     }
 
-    private func supportsAudioFormat(_ format: CMFormatDescription) -> Bool {
-        switch format.mediaSubType {
-        case .mpeg4AAC:
-            return true
-        default:
-            return false
-        }
+    func supportsFormat(rendererCapabilities: RendererCapabilities, trackGroup: TrackGroup) -> [Bool] {
+        trackGroup.formats.map { rendererCapabilities.supportsFormat($0) }
     }
 }

@@ -10,8 +10,8 @@ import UIKit
 protocol DisplayLinkProvider {
     var sampledVsyncTime: Int64? { get }
     var vsyncDuration: Int64? { get }
-    func addOutput(_ output: SEPlayerBufferView)
-    func removeOutput(_ output: SEPlayerBufferView)
+    func addOutput(_ output: DisplayLinkListener)
+    func removeOutput(_ output: DisplayLinkListener)
     func addObserver()
     func removeObserver()
 }
@@ -72,12 +72,12 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
         }
     }
 
-    func addOutput(_ output: SEPlayerBufferView) {
+    func addOutput(_ output: DisplayLinkListener) {
         assert(queue.isCurrent())
         observers.addDelegate(output)
     }
 
-    func removeOutput(_ output: SEPlayerBufferView) {
+    func removeOutput(_ output: DisplayLinkListener) {
         assert(queue.isCurrent())
         observers.removeDelegate(output)
     }

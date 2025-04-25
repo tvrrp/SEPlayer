@@ -10,13 +10,13 @@ import Foundation
 
 extension BoxParser {
     struct StsdData {
-        let descriptions: [Track.TrackFormat]
+        let description: Track.TrackFormat
 
         init(stsd: ByteBuffer, trackId: Int) throws {
             var stsd = stsd
             stsd.moveReaderIndex(to: Int(MP4Box.fullHeaderSize))
             let descriptionCount = try stsd.readInt(as: UInt32.self)
-            var descriptions: [Track.TrackFormat] = []
+            var description: Track.TrackFormat?
 
             for _ in 0..<descriptionCount {
                 let childStartPosition = stsd.readerIndex
@@ -27,11 +27,11 @@ extension BoxParser {
                     switch childAtomType {
                     case .avc1:
                         if let codecInfo = try? VideoSampleEntry(parent: &stsd, childAtomType: childAtomType).codecInfo {
-                            descriptions.append(.video(codecInfo))
+                            description = .video(codecInfo)
                         }
                     case .mp4a:
                         if let codecInfo = try? AudioSampleEntry(parent: &stsd).codecInfo {
-                            descriptions.append(.audio(codecInfo))
+                            description = .video(codecInfo)
                         }
                     default:
                         break
@@ -41,13 +41,13 @@ extension BoxParser {
                 stsd.moveReaderIndex(to: childStartPosition + Int(childAtomSize))
             }
 
-            guard !descriptions.isEmpty else {
+            guard let description else {
                 throw BoxParser.BoxParserErrors.badBoxContent(
                     type: .stsd, reason: "Sample Description Box missing valid description"
                 )
             }
 
-            self.descriptions = descriptions
+            self.description = description
         }
     }
 

@@ -52,3 +52,17 @@ final class Allocation {
         )
     }
 }
+
+final class Allocation2 {
+    let data: UnsafeMutableRawPointer
+    let capacity: Int
+
+    init(data: UnsafeMutableRawPointer, capacity: Int) {
+        self.data = data
+        self.capacity = capacity
+    }
+
+    deinit {
+        data.deallocate()
+    }
+}

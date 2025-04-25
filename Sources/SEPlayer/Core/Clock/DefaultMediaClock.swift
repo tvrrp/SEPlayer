@@ -8,13 +8,6 @@
 import CoreMedia
 
 final class DefaultMediaClock: MediaClock {
-    var playbackParameters: PlaybackParameters {
-        get { getPlaybackParameters() }
-        set {
-            setPlaybackParameters(newValue)
-        }
-    }
-
     private let standaloneClock: StandaloneClock
     private var rendererClock: MediaClock?
     private var renderClockSource: BaseSERenderer?
@@ -45,7 +38,7 @@ final class DefaultMediaClock: MediaClock {
         if let rendererMediaClock, rendererMediaClock !== rendererClock {
             rendererClock = rendererMediaClock
             renderClockSource = renderer
-            rendererMediaClock.playbackParameters = standaloneClock.playbackParameters
+            rendererMediaClock.setPlaybackParameters(new: standaloneClock.getPlaybackParameters())
         }
     }
 
@@ -65,17 +58,13 @@ final class DefaultMediaClock: MediaClock {
         return rendererClock?.getPosition() ?? standaloneClock.getPosition()
     }
 
-    func setPlaybackRate(new playbackRate: Float) {
-        standaloneClock.setPlaybackRate(new: playbackRate)
-    }
-    
-    private func setPlaybackParameters(_ playbackParameters: PlaybackParameters) {
-        rendererClock?.playbackParameters = playbackParameters
-        standaloneClock.playbackParameters = playbackParameters
+    func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
+        rendererClock?.setPlaybackParameters(new: playbackParameters)
+        standaloneClock.setPlaybackParameters(new: playbackParameters)
     }
 
-    private func getPlaybackParameters() -> PlaybackParameters {
-        rendererClock?.playbackParameters ?? standaloneClock.playbackParameters
+    func getPlaybackParameters() -> PlaybackParameters {
+        rendererClock?.getPlaybackParameters() ?? standaloneClock.getPlaybackParameters()
     }
 
     private func syncClock(isReadingAhead: Bool) {
@@ -100,9 +89,9 @@ final class DefaultMediaClock: MediaClock {
             }
         }
         standaloneClock.resetPosition(position: rendererClockPosition)
-        let playbackParameters = rendererClock.playbackParameters
-        if playbackParameters != standaloneClock.playbackParameters {
-            standaloneClock.playbackParameters = playbackParameters
+        let playbackParameters = rendererClock.getPlaybackParameters()
+        if playbackParameters != standaloneClock.getPlaybackParameters() {
+            standaloneClock.setPlaybackParameters(new: playbackParameters)
         }
     }
 

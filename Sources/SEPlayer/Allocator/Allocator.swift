@@ -6,6 +6,7 @@
 //
 
 import unistd
+import Darwin
 
 protocol Allocator {
     var totalBytesAllocated: Int { get }
@@ -55,39 +56,9 @@ final class DefaultAllocator: Allocator {
         }
     }
 
-    func reset() {
-        assert(queue.isCurrent())
-        if trimOnReset {
-            trim()
-        }
-    }
-
-    func setTargetBufferSize(_ targetBufferSize: Int) {
-        assert(queue.isCurrent())
-        let targetBufferSizeReduced = targetBufferSize < self.targetBufferSize
-        self.targetBufferSize = targetBufferSize
-        if targetBufferSizeReduced { trim() }
-    }
-
     func allocate(capacity: Int) -> Allocation {
         assert(queue.isCurrent())
         let allocation: Allocation
-
-//        if capacity <= individualAllocationSize && availableCount > 0 {
-//            availableCount -= 1
-//            allocation = availableAllocations.removeLast()
-//        } else {
-//            let size = max(capacity, individualAllocationSize)
-//            allocation = Allocation(
-//                queue: queue,
-//                data: UnsafeMutableRawBufferPointer.allocateUInt8(byteCount: size),
-//                size: size
-//            )
-//
-//            if allocatedCount > availableAllocations.count {
-//                availableAllocations.reserveCapacity(availableAllocations.count * 2)
-//            }
-//        }
         let size = capacity
         allocation = Allocation(
             queue: queue,
@@ -100,26 +71,122 @@ final class DefaultAllocator: Allocator {
 
     func release(allocation: Allocation) {
         assert(queue.isCurrent())
-//        guard !allocation.isNode else { return}
-//
-//        if allocation.data.count > individualAllocationSize || availableCount >= 50 {
-//            allocation.data.deallocate()
-//        } else {
-//            availableCount += 1
-//            availableAllocations.append(allocation)
-//        }
-//        allocatedCount -= 1
         allocation.data.deallocate()
     }
 
     func trim() {
         assert(queue.isCurrent())
-        fatalError()
     }
 }
 
 extension UnsafeMutableRawBufferPointer {
     static func allocateUInt8(byteCount: Int) -> Self {
         UnsafeMutableRawBufferPointer.allocate(byteCount: byteCount, alignment: MemoryLayout<UInt8>.alignment)
+    }
+}
+
+protocol AllocationNode: AnyObject {
+    func getAllocation() -> Allocation2
+    func next() -> AllocationNode?
+}
+
+protocol Allocator2: AnyObject {
+    var totalBytesAllocated: Int { get }
+    var individualAllocationSize: Int { get }
+    func allocate() -> Allocation2
+    func release(allocation: Allocation2)
+    func release(allocationNode: AllocationNode)
+    func trim()
+}
+
+final class DefaultAllocator2: Allocator2 {
+    var totalBytesAllocated: Int {
+        assert(queue.isCurrent())
+        return allocatedCount * _individualAllocationSize
+    }
+
+    var individualAllocationSize: Int {
+        assert(queue.isCurrent())
+        return _individualAllocationSize
+    }
+
+    private let queue: Queue
+    private let trimOnReset: Bool
+    private let _individualAllocationSize: Int
+
+    private var allocatedCount = 0
+    private var availableCount = 0
+    private var targetBufferSize = 0
+
+    private var availableAllocations: [Allocation2] = []
+
+    init(
+        queue: Queue,
+        trimOnReset: Bool = true,
+        individualAllocationSize: Int = Int(2 * getpagesize()),
+        initialAllocationCount: Int = 0
+    ) {
+        self.queue = queue
+        self.trimOnReset = trimOnReset
+        self._individualAllocationSize = malloc_good_size(individualAllocationSize)
+    }
+
+    func reset() {
+        assert(queue.isCurrent())
+        if trimOnReset {
+            setTargetBufferSize(new: 0)
+        }
+    }
+
+    func setTargetBufferSize(new targetBufferSize: Int) {
+        assert(queue.isCurrent())
+        let didReduceBufferSize = targetBufferSize < self.targetBufferSize
+        self.targetBufferSize = targetBufferSize
+        if didReduceBufferSize {
+            trim()
+        }
+    }
+
+    func allocate() -> Allocation2 {
+        assert(queue.isCurrent())
+        if availableCount > 0 {
+            availableCount -= 1
+            return availableAllocations.removeLast()
+        } else {
+            let ptr = malloc(size_t(individualAllocationSize))!
+            ptr.bindMemory(to: UInt8.self, capacity: individualAllocationSize)
+
+            return .init(data: ptr, capacity: individualAllocationSize)
+        }
+    }
+
+    func release(allocation: Allocation2) {
+        assert(queue.isCurrent())
+        availableAllocations.append(allocation)
+        availableCount += 1
+        allocatedCount -= 1
+    }
+
+    func release(allocationNode: AllocationNode) {
+        assert(queue.isCurrent())
+        var allocationNode: AllocationNode? = allocationNode
+        while let allocationNodeToClear = allocationNode {
+            availableCount += 1
+            allocatedCount -= 1
+            availableAllocations.append(allocationNodeToClear.getAllocation())
+            allocationNode = allocationNodeToClear.next()
+        }
+    }
+
+    func trim() {
+        assert(queue.isCurrent())
+        let targetAllocationCount = (targetBufferSize + individualAllocationSize - 1) / individualAllocationSize
+        let targetAvailableCount = max(0, targetAllocationCount - allocatedCount)
+        guard targetAvailableCount < availableCount else { return }
+
+        if targetAvailableCount == 0 {
+            availableAllocations.removeAll(keepingCapacity: true)
+        }
+        availableAllocations.removeSubrange(targetAvailableCount..<availableCount)
     }
 }

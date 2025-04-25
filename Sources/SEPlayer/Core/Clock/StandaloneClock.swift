@@ -8,13 +8,10 @@
 import CoreMedia
 
 final class StandaloneClock: MediaClock {
-    var playbackParameters: PlaybackParameters {
-        didSet { updatePlaybackParameters() }
-    }
 
     private let clock: CMClock
 
-    private var playbackRate: Float = 1.0
+    private var playbackParameters: PlaybackParameters
     private var started: Bool = false
     private var baseElapsed: Int64 = 0
     private var baseTime: Int64 = 0
@@ -53,9 +50,12 @@ final class StandaloneClock: MediaClock {
         return position
     }
 
-    func setPlaybackRate(new playbackRate: Float) {
-        guard self.playbackRate != playbackRate else { return }
-        self.playbackRate = playbackRate
+    func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
+        self.playbackParameters = playbackParameters
+    }
+
+    func getPlaybackParameters() -> PlaybackParameters {
+        playbackParameters
     }
 
     private func updatePlaybackParameters() {
