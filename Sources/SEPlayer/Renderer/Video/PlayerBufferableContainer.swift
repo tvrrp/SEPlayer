@@ -72,41 +72,21 @@ final class PlayerBufferableContainer {
 
 extension PlayerBufferableContainer: DisplayLinkListener {
     func displayLinkTick(_ info: DisplayLinkInfo) {
-//        let deadline = info.currentTimestampNs...info.targetTimestampNs
-
-//        if let sampleWrapper = sampleQueue?.dequeue() {
-//            if sampleWrapper.presentationTime > info.targetTimestampNs {
-////                print("ℹ️ pixel buffer is early")
-//                try? sampleQueue?.enqueue(sampleWrapper)
-//            } else if deadline.contains(sampleWrapper.presentationTime) {
-//                guard let pixelBuffer = sampleWrapper.imageBuffer else { return }
-//                lastPixelBuffer = pixelBuffer
-//                bufferables.forEach { $0.enqueue(pixelBuffer) }
-////                print("✅ enqueuing pixel buffer")
-//            } else {
-////                print("❌ missed sample")
-//                displayLinkTick(info)
-//            }
-//        }
-        guard let sampleQueue, !sampleQueue.isEmpty else { return }
-
-        let firstPts = sampleQueue.firstPresentationTimeStamp.nanoseconds
         let deadline = info.currentTimestampNs...info.targetTimestampNs
 
-        guard firstPts < info.targetTimestampNs else {
-//            print("ℹ️ pixel buffer is early")
-            return
-        }
-
-        if deadline.contains(firstPts) {
-            guard let pixelBuffer = sampleQueue.dequeue()?.imageBuffer else { return }
-
-//            print("✅ enqueuing pixel buffer")
-            lastPixelBuffer = pixelBuffer
-            bufferables.forEach { $0.enqueue(pixelBuffer) }
-        } else {
-//            print("❌ missed sample")
-            displayLinkTick(info)
+        if let sampleWrapper = sampleQueue?.dequeue() {
+            if sampleWrapper.presentationTime > info.targetTimestampNs {
+//                print("ℹ️ pixel buffer is early")
+                try? sampleQueue?.enqueue(sampleWrapper)
+            } else if deadline.contains(sampleWrapper.presentationTime) {
+                guard let pixelBuffer = sampleWrapper.imageBuffer else { return }
+                lastPixelBuffer = pixelBuffer
+                bufferables.forEach { $0.enqueue(pixelBuffer) }
+//                print("✅ enqueuing pixel buffer")
+            } else {
+//                print("❌ missed sample")
+                displayLinkTick(info)
+            }
         }
     }
 }

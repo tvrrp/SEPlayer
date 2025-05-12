@@ -17,10 +17,11 @@ protocol CoreVideoBuffer: DecoderOutputBuffer {
     var imageBuffer: CVImageBuffer? { get }
 }
 
-final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer2 {
+final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     private var decoder: Decoder?
     private let queue: Queue
     private let bufferableContainer: PlayerBufferableContainer
+    private let decoderFactory: SEDecoderFactory
 
     private let flagsOnlyBuffer: DecoderInputBuffer
     private var inputFormat: CMFormatDescription?
@@ -29,7 +30,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer2 {
     private var inputBuffer: DecoderInputBuffer
     private var outputBuffer: CoreVideoBuffer?
 
-    private var decoderReinitializationState: ReinitializationState = .none
+    private var decoderReinitializationState: DecoderReinitializationState = .none
     private var decoderReceivedBuffers: Bool = false
 
     private var initialPosition: Int64?
@@ -50,10 +51,17 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer2 {
 
     private var pendingFramesAfterStop: [ImageBufferWrapper] = []
 
-    init(queue: Queue, clock: CMClock, displayLink: DisplayLinkProvider, bufferableContainer: PlayerBufferableContainer) throws {
+    init(
+        queue: Queue,
+        clock: CMClock,
+        displayLink: DisplayLinkProvider,
+        bufferableContainer: PlayerBufferableContainer,
+        decoderFactory: SEDecoderFactory
+    ) throws {
         self.queue = queue
         self.bufferableContainer = bufferableContainer
         self.videoFrameReleaseControl = VideoFrameReleaseControl(queue: queue, clock: clock, displayLink: displayLink)
+        self.decoderFactory = decoderFactory
 
         outputSampleQueue = try TypedCMBufferQueue(compareHandler: { rhs, lhs in
             guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
@@ -149,7 +157,6 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer2 {
         if rendererOtherwiseReady, decoder == nil {
             return true
         }
-        let isReadyTest = videoFrameReleaseControl.isReady() && rendererOtherwiseReady
         return videoFrameReleaseControl.isReady() && rendererOtherwiseReady
     }
 
@@ -219,9 +226,9 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer2 {
     }
 
     func createDecoder(format: CMFormatDescription) throws -> Decoder {
-        let decoder = try VideoToolboxDecoder(queue: queue, formatDescription: format)
+        let decoder = try decoderFactory.create(type: Decoder.self, queue: queue, format: format)
         decoder.setPlaybackSpeed(playbackSpeed)
-        return decoder as! Decoder
+        return decoder
     }
 
     func onInputFormatChanged(format: CMFormatDescription) throws {
@@ -285,10 +292,10 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer2 {
                 resetInputBuffer()
                 return false
             }
-            if waitingForFirstSampleInFormat, let inputFormat {
+//            if waitingForFirstSampleInFormat, let inputFormat {
 //                formatQueue.add(timestamp: inputBuffer.time, value: inputFormat)
-                waitingForFirstSampleInFormat = false
-            }
+//                waitingForFirstSampleInFormat = false
+//            }
             try decoder.queueInputBuffer(for: inputIndex, inputBuffer: inputBuffer)
             buffersInCodecCount += 1
             decoderReceivedBuffers = true
@@ -394,12 +401,6 @@ private extension CAVideoRenderer {
     func resetInputBuffer() {
         inputIndex = nil
         inputBuffer.reset()
-    }
-
-    enum ReinitializationState {
-        case none
-        case signalEndOfStream
-        case waitEndOfStream
     }
 }
 

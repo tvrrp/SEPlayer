@@ -9,17 +9,24 @@ import CoreMedia
 import Foundation
 
 final class ProgressiveMediaSource: BaseMediaSource {
+    protocol Listener: AnyObject {
+        func onSeekMap(source: MediaSource, seekMap: SeekMap)
+    }
+
+    weak var listener: Listener?
     var mediaPerionId: MediaPeriodId { fatalError() }
     var mediaItem: MediaItem { assert(queue.isCurrent()); return _mediaItem }
 
     private let queue: Queue
-    private let _mediaItem: MediaItem
+    private var _mediaItem: MediaItem
     private let dataSource: DataSource
     private let progressiveMediaExtractor: ProgressiveMediaExtractor
     private let continueLoadingCheckIntervalBytes: Int
 
     private var timelineIsPlaceholder: Bool
-    private var timelineDuration: CMTime
+    private var timelineDuration: Int64
+    private var timelineIsSeekable = false
+    private var timelineIsLive = false
 
     private var mediaTransferListener: TransferListener?
 
@@ -36,8 +43,12 @@ final class ProgressiveMediaSource: BaseMediaSource {
         self.progressiveMediaExtractor = progressiveMediaExtractor
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
         self.timelineIsPlaceholder = true
-        self.timelineDuration = .indefinite
+        self.timelineDuration = .timeUnset
         super.init(queue: queue)
+    }
+
+    override func updateMediaItem() {
+//        self.
     }
 
     override func prepareSourceInternal(mediaTransferListener: (any TransferListener)?) {
@@ -47,9 +58,8 @@ final class ProgressiveMediaSource: BaseMediaSource {
 
     override func createPeriod(
         id: MediaPeriodId,
-//        allocator: Allocator,
-        allocator: Allocator2,
-        startPosition: CMTime,
+        allocator: Allocator,
+        startPosition: Int64,
         loadCondition: LoadConditionCheckable,
         mediaSourceEventDelegate: MediaSourceEventListener
     ) -> MediaPeriod {
@@ -78,8 +88,28 @@ final class ProgressiveMediaSource: BaseMediaSource {
 }
 
 extension ProgressiveMediaSource: ProgressiveMediaPeriod.Delegate {
-    func sourceInfoRefreshed(duration: CMTime) {
-        let duration = duration == .indefinite ? timelineDuration : duration
+    func sourceInfoRefreshed(duration: Int64, seekMap: SeekMap, isLive: Bool) {
+        let duration = duration == .timeUnset ? timelineDuration : duration
+        let isSeekable = seekMap.isSeekable()
+
+        guard timelineIsPlaceholder,
+              timelineDuration != duration,
+              timelineIsSeekable != isSeekable,
+              timelineIsLive != isLive else {
+            return
+        }
+
+        timelineIsPlaceholder = false
+        timelineDuration = duration
+        timelineIsSeekable = isSeekable
+        timelineIsLive = isLive
+
+        notifySourceInfoRefreshed()
+        listener?.onSeekMap(source: self, seekMap: seekMap)
+    }
+
+    func sourceInfoRefreshed(duration: Int64) {
+        let duration = duration == .timeUnset ? timelineDuration : duration
         guard timelineDuration != duration else { return }
         timelineDuration = duration
         notifySourceInfoRefreshed()

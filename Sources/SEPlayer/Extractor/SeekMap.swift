@@ -9,8 +9,8 @@ import CoreMedia
 
 protocol SeekMap {
     func isSeekable() -> Bool
-    func getDuration() -> CMTime
-    func getSeekPoints(for time: CMTime) -> SeekPoints
+    func getDuration() -> Int64
+    func getSeekPoints(for time: Int64) -> SeekPoints
 }
 
 struct SeekPoints: Hashable {
@@ -25,11 +25,11 @@ struct SeekPoints: Hashable {
 
 extension SeekPoints {
     struct SeekPoint: Hashable {
-        let time: CMTime
+        let time: Int64
         let position: Int
 
         static func start() -> SeekPoint {
-            SeekPoint(time: .zero, position: 0)
+            SeekPoint(time: 0, position: 0)
         }
     }
 }

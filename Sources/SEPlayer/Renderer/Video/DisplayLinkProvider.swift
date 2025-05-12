@@ -40,8 +40,7 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
         return value
     }
 
-    private let observers = MulticastDelegate<DisplayLinkListener>()
-    private let queue: Queue
+    private let observers = MulticastDelegate<DisplayLinkListener>(isThreadSafe: true)
     private var displayLink: CADisplayLink?
 
     private var isStarted: Bool = false
@@ -51,12 +50,8 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     private var _vsyncDuration: Int64?
     private var onDisplayLinkExecuting: Bool = false
 
-    init(queue: Queue) {
-        self.queue = queue
-    }
-
     func addObserver() {
-        assert(queue.isCurrent())
+//        assert(queue.isCurrent())
         observersCount += 1
         if observersCount > 0 {
             startIfNeeded()
@@ -64,7 +59,7 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     }
 
     func removeObserver() {
-        assert(queue.isCurrent())
+//        assert(queue.isCurrent())
         observersCount -= 1
         if observersCount == 0 {
             removeIfNeeded()
@@ -73,12 +68,10 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     }
 
     func addOutput(_ output: DisplayLinkListener) {
-        assert(queue.isCurrent())
         observers.addDelegate(output)
     }
 
     func removeOutput(_ output: DisplayLinkListener) {
-        assert(queue.isCurrent())
         observers.removeDelegate(output)
     }
 

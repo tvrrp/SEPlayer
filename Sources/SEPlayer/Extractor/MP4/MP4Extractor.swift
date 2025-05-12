@@ -31,7 +31,7 @@ final class MP4Extractor: Extractor {
     private var sampleTrackIndex: Int?
     private var sampleBytesRead = 0
 
-    private var duration: CMTime = .negativeInfinity
+    private var duration: Int64 = .timeUnset
 
     init(queue: Queue, extractorOutput: ExtractorOutput) {
         self.queue = queue
@@ -70,7 +70,7 @@ final class MP4Extractor: Extractor {
         }
     }
 
-    func seek(to position: Int, time: CMTime) {
+    func seek(to position: Int, time: Int64) {
         containerAtoms.removeAll()
         atomHeaderBytesRead = 0
         sampleTrackIndex = nil
@@ -91,20 +91,20 @@ extension MP4Extractor: SeekMap {
         return true
     }
 
-    func getDuration() -> CMTime {
+    func getDuration() -> Int64 {
         queue.sync { return duration }
     }
 
-    func getSeekPoints(for time: CMTime) -> SeekPoints {
+    func getSeekPoints(for time: Int64) -> SeekPoints {
         queue.sync { return getSeekPoints(for: time, trackId: nil) }
     }
 
-    func getSeekPoints(for time: CMTime, trackId: Int?) -> SeekPoints {
+    func getSeekPoints(for time: Int64, trackId: Int?) -> SeekPoints {
         queue.sync {
             guard !tracks.isEmpty else { return SeekPoints(first: .start()) }
-            var firstTime: CMTime
+            var firstTime: Int64
             var firstOffset: Int
-            var secondTime: CMTime?
+            var secondTime: Int64?
             var secondOffset: Int?
 
             let mainTrackIndex = trackId ?? tracks.firstIndex(where: { track in
@@ -301,7 +301,7 @@ private extension MP4Extractor {
                 }
 
                 trackOutput.sampleMetadata(
-                    time: sample.decodeTimeStamp.microseconds,
+                    time: sample.decodeTimeStamp,
                     flags: sample.flags,
                     size: sample.size,
                     offset: 0
@@ -325,7 +325,7 @@ private extension MP4Extractor {
         }
     }
 
-    func loadToTrackOutput(input: ExtractorInput, trackOutput: TrackOutput2, amount: Int, completion: @escaping (Error?) -> Void) {
+    func loadToTrackOutput(input: ExtractorInput, trackOutput: TrackOutput, amount: Int, completion: @escaping (Error?) -> Void) {
         trackOutput.loadSampleData(input: input, length: amount, completionQueue: queue) { [weak self] result in
             guard let self else { return }
             assert(queue.isCurrent())
@@ -368,7 +368,7 @@ private extension MP4Extractor {
             let trackDuration = CMTime(
                 value: CMTimeValue(track.duration),
                 timescale: CMTimeScale(track.timescale)
-            )
+            ).microseconds
             mp4Track.trackOutput.setFormat(track.format.formatDescription)
 
             self.duration = max(duration, trackDuration)
@@ -462,7 +462,7 @@ private extension MP4Extractor {
         var accumulatedSampleSize = 0
         var finishedTracks = 0
         while finishedTracks < tracks.count {
-            var minTime = CMTime.positiveInfinity
+            var minTime = Int64.max
             var minTimeTrackIndex = -1
             for i in 0..<tracks.count {
                 if !tracksFinished[i] && nextSampleTimes[i] <= minTime {
@@ -486,7 +486,7 @@ private extension MP4Extractor {
         return accumulatedSampleSizes
     }
 
-    func adjustSeekOffset(sampleTable: BoxParser.TrackSampleTable, seekTime: CMTime, offset: Int) -> Int {
+    func adjustSeekOffset(sampleTable: BoxParser.TrackSampleTable, seekTime: Int64, offset: Int) -> Int {
         if let (_, syncSample) = sampleTable.syncSample(for: seekTime) {
             return min(offset, syncSample.offset)
         } else {
@@ -505,7 +505,7 @@ private extension MP4Extractor {
     struct MP4Track {
         let track: Track
         let sampleTable: BoxParser.TrackSampleTable
-        let trackOutput: TrackOutput2
+        let trackOutput: TrackOutput
 
         var sampleIndex: Int = 0
     }
@@ -552,11 +552,11 @@ private extension Int {
 }
 
 private extension BoxParser.TrackSampleTable {
-    func syncSample(for time: CMTime) -> (index: Int, sample: Sample)? {
+    func syncSample(for time: Int64) -> (index: Int, sample: Sample)? {
         return earlierOrEqualSyncSample(for: time) ?? laterOrEqualSyncSample(for: time)
     }
 
-    func earlierOrEqualSyncSample(for time: CMTime) -> (index: Int, sample: Sample)? {
+    func earlierOrEqualSyncSample(for time: Int64) -> (index: Int, sample: Sample)? {
         guard let startIndex = samples.firstIndex(where: { $0.decodeTimeStamp >= time}) else {
             return nil
         }
@@ -568,7 +568,7 @@ private extension BoxParser.TrackSampleTable {
         return nil
     }
 
-    func laterOrEqualSyncSample(for time: CMTime) -> (index: Int, sample: Sample)? {
+    func laterOrEqualSyncSample(for time: Int64) -> (index: Int, sample: Sample)? {
         guard let startIndex = samples.firstIndex(where: { $0.decodeTimeStamp >= time}) else {
             return nil
         }

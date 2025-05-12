@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8D28AA172DC8786400A67F38 /* SEPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 8D28AA162DC8786400A67F38 /* SEPlayer */; };
 		8D307C3C2D2C0ACD0065A7DD /* SEPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 8D307C3B2D2C0ACD0065A7DD /* SEPlayer */; };
 		8D4BB8C02D2C0748001B5876 /* SEPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 8D4BB8BF2D2C0748001B5876 /* SEPlayer */; };
 		8D66695D2DAC1B8B00F14F16 /* SEPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 8D66695C2DAC1B8B00F14F16 /* SEPlayer */; };
@@ -43,6 +44,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8D4BB8C02D2C0748001B5876 /* SEPlayer in Frameworks */,
+				8D28AA172DC8786400A67F38 /* SEPlayer in Frameworks */,
 				8D66695D2DAC1B8B00F14F16 /* SEPlayer in Frameworks */,
 				8D307C3C2D2C0ACD0065A7DD /* SEPlayer in Frameworks */,
 			);
@@ -90,6 +92,7 @@
 				8D4BB8BF2D2C0748001B5876 /* SEPlayer */,
 				8D307C3B2D2C0ACD0065A7DD /* SEPlayer */,
 				8D66695C2DAC1B8B00F14F16 /* SEPlayer */,
+				8D28AA162DC8786400A67F38 /* SEPlayer */,
 			);
 			productName = DemoApp;
 			productReference = 8D4BB8A52D2C064F001B5876 /* DemoApp.app */;
@@ -120,7 +123,7 @@
 			mainGroup = 8D4BB89A2D2C05DB001B5876;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8D66695B2DAC1B8B00F14F16 /* XCLocalSwiftPackageReference "../../SEPlayer2" */,
+				8D28AA152DC8786400A67F38 /* XCLocalSwiftPackageReference "../../SEPlayer" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8D4BB8A62D2C064F001B5876 /* Products */;
@@ -352,13 +355,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		8D66695B2DAC1B8B00F14F16 /* XCLocalSwiftPackageReference "../../SEPlayer2" */ = {
+		8D28AA152DC8786400A67F38 /* XCLocalSwiftPackageReference "../../SEPlayer" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../SEPlayer2;
+			relativePath = ../../SEPlayer;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		8D28AA162DC8786400A67F38 /* SEPlayer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SEPlayer;
+		};
 		8D307C3B2D2C0ACD0065A7DD /* SEPlayer */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SEPlayer;

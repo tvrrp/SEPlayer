@@ -8,7 +8,6 @@
 import Foundation
 
 enum ByteBufferError: Error {
-    case parse
     case endOfData
 }
 
@@ -22,7 +21,7 @@ extension ByteBuffer {
         if let value = self.readInteger(endianness: endianness, as: T.self) {
             return value
         } else {
-            throw ByteBufferError.parse
+            throw ByteBufferError.endOfData
         }
     }
 

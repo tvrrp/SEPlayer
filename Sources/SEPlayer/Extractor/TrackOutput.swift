@@ -8,5 +8,7 @@
 import CoreMedia
 
 protocol TrackOutput {
-    func sampleData(input: DataReader, allowEndOfInput: Bool, metadata: SampleMetadata, completionQueue: Queue, completion: @escaping (Error?) -> Void)
+    func setFormat(_ format: CMFormatDescription)
+    func loadSampleData(input: DataReader, length: Int, completionQueue: Queue, completion: @escaping (Result<Int, Error>) -> Void)
+    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int)
 }

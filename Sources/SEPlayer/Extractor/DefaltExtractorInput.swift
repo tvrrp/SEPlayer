@@ -77,30 +77,6 @@ final class DefaltExtractorInput: ExtractorInput {
         }
     }
 
-    func read(allocation: Allocation2, offset: Int, length: Int, completionQueue: any Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
-        queue.async { [weak self] in
-            guard let self else { completionQueue.async { completion(.failure(DataReaderError.endOfInput)) }; return }
-            dataReader.read(allocation: allocation, offset: offset, length: length, completionQueue: queue) { result in
-                if case let .success(bytesRead) = result {
-                    self.commitBytesRead(bytesRead)
-                }
-                completionQueue.async { completion(result) }
-            }
-        }
-    }
-
-//    func read(blockBuffer: CMBlockBuffer, offset: Int, length: Int, completionQueue: any Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
-//        queue.async { [weak self] in
-//            guard let self else { completionQueue.async { completion(.failure(DataReaderError.endOfInput)) }; return }
-//            dataReader.read(blockBuffer: blockBuffer, offset: offset, length: length, completionQueue: queue) { result in
-//                if case let .success(bytesRead) = result {
-//                    self.commitBytesRead(bytesRead)
-//                }
-//                completionQueue.async { completion(result) }
-//            }
-//        }
-//    }
-
 //    @discardableResult
 //    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowsEndOfInput: Bool) async throws -> Bool {
 //        executor.assertIsolated()

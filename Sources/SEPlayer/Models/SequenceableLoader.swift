@@ -13,8 +13,9 @@ protocol SequenceableLoaderCallback {
 }
 
 protocol SequenceableLoader {
-    var bufferedPosition: CMTime { get }
-    var nextLoadPosition: CMTime { get }
+    var bufferedPosition: Int64 { get }
+    var nextLoadPosition: Int64 { get }
     var isLoading: Bool { get }
-    func continueLoading(with loadingInfo: Void) -> Bool
+    @discardableResult
+    func continueLoading(with loadingInfo: LoadingInfo) -> Bool
 }

@@ -15,13 +15,14 @@ protocol MediaSource: AnyObject {
     func addEventListener(_ listener: MediaSourceEventListener)
     func removeEventListener(_ listener: MediaSourceEventListener)
     func getInitialTimeline() -> Timeline?
+    func canUpdateMediaItem(new item: MediaItem) -> Bool
+    func updateMediaItem()
     func prepareSource(delegate: MediaSourceDelegate, mediaTransferListener: TransferListener?, playerId: UUID)
     func enable(delegate: MediaSourceDelegate)
     func createPeriod(
         id: MediaPeriodId,
-//        allocator: Allocator,
-        allocator: Allocator2,
-        startPosition: CMTime,
+        allocator: Allocator,
+        startPosition: Int64,
         loadCondition: LoadConditionCheckable,
         mediaSourceEventDelegate: MediaSourceEventListener
     ) -> MediaPeriod
@@ -35,6 +36,8 @@ extension MediaSource {
     var isSingleWindow: Bool { true }
 
     func getInitialTimeline() -> Timeline? { nil }
+    func canUpdateMediaItem(new item: MediaItem) -> Bool { false }
+    func updateMediaItem() {}
 }
 
 protocol MediaSourceEventListener: AnyObject {
@@ -79,9 +82,8 @@ class BaseMediaSource: MediaSource {
     func enableInternal() { fatalError("To override") }
     func createPeriod(
         id: MediaPeriodId,
-//        allocator: Allocator,
-        allocator: Allocator2,
-        startPosition: CMTime,
+        allocator: Allocator,
+        startPosition: Int64,
         loadCondition: LoadConditionCheckable,
         mediaSourceEventDelegate: MediaSourceEventListener
     ) -> MediaPeriod {

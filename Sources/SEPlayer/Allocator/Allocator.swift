@@ -8,98 +8,21 @@
 import unistd
 import Darwin
 
-protocol Allocator {
-    var totalBytesAllocated: Int { get }
-    var individualAllocationSize: Int { get }
-
-    func allocate(capacity: Int) -> Allocation
-    func release(allocation: Allocation)
-    func trim()
-}
-
-final class DefaultAllocator: Allocator {
-    var totalBytesAllocated: Int {
-        allocatedCount * individualAllocationSize
-    }
-
-    let individualAllocationSize: Int
-
-    private let queue: Queue
-    private let trimOnReset: Bool
-    private let initialAllocationBlock: UnsafeMutableRawBufferPointer?
-
-    private var targetBufferSize: Int
-    private var allocatedCount: Int
-    private var availableCount: Int
-    private var availableAllocations: [Allocation]
-
-    init(queue: Queue, trimOnReset: Bool, initialAllocationCount: Int = 0) {
-        self.queue = queue
-        self.trimOnReset = trimOnReset
-        self.individualAllocationSize = Int(getpagesize())
-        self.targetBufferSize = 0
-        self.allocatedCount = 0
-        self.availableCount = initialAllocationCount
-        self.availableAllocations = []
-        if initialAllocationCount > 0 {
-            let initialAllocationBlock = UnsafeMutableRawBufferPointer.allocateUInt8(
-                byteCount: initialAllocationCount * individualAllocationSize
-            )
-            for i in 0..<initialAllocationCount {
-                availableAllocations.append(
-                    Allocation(queue: queue, data: initialAllocationBlock, offset: i * individualAllocationSize, size: individualAllocationSize)
-                )
-            }
-            self.initialAllocationBlock = initialAllocationBlock
-        } else {
-            initialAllocationBlock = nil
-        }
-    }
-
-    func allocate(capacity: Int) -> Allocation {
-        assert(queue.isCurrent())
-        let allocation: Allocation
-        let size = capacity
-        allocation = Allocation(
-            queue: queue,
-            data: UnsafeMutableRawBufferPointer.allocateUInt8(byteCount: size),
-            size: size
-        )
-
-        return allocation
-    }
-
-    func release(allocation: Allocation) {
-        assert(queue.isCurrent())
-        allocation.data.deallocate()
-    }
-
-    func trim() {
-        assert(queue.isCurrent())
-    }
-}
-
-extension UnsafeMutableRawBufferPointer {
-    static func allocateUInt8(byteCount: Int) -> Self {
-        UnsafeMutableRawBufferPointer.allocate(byteCount: byteCount, alignment: MemoryLayout<UInt8>.alignment)
-    }
-}
-
 protocol AllocationNode: AnyObject {
-    func getAllocation() -> Allocation2
+    func getAllocation() -> Allocation
     func next() -> AllocationNode?
 }
 
-protocol Allocator2: AnyObject {
+protocol Allocator: AnyObject {
     var totalBytesAllocated: Int { get }
     var individualAllocationSize: Int { get }
-    func allocate() -> Allocation2
-    func release(allocation: Allocation2)
+    func allocate() -> Allocation
+    func release(allocation: Allocation)
     func release(allocationNode: AllocationNode)
     func trim()
 }
 
-final class DefaultAllocator2: Allocator2 {
+final class DefaultAllocator: Allocator {
     var totalBytesAllocated: Int {
         assert(queue.isCurrent())
         return allocatedCount * _individualAllocationSize
@@ -118,7 +41,7 @@ final class DefaultAllocator2: Allocator2 {
     private var availableCount = 0
     private var targetBufferSize = 0
 
-    private var availableAllocations: [Allocation2] = []
+    private var availableAllocations: [Allocation] = []
 
     init(
         queue: Queue,
@@ -147,7 +70,7 @@ final class DefaultAllocator2: Allocator2 {
         }
     }
 
-    func allocate() -> Allocation2 {
+    func allocate() -> Allocation {
         assert(queue.isCurrent())
         if availableCount > 0 {
             availableCount -= 1
@@ -160,7 +83,7 @@ final class DefaultAllocator2: Allocator2 {
         }
     }
 
-    func release(allocation: Allocation2) {
+    func release(allocation: Allocation) {
         assert(queue.isCurrent())
         availableAllocations.append(allocation)
         availableCount += 1

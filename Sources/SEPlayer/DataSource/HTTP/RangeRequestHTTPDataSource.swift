@@ -127,49 +127,6 @@ final class RangeRequestHTTPDataSource: DataSource {
             }
         }
     }
-
-    func read(allocation: Allocation2, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
-        queue.async { [weak self] in
-            guard let self, let currentDataSpec else {
-                completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return
-            }
-
-            requestHandler.read(allocation: allocation, offset: offset, length: length, completionQueue: queue) { [weak self] result in
-                guard let self else { return }
-
-                switch result {
-                case let .success(bytesRead):
-                    if bytesRead == length {
-                        completionQueue.async { completion(.success(bytesRead)) }
-                    } else {
-                        let newDataSpec = currentDataSpec
-                            .offset(currentDataSpec.range.upperBound + 1)
-                            .length(max(defaultSegmentLenght, length - bytesRead))
-
-                        self.currentDataSpec = newDataSpec
-
-                        open(dataSpec: newDataSpec, completionQueue: queue) { openResult in
-                            switch openResult {
-                            case .success(_):
-                                self.read(allocation: allocation, offset: offset + bytesRead, length: length - bytesRead, completionQueue: self.queue) { result in
-                                    switch result {
-                                    case let .success(bytesReadAfterNewConnection):
-                                        completionQueue.async { completion(.success(bytesRead + bytesReadAfterNewConnection)) }
-                                    case let .failure(error):
-                                        completionQueue.async { completion(.failure(error)) }
-                                    }
-                                }
-                            case let .failure(error):
-                                completionQueue.async { completion(.failure(error)) }
-                            }
-                        }
-                    }
-                case let .failure(error):
-                    completionQueue.async { completion(.failure(error)) }
-                }
-            }
-        }
-    }
     
     @discardableResult
     func close() -> ByteBuffer? {

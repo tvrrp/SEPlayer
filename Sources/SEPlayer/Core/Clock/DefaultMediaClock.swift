@@ -10,7 +10,7 @@ import CoreMedia
 final class DefaultMediaClock: MediaClock {
     private let standaloneClock: StandaloneClock
     private var rendererClock: MediaClock?
-    private var renderClockSource: BaseSERenderer?
+    private var renderClockSource: SERenderer?
 
     private var isUsingStandaloneClock: Bool = false
     private var standaloneClockIsStarted: Bool = false
@@ -33,7 +33,7 @@ final class DefaultMediaClock: MediaClock {
         standaloneClock.resetPosition(position: position)
     }
 
-    func onRendererEnabled(renderer: BaseSERenderer) {
+    func onRendererEnabled(renderer: SERenderer) {
         let rendererMediaClock = renderer.getMediaClock()
         if let rendererMediaClock, rendererMediaClock !== rendererClock {
             rendererClock = rendererMediaClock
@@ -42,7 +42,7 @@ final class DefaultMediaClock: MediaClock {
         }
     }
 
-    func onRendererDisabled(renderer: BaseSERenderer) {
+    func onRendererDisabled(renderer: SERenderer) {
         if renderer === rendererClock {
             rendererClock = nil
             renderClockSource = nil
@@ -98,9 +98,9 @@ final class DefaultMediaClock: MediaClock {
     private func shouldUseStandaloneClock(isReadingAhead: Bool) -> Bool {
         guard let renderClockSource else { return true }
 
-        return //|| renderClockSource.isEnded()
-            (isReadingAhead && renderClockSource.isStarted == false)
-            || (!renderClockSource.isReady())
-//        && (isReadingAhead || renderClockSource )
+        return renderClockSource.isEnded()
+            || (isReadingAhead && renderClockSource.getState() != .started)
+            || !renderClockSource.isReady()
+                && isReadingAhead || renderClockSource.didReadStreamToEnd()
     }
 }

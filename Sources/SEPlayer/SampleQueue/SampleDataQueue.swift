@@ -9,7 +9,7 @@ import CoreMedia
 
 final class SampleDataQueue {
     private let queue: Queue
-    private let allocator: Allocator2
+    private let allocator: Allocator
 
     private let allocationLength: Int
     private var firstAllocationNode: SampleAllocationNode
@@ -18,7 +18,7 @@ final class SampleDataQueue {
 
     private var totalBytesWritten: Int = 0
 
-    init(queue: Queue, allocator: Allocator2) {
+    init(queue: Queue, allocator: Allocator) {
         self.queue = queue
         self.allocator = allocator
         allocationLength = allocator.individualAllocationSize
@@ -34,7 +34,11 @@ final class SampleDataQueue {
     func reset() {
         assert(queue.isCurrent())
         clearAllocationNodes(fromNode: firstAllocationNode)
-        firstAllocationNode.reset(startPosition: 0, allocationLength: allocationLength)
+        firstAllocationNode = SampleAllocationNode(
+            allocation: allocator.allocate(),
+            startPosition: 0,
+            allocationLength: allocationLength
+        )
         readAllocationNode = firstAllocationNode
         writeAllocationNode = firstAllocationNode
         totalBytesWritten = 0
@@ -209,20 +213,6 @@ final class SampleDataQueue {
                 node = next
             }
         }
-//        try target.withUnsafeMutableBytes { rawPointer in
-//            while remaining > 0, let baseAdress = rawPointer.baseAddress?.advanced(by: bufferOffset) {
-//                let toCopy = min(remaining, node.endPosition - absolutePosition)
-//                let nodeOffset = node.translateOffset(absolutePosition: absolutePosition)
-//                memcpy(baseAdress, node.allocation.data.advanced(by: nodeOffset), toCopy)
-//                remaining -= toCopy
-//                absolutePosition += toCopy
-//                bufferOffset += toCopy
-//
-//                if absolutePosition == node.endPosition, let next = node.nextNode {
-//                    node = next
-//                }
-//            }
-//        }
 
         return node
     }
@@ -244,10 +234,10 @@ private final class SampleAllocationNode: AllocationNode {
     var startPosition: Int
     var endPosition: Int
 
-    let allocation: Allocation2
+    let allocation: Allocation
     var nextNode: SampleAllocationNode?
 
-    init(allocation: Allocation2, startPosition: Int, allocationLength: Int) {
+    init(allocation: Allocation, startPosition: Int, allocationLength: Int) {
         self.allocation = allocation
         self.startPosition = startPosition
         self.endPosition = startPosition + allocationLength
@@ -273,7 +263,7 @@ private final class SampleAllocationNode: AllocationNode {
         return temp
     }
 
-    func getAllocation() -> Allocation2 {
+    func getAllocation() -> Allocation {
         return allocation
     }
 

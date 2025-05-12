@@ -40,26 +40,15 @@ public final class SEPlayer {
 
     var started = false
 
-    init(
-        identifier: UUID = UUID(),
-        returnQueue: Queue = Queues.mainQueue,
-        sessionLoader: IPlayerSessionLoader
-    ) {
-        queue = SignalQueue(name: "com.SEPlayer.work_\(identifier)", qos: .userInitiated)
-        self.identifier = identifier
-        self.returnQueue = returnQueue
-        let allocator = DefaultAllocator(queue: queue, trimOnReset: true)
-        let allocator2 = DefaultAllocator2(queue: queue, trimOnReset: true)
+    init(dependencies: SEPlayerStateDependencies, renderersFactory: RenderersFactory) {
+        self.queue = dependencies.queue
+        self.identifier = dependencies.playerId
+        self.returnQueue = dependencies.returnQueue
 
-        _dependencies = SEPlayerStateDependencies(
-            queue: queue,
-            returnQueue: returnQueue,
-            sessionLoader: sessionLoader,
-            playerId: identifier,
-            allocator: allocator,
-            allocator2: allocator2
-        )
-        self.timer = DispatchSource.makeTimerSource(flags: .strict, queue: queue.queue)
+        _dependencies = dependencies
+        _dependencies.renderers = renderersFactory
+            .createRenderers(dependencies: _dependencies)
+        self.timer = DispatchSource.makeTimerSource(queue: queue.queue)
         setupTimer()
     }
 
@@ -119,11 +108,11 @@ private extension SEPlayer {
 
         let mediaPeriodHolder = MediaPeriodHolder(
             queue: queue,
-            rendererCapabilities: _dependencies.newRenderers.map { $0.getCapabilities() },
-            allocator: _dependencies.allocator2,
+            rendererCapabilities: _dependencies.renderers.map { $0.getCapabilities() },
+            allocator: _dependencies.allocator,
             mediaSourceList: mediaSourceList,
             info: .init(
-                id: .init(periodId: UUID(), windowSequenceNumber: 0), startPosition: .zero, requestedContentPosition: .zero, endPosition: .zero, duration: .zero
+                id: .init(periodId: UUID(), windowSequenceNumber: 0), startPosition: .zero, requestedContentPosition: .zero, endPosition: .zero, duration: .zero, isFinal: false
             ),
             loadCondition: self,
             trackSelector: DefaultTrackSelector()
@@ -185,9 +174,9 @@ extension SEPlayer: MediaPeriodCallback {
 //                    return nil
 //                }
 //            }
-            for (index, sampleStream) in mediaPeriodHolder.sampleStreams2.enumerated() {
+            for (index, sampleStream) in mediaPeriodHolder.sampleStreams.enumerated() {
                 if let sampleStream {
-                    try _dependencies.newRenderers[index].enable(
+                    try _dependencies.renderers[index].enable(
                         formats: [],
                         stream: sampleStream,
                         position: 0,
@@ -203,12 +192,6 @@ extension SEPlayer: MediaPeriodCallback {
             }
         } catch {
             fatalError()
-        }
-
-        if let output {
-            for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
-                renderer.setBufferOutput(output)
-            }
         }
 
         for renderer in _dependencies.renderers {
@@ -275,11 +258,7 @@ private extension SEPlayer {
         rendererPositionElapsedRealtime = _dependencies.clock.microseconds
 
         var renderersReady = true
-//        for renderer in _dependencies.renderers {
-//            try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime)
-//            renderersReady = renderersReady && renderer.isReady()
-//        }
-        for renderer in _dependencies.newRenderers {
+        for renderer in _dependencies.renderers {
             try! renderer.render(position: rendererPosition, elapsedRealtime: rendererPositionElapsedRealtime)
             renderersReady = renderersReady && renderer.isReady()
         }
@@ -287,59 +266,40 @@ private extension SEPlayer {
         if renderersReady && !isReady {
             isPlaying = true
             isReady = true
+//            updatePlaybackRate(new: 2.0)
             _dependencies.standaloneClock.start()
             enableRenderers()
         }
 
-//        if !renderersReady && isReady {
-//            isReady = false
-//            stopRenderers()
-//        }
+        if !renderersReady && isReady {
+            isReady = false
+            stopRenderers()
+        }
 
         timer.schedule(deadline: currentTime + .milliseconds(10))
     }
 
     private func enableRenderers() {
-//        _dependencies.renderers.forEach { $0.start() }
-        _dependencies.newRenderers.forEach { try! $0.start() }
+        _dependencies.renderers.forEach { try! $0.start() }
     }
 
     private func stopRenderers() {
         _dependencies.standaloneClock.stop()
-//        _dependencies.renderers.forEach { $0.pause() }
-        try! _dependencies.newRenderers.forEach { $0.stop() }
+        _dependencies.renderers.forEach { $0.stop() }
     }
 
     private func updatePlaybackRate(new playbackRate: Float) {
         assert(queue.isCurrent())
+        let old = playbackParams
         self.playbackParams = PlaybackParameters(playbackRate: playbackRate)
         _dependencies.standaloneClock.setPlaybackParameters(new: playbackParams)
-        _dependencies.renderers.forEach { try? $0.setPlaybackRate(new: playbackRate) }
+        _dependencies.renderers.forEach {
+            try? $0.setPlaybackSpeed(current: old.playbackRate, target: playbackParams.playbackRate)
+        }
     }
 }
 
 extension SEPlayer {
-    func setBufferOutput(_ output: SEPlayerBufferView) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.output = output
-
-            for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
-                renderer.setBufferOutput(output)
-            }
-        }
-    }
-
-    func removeBufferOutput(_ output: SEPlayerBufferView) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.output = nil
-            for renderer in _dependencies.renderers.compactMap({ $0 as? VTRenderer }) {
-                renderer.setBufferOutput(output)
-            }
-        }
-    }
-    
     func register(_ bufferable: PlayerBufferable) {
         queue.async { [weak self] in
             guard let self else { return }

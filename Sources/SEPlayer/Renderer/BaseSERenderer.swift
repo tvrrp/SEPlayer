@@ -1,179 +1,178 @@
 //
-//  SERenderer.swift
+//  BaseSERenderer2.swift
 //  SEPlayer
 //
-//  Created by Damir Yackupov on 14.01.2025.
+//  Created by Damir Yackupov on 21.04.2025.
 //
 
 import CoreMedia
 
-class BaseSERenderer {
-    var isStarted: Bool = false
+class BaseSERenderer: SERenderer {
+    private let queue: Queue
+    private let trackType: TrackType
+    private let clock: CMClock
 
-    let clock: CMClock
-    let queue: Queue
-    let sampleStream: SampleStream
-    private let compressedSampleQueue: TypedCMBufferQueue<CMSampleBuffer>
-    let decompressedSamplesQueue: TypedCMBufferQueue<CMSampleBuffer>
+    private var state: SERendererState = .disabled
+    private var sampleStream: SampleStream?
+    private var formats: [CMFormatDescription] = []
 
-    var playbackRate: Float = 1.0
+    private var streamIsFinal: Bool = false
 
-    private let renderLimit: Int64 = 1000
-    private var startStream: Int64 = 1_000_000_000_000
+    private var lastResetPosition: Int64 = .zero
+    private var readingPosition: Int64 = .zero
+    private var streamOffset: Int64 = .zero
 
-    private var lastResetPosition: Int64 = .min
-    private var lastSampleInStreamPTS: Int64 = .zero
-    private var largestQueuedPTS: Int64 = .zero
-
-    private var inputSample: CMSampleBuffer?
-
-    private var outputSample: CMSampleBuffer?
-    private var isDecodeOnlyOutputSample: Bool = false
-    private var isLastOutputSample: Bool = false
-    private var _framedInQueue = 0
-
-    init(
-        clock: CMClock,
-        queue: Queue,
-        sampleStream: SampleStream
-    ) throws {
-        self.clock = clock
+    init(queue: Queue, trackType: TrackType, clock: CMClock) {
         self.queue = queue
-        self.sampleStream = sampleStream
-        self.compressedSampleQueue = try TypedCMBufferQueue<CMSampleBuffer>(
-            capacity: 10,
-            handlers: .unsortedSampleBuffers
-        )
-        self.decompressedSamplesQueue = try TypedCMBufferQueue<CMSampleBuffer>(
-            capacity: 100,
-            handlers: .outputPTSSortedSampleBuffers
-        )
+        self.trackType = trackType
+        self.clock = clock
     }
 
-    func start() {
-        isStarted = true
+    func getCapabilities() -> RendererCapabilities {
+        EmptyRendererCapabilities()
     }
 
-    func isReady() -> Bool {
-        return sampleStream.isReady() && !decompressedSamplesQueue.isEmpty //&& outputSample != nil
-    }
+    final func getTrackType() -> TrackType { trackType }
+    final func getState() -> SERendererState { state }
 
-    func getMediaClock() -> MediaClock? {
-        return nil
-    }
-
-    func pause() {
-        isStarted = false
-    }
-
-    func render(position: Int64, elapsedRealtime: Int64) throws {
-        let startTime = clock.microseconds
-        while try drainOutputQueue(position: position, elapsedRealtime: elapsedRealtime),
-              shouldContinueRendering(from: startTime) {}
-        while try drainInputQueue(position: position, elapsedRealtime: elapsedRealtime),
-              shouldContinueRendering(from: startTime) {}
-    }
-
-    func drainOutputQueue(position: Int64, elapsedRealtime: Int64) throws -> Bool {
-        let sample = outputSample ?? decompressedSamplesQueue.dequeue()
-//        self.outputSample = sample
-
-        guard let sample else { return false }
-
-        isDecodeOnlyOutputSample = sample.presentationTimeStamp.microseconds < lastResetPosition
-        isLastOutputSample = lastSampleInStreamPTS != .zero && lastSampleInStreamPTS <= sample.presentationTimeStamp.microseconds
-
-        if try processOutputSample(position: position,
-                               elapsedRealtime: elapsedRealtime,
-                               outputStreamStartPosition: startStream,
-                               presenationTime: startStream + sample.presentationTimeStamp.microseconds,
-                               sample: sample,
-                               isDecodeOnlySample: isDecodeOnlyOutputSample,
-                               isLastOutputSample: isLastOutputSample) {
-            resetOutputBuffer()
-            _framedInQueue -= 1
-            if self is VTRenderer {
-//                print("DID Release frame, _framedInQueue = \(decompressedSamplesQueue.bufferCount)")
-            }
-            return true
-        } else {
-            resetOutputBuffer()
-            try! decompressedSamplesQueue.enqueue(sample)
-            return false
-        }
-    }
-
-    func setPlaybackRate(new playbackRate: Float) throws {
-        guard self.playbackRate != playbackRate else { return }
-        self.playbackRate = playbackRate
-    }
-
-    func drainInputQueue(position: Int64, elapsedRealtime: Int64) throws -> Bool {
-//        guard _framedInQueue < 10 else { return false }
-        guard decompressedSamplesQueue.bufferCount < 10 else { return false }
-
-        let sample: CMSampleBuffer?
-        if let inputSample {
-            sample = inputSample
-        } else {
-            try sampleStream.readData(to: compressedSampleQueue)
-            sample = compressedSampleQueue.dequeue()
-        }
-        inputSample = sample
-
-        guard let sample else {
-            return false
-        }
-        largestQueuedPTS = max(largestQueuedPTS, sample.outputPresentationTimeStamp.microseconds)
-        if try queueInputSample(sampleBuffer: sample) {
-            resetInputBuffer()
-            _framedInQueue += 1
-            if self is VTRenderer {
-//                print("DID added frame, _framedInQueue = \(decompressedSamplesQueue.bufferCount)")
-            }
-            return true
-        } else {
-            return false
-        }
-    }
-
-    func queueInputSample(sampleBuffer: CMSampleBuffer) throws -> Bool {
-        fatalError("to override")
-    }
-
-    func processOutputSample(
+    final func enable(
+        formats: [CMFormatDescription],
+        stream: SampleStream,
         position: Int64,
-        elapsedRealtime: Int64,
-        outputStreamStartPosition: Int64,
-        presenationTime: Int64,
-        sample: CMSampleBuffer,
-        isDecodeOnlySample: Bool,
-        isLastOutputSample: Bool
-    ) throws -> Bool {
-        fatalError("to override")
+        joining: Bool,
+        mayRenderStartOfStream: Bool,
+        startPosition: Int64,
+        offset: Int64,
+        mediaPeriodId: MediaPeriodId
+    ) throws {
+        assert(queue.isCurrent() && state == .disabled)
+        state = .enabled
+        self.sampleStream = stream
+        self.formats = formats
+        try onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
+        try replaceStream(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
+        try resetPosition(new: startPosition, joining: joining)
     }
 
-    func shouldSkipInputSample(sample: CMSampleBuffer) -> Bool {
-        return false
+    final func start() throws {
+        assert(queue.isCurrent() && state == .enabled)
+        state = .started
+        try onStarted()
     }
 
-    private func shouldContinueRendering(from startTime: Int64) -> Bool {
-        return clock.microseconds - startTime < renderLimit
+    final func replaceStream(
+        formats: [CMFormatDescription],
+        stream: SampleStream,
+        startPosition: Int64,
+        offset: Int64,
+        mediaPeriodId: MediaPeriodId
+    ) throws {
+        self.sampleStream = stream
+        if readingPosition == .max {
+            readingPosition = startPosition
+        }
+        self.formats = formats
+        streamOffset = offset
+        try onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
     }
-}
 
-private extension BaseSERenderer {
-    func resetInputBuffer() {
-        inputSample = nil
+    final func getStream() -> SampleStream? { sampleStream }
+    final func didReadStreamToEnd() -> Bool { return readingPosition == .max }
+    final func getReadingPosition() -> Int64 { return readingPosition }
+    final func setStreamFinal() { streamIsFinal = true }
+    final func isCurrentStreamFinal() -> Bool { streamIsFinal }
+
+    final func setTimeline(_ timeline: Timeline) {
+        // TODO: Timeline
+        onTimelineChanged(new: timeline)
     }
 
-    func resetOutputBuffer() {
-        outputSample = nil
+    final func resetPosition(new position: Int64) throws {
+        try resetPosition(new: position, joining: false)
     }
-}
 
+    private func resetPosition(new position: Int64, joining: Bool) throws {
+        streamIsFinal = false
+        lastResetPosition = position
+        readingPosition = position
+        try onPositionReset(position: position, joining: joining)
+    }
 
+    func render(position: Int64, elapsedRealtime: Int64) throws {}
+    func isReady() -> Bool { false }
+    func isEnded() -> Bool { true }
+    func getMediaClock() -> MediaClock? { return nil }
+    func setPlaybackSpeed(current: Float, target: Float) throws {}
+    func enableRenderStartOfStream() {}
 
-private extension Int64 {
-    static let renderLimit: Int64 = 1000
+    final func stop() {
+        assert(queue.isCurrent() && state == .started)
+        state = .enabled
+        onStopped()
+    }
+
+    final func disable() {
+        assert(queue.isCurrent() && state == .enabled)
+        state = .disabled
+        sampleStream = nil
+        formats.removeAll()
+        streamIsFinal = false
+        onDisabled()
+    }
+
+    final func reset() {
+        assert(queue.isCurrent() && state == .disabled)
+        onReset()
+    }
+
+    final func release() {
+        assert(queue.isCurrent() && state == .disabled)
+        onRelease()
+    }
+
+    func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {}
+
+    func onStreamChanged(
+        formats: [CMFormatDescription],
+        startPosition: Int64,
+        offset: Int64,
+        mediaPeriodId: MediaPeriodId
+    ) throws {}
+
+    func onPositionReset(position: Int64, joining: Bool) throws {}
+    func onStarted() throws {}
+    func onStopped() {}
+    func onDisabled() {}
+    func onReset() {}
+    func onRelease() {}
+    func onTimelineChanged(new timeline: Timeline) {}
+
+    final func getLastResetPosition() -> Int64 { lastResetPosition }
+    final func getStreamOffset() -> Int64 { streamOffset }
+    final func getStreamFormats() -> [CMFormatDescription] { formats }
+    final func getClock() -> CMClock { clock }
+
+    final func readSource(to buffer: DecoderInputBuffer, readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
+        guard let sampleStream else { return .nothingRead }
+
+        let result = try sampleStream.readData(to: buffer, readFlags: readFlags)
+        if case .didReadBuffer = result {
+            if buffer.flags.contains(.endOfStream) {
+                readingPosition = .min // TODO: end of source
+                return streamIsFinal ? .didReadBuffer : .nothingRead
+            }
+            buffer.time += streamOffset
+            readingPosition = max(readingPosition, buffer.time)
+        }
+
+        return result
+    }
+
+    final func skipSource(position: Int64) -> Int {
+        sampleStream?.skipData(position: position - streamOffset) ?? 0
+    }
+
+    final func isSourceReady() -> Bool {
+        didReadStreamToEnd() ? streamIsFinal : sampleStream?.isReady() ?? false
+    }
 }

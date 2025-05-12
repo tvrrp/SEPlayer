@@ -8,7 +8,7 @@
 import CoreMedia
 
 protocol ExtractorOutput {
-    func track(for id: Int, trackType: TrackType) -> TrackOutput2
+    func track(for id: Int, trackType: TrackType) -> TrackOutput
     func endTracks()
     func seekMap(seekMap: SeekMap)
 }

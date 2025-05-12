@@ -124,9 +124,9 @@ extension BoxParser {
             samples.append(.init(
                 offset: offset,
                 size: size,
-                duration: CMTime(value: timestampDeltaInTimeUnits, timescale: track.timescale),
-                presentationTimeStamp: CMTime(value: timestampTimeUnits + timestampOffset, timescale: track.timescale),
-                decodeTimeStamp: CMTime(value: timestampTimeUnits, timescale: track.timescale),
+                duration: CMTime(value: timestampDeltaInTimeUnits, timescale: track.timescale).microseconds,
+                presentationTimeStamp: CMTime(value: timestampTimeUnits + timestampOffset, timescale: track.timescale).microseconds,
+                decodeTimeStamp: CMTime(value: timestampTimeUnits, timescale: track.timescale).microseconds,
                 flags: flags
             ))
 
@@ -175,7 +175,7 @@ extension BoxParser {
         return TrackSampleTable(
             track: track,
             maximumSize: maximumSize,
-            duration: CMTime(value: durarion, timescale: track.timescale),
+            duration: CMTime(value: durarion, timescale: track.timescale).microseconds,
             samples: samples
         )
     }
@@ -184,19 +184,19 @@ extension BoxParser {
         let track: Track
         let sampleCount: Int
         let maximumSize: Int
-        let duration: CMTime
+        let duration: Int64
         let samples: [Sample]
 
         struct Sample {
             let offset: Int
             let size: Int
-            let duration: CMTime
-            let presentationTimeStamp: CMTime
-            let decodeTimeStamp: CMTime
+            let duration: Int64
+            let presentationTimeStamp: Int64
+            let decodeTimeStamp: Int64
             let flags: SampleFlags
         }
 
-        init(track: Track, maximumSize: Int, duration: CMTime, samples: [Sample]) {
+        init(track: Track, maximumSize: Int, duration: Int64, samples: [Sample]) {
             self.track = track
             self.sampleCount = samples.count
             self.maximumSize = maximumSize

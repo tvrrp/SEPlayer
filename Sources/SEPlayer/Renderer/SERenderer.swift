@@ -7,14 +7,14 @@
 
 import CoreMedia
 
-protocol SERenderer {
+protocol SERenderer: AnyObject {
     func getCapabilities() -> RendererCapabilities
 
     func getMediaClock() -> MediaClock?
     func getState() -> SERendererState
     func enable(
         formats: [CMFormatDescription],
-        stream: SampleStream2,
+        stream: SampleStream,
         position: Int64,
         joining: Bool,
         mayRenderStartOfStream: Bool,
@@ -27,12 +27,12 @@ protocol SERenderer {
 
     func replaceStream(
         formats: [CMFormatDescription],
-        stream: SampleStream2,
+        stream: SampleStream,
         startPosition: Int64,
         offset: Int64,
         mediaPeriodId: MediaPeriodId
     ) throws
-    func getStream() -> SampleStream2?
+    func getStream() -> SampleStream?
     func didReadStreamToEnd() -> Bool
     func getReadingPosition() -> Int64
     func setStreamFinal()

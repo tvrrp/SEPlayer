@@ -107,44 +107,7 @@ final class DefautlHTTPDataSource: DataSource {
         }
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
-        queue.async { [weak self] in
-            guard let self, let currentDataSpec else { completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return }
-
-            do {
-                if intermidateBuffer.readableBytes >= length {
-                    try readFully(to: allocation, offset: offset, length: length)
-                    completionQueue.async { completion(.success(length)) }
-                } else {
-                    let requestedReadAmount = min(length, currentDataSpec.range.length + 1 - intermidateBuffer.readerIndex)
-                    if requestedReadAmount == intermidateBuffer.readableBytes {
-                        try readFully(to: allocation, offset: offset, length: requestedReadAmount)
-                        completionQueue.async { completion(.success(requestedReadAmount)) }; return
-                    }
-
-                    self.requestedReadAmount = requestedReadAmount
-                    readCompletion = { [weak self] result in
-                        guard let self else { completionQueue.async { completion(.failure(CancellationError())) }; return }
-                        do {
-                            switch result {
-                            case let .success(availableBytesCount):
-                                try self.readFully(to: allocation, offset: offset, length: availableBytesCount)
-                                completionQueue.async { completion(.success((availableBytesCount))) }
-                            case let .failure(error):
-                                completionQueue.async { completion(.failure(error)) }
-                            }
-                        } catch {
-                            completionQueue.async { completion(.failure(error)) }
-                        }
-                    }
-                }
-            } catch {
-                completionQueue.async { completion(.failure(error)) }
-            }
-        }
-    }
-
-    func read(allocation: Allocation2, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(Int), any Error>) -> Void) {
+    func read(allocation: Allocation, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<Int, Error>) -> Void) {
         queue.async { [weak self] in
             guard let self, let currentDataSpec else { completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return }
 
@@ -189,20 +152,7 @@ final class DefautlHTTPDataSource: DataSource {
         return buffer
     }
 
-    private func readFully(to buffer: Allocation, offset: Int, length: Int) throws {
-        try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
-            guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
-            try buffer.getData { buffer in
-                guard let bufferBaseAdress = buffer.baseAddress else { throw DataReaderError.endOfInput }
-                bufferBaseAdress
-                    .advanced(by: offset)
-                    .copyMemory(from: baseAdress, byteCount: length)
-            }
-            return length
-        }
-    }
-
-    private func readFully(to allocation: Allocation2, offset: Int, length: Int) throws {
+    private func readFully(to allocation: Allocation, offset: Int, length: Int) throws {
         try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
             guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
             memcpy(allocation.data.advanced(by: offset), baseAdress, length)

@@ -93,7 +93,7 @@ extension SEPlayerView: PlayerBufferable {
         #if targetEnvironment(simulator)
         layer.contents = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue()
         #else
-        layer.contents = imageBuffer
+        layer.contents = buffer
         #endif
     }
 

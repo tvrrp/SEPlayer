@@ -39,20 +39,18 @@ struct DefaultTrackSelector: TrackSelector {
         periodId: MediaPeriodId,
         timeline: Timeline
     ) -> TrackSelectionResult {
-        let updatedGroups: [TrackGroup?] = trackGroups.compactMap { group in
-            if findRenderer(rendererCapabilities: rendererCapabilities, group: group) != nil {
-                return group
+        let updatedGroups: [TrackGroup] = trackGroups.map { group -> (Int, TrackGroup)? in
+            if let index = findRenderer(rendererCapabilities: rendererCapabilities, group: group) {
+                return (index, group)
             }
             return nil
         }
+        .compactMap { $0 }
+        .sorted(by: { $0.0 < $1.0 })
+        .map { $0.1 }
 
         return TrackSelectionResult(
-            selections: updatedGroups.map { group in
-                if let group {
-                    return FixedTrackSelection(trackGroup: group)
-                }
-                return nil
-            },
+            selections: updatedGroups.map { FixedTrackSelection(trackGroup: $0) },
             tracks: Tracks.empty
         )
     }

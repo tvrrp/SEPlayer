@@ -8,16 +8,17 @@
 import AudioToolbox
 import CoreMedia
 
-protocol AudioSyncDelegate: AnyObject {
+protocol AudioSinkDelegate: AnyObject {
     func onPositionDiscontinuity()
 }
 
 protocol IAudioSink: AnyObject {
-    var delegate: AudioSyncDelegate? { get set }
+    var delegate: AudioSinkDelegate? { get set }
     func getPosition() -> Int64?
     func configure(inputFormat: AudioStreamBasicDescription) throws
     func play()
     func pause()
+    func handleDiscontinuity()
     func handleBuffer(_ buffer: CMSampleBuffer, presentationTime: Int64) throws -> Bool
     func playToEndOfStream() throws
     func isEnded() -> Bool
@@ -29,7 +30,7 @@ protocol IAudioSink: AnyObject {
 }
 
 final class AudioSink: IAudioSink {
-    weak var delegate: AudioSyncDelegate?
+    weak var delegate: AudioSinkDelegate?
 
     private var pendingConfiguration: Configuration?
     private var configuration: Configuration!
@@ -67,7 +68,7 @@ final class AudioSink: IAudioSink {
     private var mediaPositionParameters = MediaPositionParameters()
     private var mediaPositionParametersCheckpoints: [MediaPositionParameters] = []
 
-    init(queue: Queue, clock: CMClock) throws {
+    init(queue: Queue, clock: CMClock) {
         self.queue = queue
         self.clock = clock
         self.audioQueuePositionTracker = AudioQueuePositionTracker(clock: clock)
@@ -77,12 +78,11 @@ final class AudioSink: IAudioSink {
     }
 
     func getPosition() -> Int64? {
-        guard let configuration, audioQueue != nil, !startMediaTimeNeedsInit else {
+        guard audioQueue != nil, !startMediaTimeNeedsInit else {
             return nil
         }
 
-        var position = audioQueuePositionTracker.getCurrentPosition()
-        position = max(position, (Double(getWrittenFrames()) / configuration.outputFormat.mSampleRate).microsecondsPerSecond)
+        let position = audioQueuePositionTracker.getCurrentPosition()
         return applyMediaPositionParameters(position: position)
     }
 
@@ -108,6 +108,10 @@ final class AudioSink: IAudioSink {
             didStartAudioQueue = true
         }
         isPlaying = true
+    }
+
+    func handleDiscontinuity() {
+        startMediaTimeNeedsSync = true
     }
 
     func handleBuffer(_ buffer: CMSampleBuffer, presentationTime: Int64) throws -> Bool {
@@ -175,7 +179,6 @@ final class AudioSink: IAudioSink {
         }
 
         if audioQueuePositionTracker.isStalled(writtenFrames: getWrittenFrames()) {
-            print("❌ STALLED")
             flush()
             return true
         }

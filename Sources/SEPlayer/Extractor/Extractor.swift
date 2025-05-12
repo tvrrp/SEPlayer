@@ -10,7 +10,12 @@ import Foundation
 
 protocol Extractor: AnyObject {
     func read(input: ExtractorInput, completion: @escaping (ExtractorReadResult) -> Void)
-    func seek(to position: Int, time: CMTime)
+    func seek(to position: Int, time: Int64)
+    func release()
+}
+
+extension Extractor {
+    func release() {}
 }
 
 enum ExtractorReadResult: Equatable {

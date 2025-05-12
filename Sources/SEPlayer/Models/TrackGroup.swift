@@ -38,6 +38,10 @@ struct TrackGroup: Hashable {
         }
         throw TrackGroupError.differentFormatsForTrackGroup
     }
+
+    static func == (lhs: TrackGroup, rhs: TrackGroup) -> Bool {
+        return lhs.id == rhs.id && lhs.formats == rhs.formats
+    }
 }
 
 enum TrackType {
