@@ -11,7 +11,6 @@ protocol SampleStream {
     func isReady() -> Bool
     func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult
     func skipData(position: Int64) -> Int
-    func returnToSyncSample() -> Bool
 }
 
 enum SampleStreamReadResult: Equatable {

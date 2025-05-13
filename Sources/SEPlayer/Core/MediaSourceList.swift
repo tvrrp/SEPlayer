@@ -84,7 +84,6 @@ final class MediaSourceList {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        loadCondition: LoadConditionCheckable,
         startPosition: Int64
     ) -> MediaPeriod {
         var holder = mediaSourceHolders[0]
@@ -93,9 +92,7 @@ final class MediaSourceList {
         let period = holder.mediaSource.createPeriod(
             id: holder.activeMediaPeriodIds[0],
             allocator: allocator,
-            startPosition: startPosition,
-            loadCondition: loadCondition,
-            mediaSourceEventDelegate: ForwardingEventListener(id: holder)
+            startPosition: startPosition
         )
         mediaSourceByMediaPeriod[MediaPeriodHolder(period: period)] = holder
         disableUnusedMediaSources()
@@ -164,9 +161,7 @@ private extension MediaSourceList {
 private extension MediaSourceList {
     func prepareChildSource(from holder: MediaSourceHolder) {
         let mediaSource = holder.mediaSource
-        let eventListener = ForwardingEventListener(id: holder)
-        childSources[holder] = MediaSourceDelegateHolder(source: mediaSource, delegate: self, eventListener: eventListener)
-        mediaSource.addEventListener(eventListener)
+        childSources[holder] = MediaSourceDelegateHolder(source: mediaSource, delegate: self)
         mediaSource.prepareSource(delegate: self, mediaTransferListener: mediaTransferListener, playerId: playerId)
     }
 
@@ -174,7 +169,6 @@ private extension MediaSourceList {
         if holder.isRemoved && holder.activeMediaPeriodIds.isEmpty {
             if let removedChild = childSources.removeValue(forKey: holder) {
                 removedChild.source.releaseSource(delegate: removedChild.delegate)
-                removedChild.source.removeEventListener(removedChild.eventListener)
                 enabledMediaSourceHolders.remove(holder)
             }
         }
@@ -203,7 +197,6 @@ extension MediaSourceList {
     private struct MediaSourceDelegateHolder {
         let source: BaseMediaSource
         let delegate: MediaSourceDelegate
-        let eventListener: MediaSourceEventListener
     }
 
     struct MediaSourceHolder: MediaSourceInfoHolder, Hashable {
@@ -236,36 +229,6 @@ extension MediaSourceList {
 
         static func == (lhs: MediaSourceList.MediaSourceHolder, rhs: MediaSourceList.MediaSourceHolder) -> Bool {
             lhs.id == rhs.id
-        }
-    }
-}
-
-private extension MediaSourceList {
-    final class ForwardingEventListener: MediaSourceEventListener {
-        let id: MediaSourceHolder
-
-        init(id: MediaSourceHolder) {
-            self.id = id
-        }
-
-        func loadStarted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void) {
-            
-        }
-
-        func loadCompleted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void) {
-            
-        }
-
-        func loadCancelled(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void) {
-            
-        }
-
-        func loadError(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void, error: any Error, wasCancelled: Bool) {
-            
-        }
-
-        func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void) {
-            
         }
     }
 }

@@ -12,8 +12,6 @@ protocol MediaSource: AnyObject {
     var mediaItem: MediaItem? { get }
     var isSingleWindow: Bool { get }
 
-    func addEventListener(_ listener: MediaSourceEventListener)
-    func removeEventListener(_ listener: MediaSourceEventListener)
     func getInitialTimeline() -> Timeline?
     func canUpdateMediaItem(new item: MediaItem) -> Bool
     func updateMediaItem()
@@ -22,9 +20,7 @@ protocol MediaSource: AnyObject {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64,
-        loadCondition: LoadConditionCheckable,
-        mediaSourceEventDelegate: MediaSourceEventListener
+        startPosition: Int64
     ) -> MediaPeriod
     func release(mediaPeriod: MediaPeriod)
     func disable(delegate: MediaSourceDelegate)
@@ -40,13 +36,13 @@ extension MediaSource {
     func updateMediaItem() {}
 }
 
-protocol MediaSourceEventListener: AnyObject {
-    func loadStarted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-    func loadCompleted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-    func loadCancelled(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-    func loadError(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void, error: Error, wasCancelled: Bool)
-    func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void)
-}
+//protocol MediaSourceEventListener: AnyObject {
+//    func loadStarted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
+//    func loadCompleted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
+//    func loadCancelled(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
+//    func loadError(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void, error: Error, wasCancelled: Bool)
+//    func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void)
+//}
 
 protocol MediaSourceDelegate: AnyObject {
     func mediaSource(_ source: any MediaSource, sourceInfo refreshed: Timeline?)
@@ -65,7 +61,6 @@ class BaseMediaSource: MediaSource {
 
     private let queue: Queue
     private let mediaSourceDelegates: MulticastDelegate<MediaSourceDelegate>
-    private let mediaSourceEventListeners: MulticastDelegate<MediaSourceEventListener>
 
     private var _playerId: UUID?
     private var _timeline: Timeline?
@@ -73,7 +68,6 @@ class BaseMediaSource: MediaSource {
     init(queue: Queue) {
         self.queue = queue
         mediaSourceDelegates = MulticastDelegate<MediaSourceDelegate>(isThreadSafe: false)
-        mediaSourceEventListeners = MulticastDelegate<MediaSourceEventListener>(isThreadSafe: false)
     }
 
     func prepareSourceInternal(mediaTransferListener: TransferListener?) { fatalError("To override") }
@@ -83,9 +77,7 @@ class BaseMediaSource: MediaSource {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64,
-        loadCondition: LoadConditionCheckable,
-        mediaSourceEventDelegate: MediaSourceEventListener
+        startPosition: Int64
     ) -> MediaPeriod {
         fatalError("To override")
     }
@@ -97,16 +89,6 @@ class BaseMediaSource: MediaSource {
         assert(queue.isCurrent())
         self._timeline = timeline
         mediaSourceDelegates.invokeDelegates { $0.mediaSource(self, sourceInfo: timeline) }
-    }
-
-    final func addEventListener(_ listener: MediaSourceEventListener) {
-        assert(queue.isCurrent())
-        mediaSourceEventListeners.addDelegate(listener)
-    }
-
-    final func removeEventListener(_ listener: MediaSourceEventListener) {
-        assert(queue.isCurrent())
-        mediaSourceEventListeners.removeDelegate(listener)
     }
 
     final func prepareSource(delegate: MediaSourceDelegate, mediaTransferListener: TransferListener?, playerId: UUID) {

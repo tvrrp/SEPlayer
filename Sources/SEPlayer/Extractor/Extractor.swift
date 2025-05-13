@@ -5,9 +5,6 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-import Foundation
-
 protocol Extractor: AnyObject {
     func read(input: ExtractorInput, completion: @escaping (ExtractorReadResult) -> Void)
     func seek(to position: Int, time: Int64)

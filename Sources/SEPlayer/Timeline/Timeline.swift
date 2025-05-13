@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol Timeline: Hashable {
+protocol Timeline {
     var windowCount: Int { get }
     func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int?
     func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int
@@ -15,7 +15,7 @@ protocol Timeline: Hashable {
     func firstWindowIndex(shuffleModeEnabled: Bool) -> Int
     func getWindow(windowIndex: Int, defaultPositionProjectionUs: Int64) -> Window
     func getPeriodCount() -> Int
-    
+
     func getPeriod(periodIndex: Int, setIds: Bool) -> Period
 }
 

@@ -12,7 +12,6 @@ public final class SEPlayer {
 
     public let identifier: UUID
 
-    public var state: State { _internalStateQueue.sync { _state.state } }
     private let _internalStateQueue: Queue = Queues.internalStateQueue
 
     public var playbackRate: Float {
@@ -23,8 +22,7 @@ public final class SEPlayer {
     private let returnQueue: Queue
     private let queue: Queue
 
-    private lazy var _state: SEPlayerState = SEPlayerBaseState(dependencies: _dependencies, statable: self)
-    private let _dependencies: SEPlayerStateDependencies
+    private let _dependencies: SEPlayerDependencies
     private let timer: DispatchSourceTimer
 
     private var playbackParams = PlaybackParameters.default
@@ -40,7 +38,7 @@ public final class SEPlayer {
 
     var started = false
 
-    init(dependencies: SEPlayerStateDependencies, renderersFactory: RenderersFactory) {
+    init(dependencies: SEPlayerDependencies, renderersFactory: RenderersFactory) {
         self.queue = dependencies.queue
         self.identifier = dependencies.playerId
         self.returnQueue = dependencies.returnQueue
@@ -85,17 +83,19 @@ public final class SEPlayer {
 private extension SEPlayer {
     func _set(content: URL) {
         assert(queue.isCurrent())
+        let loaderQueue = SignalQueue(name: "com.seplayer.loader_\(identifier)", qos: .userInteractive)
         let dataSource = RangeRequestHTTPDataSource(
             queue: Queues.loaderQueue,
             networkLoader: _dependencies.sessionLoader
         )
         let progressiveMediaExtractor = BundledMediaExtractor(
-            queue: queue,
-            extractorQueue: SignalQueue(name: "com.SEPlayer.extractor_\(identifier)", qos: .userInteractive)
+            queue: loaderQueue,
+            extractorQueue: loaderQueue
         )
 
         let mediaSource = ProgressiveMediaSource(
             queue: queue,
+            loaderQueue: loaderQueue,
             mediaItem: .init(url: content),
             dataSource: dataSource,
             progressiveMediaExtractor: progressiveMediaExtractor,
@@ -114,29 +114,36 @@ private extension SEPlayer {
             info: .init(
                 id: .init(periodId: UUID(), windowSequenceNumber: 0), startPosition: .zero, requestedContentPosition: .zero, endPosition: .zero, duration: .zero, isFinal: false
             ),
-            loadCondition: self,
             trackSelector: DefaultTrackSelector()
         )
+        mediaPeriodHolder.renderPositionOffset = rendererPosition
         _dependencies.mediaPeriodHolder = mediaPeriodHolder
         mediaPeriodHolder.prepare(callback: self, on: .zero)
     }
-}
 
-extension SEPlayer: SEPlayerStatable {
-    func perform(_ state: SEPlayerState) {
-        assert(queue.isCurrent())
-
-        _internalStateQueue.sync {
-            _state = state
+    private func maybeContinueLoading() {
+        if shouldContinueLoading(), let loadingPeriod = _dependencies.mediaPeriodHolder {
+            loadingPeriod.continueLoading(loadingInfo: .init(
+                playbackPosition: loadingPeriod.toPeriodTime(rendererTime: rendererPosition),
+                playbackSpeed: _dependencies.standaloneClock.getPlaybackParameters().playbackRate,
+                lastRebufferRealtime: .zero
+            ))
         }
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            delegate.invokeDelegates { $0.player(self, didChangeState: state.state) }
-        }
-
-        state.didLoad()
+        updateIsLoading()
     }
+
+    private func shouldContinueLoading() -> Bool {
+//        _dependencies.
+        return true
+    }
+
+    private func isLoadingPossible(mediaPeriodHolder: MediaPeriodHolder?) -> Bool {
+        guard let mediaPeriodHolder else { return false }
+
+        return mediaPeriodHolder.getNextLoadPosition() != .timeUnset
+    }
+
+    private func updateIsLoading() {}
 }
 
 extension SEPlayer: MediaSourceDelegate {
@@ -150,30 +157,15 @@ extension SEPlayer: MediaPeriodCallback {
         assert(queue.isCurrent())
         guard let mediaPeriodHolder = _dependencies.mediaPeriodHolder else { return }
 
-        mediaPeriodHolder.handlePrepared(playbackSpeed: 1.0, timeline: SinglePeriodTimeline(), playWhenReady: true)
+        if !mediaPeriodHolder.isPrepared {
+            mediaPeriodHolder.handlePrepared(
+                playbackSpeed: _dependencies.standaloneClock.getPlaybackParameters().playbackRate,
+                timeline: SinglePeriodTimeline(),
+                playWhenReady: true
+            )
+        }
+
         do {
-//            _dependencies.renderers = try mediaPeriodHolder.sampleStreams.compactMap { stream in
-//                let format = stream.format
-//                switch stream.format.mediaType {
-//                case .video:
-//                    return try VTRenderer(
-//                        formatDescription: format,
-//                        clock: _dependencies.clock,
-//                        queue: queue,
-//                        displayLink: _dependencies.displayLink,
-//                        sampleStream: stream
-//                    )
-//                case .audio:
-//                    return try ATRenderer(
-//                        format: format,
-//                        clock: _dependencies.clock,
-//                        queue: queue,
-//                        sampleStream: stream
-//                    )
-//                default:
-//                    return nil
-//                }
-//            }
             for (index, sampleStream) in mediaPeriodHolder.sampleStreams.enumerated() {
                 if let sampleStream {
                     try _dependencies.renderers[index].enable(
@@ -201,39 +193,12 @@ extension SEPlayer: MediaPeriodCallback {
         _dependencies.standaloneClock.resetPosition(position: rendererPosition)
         self.timer.resume()
         self.doSomeWork()
+        maybeContinueLoading()
     }
 
     func continueLoadingRequested(with source: any MediaPeriod) {
         assert(queue.isCurrent())
-    }
-}
-
-extension SEPlayer: MediaSourceEventListener {
-    func loadStarted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void) {
-        assert(queue.isCurrent())
-    }
-
-    func loadCompleted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void) {
-        assert(queue.isCurrent())
-    }
-
-    func loadCancelled(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void) {
-        assert(queue.isCurrent())
-    }
-
-    func loadError(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void, error: any Error, wasCancelled: Bool) {
-        assert(queue.isCurrent())
-    }
-
-    func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void) {
-        assert(queue.isCurrent())
-    }
-}
-
-extension SEPlayer: LoadConditionCheckable {
-    func checkLoadingCondition() -> Bool {
-        assert(queue.isCurrent())
-        return true
+        maybeContinueLoading()
     }
 }
 
@@ -276,6 +241,8 @@ private extension SEPlayer {
             stopRenderers()
         }
 
+        let time = _dependencies.mediaPeriodHolder?.toPeriodTime(rendererTime: rendererPosition) ?? .zero
+        _dependencies.mediaPeriodHolder?.mediaPeriod.discardBuffer(to: time, toKeyframe: true)
         timer.schedule(deadline: currentTime + .milliseconds(10))
     }
 

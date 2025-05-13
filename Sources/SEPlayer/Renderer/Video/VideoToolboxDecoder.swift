@@ -139,10 +139,6 @@ final class VideoToolboxDecoder: SEDecoder {
         buffers.forEach { $0.deallocate() }
     }
 
-    func didSkipBuffer(_ buffer: VideoOutputWrapper) {
-        assert(queue.isCurrent())
-    }
-
     private func createDecompressionSession() throws {
         var imageBufferAttributes: [NSString: Any] = [:]
         #if targetEnvironment(simulator)
@@ -161,8 +157,7 @@ final class VideoToolboxDecoder: SEDecoder {
         )
 
         if status != noErr {
-            // TODO: throw DecoderErrors.vtError(.init(rawValue: status))
-            fatalError()
+            throw VTDSessionErrors.osStatus(.init(rawValue: status))
         }
     }
 
@@ -216,14 +211,19 @@ final class VideoToolboxDecoder: SEDecoder {
 
         if status != noErr {
             // TODO: error DecoderErrors.vtError(.init(rawValue: status))
-            _isDecodingSample = false
-            _framedBeingDecoded -= 1
-            decodeNextSampleIfNeeded()
-//            fatalError()
+//            _isDecodingSample = false
+//            _framedBeingDecoded -= 1
+//            decodeNextSampleIfNeeded()
         }
     }
 
     private func handleSample(response: VTDecoderResponce) {
+        defer {
+            _isDecodingSample = false
+            _framedBeingDecoded -= 1
+            decodeNextSampleIfNeeded()
+        }
+
         do {
             guard response.status == noErr else {
                 if !response.sampleFlags.contains(.endOfStream) {
@@ -243,9 +243,6 @@ final class VideoToolboxDecoder: SEDecoder {
         } catch {
             print(error)
         }
-        _isDecodingSample = false
-        _framedBeingDecoded -= 1
-        decodeNextSampleIfNeeded()
     }
 }
 
@@ -279,6 +276,59 @@ extension VideoToolboxDecoder {
         let sampleIndex: Int
         let sampleFlags: SampleFlags
     }
+
+    enum VTDSessionErrors: Error {
+        case osStatus(VTError?)
+
+        enum VTError: OSStatus {
+            case propertyNotSupported = -12900
+            case propertyReadOnly = -12901
+            case wrongParameter = -12902
+            case invalidSession = -12903
+            case allocationFailed = -12904
+            case pixelTransferNotSupported_1 = -12905
+            case pixelTransferNotSupported_2 = -8961
+            case couldNotFindVideoDecoder = -12906
+            case couldNotCreateInstance = -12907
+            case couldNotFindVideoEncoder = -12908
+            case videoDecoderBadData_1 = -12909
+            case videoDecoderBadData_2 = -8969
+            case videoDecoderUnsupportedDataFormat_1 = -12910
+            case videoDecoderUnsupportedDataFormat_2 = -8970
+            case videoDecoderMalfunction_1 = -12911
+            case videoDecoderMalfunction_2 = -8960
+            case videoEncoderMalfunction = -12912
+            case videoDecoderNotAvailableNow = -12913
+            case pixelRotationNotSupported = -12914
+            case videoEncoderNotAvailableNow = -12915
+            case formatDescriptionChangeNotSupported = -12916
+            case insufficientSourceColorData = -12917
+            case couldNotCreateColorCorrectionData = -12918
+            case colorSyncTransformConvertFailed = -12919
+            case videoDecoderAuthorization = -12210
+            case videoEncoderAuthorization = -12211
+            case colorCorrectionPixelTransferFailed = -12212
+            case multiPassStorageIdentifierMismatch = -12213
+            case multiPassStorageInvalid = -12214
+            case frameSiloInvalidTimeStamp = -12215
+            case frameSiloInvalidTimeRange = -12216
+            case couldNotFindTemporalFilter = -12217
+            case pixelTransferNotPermitted = -12218
+            case colorCorrectionImageRotationFailed = -12219
+            case videoDecoderRemoved = -17690
+            case sessionMalfunction = -17691
+            case videoDecoderNeedsRosetta = -17692
+            case videoEncoderNeedsRosetta = -17693
+            case videoDecoderReferenceMissing = -17694
+            case videoDecoderCallbackMessaging = -17695
+            case videoDecoderUnknown = -17696
+            case extensionDisabled = -17697
+            case videoEncoderMVHEVCVideoLayerIDsMismatch = -17698
+            case couldNotOutputTaggedBufferGroup = -17699
+            case couldNotFindExtension = -19510
+            case extensionConflict = -19511
+        }
+    }
 }
 
 final class VideoOutputWrapper: CoreVideoBuffer {
@@ -304,10 +354,6 @@ private struct VideoToolboxCapabilitiesResolver: RendererCapabilities {
             return false
         }
     }
-}
-
-private extension String {
-    static let endOfStream = "endOfStream"
 }
 
 private extension Int {

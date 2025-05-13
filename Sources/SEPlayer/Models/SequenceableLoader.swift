@@ -5,17 +5,20 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-
 protocol SequenceableLoaderCallback {
     associatedtype Source
     func continueLoadingRequested(with source: Source)
 }
 
 protocol SequenceableLoader {
-    var bufferedPosition: Int64 { get }
-    var nextLoadPosition: Int64 { get }
     var isLoading: Bool { get }
+    func getBufferedPositionUs() -> Int64
+    func getNextLoadPositionUs() -> Int64
     @discardableResult
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool
+    func reevaluateBuffer(positionUs: Int64)
+}
+
+extension SequenceableLoader {
+    func reevaluateBuffer(positionUs: Int64) {}
 }

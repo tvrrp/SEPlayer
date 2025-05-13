@@ -24,9 +24,9 @@ public final class SEPlayerFactory {
     }
 
     public func buildPlayer(identifier: UUID = UUID(), returnQueue: DispatchQueue = .main) -> SEPlayer {
-        let workQueue = SignalQueue(name: "com.SEPlayer.work_\(identifier)", qos: .userInitiated)
+        let workQueue = SignalQueue(name: "com.seplayer.work_\(identifier)", qos: .userInitiated)
         let allocator = DefaultAllocator(queue: workQueue)
-        let playerDependencies = SEPlayerStateDependencies(
+        let playerDependencies = SEPlayerDependencies(
             playerId: identifier,
             queue: workQueue,
             returnQueue: SignalQueue(queue: returnQueue),

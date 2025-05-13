@@ -19,7 +19,7 @@ class BaseSERenderer: SERenderer {
     private var streamIsFinal: Bool = false
 
     private var lastResetPosition: Int64 = .zero
-    private var readingPosition: Int64 = .zero
+    private var readingPosition: Int64 = .endOfSource
     private var streamOffset: Int64 = .zero
 
     init(queue: Queue, trackType: TrackType, clock: CMClock) {
@@ -68,7 +68,7 @@ class BaseSERenderer: SERenderer {
         mediaPeriodId: MediaPeriodId
     ) throws {
         self.sampleStream = stream
-        if readingPosition == .max {
+        if readingPosition == .endOfSource {
             readingPosition = startPosition
         }
         self.formats = formats
@@ -77,7 +77,7 @@ class BaseSERenderer: SERenderer {
     }
 
     final func getStream() -> SampleStream? { sampleStream }
-    final func didReadStreamToEnd() -> Bool { return readingPosition == .max }
+    final func didReadStreamToEnd() -> Bool { return readingPosition == .endOfSource }
     final func getReadingPosition() -> Int64 { return readingPosition }
     final func setStreamFinal() { streamIsFinal = true }
     final func isCurrentStreamFinal() -> Bool { streamIsFinal }
@@ -158,7 +158,7 @@ class BaseSERenderer: SERenderer {
         let result = try sampleStream.readData(to: buffer, readFlags: readFlags)
         if case .didReadBuffer = result {
             if buffer.flags.contains(.endOfStream) {
-                readingPosition = .min // TODO: end of source
+                readingPosition = .endOfSource
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
             buffer.time += streamOffset

@@ -218,8 +218,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
     }
 
     func createDecoder(format: CMFormatDescription) throws -> Decoder {
-        let decoder = try decoderFactory.create(type: Decoder.self, queue: queue, format: format)
-        return decoder as! Decoder
+        return try decoderFactory.create(type: Decoder.self, queue: queue, format: format)
     }
 
     func onInputFormatChanged(format: CMFormatDescription) throws {

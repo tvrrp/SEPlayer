@@ -51,7 +51,7 @@ class ViewController: UIViewController {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: .duckOthers)
 
         playerView.gravity = .resizeAspect
-        player.set(content: videoUrls[3])
+        player.set(content: videoUrls[1])
         player.delegate.addDelegate(self)
 
         NotificationCenter.default.addObserver(self, selector: #selector(didEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)

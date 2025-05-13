@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import CoreMedia
 
 final class DefaltExtractorInput: ExtractorInput {
     private let dataReader: DataReader
@@ -16,7 +15,7 @@ final class DefaltExtractorInput: ExtractorInput {
     private var scratchSpaceCapacity: Int
 
     private var position: Int
-    nonisolated(unsafe) private var peekBuffer: ByteBuffer
+    private var peekBuffer: ByteBuffer
     private var peekBufferPosition: Int
     private var peekBufferLength: Int
 

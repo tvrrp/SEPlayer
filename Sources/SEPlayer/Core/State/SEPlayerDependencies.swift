@@ -7,7 +7,7 @@
 
 import AVFoundation
 
-final class SEPlayerStateDependencies {
+final class SEPlayerDependencies {
     let playerId: UUID
     let queue: Queue
     let returnQueue: Queue

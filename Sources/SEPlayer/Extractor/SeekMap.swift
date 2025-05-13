@@ -15,11 +15,11 @@ protocol SeekMap {
 
 struct SeekPoints: Hashable {
     let first: SeekPoint
-    let second: SeekPoint?
+    let second: SeekPoint
 
     init(first: SeekPoint, second: SeekPoint? = nil) {
         self.first = first
-        self.second = second
+        self.second = second ?? first
     }
 }
 

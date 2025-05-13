@@ -24,24 +24,27 @@ final class MediaPeriodHolder {
     var isPrepared: Bool = false
     var hasEnabledTracks: Bool = false
 
+    private var mayRetainStreamFlags: [Bool]
+    private var trackSelectorResults: TrackSelectionResult?
+
     init(
         queue: Queue,
         rendererCapabilities: [RendererCapabilities],
         allocator: Allocator,
         mediaSourceList: MediaSourceList,
         info: MediaPeriodInfo,
-        loadCondition: LoadConditionCheckable,
         trackSelector: TrackSelector
     ) {
         self.queue = queue
         self.rendererCapabilities = rendererCapabilities
         self.sampleStreams = Array(repeating: nil, count: rendererCapabilities.count)
+        self.mayRetainStreamFlags = Array(repeating: false, count: rendererCapabilities.count)
         self.mediaSourceList = mediaSourceList
         self.info = info
         self.trackSelector = trackSelector
 
         self.mediaPeriod = mediaSourceList.createPeriod(
-            id: info.id, allocator: allocator, loadCondition: loadCondition, startPosition: info.startPosition
+            id: info.id, allocator: allocator, startPosition: info.startPosition
         )
     }
 
@@ -58,7 +61,7 @@ final class MediaPeriodHolder {
     }
 
     func isFullyBuffered() -> Bool {
-        return isPrepared && (!hasEnabledTracks || mediaPeriod.bufferedPosition == .endOfSource )
+        return isPrepared && (!hasEnabledTracks || mediaPeriod.getBufferedPositionUs() == .endOfSource )
     }
 
     func isFullyPreloaded() -> Bool {
@@ -70,12 +73,12 @@ final class MediaPeriodHolder {
     func getBufferedPosition() -> Int64 {
         guard isPrepared else { return info.startPosition }
 
-        let bufferedPosition = hasEnabledTracks ? mediaPeriod.bufferedPosition : .endOfSource
+        let bufferedPosition = hasEnabledTracks ? mediaPeriod.getBufferedPositionUs() : .endOfSource
         return bufferedPosition == .endOfSource ? info.duration : bufferedPosition
     }
 
     func getNextLoadPosition() -> Int64 {
-        !isPrepared ? .zero : mediaPeriod.nextLoadPosition
+        !isPrepared ? .zero : mediaPeriod.getNextLoadPositionUs()
     }
 
     func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) {
@@ -92,7 +95,7 @@ final class MediaPeriodHolder {
             requestedStartPosition = max(0, info.duration - 1)
         }
         let newStartPosition = applyTrackSelection(trackSelectorResult: selectorResult,
-                                                   position: requestedStartPosition,
+                                                   positionUs: requestedStartPosition,
                                                    forceRecreateStreams: false)
         renderPositionOffset += info.startPosition - newStartPosition
         info = info.withUpdatedStartPosition(newStartPosition)
@@ -100,7 +103,7 @@ final class MediaPeriodHolder {
 
     func reevaluateBuffer(rendererPosition: Int64) {
         if isPrepared {
-            // TODO: mediaPeriod.reevaluateBuffer
+            mediaPeriod.reevaluateBuffer(positionUs: toPeriodTime(rendererTime: rendererPosition))
         }
     }
 
@@ -120,28 +123,41 @@ final class MediaPeriodHolder {
 
     func applyTrackSelection(
         trackSelectorResult: TrackSelectionResult,
-        position: Int64,
+        positionUs: Int64,
         forceRecreateStreams: Bool
     ) -> Int64 {
         assert(queue.isCurrent())
+        var streamResetFlags = Array(repeating: false, count: rendererCapabilities.count)
         return applyTrackSelection(
             newTrackSelectorResult: trackSelectorResult,
-            position: position,
+            positionUs: positionUs,
             forceRecreateStreams: forceRecreateStreams,
-            streamResetFlags: Array(repeating: false, count: rendererCapabilities.count)
+            streamResetFlags: &streamResetFlags
         )
     }
 
     func applyTrackSelection(
         newTrackSelectorResult: TrackSelectionResult,
-        position: Int64,
+        positionUs: Int64,
         forceRecreateStreams: Bool,
-        streamResetFlags: [Bool]
+        streamResetFlags: inout [Bool]
     ) -> Int64 {
-        fatalError()
+        for index in 0..<newTrackSelectorResult.selections.count {
+            mayRetainStreamFlags[index] = !forceRecreateStreams
+                && trackSelectorResults == newTrackSelectorResult
+        }
+
+        self.trackSelectorResults = newTrackSelectorResult
+        return mediaPeriod.selectTrack(
+            selections: newTrackSelectorResult.selections,
+            mayRetainStreamFlags: mayRetainStreamFlags,
+            streams: &sampleStreams,
+            streamResetFlags: &streamResetFlags,
+            positionUs: positionUs
+        )
     }
 
-    func prepare(callback: any MediaPeriodCallback, on time: CMTime) {
+    func prepare(callback: any MediaPeriodCallback, on time: Int64) {
         mediaPeriod.prepare(callback: callback, on: time)
     }
 }

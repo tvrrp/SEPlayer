@@ -18,6 +18,7 @@ final class ProgressiveMediaSource: BaseMediaSource {
     var mediaItem: MediaItem { assert(queue.isCurrent()); return _mediaItem }
 
     private let queue: Queue
+    private let loaderQueue: Queue
     private var _mediaItem: MediaItem
     private let dataSource: DataSource
     private let progressiveMediaExtractor: ProgressiveMediaExtractor
@@ -32,12 +33,14 @@ final class ProgressiveMediaSource: BaseMediaSource {
 
     init(
         queue: Queue,
+        loaderQueue: Queue,
         mediaItem: MediaItem,
         dataSource: DataSource,
         progressiveMediaExtractor: ProgressiveMediaExtractor,
         continueLoadingCheckIntervalBytes: Int
     ) {
         self.queue = queue
+        self.loaderQueue = loaderQueue
         self._mediaItem = mediaItem
         self.dataSource = dataSource
         self.progressiveMediaExtractor = progressiveMediaExtractor
@@ -59,9 +62,7 @@ final class ProgressiveMediaSource: BaseMediaSource {
     override func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64,
-        loadCondition: LoadConditionCheckable,
-        mediaSourceEventDelegate: MediaSourceEventListener
+        startPosition: Int64
     ) -> MediaPeriod {
         if let mediaTransferListener {
             dataSource.addTransferListener(mediaTransferListener)
@@ -69,12 +70,11 @@ final class ProgressiveMediaSource: BaseMediaSource {
         return ProgressiveMediaPeriod(
             url: mediaItem.url,
             queue: queue,
+            loaderQueue: loaderQueue,
             dataSource: dataSource,
             progressiveMediaExtractor: progressiveMediaExtractor,
-            mediaSourceEventDelegate: mediaSourceEventDelegate,
-            delegate: self,
+            listener: self,
             allocator: allocator,
-            loadCondition: loadCondition,
             continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
         )
     }
@@ -87,7 +87,7 @@ final class ProgressiveMediaSource: BaseMediaSource {
     }
 }
 
-extension ProgressiveMediaSource: ProgressiveMediaPeriod.Delegate {
+extension ProgressiveMediaSource: ProgressiveMediaPeriod.Listener {
     func sourceInfoRefreshed(duration: Int64, seekMap: SeekMap, isLive: Bool) {
         let duration = duration == .timeUnset ? timelineDuration : duration
         let isSeekable = seekMap.isSeekable()

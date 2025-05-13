@@ -6,7 +6,7 @@
 //
 
 protocol RenderersFactory {
-    func createRenderers(dependencies: SEPlayerStateDependencies) -> [SERenderer]
+    func createRenderers(dependencies: SEPlayerDependencies) -> [SERenderer]
 }
 
 struct DefaultRenderersFactory: RenderersFactory {
@@ -16,7 +16,7 @@ struct DefaultRenderersFactory: RenderersFactory {
         self.decoderFactory = decoderFactory
     }
 
-    func createRenderers(dependencies: SEPlayerStateDependencies) -> [any SERenderer] {
+    func createRenderers(dependencies: SEPlayerDependencies) -> [any SERenderer] {
         let renderers = [
             try? CAVideoRenderer<VideoToolboxDecoder>(
                 queue: dependencies.queue,
