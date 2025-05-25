@@ -363,7 +363,7 @@ private extension SampleQueue {
         if !hasNextSample() {
             if loadingFinished || isLastSampleQueued {
                 buffer.flags = .endOfStream
-                buffer.time = .min // TODO: End of source?
+                buffer.time = .endOfSource
                 return (.didReadBuffer, nil)
             } else if let upstreamFormat, (formatRequired || upstreamFormat != downstreamFormat) {
                 downstreamFormat = upstreamFormat

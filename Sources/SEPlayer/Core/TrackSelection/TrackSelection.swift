@@ -7,7 +7,7 @@
 
 import CoreMedia
 
-protocol TrackSelection {
+public protocol TrackSelection {
     var trackGroup: TrackGroup { get }
 }
 

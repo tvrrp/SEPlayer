@@ -70,7 +70,7 @@ final class MP4Extractor: Extractor {
         }
     }
 
-    func seek(to position: Int, time: Int64) {
+    func seek(to position: Int, timeUs: Int64) {
         containerAtoms.removeAll()
         atomHeaderBytesRead = 0
         sampleTrackIndex = nil
@@ -78,7 +78,7 @@ final class MP4Extractor: Extractor {
             enterReadingAtomHeaderState()
         } else {
             for index in 0..<tracks.count {
-                if let (index, _) = tracks[index].sampleTable.syncSample(for: time) {
+                if let (index, _) = tracks[index].sampleTable.syncSample(for: timeUs) {
                     tracks[index].sampleIndex = index
                 }
             }
@@ -91,17 +91,17 @@ extension MP4Extractor: SeekMap {
         return true
     }
 
-    func getDuration() -> Int64 {
+    func getDurationUs() -> Int64 {
         queue.sync { return duration }
     }
 
-    func getSeekPoints(for time: Int64) -> SeekPoints {
-        queue.sync { return getSeekPoints(for: time, trackId: nil) }
+    func getSeekPoints(for timeUs: Int64) -> SeekPoints {
+        queue.sync { return getSeekPoints(for: timeUs, trackId: nil) }
     }
 
     func getSeekPoints(for time: Int64, trackId: Int?) -> SeekPoints {
         queue.sync {
-            guard !tracks.isEmpty else { return SeekPoints(first: .start()) }
+            guard !tracks.isEmpty else { return SeekPoints(first: .start) }
             var firstTime: Int64
             var firstOffset: Int
             var secondTime: Int64?
@@ -117,7 +117,7 @@ extension MP4Extractor: SeekMap {
                 let mainTrack = tracks[mainTrackIndex]
                 let sampleTable = mainTrack.sampleTable
                 guard let (syncSampleIndex, syncSample) = sampleTable.syncSample(for: time) else {
-                    return SeekPoints(first: .start())
+                    return SeekPoints(first: .start)
                 }
                 firstTime = syncSample.decodeTimeStamp
                 firstOffset = syncSample.offset
@@ -152,9 +152,9 @@ extension MP4Extractor: SeekMap {
                 }
             }
 
-            let firstSeekPoint = SeekPoints.SeekPoint(time: firstTime, position: firstOffset)
+            let firstSeekPoint = SeekPoints.SeekPoint(timeUs: firstTime, position: firstOffset)
             let secondSeekPoint: SeekPoints.SeekPoint? = if let secondTime, let secondOffset {
-                SeekPoints.SeekPoint(time: secondTime, position: secondOffset)
+                SeekPoints.SeekPoint(timeUs: secondTime, position: secondOffset)
             } else {
                 nil
             }
@@ -312,16 +312,6 @@ private extension MP4Extractor {
                 self.tracks[sampleTrackIndex].sampleIndex += 1
                 completion(.continueRead)
             }
-//            trackOutput.sampleData(input: input, allowEndOfInput: false, metadata: sampleMedatada, completionQueue: self.queue) { error in
-//                if let error {
-//                    completion(.error(error)); return
-//                }
-//
-//                self.sampleBytesRead += sample.size
-//                self.sampleTrackIndex = nil
-//                self.tracks[sampleTrackIndex].sampleIndex += 1
-//                completion(.continueRead)
-//            }
         }
     }
 

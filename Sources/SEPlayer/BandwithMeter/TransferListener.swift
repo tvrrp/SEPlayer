@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol TransferListener {
+public protocol TransferListener {
     var id: UUID { get }
     func onTransferInitializing(source: DataSource, isNetwork: Bool)
     func onTransferEnd(source: DataSource, isNetwork: Bool, metrics: URLSessionTaskMetrics)

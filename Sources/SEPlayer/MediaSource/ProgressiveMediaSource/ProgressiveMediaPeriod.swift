@@ -10,7 +10,7 @@ import Foundation
 
 final class ProgressiveMediaPeriod: MediaPeriod {
     protocol Listener: AnyObject {
-        func sourceInfoRefreshed(duration: Int64, seekMap: SeekMap, isLive: Bool)
+        func sourceInfoRefreshed(durationUs: Int64, seekMap: SeekMap, isLive: Bool)
     }
 
     var trackGroups: [TrackGroup] { trackState.tracks }
@@ -281,9 +281,9 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
         let seekPoints = seekMap.getSeekPoints(for: positionUs)
         return seekParameters.resolveSyncPosition(
-            position: positionUs,
-            firstSync: seekPoints.first.time,
-            secondSync: seekPoints.second.time
+            positionUs: positionUs,
+            firstSyncUs: seekPoints.first.timeUs,
+            secondSyncUs: seekPoints.second.timeUs
         )
     }
 
@@ -329,7 +329,6 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
     private func maybeStartDeferredRetry(track: Int) {
         assertPrepared()
-        return // TODO: Remove
         guard pendingDeferredRetry
                 || (!haveAudioVideoTracks && trackState.isAudioOrVideo[track])
                 || !sampleQueues[track].isReady(loadingFinished: false) else {
@@ -398,7 +397,7 @@ extension ProgressiveMediaPeriod: Loader.Callback {
             if durationUs == .timeUnset, let seekMap {
                 let largestQueuedTimestampUs = getLargestQueuedTimestampUs(includeDisabledTracks: false)
                 durationUs = largestQueuedTimestampUs == .min ? .zero : largestQueuedTimestampUs + 10_000
-                listener?.sourceInfoRefreshed(duration: durationUs, seekMap: seekMap, isLive: isLive)
+                listener?.sourceInfoRefreshed(durationUs: durationUs, seekMap: seekMap, isLive: isLive)
             }
             loadingFinished = true
             callback?.continueLoadingRequested(with: self)
@@ -468,10 +467,10 @@ private extension ProgressiveMediaPeriod {
 
     func setSeekMap(_ seekMap: SeekMap) {
         assert(queue.isCurrent())
-        durationUs = seekMap.getDuration()
+        durationUs = seekMap.getDurationUs()
         self.seekMap = seekMap
         if isPrepared {
-            listener?.sourceInfoRefreshed(duration: durationUs, seekMap: seekMap, isLive: false)
+            listener?.sourceInfoRefreshed(durationUs: durationUs, seekMap: seekMap, isLive: false)
         } else {
             self.maybeFinishPrepare()
         }
@@ -505,7 +504,7 @@ private extension ProgressiveMediaPeriod {
         }
 
         trackState = TrackState(tracks: trackGroups, isAudioOrVideo: isAudioOrVideo)
-        listener?.sourceInfoRefreshed(duration: durationUs, seekMap: seekMap, isLive: false)
+        listener?.sourceInfoRefreshed(durationUs: durationUs, seekMap: seekMap, isLive: false)
         isPrepared = true
         callback?.didPrepare(mediaPeriod: self)
     }
@@ -554,11 +553,23 @@ private extension ProgressiveMediaPeriod {
 }
 
 private extension ProgressiveMediaPeriod {
-    struct SampleStreamHolder: SampleStream {
+    final class SampleStreamHolder: SampleStream {
         let track: Int
-        let isReadyClosure: ((_ track: Int) -> Bool)
-        let readDataClosure: ((_ track: Int, _ buffer: DecoderInputBuffer, _ readFlags: ReadFlags) throws -> SampleStreamReadResult)
-        let skipDataClosure: ((_ track: Int, _ time: Int64) -> Int)
+        let isReadyClosure: ((Int) -> Bool)
+        let readDataClosure: ((Int, DecoderInputBuffer, ReadFlags) throws -> SampleStreamReadResult)
+        let skipDataClosure: ((Int, Int64) -> Int)
+
+        init(
+            track: Int,
+            isReadyClosure: @escaping (Int) -> Bool,
+            readDataClosure: @escaping (Int, DecoderInputBuffer, ReadFlags) throws -> SampleStreamReadResult,
+            skipDataClosure: @escaping (Int, Int64) -> Int
+        ) {
+            self.track = track
+            self.isReadyClosure = isReadyClosure
+            self.readDataClosure = readDataClosure
+            self.skipDataClosure = skipDataClosure
+        }
 
         func isReady() -> Bool {
             isReadyClosure(track)

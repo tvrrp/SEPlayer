@@ -23,20 +23,28 @@ public final class SEPlayerFactory {
         registerDecoders()
     }
 
-    public func buildPlayer(identifier: UUID = UUID(), returnQueue: DispatchQueue = .main) -> SEPlayer {
+    public func buildPlayer(identifier: UUID = UUID()) -> BaseSEPlayer {
         let workQueue = SignalQueue(name: "com.seplayer.work_\(identifier)", qos: .userInitiated)
-        let allocator = DefaultAllocator(queue: workQueue)
-        let playerDependencies = SEPlayerDependencies(
-            playerId: identifier,
-            queue: workQueue,
-            returnQueue: SignalQueue(queue: returnQueue),
-            sessionLoader: sessionLoader,
-            allocator: allocator,
-            displayLink: displayLink
+        let loaderQueue = SignalQueue(name: "com.seplayer.loader_\(identifier)", qos: .userInitiated)
+
+        let dataSourceFactory = DefaultDataSourceFactory(loaderQueue: loaderQueue, networkLoader: sessionLoader)
+        let extractorsFactory = DefaultExtractorFactory(queue: loaderQueue)
+        let mediaSourceFactory = DefaultMediaSourceFactory(
+            workQueue: workQueue,
+            loaderQueue: loaderQueue,
+            dataSourceFactory: dataSourceFactory,
+            extractorsFactory: extractorsFactory
         )
-        return SEPlayer(
-            dependencies: playerDependencies,
-            renderersFactory: DefaultRenderersFactory(decoderFactory: decoderFactory)
+
+        return SEPlayerImpl(
+            identifier: identifier,
+            queue: workQueue,
+            clock: CMClockGetHostTimeClock(),
+            renderersFactory: DefaultRenderersFactory(decoderFactory: decoderFactory),
+            displayLink: displayLink,
+            trackSelector: DefaultTrackSelector(),
+            loadControl: DefaultLoadControl(queue: workQueue),
+            mediaSourceFactory: mediaSourceFactory
         )
     }
 

@@ -5,12 +5,11 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
-import CoreMedia
 import Foundation
 
 protocol MediaSourceInfoHolder {
-    var id: UUID { get }
-    var timeline: Timeline? { get set }
+    var id: AnyHashable { get }
+    var timeline: Timeline { get }
 }
 
 final class MediaSourceList {
@@ -19,45 +18,54 @@ final class MediaSourceList {
     }
 
     weak var delegate: Delegate?
+    var isPrepared: Bool = false
 
     private let playerId: UUID
     private var mediaSourceHolders: [MediaSourceHolder]
     private var mediaSourceByMediaPeriod: [MediaPeriodHolder: MediaSourceHolder]
+    private var mediaSourceById: [AnyHashable: MediaSourceHolder]
     private var childSources: [MediaSourceHolder: MediaSourceDelegateHolder]
     private var enabledMediaSourceHolders: Set<MediaSourceHolder>
 
-    private var isPrepared: Bool
     private var mediaTransferListener: TransferListener?
+    
+    private var shuffleOrder: ShuffleOrder
 
-    init(delegate: Delegate, playerId: UUID) {
-        self.delegate = delegate
+    init(playerId: UUID) {
         self.playerId = playerId
         mediaSourceHolders = []
         mediaSourceByMediaPeriod = [:]
+        mediaSourceById = [:]
         childSources = [:]
         enabledMediaSourceHolders = .init()
         isPrepared = false
+        shuffleOrder = DefaultShuffleOrder(length: .zero)
     }
 
-    func setMediaSource(holders: [MediaSourceHolder]) {
-        removeMediaSources(range: 0..<mediaSourceHolders.count)
-        addMediaSource(index: mediaSourceHolders.count, holders: holders)
+    func setMediaSource(holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) -> Timeline {
+        removeMediaSourcesInternal(range: 0..<mediaSourceHolders.count)
+        return addMediaSource(index: mediaSourceHolders.count, holders: holders, shuffleOrder: shuffleOrder)
     }
 
-    func addMediaSource(index: Int, holders: [MediaSourceHolder]) {
+    func addMediaSource(index: Int, holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) -> Timeline {
         if !holders.isEmpty {
+            self.shuffleOrder = shuffleOrder
             for insertionIndex in index..<index + holders.count {
-                var holder = holders[insertionIndex - index]
+                let holder = holders[insertionIndex - index]
                 if insertionIndex > 0 {
-//                    let previousHolder = mediaSourceHolders[insertionIndex - 1]
-                    holder.reset(firstWindowIndexInChild: 0) // TODO: implement real timeline
+                    let previousHolder = mediaSourceHolders[insertionIndex - 1]
+                    let previousTimeline = previousHolder.mediaSource.timeline
+                    holder.reset(
+                        firstWindowIndexInChild: previousHolder.firstWindowIndexInChild + previousTimeline.windowCount()
+                    )
                 } else {
                     holder.reset(firstWindowIndexInChild: 0)
                 }
-                
-                // TODO: implement real timeline
-//                correctOffsets(start: <#T##Int#>, windowOffsetUpdate: <#T##Int#>)
+
+                let newTimeline = holder.mediaSource.timeline
+                correctOffsets(start: insertionIndex, windowOffsetUpdate: newTimeline.windowCount())
                 mediaSourceHolders.insert(holder, at: insertionIndex)
+                mediaSourceById[holder.id] = holder
                 if isPrepared {
                     prepareChildSource(from: holder)
                     if mediaSourceByMediaPeriod.isEmpty {
@@ -68,7 +76,83 @@ final class MediaSourceList {
                 }
             }
         }
-//        return createTimeline()
+
+        return createTimeline()
+    }
+
+    func removeMediaSource(range: Range<Int>, shuffleOrder: ShuffleOrder) -> Timeline {
+        self.shuffleOrder = shuffleOrder
+        removeMediaSourcesInternal(range: range)
+        return createTimeline()
+    }
+
+    func moveMediaSource(from currentIndex: Int, to newIndex: Int, shuffleOrder: ShuffleOrder) -> Timeline {
+        moveMediaSourceRange(
+            range: Range<Int>(currentIndex...newIndex),
+            to: newIndex,
+            shuffleOrder: shuffleOrder
+        )
+    }
+
+    func moveMediaSourceRange(range: Range<Int>, to newIndex: Int, shuffleOrder: ShuffleOrder) -> Timeline {
+        self.shuffleOrder = shuffleOrder
+        if range.count == 0 || range.lowerBound == newIndex {
+            return createTimeline()
+        }
+
+        let startIndex = min(range.lowerBound, newIndex)
+        let newEndIndex = newIndex + (range.upperBound - range.lowerBound) - 1
+        let endIndex = max(newEndIndex, range.upperBound - 1)
+        var windowOffset = mediaSourceHolders[startIndex].firstWindowIndexInChild
+        if #available(iOS 18.0, *) {
+            mediaSourceHolders.moveSubranges(.init(range), to: newIndex)
+        } else {
+            let removed = mediaSourceHolders[range]
+            mediaSourceHolders.removeSubrange(range)
+            mediaSourceHolders.insert(contentsOf: removed, at: newIndex)
+        }
+
+        for index in startIndex...endIndex {
+            let holder = mediaSourceHolders[index]
+            holder.firstWindowIndexInChild = windowOffset
+            windowOffset += holder.mediaSource.timeline.windowCount()
+        }
+
+        return createTimeline()
+    }
+
+    func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) -> Timeline {
+        for index in range {
+            mediaSourceHolders[index]
+                .mediaSource
+                .updateMediaItem(new: mediaItems[index - range.lowerBound])
+        }
+
+        return createTimeline()
+    }
+
+    func clear(shuffleOrder: ShuffleOrder?) -> Timeline {
+        self.shuffleOrder = if let shuffleOrder {
+            shuffleOrder
+        } else {
+            self.shuffleOrder.cloneAndClear()
+        }
+        removeMediaSourcesInternal(range: 0..<getSize())
+        return createTimeline()
+    }
+
+    func getSize() -> Int { mediaSourceHolders.count }
+
+    func setShuffleOrder(new shuffleOrder: ShuffleOrder) -> Timeline {
+        var shuffleOrder = shuffleOrder
+        let size = getSize()
+        if shuffleOrder.count != size {
+            shuffleOrder = shuffleOrder
+                .cloneAndClear()
+                .cloneAndInsert(insertionIndex: .zero, insertionCount: size)
+        }
+        self.shuffleOrder = shuffleOrder
+        return createTimeline()
     }
 
     func prepare(mediaTransferListener: TransferListener?) throws {
@@ -85,34 +169,64 @@ final class MediaSourceList {
         id: MediaPeriodId,
         allocator: Allocator,
         startPosition: Int64
-    ) -> MediaPeriod {
-        var holder = mediaSourceHolders[0]
+    ) throws -> MediaPeriod {
+        let mediaSourceHolderId = mediaSourceHolderId(for: id.periodId)
+        let childMediaPeriodId = id.copy(with: childPeriodId(from: id.periodId))
+        guard let holder = mediaSourceById[mediaSourceHolderId] else {
+            // TODO: throw
+            fatalError()
+        }
+
         enableMediaSource(holder: holder)
-        holder.activeMediaPeriodIds.append(id)
-        let period = holder.mediaSource.createPeriod(
-            id: holder.activeMediaPeriodIds[0],
+        holder.activeMediaPeriodIds.append(childMediaPeriodId)
+        let mediaPeriod = holder.mediaSource.createPeriod(
+            id: childMediaPeriodId,
             allocator: allocator,
             startPosition: startPosition
         )
-        mediaSourceByMediaPeriod[MediaPeriodHolder(period: period)] = holder
+
+        mediaSourceByMediaPeriod[.init(period: mediaPeriod)] = holder
         disableUnusedMediaSources()
-        return period
+        return mediaPeriod
     }
 
     func releasePeriod(mediaPeriod: MediaPeriod) {
         if let holder = mediaSourceByMediaPeriod.removeValue(forKey: MediaPeriodHolder(period: mediaPeriod)) {
             holder.mediaSource.release(mediaPeriod: mediaPeriod)
-//            holder.activeMediaPeriodIds.remove(at: <#T##Int#>)
+            let id = (mediaPeriod as! MaskingMediaPeriod).id
+            holder.activeMediaPeriodIds.removeAll(where: { $0 == id })
             if !mediaSourceByMediaPeriod.isEmpty {
                 disableUnusedMediaSources()
             }
             releaseChildSource(from: holder)
         }
     }
+
+    func release() {
+        childSources.values.forEach { $0.source.releaseSource(delegate: $0.delegate) }
+        childSources.removeAll()
+        enabledMediaSourceHolders.removeAll()
+        isPrepared = false
+    }
+
+    func createTimeline() -> Timeline {
+        guard !mediaSourceHolders.isEmpty else { return EmptyTimeline() }
+
+        var windowOffset = 0
+        for mediaSourceHolder in mediaSourceHolders {
+            mediaSourceHolder.firstWindowIndexInChild = windowOffset
+            windowOffset += mediaSourceHolder.mediaSource.timeline.windowCount()
+        }
+
+        return PlaylistTimeline(
+            mediaSourceInfoHolders: mediaSourceHolders,
+            shuffleOrder: shuffleOrder
+        )
+    }
 }
 
 extension MediaSourceList: MediaSourceDelegate {
-    func mediaSource(_ source: MediaSource, sourceInfo refreshed: Timeline?) {
+    func mediaSource(_ source: MediaSource, sourceInfo refreshed: Timeline) {
         delegate?.playlistUpdateRequested()
     }
 }
@@ -126,10 +240,10 @@ private extension MediaSourceList {
     }
 
     func disableUnusedMediaSources() {
-        for holder in enabledMediaSourceHolders {
-            if holder.activeMediaPeriodIds.isEmpty {
-                disableChildSource(holder: holder)
-            }
+        let unusedHolders = enabledMediaSourceHolders.filter { $0.activeMediaPeriodIds.isEmpty }
+        for holder in unusedHolders {
+            disableChildSource(holder: holder)
+            enabledMediaSourceHolders.remove(holder)
         }
     }
 
@@ -139,11 +253,12 @@ private extension MediaSourceList {
         }
     }
 
-    func removeMediaSources(range: Range<Int>) {
+    func removeMediaSourcesInternal(range: Range<Int>) {
         for index in range.reversed() {
-            var holder = mediaSourceHolders.remove(at: index)
-//            let oldTimelime = holder.mediaSource.
-            correctOffsets(start: index, windowOffsetUpdate: 1)
+            let holder = mediaSourceHolders.remove(at: index)
+            mediaSourceById.removeValue(forKey: holder.id)
+            let oldTimelime = holder.mediaSource.timeline
+            correctOffsets(start: index, windowOffsetUpdate: -oldTimelime.windowCount())
             holder.isRemoved = true
             if isPrepared {
                 releaseChildSource(from: holder)
@@ -155,6 +270,24 @@ private extension MediaSourceList {
         for index in start..<mediaSourceHolders.count {
             mediaSourceHolders[index].firstWindowIndexInChild += windowOffsetUpdate
         }
+    }
+
+    func mediaPeriodIdForChild(for mediaPeriodId: MediaPeriodId, mediaSourceHolder: MediaSourceHolder) -> MediaPeriodId? {
+        for activeMediaPeriodId in mediaSourceHolder.activeMediaPeriodIds {
+            if activeMediaPeriodId.windowSequenceNumber == mediaPeriodId.windowSequenceNumber {
+                let periodId = periodId(
+                    holder: mediaSourceHolder,
+                    childPeriodId: mediaPeriodId.periodId
+                )
+                return mediaPeriodId.copy(with: periodId)
+            }
+        }
+
+        return nil
+    }
+
+    func windowIndexForChild(windowIndex: Int, mediaSourceHolder: MediaSourceHolder) -> Int {
+        windowIndex + mediaSourceHolder.firstWindowIndexInChild
     }
 }
 
@@ -176,8 +309,16 @@ private extension MediaSourceList {
 }
 
 private extension MediaSourceList {
-    var mediaSourceById: [(UUID, MediaSourceHolder)] {
-        mediaSourceHolders.map { ($0.id, $0) }
+    func mediaSourceHolderId(for periodId: AnyHashable) -> AnyHashable {
+        PlaylistTimeline.childTimelineId(from: periodId)
+    }
+
+    func childPeriodId(from periodId: AnyHashable) -> AnyHashable {
+        PlaylistTimeline.childPeriodId(from: periodId)
+    }
+
+    func periodId(holder: MediaSourceHolder, childPeriodId: AnyHashable) -> AnyHashable {
+        PlaylistTimeline.concatenatedId(childTimelineId: holder.id, childPeriodOrWindowId: childPeriodId)
     }
 }
 
@@ -190,34 +331,33 @@ extension MediaSourceList {
         }
 
         static func == (lhs: MediaPeriodHolder, rhs: MediaPeriodHolder) -> Bool {
-            return ObjectIdentifier(lhs.period) == ObjectIdentifier(rhs.period)
+            return lhs.period === rhs.period
         }
     }
 
     private struct MediaSourceDelegateHolder {
-        let source: BaseMediaSource
+        let source: MediaSource
         let delegate: MediaSourceDelegate
     }
 
-    struct MediaSourceHolder: MediaSourceInfoHolder, Hashable {
-        let id: UUID
-        var timeline: Timeline?
-
-        let mediaSource: BaseMediaSource
+    final class MediaSourceHolder: MediaSourceInfoHolder, Hashable {
+        var timeline: Timeline { mediaSource.timeline }
+        let mediaSource: MaskingMediaSource
+        let id: AnyHashable
         var activeMediaPeriodIds: [MediaPeriodId]
 
         var firstWindowIndexInChild: Int
         var isRemoved: Bool
 
-        init(mediaSource: BaseMediaSource) {
+        init(queue: Queue, mediaSource: MediaSource, useLazyPreparation: Bool) {
             id = UUID()
             activeMediaPeriodIds = []
-            self.mediaSource = mediaSource
+            self.mediaSource = MaskingMediaSource(queue: queue, mediaSource: mediaSource, useLazyPreparation: useLazyPreparation)
             firstWindowIndexInChild = 0
             isRemoved = false
         }
 
-        mutating func reset(firstWindowIndexInChild: Int) {
+        func reset(firstWindowIndexInChild: Int) {
             self.firstWindowIndexInChild = firstWindowIndexInChild
             isRemoved = false
             activeMediaPeriodIds.removeAll()

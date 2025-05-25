@@ -7,121 +7,225 @@
 
 import Foundation
 
-protocol Timeline {
-    var windowCount: Int { get }
-    func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int?
-    func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int
-    func lastWindowIndex(shuffleModeEnabled: Bool) -> Int
-    func firstWindowIndex(shuffleModeEnabled: Bool) -> Int
-    func getWindow(windowIndex: Int, defaultPositionProjectionUs: Int64) -> Window
-    func getPeriodCount() -> Int
-
-    func getPeriod(periodIndex: Int, setIds: Bool) -> Period
+public protocol Timeline {
+    func windowCount() -> Int
+    func nextWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int?
+    func previousWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int?
+    func lastWindowIndex(shuffleModeEnabled: Bool) -> Int?
+    func firstWindowIndex(shuffleModeEnabled: Bool) -> Int?
+    @discardableResult
+    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window
+    func periodCount() -> Int
+    @discardableResult
+    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period
+    @discardableResult
+    func periodById(_ id: AnyHashable, period: inout Period) -> Period
+    func indexOfPeriod(by id: AnyHashable) -> Int?
+    func id(for periodIndex: Int) -> AnyHashable
 }
 
 extension Timeline {
-//    func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int {
-//        switch repeatMode {
-//        case .off:
-//            <#code#>
-//        case .one:
-//            <#code#>
-//        case .all:
-//            <#code#>
-//        }
-//    }
+    var isEmpty: Bool { windowCount() == .zero }
+
+    func nextWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+        switch repeatMode {
+        case .off:
+            return if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+                nil
+            } else {
+                windowIndex + 1
+            }
+        case .one:
+            return windowIndex
+        case .all:
+            return if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+                firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
+            } else {
+                windowIndex + 1
+            }
+        }
+    }
+
+    func previousWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+        switch repeatMode {
+        case .off:
+            return if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+                nil
+            } else {
+                windowIndex - 1
+            }
+        case .one:
+            return windowIndex
+        case .all:
+            return if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+                lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
+            } else {
+                windowIndex - 1
+            }
+        }
+    }
+
+    func lastWindowIndex(shuffleModeEnabled: Bool) -> Int? {
+        isEmpty ? nil : windowCount() - 1
+    }
+
+    func firstWindowIndex(shuffleModeEnabled: Bool) -> Int? {
+        isEmpty ? nil : 0
+    }
+
+    @discardableResult
+    func getWindow(windowIndex: Int, window: inout Window) -> Window {
+        getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: .zero)
+    }
+
     func nextPeriodIndex(
         periodIndex: Int,
-        period: Period,
-        window: Window,
-        repeatMode: RepeatMode,
+        period: inout Period,
+        window: inout Window,
+        repeatMode: SEPlayer.RepeatMode,
         shuffleModeEnabled: Bool
     ) -> Int? {
-        let windowIndex = getPeriod(periodIndex: periodIndex).windowIndex
-        if getWindow(windowIndex: windowIndex).lastPeriodIndex == periodIndex {
+        let windowIndex = getPeriod(periodIndex: periodIndex, period: &period).windowIndex
+        if getWindow(windowIndex: windowIndex, window: &window).lastPeriodIndex == periodIndex {
             let nextWindowIndex = nextWindowIndex(
                 windowIndex: windowIndex,
                 repeatMode: repeatMode,
                 shuffleModeEnabled: shuffleModeEnabled
             )
             if let nextWindowIndex {
-                return getWindow(windowIndex: nextWindowIndex).firstPeriodIndex
+                return getWindow(windowIndex: nextWindowIndex, window: &window).firstPeriodIndex
             }
             return nextWindowIndex
         }
         return periodIndex + 1
     }
 
-    func getWindow(windowIndex: Int) -> Window { getWindow(windowIndex: windowIndex, defaultPositionProjectionUs: .zero) }
-    func getPeriod(periodIndex: Int) -> Period { getPeriod(periodIndex: periodIndex, setIds: false) }
-}
+    func isLastPeriod(
+        periodIndex: Int,
+        period: inout Period,
+        window: inout Window,
+        repeatMode: SEPlayer.RepeatMode,
+        shuffleModeEnabled: Bool
+    ) -> Bool {
+        nil == nextPeriodIndex(
+            periodIndex: periodIndex,
+            period: &period,
+            window: &window,
+            repeatMode: repeatMode,
+            shuffleModeEnabled: shuffleModeEnabled
+        )
+    }
 
-struct Window: Hashable {
-    let id: UUID
+    func periodPositionUs(
+        window: inout Window,
+        period: inout Period,
+        windowIndex: Int,
+        windowPositionUs: Int64,
+        defaultPositionProjectionUs: Int64 = .zero
+    ) -> (AnyHashable, Int64)? {
+        guard windowIndex > 0 || windowIndex < windowCount() else {
+            assertionFailure()
+            return nil
+        }
+        getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        let windowPositionUs = windowPositionUs == .timeUnset ? window.defaultPositionUs : windowPositionUs
+        guard windowPositionUs != .timeUnset else { return nil }
 
-    let mediaItem: MediaItem
-    let presentationStartTimeMs: Int64
-    let windowStartTimeMs: Int64
+        var periodIndex = window.firstPeriodIndex
+        getPeriod(periodIndex: periodIndex, period: &period)
+        while periodIndex < window.lastPeriodIndex,
+              period.positionInWindowUs != windowPositionUs,
+              getPeriod(periodIndex: periodIndex + 1, period: &period).positionInWindowUs <= windowPositionUs {
+            periodIndex += 1
+        }
+        getPeriod(periodIndex: periodIndex, period: &period, setIds: true)
+        var periodPositionUs = windowPositionUs - period.positionInWindowUs
+        if periodPositionUs != .timeUnset {
+            periodPositionUs = min(periodPositionUs, period.durationUs - 1)
+        }
+        periodPositionUs = max(0, periodPositionUs)
+        guard let periodId = period.uuid else { return nil }
+        return (periodId, periodPositionUs)
+    }
 
-    let isSeekable: Bool
-    let isDynamic: Bool
-    let isPlaceholder: Bool
+    @discardableResult
+    func periodById(_ id: AnyHashable, period: inout Period) -> Period {
+        getPeriod(periodIndex: indexOfPeriod(by: id) ?? .zero, period: &period, setIds: true)
+    }
 
-    let defaultPositionUs: Int64
-    let durationUs: Int64
+    @discardableResult
+    func getPeriod(periodIndex: Int, period: inout Period) -> Period {
+        getPeriod(periodIndex: periodIndex, period: &period, setIds: false)
+    }
 
-    let firstPeriodIndex: Int
-    let lastPeriodIndex: Int
-    let positionInFirstPeriodUs: Int64
+    func equals(to other: Timeline) -> Bool {
+        guard !self.conformsToClass(), !other.conformsToClass() else {
+            return (self as AnyObject) === (other as AnyObject)
+        }
 
-    init(
-        id: UUID = Window.singleWindowId,
-        mediaItem: MediaItem = Window.placeholderMediaItem,
-        presentationStartTimeMs: Int64 = .zero,
-        windowStartTimeMs: Int64 = .zero,
-        isSeekable: Bool = false,
-        isDynamic: Bool = false,
-        isPlaceholder: Bool = false,
-        defaultPositionUs: Int64 = .zero,
-        durationUs: Int64 = .zero,
-        firstPeriodIndex: Int = .zero,
-        lastPeriodIndex: Int = .zero,
-        positionInFirstPeriodUs: Int64 = .zero
-    ) {
-        self.id = id
-        self.mediaItem = mediaItem
-        self.presentationStartTimeMs = presentationStartTimeMs
-        self.windowStartTimeMs = windowStartTimeMs
-        self.isSeekable = isSeekable
-        self.isDynamic = isDynamic
-        self.isPlaceholder = isPlaceholder
-        self.defaultPositionUs = defaultPositionUs
-        self.durationUs = durationUs
-        self.firstPeriodIndex = firstPeriodIndex
-        self.lastPeriodIndex = lastPeriodIndex
-        self.positionInFirstPeriodUs = positionInFirstPeriodUs
+        guard other.windowCount() == windowCount() || other.periodCount() == periodCount() else {
+            return false
+        }
+
+        var window = Window()
+        var period = Period()
+        var otherWindow = Window()
+        var otherPeriod = Period()
+
+        for index in 0..<windowCount() {
+            if getWindow(windowIndex: index, window: &window) != other.getWindow(windowIndex: index, window: &otherWindow) {
+                return false
+            }
+        }
+
+        for index in 0..<periodCount() {
+            if getPeriod(periodIndex: index, period: &period) != other.getPeriod(periodIndex: index, period: &otherPeriod) {
+                return false
+            }
+        }
+
+        var windowIndex = firstWindowIndex(shuffleModeEnabled: true)
+        if windowIndex != other.firstWindowIndex(shuffleModeEnabled: true) {
+            return false
+        }
+
+        let lastWindowIndex = lastWindowIndex(shuffleModeEnabled: true)
+        if lastWindowIndex != other.lastWindowIndex(shuffleModeEnabled: true) {
+            return false
+        }
+
+        while let unwrappedWindowIndex = windowIndex, windowIndex != lastWindowIndex {
+            let nextWindowIndex = nextWindowIndex(
+                windowIndex: unwrappedWindowIndex,
+                repeatMode: .off,
+                shuffleModeEnabled: true
+            )
+            let otherNextWindowIndex = other.nextWindowIndex(
+                windowIndex: unwrappedWindowIndex,
+                repeatMode: .off,
+                shuffleModeEnabled: true
+            )
+
+            if nextWindowIndex != otherNextWindowIndex {
+                return false
+            }
+            windowIndex = nextWindowIndex
+        }
+
+        return true
+    }
+
+    private func conformsToClass() -> Bool {
+        let mirror = Mirror(reflecting: self)
+        return mirror.displayStyle == .class
     }
 }
 
-extension Window {
-    static let singleWindowId = UUID()
-    static let placeholderMediaItem = MediaItem(url: FileManager.default.temporaryDirectory)
-}
-
-struct Period: Hashable {
-    let id: AnyHashable?
-    let uuid: UUID?
-    let windowIndex: Int
-    let duration: Int64
-    let positionInWindow: Int64
-    let isPlaceholder: Bool
-
-    init(id: AnyHashable? = nil, uuid: UUID? = nil, windowIndex: Int, duration: Int64, positionInWindow: Int64, isPlaceholder: Bool = false) {
-        self.id = id
-        self.uuid = uuid
-        self.windowIndex = windowIndex
-        self.duration = duration
-        self.positionInWindow = positionInWindow
-        self.isPlaceholder = isPlaceholder
-    }
+struct EmptyTimeline: Timeline {
+    func windowCount() -> Int { 0 }
+    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window { window }
+    func periodCount() -> Int { 0 }
+    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period { period }
+    func indexOfPeriod(by id: AnyHashable) -> Int? { nil }
+    func id(for periodIndex: Int) -> AnyHashable { UUID() }
 }

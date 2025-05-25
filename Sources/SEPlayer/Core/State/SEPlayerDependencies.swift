@@ -10,8 +10,6 @@ import AVFoundation
 final class SEPlayerDependencies {
     let playerId: UUID
     let queue: Queue
-    let returnQueue: Queue
-    let sessionLoader: IPlayerSessionLoader
     let allocator: Allocator
     var renderers: [SERenderer] = []
     let standaloneClock: DefaultMediaClock
@@ -19,30 +17,25 @@ final class SEPlayerDependencies {
 
     var mediaPeriodHolder: MediaPeriodHolder?
 
-    var nextState: SEPlayer.State?
-
     var mediaSource: MediaSource?
     var mediaPeriod: MediaPeriod?
 
-    let displayLink: DisplayLinkProvider
     let bufferableContainer: PlayerBufferableContainer
+    let mediaSourceList: MediaSourceList
 
     init(
         playerId: UUID,
         queue: Queue,
-        returnQueue: Queue,
-        sessionLoader: IPlayerSessionLoader,
+        clock: CMClock,
         allocator: Allocator,
-        displayLink: DisplayLinkProvider
+        bufferableContainer: PlayerBufferableContainer
     ) {
         self.playerId = playerId
         self.queue = queue
-        self.returnQueue = returnQueue
-        self.sessionLoader = sessionLoader
         self.allocator = allocator
-        self.clock = CMClockGetHostTimeClock()
-        self.displayLink = displayLink
-        self.bufferableContainer = PlayerBufferableContainer(displayLink: displayLink)
+        self.clock = clock
+        self.bufferableContainer = bufferableContainer
+        mediaSourceList = MediaSourceList(playerId: playerId)
 
         standaloneClock = DefaultMediaClock(clock: clock)
     }

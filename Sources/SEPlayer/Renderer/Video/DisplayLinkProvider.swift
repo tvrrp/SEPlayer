@@ -44,14 +44,14 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     private var displayLink: CADisplayLink?
 
     private var isStarted: Bool = false
-    private let startCondition = NSCondition()
     private var observersCount: Int = 0
     private var _sampledVsyncTime: Int64?
     private var _vsyncDuration: Int64?
     private var onDisplayLinkExecuting: Bool = false
 
     func addObserver() {
-//        assert(queue.isCurrent())
+        lock()
+        defer { unlock() }
         observersCount += 1
         if observersCount > 0 {
             startIfNeeded()
@@ -59,7 +59,8 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     }
 
     func removeObserver() {
-//        assert(queue.isCurrent())
+        lock()
+        defer { unlock() }
         observersCount -= 1
         if observersCount == 0 {
             removeIfNeeded()
@@ -76,20 +77,20 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     }
 
     private func startIfNeeded() {
-        guard !isStarted else { return }
-        DispatchQueue.main.async { [self] in
+        Queues.mainQueue.async { [self] in
+            guard !isStarted else { return }
             guard displayLink == nil else { return }
             displayLink = CADisplayLink(target: self, selector: #selector(onDisplayTick))
             displayLink?.add(to: .main, forMode: .common)
+            isStarted = true
         }
-        startCondition.wait()
-        isStarted = true
     }
 
     private func removeIfNeeded() {
-        guard isStarted else { return }
-        isStarted = false
-        DispatchQueue.main.async { [self] in
+        Queues.mainQueue.async { [self] in
+            guard isStarted else { return }
+            isStarted = false
+
             guard let displayLink else { return }
             displayLink.invalidate()
             self.displayLink = nil
@@ -101,7 +102,6 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
         onDisplayLinkExecuting = true
         defer { onDisplayLinkExecuting = false }
 
-        startCondition.signal()
         let currentTimestampNs = displayLink.timestamp.nanosecondsPerSecond
         let targetTimestampNs = displayLink.targetTimestamp.nanosecondsPerSecond
         let duration = displayLink.duration.nanosecondsPerSecond
@@ -120,11 +120,6 @@ final class CADisplayLinkProvider: DisplayLinkProvider {
     }
 
     private var unfairLock = os_unfair_lock_s()
-    func lock() {
-        os_unfair_lock_lock(&unfairLock)
-    }
-
-    func unlock() {
-        os_unfair_lock_unlock(&unfairLock)
-    }
+    func lock() { os_unfair_lock_lock(&unfairLock) }
+    func unlock() { os_unfair_lock_unlock(&unfairLock) }
 }

@@ -8,13 +8,13 @@
 import CoreMedia
 import Foundation
 
-protocol MediaSource: AnyObject {
-    var mediaItem: MediaItem? { get }
+public protocol MediaSource: AnyObject {
     var isSingleWindow: Bool { get }
 
+    func getMediaItem() -> MediaItem
     func getInitialTimeline() -> Timeline?
     func canUpdateMediaItem(new item: MediaItem) -> Bool
-    func updateMediaItem()
+    func updateMediaItem(new item: MediaItem)
     func prepareSource(delegate: MediaSourceDelegate, mediaTransferListener: TransferListener?, playerId: UUID)
     func enable(delegate: MediaSourceDelegate)
     func createPeriod(
@@ -24,16 +24,8 @@ protocol MediaSource: AnyObject {
     ) -> MediaPeriod
     func release(mediaPeriod: MediaPeriod)
     func disable(delegate: MediaSourceDelegate)
+    func releaseSource(delegate: MediaSourceDelegate)
     func continueLoadingRequested(with source: any MediaSource)
-}
-
-extension MediaSource {
-    var mediaItem: MediaItem? { nil }
-    var isSingleWindow: Bool { true }
-
-    func getInitialTimeline() -> Timeline? { nil }
-    func canUpdateMediaItem(new item: MediaItem) -> Bool { false }
-    func updateMediaItem() {}
 }
 
 //protocol MediaSourceEventListener: AnyObject {
@@ -44,11 +36,13 @@ extension MediaSource {
 //    func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void)
 //}
 
-protocol MediaSourceDelegate: AnyObject {
-    func mediaSource(_ source: any MediaSource, sourceInfo refreshed: Timeline?)
+public protocol MediaSourceDelegate: AnyObject {
+    func mediaSource(_ source: any MediaSource, sourceInfo refreshed: Timeline)
 }
 
 class BaseMediaSource: MediaSource {
+    var isSingleWindow: Bool { true }
+
     final var isEnabled: Bool {
         assert(queue.isCurrent())
         return mediaSourceDelegates.count != 0
@@ -64,12 +58,16 @@ class BaseMediaSource: MediaSource {
 
     private var _playerId: UUID?
     private var _timeline: Timeline?
-    
+
     init(queue: Queue) {
         self.queue = queue
         mediaSourceDelegates = MulticastDelegate<MediaSourceDelegate>(isThreadSafe: false)
     }
 
+    func getMediaItem() -> MediaItem { fatalError("To override") }
+    func getInitialTimeline() -> Timeline? { nil }
+    func canUpdateMediaItem(new item: MediaItem) -> Bool { false }
+    func updateMediaItem(new item: MediaItem) {}
     func prepareSourceInternal(mediaTransferListener: TransferListener?) { fatalError("To override") }
     func releaseSourceInternal() { fatalError("To override") }
     func updateMediaItem() { fatalError("To override") }

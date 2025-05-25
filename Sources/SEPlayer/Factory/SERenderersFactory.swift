@@ -5,8 +5,15 @@
 //  Created by Damir Yackupov on 05.05.2025.
 //
 
+import CoreMedia
+
 protocol RenderersFactory {
-    func createRenderers(dependencies: SEPlayerDependencies) -> [SERenderer]
+    func createRenderers(
+        queue: Queue,
+        clock: CMClock,
+        displayLink: DisplayLinkProvider,
+        bufferableContainer: PlayerBufferableContainer
+    ) -> [any SERenderer]
 }
 
 struct DefaultRenderersFactory: RenderersFactory {
@@ -16,18 +23,23 @@ struct DefaultRenderersFactory: RenderersFactory {
         self.decoderFactory = decoderFactory
     }
 
-    func createRenderers(dependencies: SEPlayerDependencies) -> [any SERenderer] {
+    func createRenderers(
+        queue: Queue,
+        clock: CMClock,
+        displayLink: DisplayLinkProvider,
+        bufferableContainer: PlayerBufferableContainer
+    ) -> [any SERenderer] {
         let renderers = [
             try? CAVideoRenderer<VideoToolboxDecoder>(
-                queue: dependencies.queue,
-                clock: dependencies.clock,
-                displayLink: dependencies.displayLink,
-                bufferableContainer: dependencies.bufferableContainer,
+                queue: queue,
+                clock: clock,
+                displayLink: displayLink,
+                bufferableContainer: bufferableContainer,
                 decoderFactory: decoderFactory
             ),
             try? AudioQueueRenderer<AudioConverterDecoder>(
-                queue: dependencies.queue,
-                clock: dependencies.clock,
+                queue: queue,
+                clock: clock,
                 decoderFactory: decoderFactory
             )
         ].compactMap { $0 }

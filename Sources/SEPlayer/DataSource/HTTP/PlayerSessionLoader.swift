@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol IPlayerSessionLoader {
+public protocol IPlayerSessionLoader {
     func createTask(
         request: URLRequest,
         didRecieveResponce: @escaping (URLResponse, URLSessionTask) -> URLSession.ResponseDisposition,

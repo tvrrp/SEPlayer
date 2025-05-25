@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol Queue: AnyObject {
+public protocol Queue: AnyObject {
     // MARK: - Static
 
     static func mainQueue() -> Queue

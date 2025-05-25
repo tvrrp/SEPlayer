@@ -101,6 +101,6 @@ final class DefaultMediaClock: MediaClock {
         return renderClockSource.isEnded()
             || (isReadingAhead && renderClockSource.getState() != .started)
             || !renderClockSource.isReady()
-                && isReadingAhead || renderClockSource.didReadStreamToEnd()
+            && isReadingAhead || renderClockSource.didReadStreamToEnd()
     }
 }

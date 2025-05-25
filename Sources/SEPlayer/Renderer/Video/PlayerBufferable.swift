@@ -7,12 +7,12 @@
 
 import CoreVideo
 
-enum PlayerBufferableAction {
+public enum PlayerBufferableAction {
     case reset
     case restore
 }
 
-protocol PlayerBufferable: AnyObject {
+public protocol PlayerBufferable: AnyObject {
     func prepare(for action: PlayerBufferableAction)
     func enqueue(_ buffer: CVPixelBuffer)
     func end()
@@ -20,7 +20,7 @@ protocol PlayerBufferable: AnyObject {
     func equal(to other: PlayerBufferable) -> Bool
 }
 
-extension PlayerBufferable {
+public extension PlayerBufferable {
     func equal(to other: PlayerBufferable) -> Bool {
         self === other
     }

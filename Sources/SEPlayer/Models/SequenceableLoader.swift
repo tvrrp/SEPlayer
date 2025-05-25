@@ -5,12 +5,12 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-protocol SequenceableLoaderCallback {
+public protocol SequenceableLoaderCallback {
     associatedtype Source
     func continueLoadingRequested(with source: Source)
 }
 
-protocol SequenceableLoader {
+public protocol SequenceableLoader {
     var isLoading: Bool { get }
     func getBufferedPositionUs() -> Int64
     func getNextLoadPositionUs() -> Int64

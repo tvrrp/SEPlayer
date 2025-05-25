@@ -8,12 +8,12 @@
 import unistd
 import Darwin
 
-protocol AllocationNode: AnyObject {
+public protocol AllocationNode: AnyObject {
     func getAllocation() -> Allocation
     func next() -> AllocationNode?
 }
 
-protocol Allocator: AnyObject {
+public protocol Allocator: AnyObject {
     var totalBytesAllocated: Int { get }
     var individualAllocationSize: Int { get }
     func allocate() -> Allocation

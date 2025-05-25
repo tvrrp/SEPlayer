@@ -8,7 +8,7 @@
 import Foundation
 
 struct ErrorBuilder: Error, LocalizedError {
-    var errorDescription: String?
+    let errorDescription: String?
 
-    static var illegalState = ErrorBuilder(errorDescription: "Illegal state")
+    static let illegalState = ErrorBuilder(errorDescription: "Illegal state")
 }

@@ -6,30 +6,47 @@
 //
 
 public struct SeekParameters: Hashable {
-    public let toleranceBefore: UInt64
-    public let toleranceAfter: UInt64
+    public let toleranceBeforeUs: UInt64
+    public let toleranceAfterUs: UInt64
 
-    public init(toleranceBefore: UInt64, toleranceAfter: UInt64) {
-        self.toleranceBefore = toleranceBefore
-        self.toleranceAfter = toleranceAfter
+    public init(toleranceBeforeUs: UInt64, toleranceAfterUs: UInt64) {
+        self.toleranceBeforeUs = toleranceBeforeUs
+        self.toleranceAfterUs = toleranceAfterUs
     }
 }
 
 extension SeekParameters {
-    public func resolveSyncPosition(position: Int64, firstSync: Int64, secondSync: Int64) -> Int64 {
-        guard toleranceBefore != 0, toleranceAfter != 0 else {
-            return position
+    public func resolveSyncPosition(positionUs: Int64, firstSyncUs: Int64, secondSyncUs: Int64) -> Int64 {
+        guard toleranceBeforeUs != 0, toleranceAfterUs != 0 else {
+            return positionUs
         }
 
-        // TODO: calc
-        return position
+        let minPositionUs = positionUs &- Int64(toleranceBeforeUs)
+        let maxPositionUs = positionUs &+ Int64(toleranceAfterUs)
+
+        let firstSyncPositionValid = (minPositionUs...maxPositionUs).contains(firstSyncUs)
+        let secondSyncPositionValid = (minPositionUs...maxPositionUs).contains(secondSyncUs)
+
+        if firstSyncPositionValid, secondSyncPositionValid {
+            if abs(firstSyncUs - positionUs) <= abs(secondSyncUs - positionUs) {
+                return firstSyncUs
+            } else {
+                return secondSyncUs
+            }
+        } else if firstSyncPositionValid {
+            return firstSyncUs
+        } else if secondSyncPositionValid {
+            return secondSyncUs
+        } else {
+            return maxPositionUs
+        }
     }
 }
 
 extension SeekParameters {
-    public static let exact = SeekParameters(toleranceBefore: .zero, toleranceAfter: .zero)
-    public static let closestSync = SeekParameters(toleranceBefore: .max, toleranceAfter: .max)
-    public static let previousSync = SeekParameters(toleranceBefore: .max, toleranceAfter: .zero)
-    public static let nextSync = SeekParameters(toleranceBefore: .zero, toleranceAfter: .max)
+    public static let exact = SeekParameters(toleranceBeforeUs: .zero, toleranceAfterUs: .zero)
+    public static let closestSync = SeekParameters(toleranceBeforeUs: .max, toleranceAfterUs: .max)
+    public static let previousSync = SeekParameters(toleranceBeforeUs: .max, toleranceAfterUs: .zero)
+    public static let nextSync = SeekParameters(toleranceBeforeUs: .zero, toleranceAfterUs: .max)
     public static let `default` = closestSync
 }

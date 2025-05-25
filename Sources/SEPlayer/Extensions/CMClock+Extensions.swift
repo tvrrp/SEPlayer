@@ -8,6 +8,10 @@
 import CoreMedia
 
 extension CMClock {
+    var milliseconds: Int64 {
+        time.seconds.millisecondsPerSecond
+    }
+
     var microseconds: Int64 {
         time.seconds.microsecondsPerSecond
     }

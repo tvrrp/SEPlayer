@@ -11,7 +11,7 @@ protocol Buffer: AnyObject {
     var flags: SampleFlags { get }
 }
 
-final class DecoderInputBuffer: Buffer {
+public final class DecoderInputBuffer: Buffer {
     var flags = SampleFlags()
     var time: Int64 = 0
     var size: Int = 0

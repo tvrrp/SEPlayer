@@ -7,7 +7,7 @@
 
 import CoreMedia
 
-struct TrackGroup: Hashable {
+public struct TrackGroup: Hashable {
     let id: String
     var length: Int { formats.count }
     let type: TrackType
@@ -39,12 +39,12 @@ struct TrackGroup: Hashable {
         throw TrackGroupError.differentFormatsForTrackGroup
     }
 
-    static func == (lhs: TrackGroup, rhs: TrackGroup) -> Bool {
+    public static func == (lhs: TrackGroup, rhs: TrackGroup) -> Bool {
         return lhs.id == rhs.id && lhs.formats == rhs.formats
     }
 }
 
-enum TrackType {
+public enum TrackType {
     case video
     case audio
     case unknown

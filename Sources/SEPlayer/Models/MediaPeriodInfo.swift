@@ -9,27 +9,40 @@ import CoreMedia
 
 struct MediaPeriodInfo: Hashable {
     let id: MediaPeriodId
-    let startPosition: Int64
-    let requestedContentPosition: Int64
-    let endPosition: Int64
-    let duration: Int64
+    let startPositionUs: Int64
+    let requestedContentPositionUs: Int64
+    let endPositionUs: Int64
+    let durationUs: Int64
+    let isLastInTimelinePeriod: Bool
+    let isLastInTimelineWindow: Bool
     let isFinal: Bool
 
-    func withUpdatedStartPosition(_ position: Int64) -> MediaPeriodInfo {
-        guard position != startPosition else { return self }
+    func copyWithStartPositionUs(_ positionUs: Int64) -> MediaPeriodInfo {
+        guard positionUs != startPositionUs else { return self }
 
         return MediaPeriodInfo(
             id: id,
-            startPosition: position,
-            requestedContentPosition: requestedContentPosition,
-            endPosition: endPosition,
-            duration: duration,
+            startPositionUs: positionUs,
+            requestedContentPositionUs: requestedContentPositionUs,
+            endPositionUs: endPositionUs,
+            durationUs: durationUs,
+            isLastInTimelinePeriod: isLastInTimelinePeriod,
+            isLastInTimelineWindow: isLastInTimelineWindow,
             isFinal: isFinal
         )
     }
 }
 
-struct MediaPeriodId: Hashable {
-    let periodId: UUID
-    let windowSequenceNumber: Int
+public struct MediaPeriodId: Hashable {
+    let periodId: AnyHashable
+    let windowSequenceNumber: Int?
+
+    public init(periodId: AnyHashable = UUID(), windowSequenceNumber: Int? = nil) {
+        self.periodId = periodId
+        self.windowSequenceNumber = windowSequenceNumber
+    }
+
+    func copy(with newPeriodId: AnyHashable) -> MediaPeriodId {
+        periodId == newPeriodId ? self : MediaPeriodId(periodId: periodId, windowSequenceNumber: windowSequenceNumber)
+    }
 }

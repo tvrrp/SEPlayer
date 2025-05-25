@@ -5,9 +5,9 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-protocol Extractor: AnyObject {
+public protocol Extractor: AnyObject {
     func read(input: ExtractorInput, completion: @escaping (ExtractorReadResult) -> Void)
-    func seek(to position: Int, time: Int64)
+    func seek(to position: Int, timeUs: Int64)
     func release()
 }
 
@@ -15,13 +15,13 @@ extension Extractor {
     func release() {}
 }
 
-enum ExtractorReadResult: Equatable {
+public enum ExtractorReadResult: Equatable {
     case continueRead
     case endOfInput
     case seek(offset: Int)
     case error(Error)
 
-    static func == (lhs: ExtractorReadResult, rhs: ExtractorReadResult) -> Bool {
+    public static func == (lhs: ExtractorReadResult, rhs: ExtractorReadResult) -> Bool {
         switch (lhs, rhs) {
         case (.continueRead, .continueRead):
             return true

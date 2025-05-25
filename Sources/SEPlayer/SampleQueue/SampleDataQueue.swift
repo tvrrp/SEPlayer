@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 07.04.2025.
 //
 
-import CoreMedia
+import string_h
 
 final class SampleDataQueue {
     private let queue: Queue

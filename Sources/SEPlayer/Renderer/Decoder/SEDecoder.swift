@@ -5,8 +5,6 @@
 //  Created by Damir Yackupov on 21.04.2025.
 //
 
-import CoreMedia
-
 protocol SEDecoder: AnyObject {
     associatedtype OutputBuffer: DecoderOutputBuffer
     func dequeueInputBufferIndex() -> Int?

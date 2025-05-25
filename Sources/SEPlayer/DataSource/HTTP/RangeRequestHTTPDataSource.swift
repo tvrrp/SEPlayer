@@ -22,11 +22,11 @@ final class RangeRequestHTTPDataSource: DataSource {
     private var currentDataSpec: DataSpec?
     private var currentReadOffset: Int = 0
 
-    init(queue: Queue, networkLoader: IPlayerSessionLoader, segmentLenght: Int = .defaultSegmentLenght) {
+    init(queue: Queue, networkLoader: IPlayerSessionLoader, segmentLenght: Int? = nil) {
         self.queue = queue
         self.components = DataSourceOpaque(isNetwork: true)
         self.networkLoader = networkLoader
-        self.defaultSegmentLenght = segmentLenght
+        self.defaultSegmentLenght = segmentLenght ?? .defaultSegmentLenght
         self.requestHandler = DefautlHTTPDataSource(
             queue: queue, networkLoader: networkLoader, components: components
         )

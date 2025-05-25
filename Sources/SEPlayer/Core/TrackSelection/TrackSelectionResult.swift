@@ -8,12 +8,13 @@
 import CoreMedia
 
 struct TrackSelectionResult: Equatable {
+    let renderersConfig: [Bool?]
     let selections: [SETrackSelection?]
     let tracks: Tracks
-
+    
     static func == (lhs: TrackSelectionResult, rhs: TrackSelectionResult) -> Bool {
         guard lhs.selections.count == rhs.selections.count else { return false }
-        
+
         for (firstSelection, secondSelection) in zip(lhs.selections, rhs.selections) {
             if firstSelection?.id == secondSelection?.id {
                 return true
@@ -21,6 +22,10 @@ struct TrackSelectionResult: Equatable {
         }
 
         return false
+    }
+
+    func isRendererEnabled(for index: Int) -> Bool {
+        renderersConfig[index] != nil
     }
 }
 

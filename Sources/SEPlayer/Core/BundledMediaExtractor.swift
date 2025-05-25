@@ -5,26 +5,26 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
 import Foundation
 
 final class BundledMediaExtractor: ProgressiveMediaExtractor {
     private let queue: Queue
-    private let extractorQueue: Queue
+    private let extractorsFactory: ExtractorsFactory
 
     private var extractor: Extractor?
     private var extractorInput: ExtractorInput?
 
-    init(queue: Queue, extractorQueue: Queue) {
+    init(queue: Queue, extractorsFactory: ExtractorsFactory) {
         self.queue = queue
-        self.extractorQueue = extractorQueue
+        self.extractorsFactory = extractorsFactory
     }
 
     func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws {
         assert(queue.isCurrent())
-        extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: extractorQueue, range: range)
+        extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: queue, range: range)
         guard extractor == nil else { return }
-        extractor = MP4Extractor(queue: extractorQueue, extractorOutput: output)
+        let httpHeaders = (response as? HTTPURLResponse)?.allHeaderFields ?? [:]
+        extractor = extractorsFactory.createExtractors(output: output, url: url, httpHeaders: httpHeaders)[0]
     }
 
     func release() {
@@ -34,23 +34,23 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
     }
 
     func getCurrentInputPosition() -> Int? {
-        extractorQueue.sync { extractorInput?.getPosition() }
+        assert(queue.isCurrent())
+        return extractorInput?.getPosition()
     }
 
     func seek(position: Int, time: Int64) {
-        extractorQueue.async { [weak self] in
-            self?.extractor?.seek(to: position, time: time)
-        }
+        assert(queue.isCurrent())
+        extractor?.seek(to: position, timeUs: time)
     }
 
     func read(completion: @escaping (ExtractorReadResult) -> Void) {
+        assert(queue.isCurrent())
         guard let extractor, let extractorInput else {
             completion(.error(ErrorBuilder.illegalState)); return
         }
-        extractorQueue.async { [weak self] in
-            extractor.read(input: extractorInput) { result in
-                self?.queue.async { completion(result) }
-            }
+
+        extractor.read(input: extractorInput) { result in
+            completion(result)
         }
     }
 }

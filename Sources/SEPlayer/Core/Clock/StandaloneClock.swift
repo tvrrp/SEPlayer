@@ -8,7 +8,6 @@
 import CoreMedia
 
 final class StandaloneClock: MediaClock {
-
     private let clock: CMClock
 
     private var playbackParameters: PlaybackParameters

@@ -8,14 +8,22 @@
 import CoreMedia
 import VideoToolbox
 
-protocol SETrackSelection: TrackSelection {
+public protocol SETrackSelection: TrackSelection {
     var id: UUID { get }
     var selectedReason: TrackSelectionReason { get }
     var selectedFormat: CMFormatDescription { get }
     var selectedIndex: Int { get }
+
+    func enable()
+    func disable()
 }
 
-enum TrackSelectionReason {
+extension SETrackSelection {
+    func enable() {}
+    func disable() {}
+}
+
+public enum TrackSelectionReason {
     case unknown
     case initial
     case manual
@@ -50,6 +58,7 @@ struct DefaultTrackSelector: TrackSelector {
         .map { $0.1 }
 
         return TrackSelectionResult(
+            renderersConfig: updatedGroups.map { _ in true },
             selections: updatedGroups.map { FixedTrackSelection(trackGroup: $0) },
             tracks: Tracks.empty
         )

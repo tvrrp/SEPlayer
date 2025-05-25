@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct DataSpec {
+public struct DataSpec {
     private(set) var url: URL
     private(set) var offset: Int
     private(set) var length: Int

@@ -5,53 +5,74 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-import Foundation
-
-final class ProgressiveMediaSource: BaseMediaSource {
+final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.Listener {
     protocol Listener: AnyObject {
         func onSeekMap(source: MediaSource, seekMap: SeekMap)
     }
 
     weak var listener: Listener?
-    var mediaPerionId: MediaPeriodId { fatalError() }
-    var mediaItem: MediaItem { assert(queue.isCurrent()); return _mediaItem }
 
     private let queue: Queue
     private let loaderQueue: Queue
-    private var _mediaItem: MediaItem
-    private let dataSource: DataSource
+    private var mediaItem: MediaItem
+    private let dataSourceFactory: DataSourceFactory
     private let progressiveMediaExtractor: ProgressiveMediaExtractor
     private let continueLoadingCheckIntervalBytes: Int
 
     private var timelineIsPlaceholder: Bool
-    private var timelineDuration: Int64
+    private var timelineDurationUs: Int64
     private var timelineIsSeekable = false
     private var timelineIsLive = false
 
     private var mediaTransferListener: TransferListener?
 
+    convenience init(
+        queue: Queue,
+        loaderQueue: Queue,
+        mediaItem: MediaItem,
+        dataSourceFactory: DataSourceFactory,
+        extractorsFactory: ExtractorsFactory,
+        continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
+    ) {
+        let progressiveMediaExtractor = BundledMediaExtractor(queue: loaderQueue, extractorsFactory: extractorsFactory)
+        self.init(
+            queue: queue,
+            loaderQueue: loaderQueue,
+            mediaItem: mediaItem,
+            dataSourceFactory: dataSourceFactory,
+            progressiveMediaExtractor: progressiveMediaExtractor,
+            continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
+        )
+    }
+
     init(
         queue: Queue,
         loaderQueue: Queue,
         mediaItem: MediaItem,
-        dataSource: DataSource,
+        dataSourceFactory: DataSourceFactory,
         progressiveMediaExtractor: ProgressiveMediaExtractor,
-        continueLoadingCheckIntervalBytes: Int
+        continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
     ) {
         self.queue = queue
         self.loaderQueue = loaderQueue
-        self._mediaItem = mediaItem
-        self.dataSource = dataSource
+        self.mediaItem = mediaItem
+        self.dataSourceFactory = dataSourceFactory
         self.progressiveMediaExtractor = progressiveMediaExtractor
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
         self.timelineIsPlaceholder = true
-        self.timelineDuration = .timeUnset
+        self.timelineDurationUs = .timeUnset
         super.init(queue: queue)
     }
 
-    override func updateMediaItem() {
-//        self.
+    override func getMediaItem() -> MediaItem { mediaItem }
+
+    override func canUpdateMediaItem(new item: MediaItem) -> Bool {
+        // TODO:
+        return false
+    }
+
+    override func updateMediaItem(new item: MediaItem) {
+        self.mediaItem = item
     }
 
     override func prepareSourceInternal(mediaTransferListener: (any TransferListener)?) {
@@ -64,6 +85,7 @@ final class ProgressiveMediaSource: BaseMediaSource {
         allocator: Allocator,
         startPosition: Int64
     ) -> MediaPeriod {
+        let dataSource = dataSourceFactory.createDataSource()
         if let mediaTransferListener {
             dataSource.addTransferListener(mediaTransferListener)
         }
@@ -85,22 +107,20 @@ final class ProgressiveMediaSource: BaseMediaSource {
         }
         mediaPeriod.release()
     }
-}
 
-extension ProgressiveMediaSource: ProgressiveMediaPeriod.Listener {
-    func sourceInfoRefreshed(duration: Int64, seekMap: SeekMap, isLive: Bool) {
-        let duration = duration == .timeUnset ? timelineDuration : duration
+    func sourceInfoRefreshed(durationUs: Int64, seekMap: SeekMap, isLive: Bool) {
+        let durationUs = durationUs == .timeUnset ? timelineDurationUs : durationUs
         let isSeekable = seekMap.isSeekable()
 
         guard timelineIsPlaceholder,
-              timelineDuration != duration,
+              timelineDurationUs != durationUs,
               timelineIsSeekable != isSeekable,
               timelineIsLive != isLive else {
             return
         }
 
         timelineIsPlaceholder = false
-        timelineDuration = duration
+        timelineDurationUs = durationUs
         timelineIsSeekable = isSeekable
         timelineIsLive = isLive
 
@@ -108,17 +128,39 @@ extension ProgressiveMediaSource: ProgressiveMediaPeriod.Listener {
         listener?.onSeekMap(source: self, seekMap: seekMap)
     }
 
-    func sourceInfoRefreshed(duration: Int64) {
-        let duration = duration == .timeUnset ? timelineDuration : duration
-        guard timelineDuration != duration else { return }
-        timelineDuration = duration
-        notifySourceInfoRefreshed()
+    private func notifySourceInfoRefreshed() {
+        var timeline: Timeline = SinglePeriodTimeline(
+            mediaItem: mediaItem,
+            periodDurationUs: timelineDurationUs,
+            windowDurationUs: timelineDurationUs,
+            isSeekable: timelineIsSeekable,
+            isDynamic: false
+        )
+
+        if timelineIsPlaceholder {
+            timeline = ForwardingTimelineImpl(timeline: timeline)
+        }
+
+        refreshSourceInfo(timeline: timeline)
     }
 }
 
-extension ProgressiveMediaSource {
-    func notifySourceInfoRefreshed() {
-        let timeline = SinglePeriodTimeline()
-        refreshSourceInfo(timeline: timeline)
+private extension ProgressiveMediaSource {
+    final class ForwardingTimelineImpl: ForwardingTimeline {
+        override func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
+            super.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+            window.isPlaceholder = true
+            return window
+        }
+
+        override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
+            super.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
+            period.isPlaceholder = true
+            return period
+        }
     }
+}
+
+private extension Int {
+    static let continueLoadingCheckIntervalBytes: Int = 1024 * 1024
 }

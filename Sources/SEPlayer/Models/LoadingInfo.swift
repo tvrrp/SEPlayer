@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.05.2025.
 //
 
-struct LoadingInfo: Hashable {
+public struct LoadingInfo: Hashable {
     let playbackPosition: Int64
     let playbackSpeed: Float
     let lastRebufferRealtime: Int64

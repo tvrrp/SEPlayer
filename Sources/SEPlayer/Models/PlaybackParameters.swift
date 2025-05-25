@@ -5,9 +5,9 @@
 //  Created by Damir Yackupov on 02.04.2025.
 //
 
-struct PlaybackParameters: Hashable {
-    let playbackRate: Float
-    let pitch: Float
+public struct PlaybackParameters: Hashable {
+    public private(set) var playbackRate: Float
+    public let pitch: Float
 
     init(playbackRate: Float, pitch: Int = 1200) {
         self.playbackRate = playbackRate
@@ -18,5 +18,9 @@ struct PlaybackParameters: Hashable {
 
     func mediaTimeForPlaybackRate(_ position: Int64) -> Int64 {
         Int64(Double(position) * Double(playbackRate))
+    }
+
+    internal mutating func newSpeed(_ playbackRate: Float) {
+        self.playbackRate = playbackRate
     }
 }

@@ -7,6 +7,6 @@
 
 import Foundation
 
-struct MediaItem: Hashable {
+public struct MediaItem: Hashable {
     let url: URL
 }

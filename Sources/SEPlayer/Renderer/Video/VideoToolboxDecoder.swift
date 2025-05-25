@@ -344,6 +344,8 @@ final class VideoOutputWrapper: CoreVideoBuffer {
 }
 
 private struct VideoToolboxCapabilitiesResolver: RendererCapabilities {
+    let trackType: TrackType = .video
+
     func supportsFormat(_ format: CMFormatDescription) -> Bool {
         guard format.mediaType == .video else { return false }
 

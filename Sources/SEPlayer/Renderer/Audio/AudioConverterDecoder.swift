@@ -327,6 +327,8 @@ extension AudioConverterDecoder {
 }
 
 struct AudioConverterRendererCapabilities: RendererCapabilities {
+    let trackType: TrackType = .audio
+
     func supportsFormat(_ format: CMFormatDescription) -> Bool {
         guard var sourceFormat = format.audioStreamBasicDescription else {
             return false
