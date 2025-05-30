@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 24.01.2025.
 //
 
-import UIKit
+import QuartzCore
 
 protocol DisplayLinkProvider {
     var sampledVsyncTime: Int64? { get }

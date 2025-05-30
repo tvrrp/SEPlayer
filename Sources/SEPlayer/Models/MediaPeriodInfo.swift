@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
-import CoreMedia
+import Foundation.NSUUID
 
 struct MediaPeriodInfo: Hashable {
     let id: MediaPeriodId
@@ -31,6 +31,23 @@ struct MediaPeriodInfo: Hashable {
             isFinal: isFinal
         )
     }
+
+    func copyWithRequestedContentPositionUs(_ requestedContentPositionUs: Int64) -> MediaPeriodInfo {
+        guard self.requestedContentPositionUs != requestedContentPositionUs else {
+            return self
+        }
+
+        return MediaPeriodInfo(
+            id: id,
+            startPositionUs: startPositionUs,
+            requestedContentPositionUs: requestedContentPositionUs,
+            endPositionUs: endPositionUs,
+            durationUs: durationUs,
+            isLastInTimelinePeriod: isLastInTimelinePeriod,
+            isLastInTimelineWindow: isLastInTimelineWindow,
+            isFinal: isFinal
+        )
+    }
 }
 
 public struct MediaPeriodId: Hashable {
@@ -43,6 +60,6 @@ public struct MediaPeriodId: Hashable {
     }
 
     func copy(with newPeriodId: AnyHashable) -> MediaPeriodId {
-        periodId == newPeriodId ? self : MediaPeriodId(periodId: periodId, windowSequenceNumber: windowSequenceNumber)
+        periodId == newPeriodId ? self : MediaPeriodId(periodId: newPeriodId, windowSequenceNumber: windowSequenceNumber)
     }
 }

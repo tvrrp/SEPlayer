@@ -5,9 +5,8 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
-import AudioToolbox
-import CoreMedia
-import Foundation
+import AudioToolbox.AudioFormat
+import CoreMedia.CMFormatDescription
 
 extension BoxParser {
     struct ESDescriptor {

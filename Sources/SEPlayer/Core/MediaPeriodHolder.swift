@@ -5,45 +5,61 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
-import Foundation
-
 final class MediaPeriodHolder {
     var allRenderersInCorrectState: Bool = false
-    var renderPositionOffset: Int64 = 0
+    var renderPositionOffset: Int64 {
+//        didSet {
+//            if renderPositionOffset < MediaPeriodQueue.initialRendererPositionOffsetUs {
+//                print()
+//            }
+//        }
+        get { _renderPositionOffset }
+        set {
+            if newValue < _renderPositionOffset {
+                print()
+            }
+            _renderPositionOffset = newValue
+        }
+    }
+
+    var _renderPositionOffset: Int64
     var trackSelectorResults: TrackSelectionResult
-    
+
     let queue: Queue
     let mediaPeriod: any MediaPeriod
     let id: AnyHashable
     let rendererCapabilities: [RendererCapabilities]
-    
+
     var sampleStreams: [SampleStream?]
     let targetPreloadBufferDurationUs: Int64
     var info: MediaPeriodInfo
+
     let mediaSourceList: MediaSourceList
     let trackSelector: TrackSelector
-    
+
     var trackGroups: [TrackGroup] = []
     var prepareCalled: Bool = false
     var isPrepared: Bool = false
     var hasEnabledTracks: Bool = false
-    
+
     var next: MediaPeriodHolder?
-    
+
     private var mayRetainStreamFlags: [Bool]
-    
+
     init(
         queue: Queue,
         rendererCapabilities: [RendererCapabilities],
+        rendererPositionOffsetUs: Int64,
+        trackSelector: TrackSelector,
         allocator: Allocator,
         mediaSourceList: MediaSourceList,
         info: MediaPeriodInfo,
-        trackSelector: TrackSelector,
         emptyTrackSelectorResult: TrackSelectionResult,
         targetPreloadBufferDurationUs: Int64
     ) throws {
         self.queue = queue
         self.rendererCapabilities = rendererCapabilities
+        self._renderPositionOffset = rendererPositionOffsetUs
         self.sampleStreams = Array(repeating: nil, count: rendererCapabilities.count)
         self.targetPreloadBufferDurationUs = targetPreloadBufferDurationUs
         self.mayRetainStreamFlags = Array(repeating: false, count: rendererCapabilities.count)
@@ -52,7 +68,7 @@ final class MediaPeriodHolder {
         self.id = info.id.periodId
         self.trackSelector = trackSelector
         self.trackSelectorResults = emptyTrackSelectorResult
-        
+
         self.mediaPeriod = try Self.createMediaPeriod(
             id: info.id,
             mediaSourceList: mediaSourceList,
@@ -70,14 +86,14 @@ final class MediaPeriodHolder {
         rendererTime - renderPositionOffset
     }
     
-    func getStartPositionRenderTime() -> Int64 {
+    func getStartPositionRendererTime() -> Int64 {
         info.startPositionUs + renderPositionOffset
     }
     
     func isFullyBuffered() -> Bool {
         return isPrepared && (!hasEnabledTracks || mediaPeriod.getBufferedPositionUs() == .endOfSource )
     }
-    
+
     func isFullyPreloaded() -> Bool {
         return isPrepared &&
             isFullyBuffered() || getBufferedPositionUs() - info.startPositionUs >= targetPreloadBufferDurationUs
@@ -160,14 +176,31 @@ final class MediaPeriodHolder {
                 && trackSelectorResults == newTrackSelectorResult
         }
 
+        disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: &sampleStreams)
+        disableTrackSelectionsInResult()
         self.trackSelectorResults = newTrackSelectorResult
-        return mediaPeriod.selectTrack(
+        enableTrackSelectionsInResult()
+
+        let positionUs = mediaPeriod.selectTrack(
             selections: newTrackSelectorResult.selections,
             mayRetainStreamFlags: mayRetainStreamFlags,
             streams: &sampleStreams,
             streamResetFlags: &streamResetFlags,
             positionUs: positionUs
         )
+        associateNoSampleRenderersWithEmptySampleStream(sampleStreams: &sampleStreams)
+        hasEnabledTracks = false
+        for (index, sampleStream) in sampleStreams.enumerated() {
+            if sampleStream != nil, trackSelectorResults.isRendererEnabled(for: index) {
+                if rendererCapabilities[index].trackType != .none {
+                    hasEnabledTracks = true
+                }
+            } else {
+                assert(newTrackSelectorResult.selections[index] == nil)
+            }
+        }
+
+        return positionUs
     }
 
     func release() {

@@ -5,15 +5,21 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMTime
 
 struct BoxParser {
-    func parseTraks(moov: ContainerBox) throws -> [TrackSampleTable] {
+    func parseTraks(
+        moov: ContainerBox,
+        duration: Int64
+    ) throws -> [TrackSampleTable] {
         return try moov.containerChildren
             .filter { $0.type == .trak }
             .compactMap { atom in
-                guard let track = try? parseTrak(trak: atom, mvhd: moov
-                    .getLeafBoxOfType(type: .mvhd).checkNotNil(BoxParserErrors.missingBox(type: .mvhd))
+                guard let track = try? parseTrak(
+                    trak: atom,
+                    mvhd: moov.getLeafBoxOfType(type: .mvhd)
+                        .checkNotNil(BoxParserErrors.missingBox(type: .mvhd)),
+                    duration: duration
                 ) else { return nil }
 
                 let stbl = try atom.getContainerBoxOfType(type: .mdia)
@@ -27,7 +33,12 @@ struct BoxParser {
             }
     }
 
-    func parseTrak(trak: ContainerBox, mvhd: LeafBox) throws -> Track? {
+    func parseTrak(
+        trak: ContainerBox,
+        mvhd: LeafBox,
+        duration: Int64
+    ) throws -> Track? {
+        var duration = duration
         let mdia = try trak.getContainerBoxOfType(type: .mdia)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
 
@@ -44,8 +55,17 @@ struct BoxParser {
             .checkNotNil(BoxParserErrors.missingBox(type: .tkhd)).data
         )
 
+        if duration == .timeUnset {
+            duration = tkhdData.duration
+        }
+
         let movieTimescale = try Mp4TimestampData(mvhd: mvhd.data).timescale
-//        let durationUs = if dura
+        let durationUs: Int64 = if duration == .timeUnset {
+            .timeUnset
+        } else {
+            Util.scaleLargeTimestamp(duration, multiplier: Int64.microsecondsPerSecond, divisor: movieTimescale)
+        }
+
         let stbl = try mdia.getContainerBoxOfType(type: .minf)
             .checkNotNil(BoxParserErrors.missingBox(type: .minf))
             .getContainerBoxOfType(type: .stbl)
@@ -66,9 +86,10 @@ struct BoxParser {
             id: tkhdData.trackId,
             type: trackType,
             format: stsdData.description,
-            timescale: CMTimeScale(mdhdData.timescale),
-            movieTimescale: CMTimeScale(movieTimescale),
-            duration: CMTimeValue(mdhdData.mediaDuration)
+            timescale: mdhdData.timescale,
+            movieTimescale: movieTimescale,
+            durationUs: durationUs,
+            mediaDurationUs: mdhdData.mediaDurationUs
         )
     }
 
@@ -81,28 +102,28 @@ struct BoxParser {
 
 extension BoxParser {
     struct Mp4TimestampData {
-        let creationTimestampSeconds: Int
-        let modificationTimestampSeconds: Int
-        let timescale: UInt32
+        let creationTimestampSeconds: Int64
+        let modificationTimestampSeconds: Int64
+        let timescale: Int64
 
         init(mvhd: ByteBuffer?) throws {
             guard var mvhd else { throw BoxParserErrors.missingBox(type: .mvhd) }
             mvhd.moveReaderIndex(to: Int(MP4Box.headerSize))
             let (version, _) = try BoxParser.readFullboxExtra(reader: &mvhd)
             if version == 0 {
-                creationTimestampSeconds = try Int(mvhd.readInt(as: UInt32.self))
-                modificationTimestampSeconds = try Int(mvhd.readInt(as: UInt32.self))
+                creationTimestampSeconds = try Int64(mvhd.readInt(as: UInt32.self))
+                modificationTimestampSeconds = try Int64(mvhd.readInt(as: UInt32.self))
             } else {
-                creationTimestampSeconds = try Int(mvhd.readInt(as: UInt64.self))
-                modificationTimestampSeconds = try Int(mvhd.readInt(as: UInt64.self))
+                creationTimestampSeconds = try Int64(mvhd.readInt(as: UInt64.self))
+                modificationTimestampSeconds = try Int64(mvhd.readInt(as: UInt64.self))
             }
-            self.timescale = try mvhd.readInt(as: UInt32.self)
+            self.timescale = try Int64(mvhd.readInt(as: UInt32.self))
         }
     }
 
     struct TkhdData {
         let trackId: Int
-        let duration: UInt64
+        let duration: Int64
 
         init(tkhd: ByteBuffer) throws {
             var tkhd = tkhd
@@ -113,16 +134,16 @@ extension BoxParser {
             tkhd.moveReaderIndex(forwardBy: 4)
 
             duration = if version == 1 {
-                try tkhd.readInt(as: UInt64.self)
+                try Int64(tkhd.readInt(as: UInt64.self))
             } else {
-                try UInt64(tkhd.readInt(as: UInt32.self))
+                try Int64(tkhd.readInt(as: UInt32.self))
             }
         }
     }
 
     struct MdhdData {
-        let timescale: UInt32
-        let mediaDuration: UInt64
+        let timescale: Int64
+        let mediaDurationUs: Int64
 
         init(mdhd: ByteBuffer) throws {
             var mdhd = mdhd
@@ -131,13 +152,13 @@ extension BoxParser {
 
             if version == 1 {
                 mdhd.moveReaderIndex(forwardBy: 16)
-                timescale = try mdhd.readInt(as: UInt32.self)
-                mediaDuration = try mdhd.readInt(as: UInt64.self)
+                timescale = try Int64(mdhd.readInt(as: UInt32.self))
+                mediaDurationUs = try Int64(mdhd.readInt(as: UInt64.self))
             } else {
                 mdhd.moveReaderIndex(forwardBy: 8)
-                timescale = try mdhd.readInt(as: UInt32.self)
+                timescale = try Int64(mdhd.readInt(as: UInt32.self))
                 let d = try mdhd.readInt(as: UInt32.self)
-                mediaDuration = d == UInt32.max ? UInt64.max : UInt64(d)
+                mediaDurationUs = d == UInt32.max ? Int64.max : Int64(d)
             }
         }
     }

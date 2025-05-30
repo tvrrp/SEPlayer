@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 05.05.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 protocol SEDecoderFactory {
     func register<D: SEDecoder>(_ type: D.Type, _ make: @escaping (Queue, CMFormatDescription) throws -> D)

@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 23.05.2025.
 //
 
-import Foundation
+import Foundation.NSURL
 
 public protocol ExtractorsFactory {
     func createExtractors(output: ExtractorOutput) -> [Extractor]

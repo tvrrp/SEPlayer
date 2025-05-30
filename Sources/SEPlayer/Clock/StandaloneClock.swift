@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 25.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
 
 final class StandaloneClock: MediaClock {
     private let clock: CMClock

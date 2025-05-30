@@ -5,12 +5,14 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
+import Foundation
 
 public final class SEPlayerFactory {
     private let sessionLoader: IPlayerSessionLoader
     private let decoderFactory: SEDecoderFactory
     private let displayLink: DisplayLinkProvider
+    private let bandwidthMeter: BandwidthMeter
 
     public init(configuration: URLSessionConfiguration = .default) {
         let operationQueue = OperationQueue()
@@ -19,6 +21,7 @@ public final class SEPlayerFactory {
         self.sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
         self.decoderFactory = DefaultSEDecoderFactory()
         self.displayLink = CADisplayLinkProvider()
+        self.bandwidthMeter = DefaultBandwidthMeter()
 
         registerDecoders()
     }
@@ -27,7 +30,7 @@ public final class SEPlayerFactory {
         let workQueue = SignalQueue(name: "com.seplayer.work_\(identifier)", qos: .userInitiated)
         let loaderQueue = SignalQueue(name: "com.seplayer.loader_\(identifier)", qos: .userInitiated)
 
-        let dataSourceFactory = DefaultDataSourceFactory(loaderQueue: loaderQueue, networkLoader: sessionLoader)
+        let dataSourceFactory = DefaultDataSourceFactory(loaderQueue: Queues.loaderQueue, networkLoader: sessionLoader)
         let extractorsFactory = DefaultExtractorFactory(queue: loaderQueue)
         let mediaSourceFactory = DefaultMediaSourceFactory(
             workQueue: workQueue,
@@ -44,6 +47,7 @@ public final class SEPlayerFactory {
             displayLink: displayLink,
             trackSelector: DefaultTrackSelector(),
             loadControl: DefaultLoadControl(queue: workQueue),
+            bandwidthMeter: bandwidthMeter,
             mediaSourceFactory: mediaSourceFactory
         )
     }

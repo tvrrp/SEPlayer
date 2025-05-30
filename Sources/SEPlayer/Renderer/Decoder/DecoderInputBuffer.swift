@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.04.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSampleBuffer
 
 protocol Buffer: AnyObject {
     var flags: SampleFlags { get }

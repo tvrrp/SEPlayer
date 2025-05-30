@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 04.03.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMBlockBuffer
 
 extension CMBlockBuffer {
     enum Errors: OSStatus {

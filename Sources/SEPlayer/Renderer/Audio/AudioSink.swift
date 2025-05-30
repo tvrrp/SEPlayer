@@ -59,7 +59,7 @@ final class AudioSink: IAudioSink {
     private var filledBufferIndex: Int = 0
 
     private let internalQueue = Queues.audioQueue
-    private let startCondition = NSCondition()
+//    private let startCondition = NSCondition()
 
     private var startMediaTimeNeedsInit = false
     private var startMediaTimeNeedsSync = false
@@ -104,7 +104,7 @@ final class AudioSink: IAudioSink {
             }
         }
         if !didStartAudioQueue {
-            startCondition.wait()
+//            startCondition.wait()
             didStartAudioQueue = true
         }
         isPlaying = true
@@ -493,7 +493,8 @@ private extension AudioSink {
     func handleAudioQueuePropertyCallback(propertyId: AudioQueuePropertyID) {
         switch propertyId {
         case kAudioQueueProperty_IsRunning:
-            startCondition.signal()
+            print("running")
+//            startCondition.signal()
         default:
             return
         }

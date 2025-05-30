@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 14.05.2025.
 //
 
-import Foundation
+import Foundation.NSUUID
 
 public struct Window: Hashable {
     var id: AnyHashable
@@ -27,11 +27,10 @@ public struct Window: Hashable {
     let positionInFirstPeriodUs: Int64
 
     var durationMs: Int64 {
-        // TODO: convert
-        return durationUs
+        return Time.usToMs(timeUs: durationUs)
     }
 
-    init(
+    public init(
         id: AnyHashable = Window.singleWindowId,
         mediaItem: MediaItem = Window.placeholderMediaItem,
         presentationStartTimeMs: Int64 = .zero,
@@ -63,6 +62,6 @@ public struct Window: Hashable {
 }
 
 extension Window {
-    static let singleWindowId: AnyHashable = UUID()
-    static let placeholderMediaItem = MediaItem(url: FileManager.default.temporaryDirectory)
+    public static let singleWindowId: AnyHashable = UUID()
+    public static let placeholderMediaItem = MediaItem(url: FileManager.default.temporaryDirectory)
 }

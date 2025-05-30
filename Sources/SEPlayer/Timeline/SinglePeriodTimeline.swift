@@ -5,10 +5,10 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
+import Foundation.NSUUID
 
 struct SinglePeriodTimeline: Timeline {
-    private let uuid = UUID()
+    static let uuid = UUID()
     private let mediaItem: MediaItem
     private let presentationStartTimeMs: Int64
     private let windowStartTimeMs: Int64
@@ -87,7 +87,7 @@ struct SinglePeriodTimeline: Timeline {
     func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
         period = Period(
             id: nil,
-            uuid: setIds ? uuid : nil,
+            uid: setIds ? Self.uuid : nil,
             windowIndex: 0,
             durationUs: periodDurationUs,
             positionInWindowUs: -windowPositionInPeriodUs,
@@ -98,10 +98,10 @@ struct SinglePeriodTimeline: Timeline {
     }
 
     func indexOfPeriod(by id: AnyHashable) -> Int? {
-        self.uuid == uuid ? 0 : nil
+        (Self.uuid as AnyHashable) == id ? 0 : nil
     }
 
     func id(for periodIndex: Int) -> AnyHashable {
-        return uuid
+        return Self.uuid
     }
 }

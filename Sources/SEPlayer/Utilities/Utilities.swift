@@ -7,7 +7,6 @@
 
 @inlinable
 internal func debugOnly(_ body: () -> Void) {
-    // FIXME: duplicated with NIO.
     assert(
         {
             body()

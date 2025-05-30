@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 public struct TrackGroup: Hashable {
     let id: String
@@ -45,9 +45,11 @@ public struct TrackGroup: Hashable {
 }
 
 public enum TrackType {
+    case unknown
+    case `default`
     case video
     case audio
-    case unknown
+    case none
 }
 
 extension Array where Element == TrackGroup {

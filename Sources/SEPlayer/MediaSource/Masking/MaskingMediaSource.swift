@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
-import Foundation
+import Foundation.NSUUID
 
 final class MaskingMediaSource: WrappingMediaSource {
     let useLazyPreparation: Bool
@@ -122,7 +122,7 @@ final class MaskingMediaSource: WrappingMediaSource {
                 }
             }
 
-            guard let (periodId, periodPositionUs) = timeline.periodPositionUs(
+            guard let (periodId, periodPositionUs) = newTimeline.periodPositionUs(
                 window: &window,
                 period: &period,
                 windowIndex: 0,
@@ -136,7 +136,7 @@ final class MaskingMediaSource: WrappingMediaSource {
             }
 
             if let maskingPeriod = unpreparedMaskingMediaPeriod,
-               setPreparePositionOverrideToUnpreparedMaskingPeriod(periodPositionUs){
+               setPreparePositionOverrideToUnpreparedMaskingPeriod(periodPositionUs) {
                 idForMaskingPeriodPreparation = maskingPeriod.id
                     .copy(with: internalPeriodId(for: maskingPeriod.id.periodId))
             }
@@ -223,8 +223,8 @@ extension MaskingMediaSource {
 
         override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
             timeline.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
-            if period.uuid == replacedInternalPeriodId, setIds {
-                period.uuid = Self.maskingExternalPeriodId
+            if period.uid == replacedInternalPeriodId, setIds {
+                period.uid = Self.maskingExternalPeriodId
             }
             return period
         }
@@ -298,7 +298,7 @@ extension MaskingMediaSource {
         func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
             period = Period(
                 id: setIds ? 0 : nil,
-                uuid: setIds ? MaskingTimeline.maskingExternalPeriodId : nil,
+                uid: setIds ? MaskingTimeline.maskingExternalPeriodId : nil,
                 windowIndex: 0,
                 durationUs: .timeUnset,
                 positionInWindowUs: 0,

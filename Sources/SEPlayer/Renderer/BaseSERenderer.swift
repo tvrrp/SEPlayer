@@ -8,8 +8,8 @@
 import CoreMedia
 
 class BaseSERenderer: SERenderer {
+    let trackType: TrackType
     private let queue: Queue
-    private let trackType: TrackType
     private let clock: CMClock
 
     private var state: SERendererState = .disabled
@@ -21,18 +21,19 @@ class BaseSERenderer: SERenderer {
     private var lastResetPosition: Int64 = .zero
     private var readingPosition: Int64 = .endOfSource
     private var streamOffset: Int64 = .zero
+    private var timeline: Timeline
 
     init(queue: Queue, trackType: TrackType, clock: CMClock) {
         self.queue = queue
         self.trackType = trackType
         self.clock = clock
+        timeline = EmptyTimeline()
     }
 
     func getCapabilities() -> RendererCapabilities {
         EmptyRendererCapabilities()
     }
 
-    final func getTrackType() -> TrackType { trackType }
     final func getState() -> SERendererState { state }
 
     final func enable(
@@ -82,8 +83,11 @@ class BaseSERenderer: SERenderer {
     final func setStreamFinal() { streamIsFinal = true }
     final func isCurrentStreamFinal() -> Bool { streamIsFinal }
 
+    func getTimeline() -> Timeline { timeline }
+
     final func setTimeline(_ timeline: Timeline) {
-        // TODO: Timeline
+        guard !self.timeline.equals(to: timeline) else { return }
+        self.timeline = timeline
         onTimelineChanged(new: timeline)
     }
 
@@ -161,6 +165,7 @@ class BaseSERenderer: SERenderer {
                 readingPosition = .endOfSource
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
+            print("👌 self = \(String(describing: self)), streamOffset = \(streamOffset)")
             buffer.time += streamOffset
             readingPosition = max(readingPosition, buffer.time)
         }

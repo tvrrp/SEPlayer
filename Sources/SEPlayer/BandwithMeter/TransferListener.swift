@@ -5,10 +5,9 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
+import Foundation.NSURLSession
 
 public protocol TransferListener {
-    var id: UUID { get }
     func onTransferInitializing(source: DataSource, isNetwork: Bool)
     func onTransferEnd(source: DataSource, isNetwork: Bool, metrics: URLSessionTaskMetrics)
 }

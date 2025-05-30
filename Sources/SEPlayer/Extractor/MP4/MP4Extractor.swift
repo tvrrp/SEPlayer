@@ -5,9 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-import CoreVideo
-import Foundation
+import CoreMedia.CMTime
 
 final class MP4Extractor: Extractor {
     private let queue: Queue
@@ -119,12 +117,12 @@ extension MP4Extractor: SeekMap {
                 guard let (syncSampleIndex, syncSample) = sampleTable.syncSample(for: time) else {
                     return SeekPoints(first: .start)
                 }
-                firstTime = syncSample.decodeTimeStamp
+                firstTime = syncSample.presentationTimeStampUs
                 firstOffset = syncSample.offset
 
                 if firstTime < time && syncSampleIndex < sampleTable.sampleCount - 1 {
                     if let (_, secondSyncSample) = sampleTable.laterOrEqualSyncSample(for: time) {
-                        secondTime = secondSyncSample.decodeTimeStamp
+                        secondTime = secondSyncSample.presentationTimeStampUs
                         secondOffset = secondSyncSample.offset
                     }
                 }
@@ -301,7 +299,7 @@ private extension MP4Extractor {
                 }
 
                 trackOutput.sampleMetadata(
-                    time: sample.decodeTimeStamp,
+                    time: sample.presentationTimeStampUs,
                     flags: sample.flags,
                     size: sample.size,
                     offset: 0
@@ -342,7 +340,7 @@ private extension MP4Extractor {
 //            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
 //        )
 
-        let trackSampleTables = try boxParser.parseTraks(moov: moov)
+        let trackSampleTables = try boxParser.parseTraks(moov: moov, duration: .timeUnset)
 
         for (trackIndex, trackSampleTable) in trackSampleTables.enumerated() {
             guard trackSampleTable.sampleCount > 0 else { continue }
@@ -355,13 +353,11 @@ private extension MP4Extractor {
                     trackType: track.type
                 )
             )
-            let trackDuration = CMTime(
-                value: CMTimeValue(track.duration),
-                timescale: CMTimeScale(track.timescale)
-            ).microseconds
+
+            let trackDurationUs = track.durationUs != .timeUnset ? track.durationUs : trackSampleTable.durationUs
             mp4Track.trackOutput.setFormat(track.format.formatDescription)
 
-            self.duration = max(duration, trackDuration)
+            self.duration = max(duration, trackDurationUs)
 
             tracks.append(mp4Track)
         }
@@ -441,12 +437,12 @@ private extension MP4Extractor {
     func calculateAccumulatedSampleSizes(tracks: [MP4Track]) -> [[Int]] {
         var accumulatedSampleSizes = tracks.map { Array(repeating: 0, count: $0.sampleTable.sampleCount) }
         var nextSampleIndex = Array(repeating: 0, count: tracks.count)
-        var nextSampleTimes = tracks.map { $0.sampleTable.samples[0].decodeTimeStamp }
+        var nextSampleTimes = tracks.map { $0.sampleTable.samples[0].presentationTimeStampUs }
         var tracksFinished = Array(repeating: false, count: tracks.count)
 
         for (index, track) in tracks.enumerated() {
             accumulatedSampleSizes[index] = Array(repeating: 0, count: track.sampleTable.sampleCount)
-            nextSampleTimes[index] = track.sampleTable.samples[0].decodeTimeStamp
+            nextSampleTimes[index] = track.sampleTable.samples[0].presentationTimeStampUs
         }
 
         var accumulatedSampleSize = 0
@@ -466,7 +462,7 @@ private extension MP4Extractor {
             trackSampleIndex += 1
             nextSampleIndex[minTimeTrackIndex] = trackSampleIndex
             if trackSampleIndex < accumulatedSampleSizes[minTimeTrackIndex].count {
-                nextSampleTimes[minTimeTrackIndex] = tracks[minTimeTrackIndex].sampleTable.samples[trackSampleIndex].decodeTimeStamp
+                nextSampleTimes[minTimeTrackIndex] = tracks[minTimeTrackIndex].sampleTable.samples[trackSampleIndex].presentationTimeStampUs
             } else {
                 tracksFinished[minTimeTrackIndex] = true
                 finishedTracks += 2
@@ -503,34 +499,15 @@ private extension MP4Extractor {
 
 private extension MP4Extractor {
     func shouldParseContainerAtom(atom: UInt32) -> Bool {
-        atom == MP4Box.BoxType.moov.rawValue
-            || atom == MP4Box.BoxType.trak.rawValue
-            || atom == MP4Box.BoxType.mdia.rawValue
-            || atom == MP4Box.BoxType.minf.rawValue
-            || atom == MP4Box.BoxType.stbl.rawValue
-            || atom == MP4Box.BoxType.edts.rawValue
-            || atom == MP4Box.BoxType.meta.rawValue
+        let atoms: [MP4Box.BoxType] = [.moov, .trak, .mdia, .minf, .stbl, .edts, .meta]
+        return atoms.contains(where: { $0.rawValue == atom })
     }
 
     func shouldParseLeafAtom(atom: UInt32) -> Bool {
-        atom == MP4Box.BoxType.mdhd.rawValue
-            || atom == MP4Box.BoxType.mvhd.rawValue
-            || atom == MP4Box.BoxType.hdlr.rawValue
-            || atom == MP4Box.BoxType.stsd.rawValue
-            || atom == MP4Box.BoxType.stts.rawValue
-            || atom == MP4Box.BoxType.stss.rawValue
-            || atom == MP4Box.BoxType.ctts.rawValue
-            || atom == MP4Box.BoxType.elst.rawValue
-            || atom == MP4Box.BoxType.stsc.rawValue
-            || atom == MP4Box.BoxType.stsz.rawValue
-            || atom == MP4Box.BoxType.stz2.rawValue
-            || atom == MP4Box.BoxType.stco.rawValue
-            || atom == MP4Box.BoxType.co64.rawValue
-            || atom == MP4Box.BoxType.tkhd.rawValue
-            || atom == MP4Box.BoxType.ftyp.rawValue
-            || atom == MP4Box.BoxType.udta.rawValue
-            || atom == MP4Box.BoxType.keys.rawValue
-            || atom == MP4Box.BoxType.ilst.rawValue
+        let atoms: [MP4Box.BoxType] = [
+            .mdhd, .mvhd, .hdlr, .stsd, .stts, .stss, .ctts, .elst, .stsc, .stsz, .stz2, .stco, .co64, .tkhd, .ftyp, .udta, .keys, .ilst
+        ]
+        return atoms.contains(where: { $0.rawValue == atom })
     }
 }
 
@@ -547,7 +524,7 @@ private extension BoxParser.TrackSampleTable {
     }
 
     func earlierOrEqualSyncSample(for time: Int64) -> (index: Int, sample: Sample)? {
-        guard let startIndex = samples.firstIndex(where: { $0.decodeTimeStamp >= time}) else {
+        guard let startIndex = samples.firstIndex(where: { $0.presentationTimeStampUs >= time}) else {
             return nil
         }
 
@@ -559,7 +536,7 @@ private extension BoxParser.TrackSampleTable {
     }
 
     func laterOrEqualSyncSample(for time: Int64) -> (index: Int, sample: Sample)? {
-        guard let startIndex = samples.firstIndex(where: { $0.decodeTimeStamp >= time}) else {
+        guard let startIndex = samples.firstIndex(where: { $0.presentationTimeStampUs >= time}) else {
             return nil
         }
 

@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
 
 public protocol BaseSEPlayer: SEPlayer.Player {
     var clock: CMClock { get }

@@ -52,7 +52,7 @@ final class VideoToolboxDecoder: SEDecoder {
 
     func dequeueInputBufferIndex() -> Int? {
         assert(queue.isCurrent())
-        guard buffersInUse[bufferCounter] == false, framesInUse[framesWriteCounter] == false else {
+        guard !buffersInUse[bufferCounter], !framesInUse[framesWriteCounter] else {
             return nil
         }
 

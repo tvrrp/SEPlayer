@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
+import Foundation.NSURLSession
 
 public protocol IPlayerSessionLoader {
     func createTask(

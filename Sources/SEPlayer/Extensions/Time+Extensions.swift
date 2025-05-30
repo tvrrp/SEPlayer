@@ -32,7 +32,7 @@ enum Time {
         (timeUs == .timeUnset || timeUs == .endOfSource) ? timeUs : timeUs / 1000
     }
 
-    static func msToUs(timeUs: Int64) -> Int64 {
-        (timeUs == .timeUnset || timeUs == .endOfSource) ? timeUs : timeUs * 1000
+    static func msToUs(timeMs: Int64) -> Int64 {
+        (timeMs == .timeUnset || timeMs == .endOfSource) ? timeMs : timeMs * 1000
     }
 }

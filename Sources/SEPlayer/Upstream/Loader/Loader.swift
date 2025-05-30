@@ -58,11 +58,11 @@ final class Loader {
     }
 
     private func handleLoadCompletion<T: Loadable>(loadable: T, callback: any Callback<T>, error: Error?) {
-//        if let error {
-//            
-//        } else {
-//            
-//        }
+        if let error {
+            
+        } else {
+            callback.onLoadCompleted(loadable: loadable, onTime: .zero, loadDurationMs: .zero)
+        }
     }
 
     private var unfairLock = os_unfair_lock_s()

@@ -93,11 +93,11 @@ final class SignalQueue: Queue {
     }
 
     func justDispatch(_ f: @escaping () -> Void) {
-        nativeQueue.async(execute: f)
+        nativeQueue.async(qos: nativeQueue.qos, flags: .detached, execute: f)
     }
 
     func justDispatchWithQoS(qos: DispatchQoS, _ f: @escaping () -> Void) {
-        nativeQueue.async(group: nil, qos: qos, flags: [.enforceQoS], execute: f)
+        nativeQueue.async(qos: qos, flags: [.enforceQoS, .detached], execute: f)
     }
 
     func after(_ delay: Double, _ f: @escaping () -> Void) {

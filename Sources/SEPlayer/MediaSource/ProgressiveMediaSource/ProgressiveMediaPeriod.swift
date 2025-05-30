@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 import Foundation
 
 final class ProgressiveMediaPeriod: MediaPeriod {
@@ -180,7 +180,9 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     }
 
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool {
-        guard !loadingFinished || !pendingDeferredRetry || (!isPrepared && enabledTrackCount != 0) else {
+        if loadingFinished
+            || pendingDeferredRetry
+            || isPrepared && enabledTrackCount == 0 {
             return false
         }
 
@@ -329,11 +331,15 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
     private func maybeStartDeferredRetry(track: Int) {
         assertPrepared()
-        guard pendingDeferredRetry
-                || (!haveAudioVideoTracks && trackState.isAudioOrVideo[track])
-                || !sampleQueues[track].isReady(loadingFinished: false) else {
+        if !pendingDeferredRetry || haveAudioVideoTracks && !trackState.isAudioOrVideo[track] ||
+            sampleQueues[track].isReady(loadingFinished: false) {
             return
         }
+//        guard pendingDeferredRetry
+//                || (!haveAudioVideoTracks && trackState.isAudioOrVideo[track])
+//                || !sampleQueues[track].isReady(loadingFinished: false) else {
+//            return
+//        }
 
         pendingResetPositionUs = .zero
         pendingDeferredRetry = false
@@ -497,7 +503,9 @@ private extension ProgressiveMediaPeriod {
 
             do {
                 try trackGroups.append(TrackGroup(id: String(index), formats: [format]))
-                isAudioOrVideo.append(format.mediaType == .audio || format.mediaType == .video)
+                let isAudioVideo = format.mediaType == .audio || format.mediaType == .video
+                isAudioOrVideo.append(isAudioVideo)
+                haveAudioVideoTracks = haveAudioVideoTracks || isAudioVideo
             } catch {
                 continue
             }

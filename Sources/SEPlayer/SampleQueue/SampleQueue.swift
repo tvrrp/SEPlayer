@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 07.04.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 protocol SampleQueueDelegate: AnyObject {
     func sampleQueue(_ sampleQueue: SampleQueue, didChange format: CMFormatDescription)

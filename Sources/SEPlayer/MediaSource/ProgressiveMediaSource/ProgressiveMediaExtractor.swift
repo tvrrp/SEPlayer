@@ -5,8 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-import Foundation
+import Foundation.NSURLSession
 
 protocol ProgressiveMediaExtractor {
     func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws

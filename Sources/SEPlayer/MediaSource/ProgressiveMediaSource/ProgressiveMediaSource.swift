@@ -112,10 +112,10 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         let durationUs = durationUs == .timeUnset ? timelineDurationUs : durationUs
         let isSeekable = seekMap.isSeekable()
 
-        guard timelineIsPlaceholder,
-              timelineDurationUs != durationUs,
-              timelineIsSeekable != isSeekable,
-              timelineIsLive != isLive else {
+        if !timelineIsPlaceholder
+            && timelineDurationUs == durationUs
+            && timelineIsSeekable == isSeekable
+            && timelineIsLive == isLive {
             return
         }
 

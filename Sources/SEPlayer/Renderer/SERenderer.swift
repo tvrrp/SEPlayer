@@ -5,9 +5,10 @@
 //  Created by Damir Yackupov on 06.04.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 protocol SERenderer: AnyObject {
+    var trackType: TrackType { get }
     func getCapabilities() -> RendererCapabilities
 
     func getMediaClock() -> MediaClock?
@@ -40,6 +41,7 @@ protocol SERenderer: AnyObject {
     func resetPosition(new position: Int64) throws
     func setPlaybackSpeed(current: Float, target: Float) throws
     func enableRenderStartOfStream()
+    func getTimeline() -> Timeline
     func setTimeline(_ timeline: Timeline)
     func render(position: Int64, elapsedRealtime: Int64) throws
     func isReady() -> Bool

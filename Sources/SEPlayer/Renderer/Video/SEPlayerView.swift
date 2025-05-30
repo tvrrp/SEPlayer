@@ -9,6 +9,7 @@ import CoreVideo
 import UIKit
 
 public final class SEPlayerView: UIView {
+
     public override class var layerClass: AnyClass {
         CALayer.self
     }
@@ -56,6 +57,8 @@ extension SEPlayerView: PlayerBufferable {
         #else
         layer.contents = buffer
         #endif
+
+        delegate?.didRenderFrame()
     }
 
     public func end() {

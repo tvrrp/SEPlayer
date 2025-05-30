@@ -5,8 +5,6 @@
 //  Created by Damir Yackupov on 24.01.2025.
 //
 
-import Foundation
-
 struct FixedFrameRateEstimator {
     private var currentMatcher = Matcher()
     private var candidateMatcher = Matcher()

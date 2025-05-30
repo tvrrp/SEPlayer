@@ -9,4 +9,8 @@ import Foundation
 
 public struct MediaItem: Hashable {
     let url: URL
+
+    public init(url: URL) {
+        self.url = url
+    }
 }

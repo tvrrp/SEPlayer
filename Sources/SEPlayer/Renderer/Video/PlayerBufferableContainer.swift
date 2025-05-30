@@ -10,13 +10,13 @@ import CoreVideo
 final class PlayerBufferableContainer {
     private let displayLink: DisplayLinkProvider
 
-    var action: PlayerBufferableAction = .reset
+    private var action: PlayerBufferableAction = .reset
     private(set) var bufferables: [PlayerBufferable] = []
 
     private var sampleQueue: TypedCMBufferQueue<ImageBufferWrapper>?
     private var lastPixelBuffer: CVPixelBuffer?
 
-    init(displayLink: DisplayLinkProvider) {
+    public init(displayLink: DisplayLinkProvider) {
         self.displayLink = displayLink
     }
 
@@ -44,6 +44,10 @@ final class PlayerBufferableContainer {
 
     func stop() {
         displayLink.removeOutput(self)
+    }
+
+    func flush() {
+        Queues.mainQueue.async { self.lastPixelBuffer = nil }
     }
 
     func register(_ bufferable: PlayerBufferable) {
@@ -76,15 +80,15 @@ extension PlayerBufferableContainer: DisplayLinkListener {
 
         if let sampleWrapper = sampleQueue?.dequeue() {
             if sampleWrapper.presentationTime > info.targetTimestampNs {
-//                print("ℹ️ pixel buffer is early")
+                print("ℹ️ pixel buffer is early")
                 try? sampleQueue?.enqueue(sampleWrapper)
             } else if deadline.contains(sampleWrapper.presentationTime) {
                 guard let pixelBuffer = sampleWrapper.imageBuffer else { return }
                 lastPixelBuffer = pixelBuffer
                 bufferables.forEach { $0.enqueue(pixelBuffer) }
-//                print("✅ enqueuing pixel buffer")
+                print("💕 enqueuing pixel buffer")
             } else {
-//                print("❌ missed sample")
+                print("💔 missed sample")
                 displayLinkTick(info)
             }
         }

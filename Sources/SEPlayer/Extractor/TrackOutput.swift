@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 public protocol TrackOutput {
     func setFormat(_ format: CMFormatDescription)

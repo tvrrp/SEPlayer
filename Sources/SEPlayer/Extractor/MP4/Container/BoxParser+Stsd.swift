@@ -5,8 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-import Foundation
+import CoreMedia.CMFormatDescription
 
 extension BoxParser {
     struct StsdData {

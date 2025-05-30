@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
+import Foundation.NSUUID
 
 public protocol Timeline {
     func windowCount() -> Int
@@ -144,12 +144,16 @@ extension Timeline {
             periodPositionUs = min(periodPositionUs, period.durationUs - 1)
         }
         periodPositionUs = max(0, periodPositionUs)
-        guard let periodId = period.uuid else { return nil }
+        guard let periodId = period.uid else { return nil }
         return (periodId, periodPositionUs)
     }
 
     @discardableResult
     func periodById(_ id: AnyHashable, period: inout Period) -> Period {
+        defaultPeriodById(id, period: &period)
+    }
+
+    internal func defaultPeriodById(_ id: AnyHashable, period: inout Period) -> Period {
         getPeriod(periodIndex: indexOfPeriod(by: id) ?? .zero, period: &period, setIds: true)
     }
 

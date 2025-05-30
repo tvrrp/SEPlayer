@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMTime
 
 extension BoxParser {
     func parseStbl(track: Track, stblBox: ContainerBox) throws -> TrackSampleTable {
@@ -21,7 +21,7 @@ extension BoxParser {
 
         let sampleCount = sampleSizeBox.sampleCount
         if sampleCount == 0 {
-            return TrackSampleTable(track: track, maximumSize: 0, duration: .zero, samples: [])
+            return TrackSampleTable(track: track, maximumSize: 0, durationUs: .zero, samples: [])
         }
 
 //        if case .video = track.type {
@@ -78,9 +78,9 @@ extension BoxParser {
         }
 
         var maximumSize = 0
-        var timestampTimeUnits: CMTimeValue = 0
+        var timestampTimeUnits: Int64 = 0
         var samples = [TrackSampleTable.Sample]()
-        var durarion: CMTimeValue = 0
+        var durationUs: Int64 = 0
 
         var offset = 0
         var remainingSamplesInChunk = 0
@@ -124,9 +124,11 @@ extension BoxParser {
             samples.append(.init(
                 offset: offset,
                 size: size,
-                duration: CMTime(value: timestampDeltaInTimeUnits, timescale: track.timescale).microseconds,
-                presentationTimeStamp: CMTime(value: timestampTimeUnits + timestampOffset, timescale: track.timescale).microseconds,
-                decodeTimeStamp: CMTime(value: timestampTimeUnits, timescale: track.timescale).microseconds,
+                presentationTimeStampUs: Util.scaleLargeTimestamp(
+                    timestampTimeUnits + timestampOffset,
+                    multiplier: Int64.microsecondsPerSecond,
+                    divisor: track.timescale
+                ),
                 flags: flags
             ))
 
@@ -148,7 +150,7 @@ extension BoxParser {
             offset += size
             remainingSamplesInChunk -= 1
         }
-        durarion = timestampTimeUnits + timestampOffset
+        durationUs = timestampTimeUnits + timestampOffset
 
         var isCttsValid = true
         try ctts.withTransform { ctts in
@@ -175,7 +177,11 @@ extension BoxParser {
         return TrackSampleTable(
             track: track,
             maximumSize: maximumSize,
-            duration: CMTime(value: durarion, timescale: track.timescale).microseconds,
+            durationUs: Util.scaleLargeTimestamp(
+                durationUs,
+                multiplier: Int64.microsecondsPerSecond,
+                divisor: track.timescale
+            ),
             samples: samples
         )
     }
@@ -184,32 +190,28 @@ extension BoxParser {
         let track: Track
         let sampleCount: Int
         let maximumSize: Int
-        let duration: Int64
+        let durationUs: Int64
         let samples: [Sample]
 
         struct Sample {
             let offset: Int
             let size: Int
-            let duration: Int64
-            let presentationTimeStamp: Int64
-            let decodeTimeStamp: Int64
+            let presentationTimeStampUs: Int64
             let flags: SampleFlags
         }
 
-        init(track: Track, maximumSize: Int, duration: Int64, samples: [Sample]) {
+        init(track: Track, maximumSize: Int, durationUs: Int64, samples: [Sample]) {
             self.track = track
             self.sampleCount = samples.count
             self.maximumSize = maximumSize
-            self.duration = duration
+            self.durationUs = durationUs
             var samples = samples
             if !samples.isEmpty {
                 let updatedSample = samples[samples.count - 1]
                 samples[samples.count - 1] = Sample(
                     offset: updatedSample.offset,
                     size: updatedSample.size,
-                    duration: updatedSample.duration,
-                    presentationTimeStamp: updatedSample.presentationTimeStamp,
-                    decodeTimeStamp: updatedSample.decodeTimeStamp,
+                    presentationTimeStampUs: updatedSample.presentationTimeStampUs,
                     flags: [updatedSample.flags, .endOfStream]
                 )
             }

@@ -94,7 +94,7 @@ extension BasePlayer {
     }
 
     public func set(mediaItems: [MediaItem]) {
-        set(mediaItems: mediaItems, resetPosition: false)
+        set(mediaItems: mediaItems, resetPosition: true)
     }
 
     public func insert(mediaItem: MediaItem, at position: Int) {
@@ -185,8 +185,6 @@ extension BasePlayer {
     public func mediaItem(at index: Int) -> MediaItem {
         timeline.getWindow(windowIndex: index, window: &window).mediaItem
     }
-
-    
 }
 
 private extension BasePlayer {

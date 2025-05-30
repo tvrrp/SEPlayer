@@ -5,8 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
-import CoreMedia
+import Foundation.NSURLSession
 
 final class DefautlHTTPDataSource: DataSource {
     let components: DataSourceOpaque

@@ -6,7 +6,7 @@
 //
 
 import AudioToolbox
-import CoreMedia
+import CoreMedia.CMSync
 
 final class AudioQueuePositionTracker {
     private let clock: CMClock

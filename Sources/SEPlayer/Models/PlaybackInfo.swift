@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 13.05.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
 
 struct PlaybackInfo {
     private(set) var clock: CMClock
@@ -151,6 +151,30 @@ struct PlaybackInfo {
 
     private func msToUs(_ timeUs: Int64) -> Int64 {
         (timeUs == .timeUnset || timeUs == .endOfSource) ? timeUs : (timeUs * 1000);
+    }
+}
+
+extension PlaybackInfo: Equatable {
+    static func == (lhs: PlaybackInfo, rhs: PlaybackInfo) -> Bool {
+        lhs.timeline.equals(to: rhs.timeline) &&
+        lhs.periodId == rhs.periodId &&
+        lhs.requestedContentPositionUs == rhs.requestedContentPositionUs &&
+        lhs.discontinuityStartPositionUs == rhs.discontinuityStartPositionUs &&
+        lhs.state == rhs.state &&
+        lhs.playbackError != nil && rhs.playbackError == nil &&
+        lhs.playbackError == nil && rhs.playbackError != nil &&
+        lhs.isLoading == rhs.isLoading &&
+        lhs.trackGroups == rhs.trackGroups &&
+        lhs.trackSelectorResult == rhs.trackSelectorResult &&
+        lhs.loadingMediaPeriodId == rhs.loadingMediaPeriodId &&
+        lhs.playWhenReady == rhs.playWhenReady &&
+        lhs.playWhenReadyChangeReason == rhs.playWhenReadyChangeReason &&
+        lhs.playbackSuppressionReason == rhs.playbackSuppressionReason &&
+        lhs.playbackParameters == rhs.playbackParameters &&
+        lhs.bufferedPositionUs == rhs.bufferedPositionUs &&
+        lhs.totalBufferedDurationUs == rhs.totalBufferedDurationUs &&
+        lhs.positionUs == rhs.positionUs &&
+        lhs.positionUpdateTimeMs == rhs.positionUpdateTimeMs
     }
 }
 

@@ -5,8 +5,6 @@
 //  Created by Damir Yackupov on 24.01.2025.
 //
 
-import UIKit
-
 final class VideoFrameReleaseHelper {
     private let queue: Queue
     private let displayLink: DisplayLinkProvider

@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
+import Foundation.NSRange
 
 final class DefaltExtractorInput: ExtractorInput {
     private let dataReader: DataReader

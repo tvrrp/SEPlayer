@@ -6,7 +6,7 @@
 //
 
 import AudioToolbox
-import CoreMedia
+import CoreMedia.CMBlockBuffer
 
 final class AudioConverterDecoder: AQDecoder {
     private let queue: Queue
@@ -66,7 +66,12 @@ final class AudioConverterDecoder: AQDecoder {
     }
 
     func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool {
-        return false
+        guard let oldAudioFormat = oldFormat?.audioStreamBasicDescription,
+              let newAudioFormat = newFormat.audioStreamBasicDescription else {
+            return false
+        }
+
+        return oldAudioFormat == newAudioFormat
     }
 
     static func getCapabilities() -> RendererCapabilities {
@@ -295,7 +300,7 @@ final class AudioConverterDecoder: AQDecoder {
                 )
             } else {
                 samplesInUse[index] = false
-                sampleBuffer = try CMSampleBuffer(
+                sampleBuffer = try! CMSampleBuffer(
                     dataBuffer: nil,
                     formatDescription: formatDescription,
                     numSamples: itemsCount,
@@ -304,7 +309,7 @@ final class AudioConverterDecoder: AQDecoder {
                 )
             }
 
-            try decompressedSamplesQueue.enqueue(.init(
+            try! decompressedSamplesQueue.enqueue(.init(
                 sampleFlags: sampleFlags,
                 presentationTime: pts.microseconds,
                 audioBuffer: sampleBuffer
@@ -368,6 +373,6 @@ final class AudioSampleWrapper: AQOutputBuffer {
 }
 
 private extension Int {
-    static let highWaterMark = 10
+    static let highWaterMark = 30
     static let defaultInputBufferSize: Int = 768 * 1024
 }

@@ -39,7 +39,7 @@ class ForwardingTimeline: Timeline {
 
     @discardableResult
     func periodById(_ id: AnyHashable, period: inout Period) -> Period {
-        (self as Timeline).periodById(id, period: &period)
+        defaultPeriodById(id, period: &period)
     }
 
     @discardableResult

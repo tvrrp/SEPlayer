@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 struct FixedTrackSelection: SETrackSelection {
     let id = UUID()

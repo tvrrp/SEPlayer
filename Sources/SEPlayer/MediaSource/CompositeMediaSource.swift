@@ -5,10 +5,13 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
-import Foundation
+import Foundation.NSMapTable
 
 class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
     private var childSources = NSMapTable<ID, MediaSourceAndListener>.init()
+    private var childSourcesEnumerator: [MediaSourceAndListener] {
+        childSources.objectEnumerator()?.compactMap { $0 as? MediaSourceAndListener } ?? []
+    }
     private var mediaTransferListener: TransferListener?
 
     override func prepareSourceInternal(mediaTransferListener: TransferListener?) {
@@ -16,26 +19,20 @@ class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
     }
 
     override func enableInternal() {
-        for childSource in childSources.dictionaryRepresentation().values {
-            if let delegate = childSource.delegate {
-                childSource.mediaSource.enable(delegate: delegate)
-            }
+        for childSource in childSourcesEnumerator {
+            childSource.mediaSource.enable(delegate: childSource.delegate)
         }
     }
 
     override func disableInternal() {
-        for childSource in childSources.dictionaryRepresentation().values {
-            if let delegate = childSource.delegate {
-                childSource.mediaSource.disable(delegate: delegate)
-            }
+        for childSource in childSourcesEnumerator {
+            childSource.mediaSource.disable(delegate: childSource.delegate)
         }
     }
 
     override func releaseSourceInternal() {
-        for childSource in childSources.dictionaryRepresentation().values {
-            if let delegate = childSource.delegate {
-                childSource.mediaSource.releaseSource(delegate: delegate)
-            }
+        for childSource in childSourcesEnumerator {
+            childSource.mediaSource.releaseSource(delegate: childSource.delegate)
         }
         childSources.removeAllObjects()
     }
@@ -64,21 +61,18 @@ class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
     }
 
     final func enableChildSource(id: ID) {
-        guard let enabledChild = childSources.object(forKey: id),
-              let delegate = enabledChild.delegate else { return }
-        enabledChild.mediaSource.enable(delegate: delegate)
+        guard let enabledChild = childSources.object(forKey: id) else { return }
+        enabledChild.mediaSource.enable(delegate: enabledChild.delegate)
     }
 
     final func disableChildSource(id: ID) {
-        guard let enabledChild = childSources.object(forKey: id),
-              let delegate = enabledChild.delegate else { return }
-        enabledChild.mediaSource.disable(delegate: delegate)
+        guard let enabledChild = childSources.object(forKey: id) else { return }
+        enabledChild.mediaSource.disable(delegate: enabledChild.delegate)
     }
 
     final func releaseChildSource(id: ID) {
-        guard let enabledChild = childSources.object(forKey: id),
-              let delegate = enabledChild.delegate else { return }
-        enabledChild.mediaSource.releaseSource(delegate: delegate)
+        guard let enabledChild = childSources.object(forKey: id) else { return }
+        enabledChild.mediaSource.releaseSource(delegate: enabledChild.delegate)
     }
 
     func getWindowIndexForChildWindowIndex(childSourceId: ID, windowIndex: Int) -> Int { windowIndex }
@@ -110,7 +104,7 @@ private extension CompositeMediaSource {
 
     final class MediaSourceAndListener {
         let mediaSource: MediaSource
-        weak var delegate: MediaSourceDelegate?
+        let delegate: MediaSourceDelegate
 
         init(mediaSource: MediaSource, delegate: MediaSourceDelegate) {
             self.mediaSource = mediaSource

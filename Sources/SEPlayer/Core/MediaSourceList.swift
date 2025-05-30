@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
-import Foundation
+import Foundation.NSUUID
 
 protocol MediaSourceInfoHolder {
     var id: AnyHashable { get }
@@ -28,8 +28,8 @@ final class MediaSourceList {
     private var enabledMediaSourceHolders: Set<MediaSourceHolder>
 
     private var mediaTransferListener: TransferListener?
-    
-    private var shuffleOrder: ShuffleOrder
+
+    var shuffleOrder: ShuffleOrder
 
     init(playerId: UUID) {
         self.playerId = playerId

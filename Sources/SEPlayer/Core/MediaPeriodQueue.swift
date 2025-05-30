@@ -23,7 +23,7 @@ final class MediaPeriodQueue {
     private var shuffleModeEnabled: Bool = false
     private var preloadConfiguration: PreloadConfiguration
     private var count: Int = 0
-    private var oldFrontPeriodUUID: UUID?
+    private var oldFrontPeriodId: AnyHashable?
     private var oldFrontPeriodWindowSequenceNumber: Int = 0
     private var preloadPriorityList: [MediaPeriodHolder] = []
 
@@ -57,7 +57,7 @@ final class MediaPeriodQueue {
     }
 
     func isPreloading(mediaPeriod: any MediaPeriod) -> Bool {
-        preloading != nil && loading?.mediaPeriod === mediaPeriod
+        preloading != nil && preloading?.mediaPeriod === mediaPeriod
     }
 
     func reevaluateBuffer(rendererPositionUs: Int64) {
@@ -66,22 +66,36 @@ final class MediaPeriodQueue {
 
     func shouldLoadNextMediaPeriod() -> Bool {
         guard let loading else { return true }
-        return loading.info.isFinal
-        && loading.isFullyBuffered()
-        && loading.info.durationUs != .timeUnset
-        && preloadPriorityList.count < Self.maximumBufferAheadPeriods
+        return !loading.info.isFinal
+            && loading.isFullyBuffered()
+            && loading.info.durationUs != .timeUnset
+            && count < Self.maximumBufferAheadPeriods
     }
 
     func nextMediaPeriodInfo(rendererPositionUs: Int64, playbackInfo: PlaybackInfo) -> MediaPeriodInfo? {
-        if let loading {
-            return followingMediaPeriodInfo(
+        let result = if let loading {
+            followingMediaPeriodInfo(
                 timeline: playbackInfo.timeline,
                 mediaPeriodHolder: loading,
                 rendererPositionUs: rendererPositionUs
             )
         } else {
-            return firstMediaPeriodInfo(with: playbackInfo)
+            firstMediaPeriodInfo(with: playbackInfo)
         }
+
+        if let result {
+            if let loading {
+                return followingMediaPeriodInfo(
+                    timeline: playbackInfo.timeline,
+                    mediaPeriodHolder: loading,
+                    rendererPositionUs: rendererPositionUs
+                )
+            } else {
+                return firstMediaPeriodInfo(with: playbackInfo)
+            }
+        }
+
+        return result
     }
 
     func enqueueNextMediaPeriodHolder(info: MediaPeriodInfo) throws -> MediaPeriodHolder {
@@ -90,11 +104,11 @@ final class MediaPeriodQueue {
         } else {
             Self.initialRendererPositionOffsetUs
         }
-        
+
         let newPeriodHolder = try removePreloadedMediaPeriodHolder(info: info) ?? builder(info, rendererPositionOffsetUs)
         newPeriodHolder.info = info
         newPeriodHolder.renderPositionOffset = rendererPositionOffsetUs
-        
+
         if let loading {
             loading.setNext(newPeriodHolder)
         } else {
@@ -102,7 +116,7 @@ final class MediaPeriodQueue {
             reading = newPeriodHolder
             prewarming = newPeriodHolder
         }
-        oldFrontPeriodUUID = nil
+        oldFrontPeriodId = nil
         loading = newPeriodHolder
         count += 1
         notifyQueueUpdate()
@@ -110,23 +124,23 @@ final class MediaPeriodQueue {
     }
 
     func invalidatePreloadPool(timeline: Timeline) throws {
-        guard preloadConfiguration.targetPreloadDurationUs == .timeUnset || loading != nil else {
+        guard preloadConfiguration.targetPreloadDurationUs != .timeUnset, let loading else {
             releasePreloadPool()
             return
         }
-        guard let loading else { return }
 
         var newPreloadPriorityList = [MediaPeriodHolder]()
         let defaultPositionOfNextWindow = defaultPeriodPositionOfNextWindow(timeline: timeline,
                                                                             periodId: loading.info.id.periodId,
                                                                             defaultPositionProjectionUs: .zero)
         if let defaultPositionOfNextWindow {
+           // TODO: timeline.getWindow(windowIndex: defaultPositionOfNextWindow.0, window: &window).isLive {
             let windowSequenceNumber: Int
-            if let sequenceNumber = resolvePeriodUUIDToWindowSequenceNumberInPreloadPeriods(periodId: defaultPositionOfNextWindow.0) {
+            if let sequenceNumber = resolvePeriodIdToWindowSequenceNumberInPreloadPeriods(periodId: defaultPositionOfNextWindow.0) {
                 windowSequenceNumber = sequenceNumber
             } else {
-                nextWindowSequenceNumber += 1
                 windowSequenceNumber = nextWindowSequenceNumber
+                nextWindowSequenceNumber += 1
             }
 
             let nextInfo = mediaPeriodInfoForPeriodPosition(timeline: timeline,
@@ -153,7 +167,8 @@ final class MediaPeriodQueue {
     }
 
     private func removePreloadedMediaPeriodHolder(info: MediaPeriodInfo) -> MediaPeriodHolder? {
-        for (index, mediaPeriodHolder) in preloadPriorityList.enumerated() {
+        for index in 0..<preloadPriorityList.count {
+            let mediaPeriodHolder = preloadPriorityList[index]
             if mediaPeriodHolder.canBeUsedFor(mediaPeriodInfo: info) {
                 return preloadPriorityList.remove(at: index)
             }
@@ -218,6 +233,7 @@ final class MediaPeriodQueue {
         return reading
     }
 
+    @discardableResult
     func advancePrewarmingPeriod() -> MediaPeriodHolder? {
         prewarming = prewarming?.next
         notifyQueueUpdate()
@@ -239,7 +255,8 @@ final class MediaPeriodQueue {
 
         if count == 0 {
             loading = nil
-            // TODO: oldFrontPeriod
+            oldFrontPeriodId = playing.id
+            oldFrontPeriodWindowSequenceNumber = playing.info.id.windowSequenceNumber ?? .zero
         }
         self.playing = playing.next
         notifyQueueUpdate()
@@ -295,7 +312,8 @@ final class MediaPeriodQueue {
 
         var front = playing
         if let front {
-            // TODO: oldFrontPeriodUid
+            oldFrontPeriodId = front.id
+            oldFrontPeriodWindowSequenceNumber = front.info.id.windowSequenceNumber ?? .zero
         }
 
         while let frontHolder = front {
@@ -323,9 +341,10 @@ final class MediaPeriodQueue {
         while let holder = periodHolder {
             let oldPeriodInfo = holder.info
             var newPeriodInfo: MediaPeriodInfo
+
             if let previousPeriodHolder {
                 let periodInfo = followingMediaPeriodInfo(timeline: timeline,
-                                                         mediaPeriodHolder: holder,
+                                                         mediaPeriodHolder: previousPeriodHolder,
                                                          rendererPositionUs: rendererPositionUs)
                 switch periodInfo {
                 case let .some(periodInfo):
@@ -340,15 +359,15 @@ final class MediaPeriodQueue {
                 newPeriodInfo = updatedMediaPeriodInfo(with: oldPeriodInfo, timeline: timeline)
             }
 
-            holder.info = newPeriodInfo.copyWithStartPositionUs(oldPeriodInfo.requestedContentPositionUs)
-            if MediaPeriodHolder.durationsCompatible(lhs: oldPeriodInfo.durationUs, rhs: newPeriodInfo.durationUs) {
+            holder.info = newPeriodInfo.copyWithRequestedContentPositionUs(oldPeriodInfo.requestedContentPositionUs)
+            if !MediaPeriodHolder.durationsCompatible(lhs: oldPeriodInfo.durationUs, rhs: newPeriodInfo.durationUs) {
                 // TODO: periodHolder.updateClipping()
                 let newDurationInRendererTime: Int64 = if newPeriodInfo.durationUs == .timeUnset {
                     .max
                 } else {
                     holder.toRendererTime(periodTime: newPeriodInfo.durationUs)
                 }
-                
+
                 let isReadingAndReadBeyondNewDuration = periodHolder == reading &&
                     (maxRendererReadPositionUs == .endOfSource || maxRendererReadPositionUs >= newDurationInRendererTime)
 
@@ -393,11 +412,83 @@ final class MediaPeriodQueue {
         )
     }
 
+    private func resolveMediaPeriodIdForAds(
+        timeline: Timeline,
+        periodId: AnyHashable,
+        positionUs: Int64,
+        windowSequenceNumber: Int,
+        window: inout Window,
+        period: inout Period
+    ) -> MediaPeriodId {
+        timeline.periodById(periodId, period: &period)
+        timeline.getWindow(windowIndex: period.windowIndex, window: &window)
+
+        // TODO: ad
+        return MediaPeriodId(periodId: periodId, windowSequenceNumber: windowSequenceNumber)
+    }
+
+    func resolveMediaPeriodIdForAdsAfterPeriodPositionChange(
+        timeline: Timeline, periodId: AnyHashable, positionUs: Int64
+    ) -> MediaPeriodId {
+        let windowSequenceNumber = resolvePeriodIdToWindowSequenceNumber(periodId, timeline: timeline) ?? .zero
+        timeline.periodById(periodId, period: &period)
+        timeline.getWindow(windowIndex: period.windowIndex, window: &window)
+
+        // TODO: Ad
+        return resolveMediaPeriodIdForAds(
+            timeline: timeline,
+            periodId: periodId,
+            positionUs: positionUs,
+            windowSequenceNumber: windowSequenceNumber,
+            window: &window,
+            period: &period
+        )
+    }
+
     private func notifyQueueUpdate() {
         // TODO: collect analytics
     }
 
-    private func resolvePeriodUUIDToWindowSequenceNumberInPreloadPeriods(periodId: AnyHashable) -> Int? {
+    private func resolvePeriodIdToWindowSequenceNumber(_ periodId: AnyHashable, timeline: Timeline) -> Int? {
+        let windowIndex = timeline.periodById(periodId, period: &period).windowIndex
+
+        if let oldFrontPeriodId, let oldFrontPeriodIndex = timeline.indexOfPeriod(by: oldFrontPeriodId),
+           windowIndex == timeline.getPeriod(periodIndex: oldFrontPeriodIndex, period: &period).windowIndex {
+            return oldFrontPeriodWindowSequenceNumber
+        }
+
+        var mediaPeriodHolder = playing
+        while let unwrappedHolder = mediaPeriodHolder {
+            if unwrappedHolder.id == periodId {
+                return unwrappedHolder.info.id.windowSequenceNumber
+            }
+            mediaPeriodHolder = unwrappedHolder.next
+        }
+
+        mediaPeriodHolder = playing
+        while let unwrappedHolder = mediaPeriodHolder {
+            if let indexOfHolderInTimeline = timeline.indexOfPeriod(by: unwrappedHolder.id),
+               windowIndex == timeline.getPeriod(periodIndex: indexOfHolderInTimeline, period: &period).windowIndex {
+                return unwrappedHolder.info.id.windowSequenceNumber
+            }
+            mediaPeriodHolder = unwrappedHolder.next
+        }
+
+        if let windowSequenceNumber = resolvePeriodIdToWindowSequenceNumberInPreloadPeriods(periodId: periodId) {
+            return windowSequenceNumber
+        }
+
+        let windowSequenceNumber = nextWindowSequenceNumber
+        nextWindowSequenceNumber += 1
+        if playing == nil {
+            oldFrontPeriodId = periodId
+            oldFrontPeriodWindowSequenceNumber = windowSequenceNumber
+        }
+
+        return windowSequenceNumber
+    }
+
+    private func resolvePeriodIdToWindowSequenceNumberInPreloadPeriods(periodId: AnyHashable) -> Int? {
         preloadPriorityList.first(where: { $0.info.id.periodId == periodId })?.info.id.windowSequenceNumber
     }
 
@@ -494,8 +585,9 @@ final class MediaPeriodQueue {
         var contentPositionUs = Int64.zero
 
         let nextWindowIndex = timeline.getPeriod(periodIndex: nextPeriodIndex, period: &period, setIds: true).windowIndex
-        guard var nextPeriodUUID = period.uuid else { return nil }
+        guard var nextPeriodUid = period.uid else { return nil }
 
+        var windowSequenceNumber = mediaPeriodInfo.id.windowSequenceNumber
         if timeline.getWindow(windowIndex: nextWindowIndex, window: &window).firstPeriodIndex == nextPeriodIndex {
             contentPositionUs = .timeUnset
             guard let defaultPositionUs = timeline.periodPositionUs(window: &window,
@@ -506,11 +598,37 @@ final class MediaPeriodQueue {
                 return nil
             }
 
-            nextPeriodUUID = defaultPositionUs.0
+            nextPeriodUid = defaultPositionUs.0
             startPositionUs = defaultPositionUs.1
+
+            if let nextMediaPeriodHolder = mediaPeriodHolder.next, nextMediaPeriodHolder.id == nextPeriodUid {
+                windowSequenceNumber = nextMediaPeriodHolder.info.id.windowSequenceNumber
+            } else {
+                if let windowSequenceNumberFromPreload = resolvePeriodIdToWindowSequenceNumberInPreloadPeriods(periodId: nextPeriodUid) {
+                    windowSequenceNumber = windowSequenceNumberFromPreload
+                } else {
+                    windowSequenceNumber = nextWindowSequenceNumber
+                    nextWindowSequenceNumber += 1
+                }
+            }
         }
 
-        let periodId = MediaPeriodId(periodId: nextPeriodUUID, windowSequenceNumber: nextWindowSequenceNumber)
+        guard let windowSequenceNumber else { return nil }
+
+        let periodId = resolveMediaPeriodIdForAds(
+            timeline: timeline,
+            periodId: nextPeriodUid,
+            positionUs: startPositionUs,
+            windowSequenceNumber: windowSequenceNumber,
+            window: &window,
+            period: &period
+        )
+
+        if contentPositionUs != .timeUnset, mediaPeriodInfo.requestedContentPositionUs != .timeUnset {
+            // TODO: ad
+            
+        }
+
         return getMediaPeriodInfo(
             timeline: timeline,
             id: periodId,
@@ -561,19 +679,24 @@ final class MediaPeriodQueue {
         requestedContentPositionUs: Int64,
         windowSequenceNumber: Int?
     ) -> MediaPeriodInfo {
-        period = timeline.periodById(periodId, period: &period)
+        timeline.periodById(periodId, period: &period)
 
         let id = MediaPeriodId(periodId: periodId, windowSequenceNumber: windowSequenceNumber)
         let isLastInPeriod = isLastInPeriod(id: id)
         let isLastInWindow = isLastInWindow(timeline: timeline, id: id)
         let isLastInTimeline = isLastInTimeline(timeline, id: id, isLastMediaPeriodInPeriod: isLastInPeriod)
 
+        var durationUs = period.durationUs
+        var startPositionUs = startPositionUs
+        if durationUs != .timeUnset && startPositionUs >= durationUs {
+            startPositionUs = max(0, durationUs - (isLastInTimeline ? 1 : 0))
+        }
         return MediaPeriodInfo(
             id: id,
-            startPositionUs: max(0, period.durationUs - (isLastInTimeline ? 1 : 0)),
+            startPositionUs: startPositionUs,
             requestedContentPositionUs: requestedContentPositionUs,
             endPositionUs: .timeUnset,
-            durationUs: period.durationUs,
+            durationUs: durationUs,
             isLastInTimelinePeriod: isLastInPeriod,
             isLastInTimelineWindow: isLastInWindow,
             isFinal: isLastInTimeline
@@ -606,7 +729,6 @@ final class MediaPeriodQueue {
                 repeatMode: repeatMode,
                 shuffleModeEnabled: shuffleModeEnabled
             )
-        
     }
 }
 

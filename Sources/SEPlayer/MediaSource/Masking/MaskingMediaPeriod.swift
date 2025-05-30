@@ -54,7 +54,7 @@ final class MaskingMediaPeriod: MediaPeriod {
     func prepare(callback: any MediaPeriodCallback, on time: Int64) {
         self.callback = callback
         mediaPeriod?.prepare(
-            callback: callback,
+            callback: self,
             on: preparePositionWithOverride(preparePositionUs: preparePositionUs)
         )
     }
@@ -100,7 +100,7 @@ final class MaskingMediaPeriod: MediaPeriod {
     }
 
     func getNextLoadPositionUs() -> Int64 {
-        mediaPeriod?.getNextLoadPositionUs() ?? .endOfSource
+        mediaPeriod?.getNextLoadPositionUs() ?? .zero
     }
 
     func reevaluateBuffer(positionUs: Int64) {
@@ -114,11 +114,11 @@ final class MaskingMediaPeriod: MediaPeriod {
 
 extension MaskingMediaPeriod: MediaPeriodCallback {
     func didPrepare(mediaPeriod: any MediaPeriod) {
-        callback?.didPrepare(mediaPeriod: mediaPeriod)
+        callback?.didPrepare(mediaPeriod: self)
     }
-    
+
     func continueLoadingRequested(with source: any MediaPeriod) {
-        callback?.continueLoadingRequested(with: source)
+        callback?.continueLoadingRequested(with: self)
     }
 }
 

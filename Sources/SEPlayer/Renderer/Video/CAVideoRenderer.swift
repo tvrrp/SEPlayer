@@ -148,6 +148,9 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         if decoder != nil {
             try flushDecoder()
         }
+        if joining {
+            // TODO: videoFrameReleaseControl.join
+        }
         try super.onPositionReset(position: position, joining: joining)
         videoFrameReleaseControl.reset()
     }
@@ -168,8 +171,8 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     }
 
     override func onStopped() {
-        videoFrameReleaseControl.stop()
         bufferableContainer.stop()
+        videoFrameReleaseControl.stop()
         while let sampleWrapper = outputSampleQueue.dequeue() {
             pendingFramesAfterStop.append(sampleWrapper)
         }
@@ -178,6 +181,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     override func onDisabled() {
         inputFormat = nil
+        try? outputSampleQueue.reset()
         releaseDecoder()
         videoFrameReleaseControl.stop()
         bufferableContainer.end()
@@ -191,11 +195,13 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     private func flushDecoder() throws {
         buffersInCodecCount = 0
+        try outputSampleQueue.reset()
+        bufferableContainer.flush()
         if decoderReinitializationState != .none {
             releaseDecoder()
             try maybeInitDecoder()
         } else {
-            inputBuffer.reset()
+            resetInputBuffer()
             outputBuffer = nil
             decoder?.flush()
             decoderReceivedBuffers = false
@@ -204,6 +210,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     private func releaseDecoder() {
         inputBuffer.reset()
+        resetInputBuffer()
         outputBuffer = nil
         decoderReinitializationState = .none
         decoderReceivedBuffers = false

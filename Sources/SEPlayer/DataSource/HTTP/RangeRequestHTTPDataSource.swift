@@ -5,8 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
-import Foundation
+import Foundation.NSURLSession
 
 final class RangeRequestHTTPDataSource: DataSource {
     var url: URL? { requestHandler.url }

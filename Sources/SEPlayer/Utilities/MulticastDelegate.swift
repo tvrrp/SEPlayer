@@ -19,11 +19,11 @@ public final class MulticastDelegate<T> {
         }
     }
 
-    public convenience init() {
+    convenience init() {
         self.init(isThreadSafe: true)
     }
 
-    public init(isThreadSafe: Bool) {
+    init(isThreadSafe: Bool) {
         self.isThreadSafe = isThreadSafe
     }
 

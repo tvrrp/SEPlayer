@@ -5,7 +5,6 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia
 import Foundation
 
 public protocol MediaSource: AnyObject {
@@ -45,7 +44,7 @@ class BaseMediaSource: MediaSource {
 
     final var isEnabled: Bool {
         assert(queue.isCurrent())
-        return mediaSourceDelegates.count != 0
+        return enabledMediaSourceDelegates.count != 0
     }
 
     final var playerId: UUID? {
@@ -55,13 +54,16 @@ class BaseMediaSource: MediaSource {
 
     private let queue: Queue
     private let mediaSourceDelegates: MulticastDelegate<MediaSourceDelegate>
+    private let enabledMediaSourceDelegates: NSHashTable<AnyObject>
 
+    private var didPrepare: Bool = false
     private var _playerId: UUID?
     private var _timeline: Timeline?
 
     init(queue: Queue) {
         self.queue = queue
         mediaSourceDelegates = MulticastDelegate<MediaSourceDelegate>(isThreadSafe: false)
+        enabledMediaSourceDelegates = NSHashTable()
     }
 
     func getMediaItem() -> MediaItem { fatalError("To override") }
@@ -71,7 +73,7 @@ class BaseMediaSource: MediaSource {
     func prepareSourceInternal(mediaTransferListener: TransferListener?) { fatalError("To override") }
     func releaseSourceInternal() { fatalError("To override") }
     func updateMediaItem() { fatalError("To override") }
-    func enableInternal() { fatalError("To override") }
+    func enableInternal() {}
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
@@ -80,7 +82,7 @@ class BaseMediaSource: MediaSource {
         fatalError("To override")
     }
     func release(mediaPeriod: any MediaPeriod) { fatalError("To override") }
-    func disableInternal() { fatalError("To override") }
+    func disableInternal() {}
     func continueLoadingRequested(with source: any MediaSource) { fatalError("To override") }
 
     final func refreshSourceInfo(timeline: Timeline) {
@@ -93,24 +95,30 @@ class BaseMediaSource: MediaSource {
         assert(queue.isCurrent())
         self._playerId = playerId
         mediaSourceDelegates.addDelegate(delegate)
-        prepareSourceInternal(mediaTransferListener: mediaTransferListener)
-        if let _timeline {
+        if !didPrepare {
+            enabledMediaSourceDelegates.add(delegate)
+            prepareSourceInternal(mediaTransferListener: mediaTransferListener)
+            didPrepare = true
+        } else if let _timeline {
+            enable(delegate: delegate)
             delegate.mediaSource(self, sourceInfo: _timeline)
         }
     }
 
     final func enable(delegate: MediaSourceDelegate) {
-        let wasDisabled = mediaSourceDelegates.count == 0
-        mediaSourceDelegates.addDelegate(delegate)
+        assert(queue.isCurrent())
+        let wasDisabled = enabledMediaSourceDelegates.count == 0
+        enabledMediaSourceDelegates.add(delegate)
         if wasDisabled {
             enableInternal()
         }
     }
 
     final func disable(delegate: MediaSourceDelegate) {
-        let wasEnabled = mediaSourceDelegates.count > 0
-        mediaSourceDelegates.removeDelegate(delegate)
-        if wasEnabled && mediaSourceDelegates.count == 0 {
+        assert(queue.isCurrent())
+        let wasEnabled = enabledMediaSourceDelegates.count > 0
+        enabledMediaSourceDelegates.remove(delegate)
+        if wasEnabled && enabledMediaSourceDelegates.count == 0 {
             disableInternal()
         }
     }
@@ -119,9 +127,13 @@ class BaseMediaSource: MediaSource {
         assert(queue.isCurrent())
         mediaSourceDelegates.removeDelegate(delegate)
         if mediaSourceDelegates.count == 0 {
+            didPrepare = false
             _timeline = nil
             playerId = nil
+            enabledMediaSourceDelegates.removeAllObjects()
             releaseSourceInternal()
+        } else {
+            disable(delegate: delegate)
         }
     }
 }

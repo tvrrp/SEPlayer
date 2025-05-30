@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 24.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
 
 extension CMClock {
     var milliseconds: Int64 {

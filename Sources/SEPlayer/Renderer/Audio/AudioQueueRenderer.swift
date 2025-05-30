@@ -187,7 +187,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
             releaseDecoder()
             try maybeInitDecoder()
         } else {
-            inputBuffer.reset()
+            resetInputBuffer()
             outputBuffer = nil
             decoder?.flush()
             decoderReceivedBuffers = false
@@ -195,7 +195,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
     }
 
     private func releaseDecoder() {
-        inputBuffer.reset()
+        resetInputBuffer()
         outputBuffer = nil
         decoderReinitializationState = .none
         decoderReceivedBuffers = false
@@ -373,6 +373,7 @@ extension AudioQueueRenderer: AudioSinkDelegate {
 extension AudioQueueRenderer: MediaClock {
     func getPosition() -> Int64 {
         updateCurrentPosition()
+        print("🙏 currentPosition = \(currentPosition)")
         return currentPosition
     }
 

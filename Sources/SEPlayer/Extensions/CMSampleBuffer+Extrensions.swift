@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 31.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSampleBuffer
 
 extension CMSampleBuffer {
     func nanoseconds(_ value: Int64) throws -> CMSampleBuffer {

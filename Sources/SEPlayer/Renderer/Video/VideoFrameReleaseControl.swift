@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 24.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
 
 struct VideoFrameReleaseControl {
     weak var frameTimingEvaluator: FrameTimingEvaluator?

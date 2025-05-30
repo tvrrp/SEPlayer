@@ -5,8 +5,7 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
-import CoreMedia
-import VideoToolbox
+import CoreMedia.CMFormatDescription
 
 public protocol SETrackSelection: TrackSelection {
     var id: UUID { get }
@@ -16,11 +15,13 @@ public protocol SETrackSelection: TrackSelection {
 
     func enable()
     func disable()
+    func playWhenReadyChanged(new playWhenReady: Bool)
 }
 
 extension SETrackSelection {
     func enable() {}
     func disable() {}
+    func playWhenReadyChanged(new playWhenReady: Bool) {}
 }
 
 public enum TrackSelectionReason {

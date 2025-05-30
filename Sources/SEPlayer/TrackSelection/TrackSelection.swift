@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMFormatDescription
 
 public protocol TrackSelection {
     var trackGroup: TrackGroup { get }

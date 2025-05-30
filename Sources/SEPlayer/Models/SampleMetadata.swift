@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 02.04.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSampleBuffer
 
 struct SampleMetadata {
     let sampleTimings: CMSampleTimingInfo

@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 05.05.2025.
 //
 
-import CoreMedia
+import CoreMedia.CMSync
 
 protocol RenderersFactory {
     func createRenderers(
