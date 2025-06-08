@@ -7,7 +7,7 @@
 
 import QuartzCore
 
-protocol DisplayLinkProvider {
+public protocol DisplayLinkProvider {
     var sampledVsyncTime: Int64? { get }
     var vsyncDuration: Int64? { get }
     func addOutput(_ output: DisplayLinkListener)
@@ -16,11 +16,11 @@ protocol DisplayLinkProvider {
     func removeObserver()
 }
 
-protocol DisplayLinkListener: AnyObject {
+public protocol DisplayLinkListener: AnyObject {
     func displayLinkTick(_ info: DisplayLinkInfo)
 }
 
-struct DisplayLinkInfo {
+public struct DisplayLinkInfo {
     let currentTimestampNs: Int64
     let targetTimestampNs: Int64
 }

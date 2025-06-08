@@ -38,7 +38,7 @@ final class AudioConverterDecoder: AQDecoder {
             sampleRate: sourceFormat.mSampleRate,
             numOfChannels: sourceFormat.mChannelsPerFrame
         )
-        decompressedSamplesQueue = try TypedCMBufferQueue<AudioSampleWrapper>(capacity: .highWaterMark) { rhs, lhs in
+        decompressedSamplesQueue = try! TypedCMBufferQueue<AudioSampleWrapper>(capacity: .highWaterMark) { rhs, lhs in
             guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
             
             return rhs.presentationTime > lhs.presentationTime ? .compareGreaterThan : .compareLessThan
@@ -62,7 +62,7 @@ final class AudioConverterDecoder: AQDecoder {
         buffersInUse = Array(repeating: false, count: .highWaterMark)
         samplesInUse = Array(repeating: false, count: .highWaterMark)
 
-        try createAudioConverter()
+        try! createAudioConverter()
     }
 
     func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool {
@@ -109,9 +109,9 @@ final class AudioConverterDecoder: AQDecoder {
 
     func queueInputBuffer(for index: Int, inputBuffer: DecoderInputBuffer) throws {
         assert(queue.isCurrent())
-        let buffer = try inputBuffer.dequeue()
+        let buffer = try! inputBuffer.dequeue()
 
-        let blockBuffer = try CMBlockBuffer(
+        let blockBuffer = try! CMBlockBuffer(
             length: inputBuffer.size,
             allocator: { _ in
                 return buffer
@@ -120,8 +120,8 @@ final class AudioConverterDecoder: AQDecoder {
             flags: .assureMemoryNow
         )
 
-        let formatDescription = try CMFormatDescription(audioStreamBasicDescription: sourceFormat)
-        let sampleBuffer = try CMSampleBuffer(
+        let formatDescription = try! CMFormatDescription(audioStreamBasicDescription: sourceFormat)
+        let sampleBuffer = try! CMSampleBuffer(
             dataBuffer: blockBuffer,
             formatDescription: formatDescription,
             numSamples: 1,
@@ -137,13 +137,15 @@ final class AudioConverterDecoder: AQDecoder {
         return decompressedSamplesQueue.dequeue()
     }
 
-    func flush() {
+    func flush() throws {
         assert(queue.isCurrent())
         if let audioConverter {
             AudioConverterReset(audioConverter)
         }
+        try! decompressedSamplesQueue.reset()
         _isDecodingSample = false
         _framedBeingDecoded = 0
+        _pendingSamples.removeAll()
         bufferCounter = 0
         buffersInUse = buffersInUse.map { _ in false }
         samplesCounter = 0
@@ -177,9 +179,9 @@ final class AudioConverterDecoder: AQDecoder {
 
         _isDecodingSample = true
         let (index, sample, flags) = _pendingSamples.removeFirst()
-        queue.async {
+//        queue.async {
             self.decodeSample(index: index, sampleBuffer: sample, sampleFlags: flags)
-        }
+//        }
     }
 
     private func decodeSample(index: Int, sampleBuffer: CMSampleBuffer, sampleFlags: SampleFlags) {
@@ -198,8 +200,8 @@ final class AudioConverterDecoder: AQDecoder {
         outputBufferList[0].mData = decodedSamples[index]
 
         do {
-            let result = try sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
-                try sampleBuffer.withAudioBufferList { audioBuffer, _ in
+            let result = try! sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
+                try! sampleBuffer.withAudioBufferList { audioBuffer, _ in
                     let descriptionPointer = UnsafeMutablePointer<AudioStreamPacketDescription>
                         .allocate(capacity: 1)
                     descriptionPointer.initialize(to: description[0])
@@ -275,12 +277,12 @@ final class AudioConverterDecoder: AQDecoder {
 
     func handleSample(index: Int, itemsCount: Int, pts: CMTime, sampleFlags: SampleFlags) {
         do {
-            let formatDescription = try CMFormatDescription(audioStreamBasicDescription: destinationFormat)
+            let formatDescription = try! CMFormatDescription(audioStreamBasicDescription: destinationFormat)
             let sampleBuffer: CMSampleBuffer
 
             if itemsCount > 0 {
                 let buffer = decodedSamples[index]
-                let blockBuffer = try CMBlockBuffer(
+                let blockBuffer = try! CMBlockBuffer(
                     length: itemsCount,
                     allocator: { _ in
                         return buffer
@@ -291,25 +293,27 @@ final class AudioConverterDecoder: AQDecoder {
                     },
                     flags: .assureMemoryNow
                 )
-                sampleBuffer = try CMSampleBuffer(
+                sampleBuffer = try! CMSampleBuffer(
                     dataBuffer: blockBuffer,
                     formatDescription: formatDescription,
                     numSamples: itemsCount,
                     presentationTimeStamp: pts,
                     packetDescriptions: []
                 )
-            } else {
+            } else if sampleFlags.contains(.endOfStream) {
                 samplesInUse[index] = false
-                sampleBuffer = try! CMSampleBuffer(
+                sampleBuffer = try  CMSampleBuffer(
                     dataBuffer: nil,
                     formatDescription: formatDescription,
                     numSamples: itemsCount,
                     sampleTimings: [],
                     sampleSizes: []
                 )
+            } else {
+                fatalError()
             }
 
-            try! decompressedSamplesQueue.enqueue(.init(
+            try  decompressedSamplesQueue.enqueue(.init(
                 sampleFlags: sampleFlags,
                 presentationTime: pts.microseconds,
                 audioBuffer: sampleBuffer

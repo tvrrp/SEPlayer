@@ -146,7 +146,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 }
 
 private extension ProgressiveMediaSource {
-    final class ForwardingTimelineImpl: ForwardingTimeline {
+    final class ForwardingTimelineImpl: ForwardingTimeline, @unchecked Sendable {
         override func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
             super.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
             window.isPlaceholder = true

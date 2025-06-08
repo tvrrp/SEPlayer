@@ -17,7 +17,7 @@ final class MP4Extractor: Extractor {
 
     private var atomHeader: ByteBuffer
     private var atomHeaderBytesRead: Int = 0
-    private var atomSize: UInt32 = 0
+    private var atomSize: UInt64 = 0
     private var atomType: UInt32 = 0
 
     private var atomData: ByteBuffer?
@@ -28,6 +28,7 @@ final class MP4Extractor: Extractor {
     private var accumulatedSampleSizes: [[Int]] = []
     private var sampleTrackIndex: Int?
     private var sampleBytesRead = 0
+    private var sampleBytesWritten = 0
 
     private var duration: Int64 = .timeUnset
 
@@ -37,34 +38,22 @@ final class MP4Extractor: Extractor {
         self.atomHeader = ByteBuffer()
     }
 
-    func read(input: any ExtractorInput, completion: @escaping (ExtractorReadResult) -> Void) {
-        let queue = queue
+    func read(input: any ExtractorInput) throws -> ExtractorReadResult {
         assert(queue.isCurrent())
-        switch parserState {
-        case .readingAtomHeader:
-            readAtomHeader(input: input) { error in
-                assert(queue.isCurrent())
-                if error != nil {
-                    completion(.endOfInput)
+        while true {
+            switch parserState {
+            case .readingAtomHeader:
+                if try !readAtomHeader(input: input) {
+                    return .endOfInput
                 }
-                completion(.continueRead)
-            }
-        case .readingAtomPayload:
-            readAtomPayload(input: input) { result in
-                assert(queue.isCurrent())
-                switch result {
-                case let .success(seekPosition):
-                    if let seekPosition {
-                        completion(.seek(offset: seekPosition))
-                    } else {
-                        completion(.continueRead)
-                    }
-                case let .failure(error):
-                    completion(.error(error))
+            case .readingAtomPayload:
+                let (position, seekRequired) = try readAtomPayload(input: input)
+                if seekRequired {
+                    return .seek(offset: position)
                 }
+            case .readingSample:
+                return try readSample(input: input)
             }
-        case .readingSample:
-            readSample(input: input, completion: completion)
         }
     }
 
@@ -76,8 +65,8 @@ final class MP4Extractor: Extractor {
             enterReadingAtomHeaderState()
         } else {
             for index in 0..<tracks.count {
-                if let (index, _) = tracks[index].sampleTable.syncSample(for: timeUs) {
-                    tracks[index].sampleIndex = index
+                if let (updatedIndex, _) = tracks[index].sampleTable.syncSample(for: timeUs) {
+                    tracks[index].sampleIndex = updatedIndex
                 }
             }
         }
@@ -90,189 +79,181 @@ extension MP4Extractor: SeekMap {
     }
 
     func getDurationUs() -> Int64 {
-        queue.sync { return duration }
+        assert(parserState == .readingSample)
+        return duration
     }
 
     func getSeekPoints(for timeUs: Int64) -> SeekPoints {
-        queue.sync { return getSeekPoints(for: timeUs, trackId: nil) }
+        assert(parserState == .readingSample)
+        return getSeekPoints(for: timeUs, trackId: nil)
     }
 
     func getSeekPoints(for time: Int64, trackId: Int?) -> SeekPoints {
-        queue.sync {
-            guard !tracks.isEmpty else { return SeekPoints(first: .start) }
-            var firstTime: Int64
-            var firstOffset: Int
-            var secondTime: Int64?
-            var secondOffset: Int?
+        assert(parserState == .readingSample)
+        guard !tracks.isEmpty else { return SeekPoints(first: .start) }
+        var firstTime: Int64
+        var firstOffset: Int
+        var secondTime: Int64?
+        var secondOffset: Int?
 
-            let mainTrackIndex = trackId ?? tracks.firstIndex(where: { track in
+        let mainTrackIndex = trackId ?? tracks.firstIndex(where: { track in
+            if case .video = track.track.format {
+                return true
+            }
+            return false
+        })
+
+        if let mainTrackIndex {
+            let mainTrack = tracks[mainTrackIndex]
+            let sampleTable = mainTrack.sampleTable
+            guard let (syncSampleIndex, syncSample) = sampleTable.syncSample(for: time) else {
+                return SeekPoints(first: .start)
+            }
+            firstTime = syncSample.presentationTimeStampUs
+            firstOffset = syncSample.offset
+            
+            if firstTime < time && syncSampleIndex < sampleTable.sampleCount - 1 {
+                if let (_, secondSyncSample) = sampleTable.laterOrEqualSyncSample(for: time) {
+                    secondTime = secondSyncSample.presentationTimeStampUs
+                    secondOffset = secondSyncSample.offset
+                }
+            }
+        } else {
+            firstTime = time
+            firstOffset = Int.max
+        }
+
+        if trackId == nil {
+            let firstVideoTrackIndex = tracks.firstIndex(where: { track in
                 if case .video = track.track.format {
                     return true
                 }
                 return false
             })
-            if let mainTrackIndex {
-                let mainTrack = tracks[mainTrackIndex]
-                let sampleTable = mainTrack.sampleTable
-                guard let (syncSampleIndex, syncSample) = sampleTable.syncSample(for: time) else {
-                    return SeekPoints(first: .start)
-                }
-                firstTime = syncSample.presentationTimeStampUs
-                firstOffset = syncSample.offset
-
-                if firstTime < time && syncSampleIndex < sampleTable.sampleCount - 1 {
-                    if let (_, secondSyncSample) = sampleTable.laterOrEqualSyncSample(for: time) {
-                        secondTime = secondSyncSample.presentationTimeStampUs
-                        secondOffset = secondSyncSample.offset
-                    }
-                }
-            } else {
-                firstTime = time
-                firstOffset = Int.max
-            }
-
-            if trackId == nil {
-                let firstVideoTrackIndex = tracks.firstIndex(where: { track in
-                    if case .video = track.track.format {
-                        return true
-                    }
-                    return false
-                })
-                for (index, track) in tracks.enumerated() {
-                    if index != firstVideoTrackIndex {
-                        firstOffset = adjustSeekOffset(sampleTable: track.sampleTable, seekTime: firstTime, offset: firstOffset)
-                        if let secondTime {
-                            secondOffset.withTransform { offset in
-                                offset = adjustSeekOffset(sampleTable: track.sampleTable, seekTime: secondTime, offset: offset)
-                            }
+            for (index, track) in tracks.enumerated() {
+                if index != firstVideoTrackIndex {
+                    firstOffset = adjustSeekOffset(sampleTable: track.sampleTable, seekTime: firstTime, offset: firstOffset)
+                    if let secondTime {
+                        secondOffset.withTransform { offset in
+                            offset = adjustSeekOffset(sampleTable: track.sampleTable, seekTime: secondTime, offset: offset)
                         }
                     }
                 }
             }
-
-            let firstSeekPoint = SeekPoints.SeekPoint(timeUs: firstTime, position: firstOffset)
-            let secondSeekPoint: SeekPoints.SeekPoint? = if let secondTime, let secondOffset {
-                SeekPoints.SeekPoint(timeUs: secondTime, position: secondOffset)
-            } else {
-                nil
-            }
-            return SeekPoints(first: firstSeekPoint, second: secondSeekPoint)
         }
+
+        let firstSeekPoint = SeekPoints.SeekPoint(timeUs: firstTime, position: firstOffset)
+        let secondSeekPoint: SeekPoints.SeekPoint? = if let secondTime, let secondOffset {
+            SeekPoints.SeekPoint(timeUs: secondTime, position: secondOffset)
+        } else {
+            nil
+        }
+
+        return SeekPoints(first: firstSeekPoint, second: secondSeekPoint)
     }
 }
 
 private extension MP4Extractor {
-    private func readAtomHeader(input: ExtractorInput, completion: @escaping (Error?) -> Void) {
+    private func readAtomHeader(input: ExtractorInput) throws -> Bool {
         assert(queue.isCurrent())
         if atomHeaderBytesRead == 0 {
-            input.read(to: atomHeader, offset: 0, length: MP4Box.headerSize) { [weak self] result in
-                guard let self else { completion(DataReaderError.endOfInput); return }
-                assert(queue.isCurrent())
-
-                do {
-                    switch result {
-                    case let .bytesRead(buffer, _):
-                        atomHeader = buffer
-                        atomHeaderBytesRead = MP4Box.headerSize
-                        atomSize = try atomHeader.readInt(as: UInt32.self)
-                        atomType = try atomHeader.readInt(as: UInt32.self)
-                        readAtomHeader(input: input, completion: completion)
-                    case .endOfInput:
-                        completion(DataReaderError.endOfInput)
-                    }
-                } catch {
-                    completion(error)
-                }
+            if try !input.readFully(to: &atomHeader, offset: 0, length: MP4Box.headerSize, allowEndOfInput: true) {
+                // TODO: processEndOfStream
+                return false
             }
-            return
+
+            atomHeaderBytesRead = MP4Box.headerSize
+            atomHeader.moveReaderIndex(to: .zero)
+            atomSize = try! UInt64(atomHeader.readInt(as: UInt32.self))
+            atomType = try! atomHeader.readInt(as: UInt32.self)
         }
 
-        do {
-            if shouldParseContainerAtom(atom: atomType) {
-                let endPosition = input.getPosition() + Int(atomSize) - atomHeaderBytesRead
-                if atomSize != atomHeaderBytesRead && atomType == MP4Box.BoxType.meta.rawValue {
-                    maybeSkipRemainingMetaAtomHeaderBytes(input: input)
-                }
-                containerAtoms.insert(.init(type: atomType, endPosition: endPosition), at: 0)
-                if atomSize == atomHeaderBytesRead {
-                    try processAtomEnded(atomEndPosition: endPosition)
-                } else {
-                    // Читаем первый child atom
-                    enterReadingAtomHeaderState()
-                }
-            } else if shouldParseLeafAtom(atom: atomType) {
-                atomHeader.moveReaderIndex(to: 0)
-                atomData = ByteBuffer(buffer: atomHeader)
-                parserState = .readingAtomPayload
+        if atomSize == MP4Box.definesLargeSize {
+            let headerBytesRemaining = MP4Box.longHeaderSize - MP4Box.headerSize
+            try input.readFully(to: &atomHeader, offset: MP4Box.headerSize, length: headerBytesRemaining)
+            atomHeaderBytesRead += headerBytesRemaining
+            atomSize = try atomHeader.readInt(as: UInt64.self)
+        } else if atomSize == MP4Box.extendsToEndSize {
+            var endPosition = input.getLength()
+            if endPosition == nil, let containerAtom = containerAtoms.first {
+                endPosition = containerAtom.endPosition
+            }
+
+            if let endPosition {
+                atomSize = UInt64(endPosition - input.getPosition() + atomHeaderBytesRead)
+            }
+        }
+
+        guard atomSize >= atomHeaderBytesRead else {
+            // TODO: throw Atom size less than header length unsupported
+            fatalError()
+        }
+
+        if shouldParseContainerAtom(atom: atomType) {
+            let endPosition = input.getPosition() + Int(atomSize) - atomHeaderBytesRead
+            if atomSize != atomHeaderBytesRead, atomType == MP4Box.BoxType.meta.rawValue {
+                maybeSkipRemainingMetaAtomHeaderBytes(input: input)
+            }
+            containerAtoms.insert(.init(type: atomType, endPosition: endPosition), at: 0)
+            if atomSize == atomHeaderBytesRead {
+                try processAtomEnded(atomEndPosition: endPosition)
             } else {
-                atomData = nil
-                parserState = .readingAtomPayload
+                // Start reading first child atom
+                enterReadingAtomHeaderState()
             }
-            completion(nil)
-        } catch {
-            completion(error)
+        } else if shouldParseLeafAtom(atom: atomType) {
+            guard atomHeaderBytesRead == MP4Box.headerSize, atomSize <= .max else {
+                // TODO: throw error
+                fatalError()
+            }
+//            atomData = ByteBuffer(buffer: atomHeader)
+            atomData = atomHeader
+            parserState = .readingAtomPayload
+        } else {
+            atomData = nil
+            parserState = .readingAtomPayload
         }
+
+        return true
     }
 
-    private func readAtomPayload(input: ExtractorInput, completion: @escaping (Result<Int?, Error>) -> Void) {
+    private func readAtomPayload(input: ExtractorInput) throws -> (Int, Bool) {
         let atomPayloadSize = Int(atomSize) - atomHeaderBytesRead
         let atomEndPosition = input.getPosition() + atomPayloadSize
         var seekRequired = false
         var position: Int = 0
 
-        func continueWork() {
-            do {
-                try processAtomEnded(atomEndPosition: atomEndPosition)
-                if seekRequired && parserState != .readingSample {
-                    completion(.success(position))
-                } else {
-                    completion(.success(nil))
-                }
-            } catch {
-                completion(.failure(error))
-            }
-        }
-
-        if let atomData {
-            input.read(to: atomData, offset: atomHeaderBytesRead, length: atomPayloadSize) { [weak self] result in
-                guard let self else { completion(.failure(DataReaderError.endOfInput)); return }
-                assert(queue.isCurrent())
-                switch result {
-                case let .bytesRead(buffer, _):
-                    self.atomData = buffer
-                    if atomType == MP4Box.BoxType.ftyp.rawValue {
-                        seenFtypAtom = true
-                    } else if !containerAtoms.isEmpty {
-                        containerAtoms[0].add(LeafBox(type: atomType, data: buffer))
-                    }
-                    continueWork()
-                case .endOfInput:
-                    completion(.failure(DataReaderError.endOfInput))
-                }
+        if var atomData {
+            try input.readFully(to: &atomData, offset: atomHeaderBytesRead, length: atomPayloadSize)
+            if atomType == MP4Box.BoxType.ftyp.rawValue {
+                seenFtypAtom = true
+                // TODO: processFtypAtom
+            } else if !containerAtoms.isEmpty {
+                containerAtoms[0].add(LeafBox(type: atomType, data: atomData))
             }
         } else {
+            if !seenFtypAtom, atomType == MP4Box.BoxType.mdat.rawValue {
+                // TODO: fileType = .qt
+            }
             if atomPayloadSize < .reloadMinimumSeekDistance {
-                input.skip(length: atomPayloadSize) { error in
-                    if let error {
-                        completion(.failure(error)); return
-                    }
-                    continueWork()
-                }
+                try input.skipFully(length: atomPayloadSize)
             } else {
                 position = input.getPosition() + atomPayloadSize
-                seekRequired = true
-                continueWork()
+                seekRequired = false
             }
         }
+
+        try processAtomEnded(atomEndPosition: atomEndPosition)
+        // TODO: seekToAxteAtom
+
+        return (position, seekRequired && parserState != .readingSample)
     }
 
-    func readSample(input: ExtractorInput, completion: @escaping (ExtractorReadResult) -> Void) {
+    func readSample(input: ExtractorInput) throws -> ExtractorReadResult {
         let inputPosition = input.getPosition()
-        guard let sampleTrackIndex else {
-            self.sampleTrackIndex = nextReadSample(inputPosition: inputPosition)
-            if self.sampleTrackIndex == nil { completion(.endOfInput); return }
-            read(input: input, completion: completion); return
-        }
+        sampleTrackIndex = sampleTrackIndex ?? nextReadSample(inputPosition: inputPosition)
+
+        guard let sampleTrackIndex else { return .endOfInput }
 
         let track = tracks[sampleTrackIndex]
         let trackOutput = track.trackOutput
@@ -282,53 +263,38 @@ private extension MP4Extractor {
         let skipAmount = sample.offset - inputPosition
 
         if skipAmount < 0 || skipAmount >= .reloadMinimumSeekDistance {
-            completion(.seek(offset: sample.offset))
-            return
+            return .seek(offset: sample.offset)
         }
 
-        input.skip(length: skipAmount) { [weak self] error in
-            guard let self else { return }
-            if let error {
-                completion(.error(error)); return
-            }
-
-            loadToTrackOutput(input: input, trackOutput: trackOutput, amount: sample.size) { error in
-                if let error {
-                    completion(.error(error))
-                    return
-                }
-
-                trackOutput.sampleMetadata(
-                    time: sample.presentationTimeStampUs,
-                    flags: sample.flags,
-                    size: sample.size,
-                    offset: 0
-                )
-
-                self.sampleBytesRead += sample.size
-                self.sampleTrackIndex = nil
-                self.tracks[sampleTrackIndex].sampleIndex += 1
-                completion(.continueRead)
-            }
-        }
-    }
-
-    func loadToTrackOutput(input: ExtractorInput, trackOutput: TrackOutput, amount: Int, completion: @escaping (Error?) -> Void) {
-        trackOutput.loadSampleData(input: input, length: amount, completionQueue: queue) { [weak self] result in
-            guard let self else { return }
-            assert(queue.isCurrent())
+        // TODO: sampleTransformation
+        try input.skipFully(length: skipAmount)
+        // TODO: canReadWithinGopSample
+        while sampleBytesWritten < sample.size {
+            let result = try trackOutput.loadSampleData(input: input, length: sample.size - sampleBytesWritten, allowEndOfInput: false)
             switch result {
-            case let .success(loaded):
-                let amountToLoad = max(0, amount - loaded)
-                if amountToLoad > 0 {
-                    loadToTrackOutput(input: input, trackOutput: trackOutput, amount: amountToLoad, completion: completion)
-                } else {
-                    completion(nil)
-                }
-            case let .failure(error):
-                completion(error)
+            case let .success(writtenBytes):
+                sampleBytesRead += writtenBytes
+                sampleBytesWritten += writtenBytes
+            case .endOfInput:
+                // TODO: throw error
+                fatalError()
             }
         }
+
+        trackOutput.sampleMetadata(
+            time: sample.presentationTimeStampUs,
+            flags: sample.flags,
+            size: sample.size,
+            offset: 0
+        )
+
+        tracks[sampleTrackIndex].sampleIndex += 1
+        self.sampleTrackIndex = nil
+        sampleBytesRead = 0
+        sampleBytesWritten = 0
+//        isSampleDependedOn = false
+
+        return .continueRead
     }
 }
 
@@ -336,11 +302,16 @@ private extension MP4Extractor {
     func processMoovAtom(moov: ContainerBox) throws {
         var tracks = [MP4Track]()
 
-//        let mvhdMetadata = try BoxParser.Mp4TimestampData(
+//        let mvhdMetadata = try! BoxParser.Mp4TimestampData(
 //            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
 //        )
 
-        let trackSampleTables = try boxParser.parseTraks(moov: moov, duration: .timeUnset)
+        let trackSampleTables = try! boxParser.parseTraks(
+            moov: moov,
+            duration: .timeUnset,
+            ignoreEditLists: false,
+            isQuickTime: false
+        )
 
         for (trackIndex, trackSampleTable) in trackSampleTables.enumerated() {
             guard trackSampleTable.sampleCount > 0 else { continue }
@@ -375,13 +346,14 @@ private extension MP4Extractor {
         while let first = containerAtoms.first, first.endPosition == atomEndPosition {
             let containerAtom = containerAtoms.removeFirst()
             if containerAtom.type == .moov {
-                try processMoovAtom(moov: containerAtom)
+                try! processMoovAtom(moov: containerAtom)
                 containerAtoms.removeAll()
                 parserState = .readingSample
             } else if !self.containerAtoms.isEmpty {
                 containerAtoms[0].add(containerAtom)
             }
         }
+
         if parserState != .readingSample {
             enterReadingAtomHeaderState()
         }

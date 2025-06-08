@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct MediaItem: Hashable {
+public struct MediaItem: Hashable, Sendable {
     let url: URL
 
     public init(url: URL) {

@@ -10,9 +10,9 @@ import CoreMedia.CMTime
 extension BoxParser {
     func parseStbl(track: Track, stblBox: ContainerBox) throws -> TrackSampleTable {
         var sampleSizeBox: SampleSizeBox = if let stszAtom = stblBox.getLeafBoxOfType(type: .stsz) {
-            try StszSampleSizeBox(stszAtom: stszAtom)
+            try! StszSampleSizeBox(stszAtom: stszAtom)
         } else if let stz2Atom = stblBox.getLeafBoxOfType(type: .stz2) {
-            try Stz2SampleSizeBox(stszAtom: stz2Atom)
+            try! Stz2SampleSizeBox(stszAtom: stz2Atom)
         } else {
             throw BoxParserErrors.badBoxContent(
                 type: .stbl, reason: "Track has no sample table size information"
@@ -35,31 +35,31 @@ extension BoxParser {
             chunkOffsetsAtom = stblBox
         } else {
             chunkOffsetsType = UInt64.self
-            chunkOffsetsAtom = try stblBox.getLeafBoxOfType(type: .co64)
+            chunkOffsetsAtom = try! stblBox.getLeafBoxOfType(type: .co64)
                 .checkNotNil(BoxParserErrors.missingBox(type: .stco))
         }
 
         let chunkOffsets = chunkOffsetsAtom.data
-        let stsc = try stblBox.getLeafBoxOfType(type: .stsc).checkNotNil(BoxParserErrors.missingBox(type: .stsc)).data
-        var stts = try stblBox.getLeafBoxOfType(type: .stts).checkNotNil(BoxParserErrors.missingBox(type: .stts)).data
+        let stsc = try! stblBox.getLeafBoxOfType(type: .stsc).checkNotNil(BoxParserErrors.missingBox(type: .stsc)).data
+        var stts = try! stblBox.getLeafBoxOfType(type: .stts).checkNotNil(BoxParserErrors.missingBox(type: .stts)).data
         var stss = stblBox.getLeafBoxOfType(type: .stss)?.data
         var ctts = stblBox.getLeafBoxOfType(type: .ctts)?.data
 
-        var chunkIterator = try ChunkIterator(
+        var chunkIterator = try! ChunkIterator(
             stsc: stsc, chunkOffsets: chunkOffsets, chunkOffsetsType: chunkOffsetsType
         )
 
         stts.moveReaderIndex(to: MP4Box.fullHeaderSize)
-        var remainingTimestampDeltaChanges = try stts.readInt(as: UInt32.self) - 1
-        var remainingSamplesAtTimestampDelta = try stts.readInt(as: UInt32.self)
-        var timestampDeltaInTimeUnits = try CMTimeValue(stts.readInt(as: UInt32.self))
+        var remainingTimestampDeltaChanges = try! stts.readInt(as: UInt32.self) - 1
+        var remainingSamplesAtTimestampDelta = try! stts.readInt(as: UInt32.self)
+        var timestampDeltaInTimeUnits = try! CMTimeValue(stts.readInt(as: UInt32.self))
         
         var remainingSamplesAtTimestampOffset: UInt32 = 0
         var remainingTimestampOffsetChanges: UInt32 = 0
         var timestampOffset: CMTimeValue = 0
-        try ctts.withTransform { ctts in
+        try! ctts.withTransform { ctts in
             ctts.moveReaderIndex(to: MP4Box.fullHeaderSize)
-            remainingTimestampOffsetChanges = try ctts.readInt(as: UInt32.self)
+            remainingTimestampOffsetChanges = try! ctts.readInt(as: UInt32.self)
         }
 
         var nextSynchronizationSampleIndex: Int?
@@ -67,9 +67,9 @@ extension BoxParser {
 
         if var stssBox = stss {
             stssBox.moveReaderIndex(to: MP4Box.fullHeaderSize)
-            remainingSynchronizationSamples = try stssBox.readInt(as: UInt32.self)
+            remainingSynchronizationSamples = try! stssBox.readInt(as: UInt32.self)
             if remainingSynchronizationSamples > 0 {
-                nextSynchronizationSampleIndex = try Int(stssBox.readInt(as: UInt32.self)) - 1
+                nextSynchronizationSampleIndex = try! Int(stssBox.readInt(as: UInt32.self)) - 1
                 stss = stssBox
             } else {
                 // Ignore empty stss boxes, which causes all samples to be treated as sync samples.
@@ -86,26 +86,26 @@ extension BoxParser {
         var remainingSamplesInChunk = 0
 
         for index in 0..<sampleCount {
-            while remainingSamplesInChunk == 0, try chunkIterator.moveNext() {
+            while remainingSamplesInChunk == 0, try! chunkIterator.moveNext() {
                 offset = chunkIterator.offset
                 remainingSamplesInChunk = chunkIterator.numberOfSamples
             }
 
-            try ctts.withTransform { ctts in
+            try! ctts.withTransform { ctts in
                 while remainingSamplesAtTimestampOffset == 0 && remainingTimestampOffsetChanges > 0 {
-                    remainingSamplesAtTimestampOffset = try ctts.readInt(as: UInt32.self)
+                    remainingSamplesAtTimestampOffset = try! ctts.readInt(as: UInt32.self)
                     // The BMFF spec (ISO/IEC 14496-12) states that sample offsets should be unsigned
                     // integers in version 0 ctts boxes, however some streams violate the spec and use
                     // signed integers instead. It's safe to always decode sample offsets as signed integers
                     // here, because unsigned integers will still be parsed correctly (unless their top bit
                     // is set, which is never true in practice because sample offsets are always small).
-                    timestampOffset = try CMTimeValue(ctts.readInt(as: Int32.self))
+                    timestampOffset = try! CMTimeValue(ctts.readInt(as: Int32.self))
                     remainingTimestampOffsetChanges -= 1
                 }
                 remainingSamplesAtTimestampOffset -= 1
             }
 
-            let size = try sampleSizeBox.readNextSampleSize()
+            let size = try! sampleSizeBox.readNextSampleSize()
             if size > maximumSize {
                 maximumSize = size
             }
@@ -115,8 +115,8 @@ extension BoxParser {
                 flags = [.keyframe]
                 remainingSynchronizationSamples -= 1
                 if remainingSynchronizationSamples > 0 {
-                    var stssBox = try stss.checkNotNil(BoxParserErrors.missingBox(type: .stss))
-                    nextSynchronizationSampleIndex = try Int(stssBox.readInt(as: UInt32.self)) - 1
+                    var stssBox = try! stss.checkNotNil(BoxParserErrors.missingBox(type: .stss))
+                    nextSynchronizationSampleIndex = try! Int(stssBox.readInt(as: UInt32.self)) - 1
                     stss = stssBox
                 }
             }
@@ -136,14 +136,14 @@ extension BoxParser {
             timestampTimeUnits += timestampDeltaInTimeUnits
             remainingSamplesAtTimestampDelta -= 1
             if remainingSamplesAtTimestampDelta == 0 && remainingTimestampDeltaChanges > 0 {
-                remainingSamplesAtTimestampDelta = try stts.readInt(as: UInt32.self)
+                remainingSamplesAtTimestampDelta = try! stts.readInt(as: UInt32.self)
                 // The BMFF spec (ISO/IEC 14496-12) states that sample deltas should be unsigned integers
                 // in stts boxes, however some streams violate the spec and use signed integers instead.
                 // It's safe to always decode sample deltas as signed integers here,
                 // because unsigned integers will still be parsed correctly
                 // (unless their top bit is set, which is never true in practice because sample
                 // deltas are always small).
-                timestampDeltaInTimeUnits = try CMTimeValue(stts.readInt(as: Int32.self))
+                timestampDeltaInTimeUnits = try! CMTimeValue(stts.readInt(as: Int32.self))
                 remainingTimestampDeltaChanges -= 1
             }
 
@@ -153,13 +153,13 @@ extension BoxParser {
         durationUs = timestampTimeUnits + timestampOffset
 
         var isCttsValid = true
-        try ctts.withTransform { ctts in
+        try! ctts.withTransform { ctts in
             while remainingTimestampOffsetChanges > 0 {
-                if try ctts.readInt(as: UInt32.self) > 0 {
+                if try! ctts.readInt(as: UInt32.self) > 0 {
                     isCttsValid = false
                     break
                 }
-                try ctts.readInt(as: Int32.self)
+                try! ctts.readInt(as: Int32.self)
                 remainingTimestampOffsetChanges -= 1
             }
         }
@@ -235,16 +235,16 @@ private extension BoxParser {
         init(stszAtom: LeafBox) throws {
             data = stszAtom.data
             data.moveReaderIndex(to: MP4Box.fullHeaderSize)
-            let sampleSize = try data.readInt(as: UInt32.self)
+            let sampleSize = try! data.readInt(as: UInt32.self)
             fixedSampleSize = sampleSize == 0 ? nil : Int(sampleSize)
-            sampleCount = try Int(data.readInt(as: UInt32.self))
+            sampleCount = try! Int(data.readInt(as: UInt32.self))
         }
         
         mutating func readNextSampleSize() throws -> Int {
             if let fixedSampleSize {
                 return fixedSampleSize
             } else {
-                return try Int(data.readInt(as: UInt32.self))
+                return try! Int(data.readInt(as: UInt32.self))
             }
         }
     }
@@ -262,20 +262,20 @@ private extension BoxParser {
             data = stszAtom.data
             data.moveReaderIndex(to: MP4Box.fullHeaderSize)
             fixedSampleSize = nil
-            fieldSize = try Int(data.readInt(as: UInt32.self)) & 0x000000FF
-            sampleCount = try Int(data.readInt(as: UInt32.self))
+            fieldSize = try! Int(data.readInt(as: UInt32.self)) & 0x000000FF
+            sampleCount = try! Int(data.readInt(as: UInt32.self))
         }
 
         mutating func readNextSampleSize() throws -> Int {
             if fieldSize == 8 {
-                return try Int(data.readInt(as: UInt8.self))
+                return try! Int(data.readInt(as: UInt8.self))
             } else if fieldSize == 16 {
-                return try Int(data.readInt(as: UInt16.self))
+                return try! Int(data.readInt(as: UInt16.self))
             } else { // fieldSize == 4.
                 sampleIndex += 1
                 if sampleIndex % 2 == 0 {
                     // Read the next byte into our cached byte when we are reading the upper bits.
-                    currentByte = try Int(data.readInt(as: UInt8.self))
+                    currentByte = try! Int(data.readInt(as: UInt8.self))
                     return (currentByte & 0xF0) >> 4
                 } else {
                     // Mask out the upper 4 bits of the last byte we read.
@@ -305,10 +305,10 @@ private extension BoxParser {
             self.chunkOffsets = chunkOffsets
             self.chunkOffsetsType = chunkOffsetsType
             self.chunkOffsets.moveReaderIndex(to: MP4Box.fullHeaderSize)
-            length = try Int(self.chunkOffsets.readInt(as: UInt32.self))
+            length = try! Int(self.chunkOffsets.readInt(as: UInt32.self))
             self.stsc.moveReaderIndex(to: MP4Box.fullHeaderSize)
-            remainingSamplesPerChunkChanges = try Int(self.stsc.readInt(as: UInt32.self))
-            guard try self.stsc.readInt(as: UInt32.self) == 1 else {
+            remainingSamplesPerChunkChanges = try! Int(self.stsc.readInt(as: UInt32.self))
+            guard try! self.stsc.readInt(as: UInt32.self) == 1 else {
                 throw BoxParserErrors.badBoxContent(type: .stsc, reason: "first_chunk must be 1")
             }
         }
@@ -319,13 +319,13 @@ private extension BoxParser {
                 return false
             }
 
-            offset = try Int(chunkOffsets.readInt(as: chunkOffsetsType))
+            offset = try! Int(chunkOffsets.readInt(as: chunkOffsetsType))
             if index == nextSamplesPerChunkChangeIndex {
-                numberOfSamples = try Int(stsc.readInt(as: UInt32.self))
+                numberOfSamples = try! Int(stsc.readInt(as: UInt32.self))
                 stsc.moveReaderIndex(forwardBy: 4) // Skip sample_description_index
                 remainingSamplesPerChunkChanges -= 1
                 nextSamplesPerChunkChangeIndex = if remainingSamplesPerChunkChanges > 0 {
-                    try Int(stsc.readInt(as: UInt32.self) - 1)
+                    try! Int(stsc.readInt(as: UInt32.self) - 1)
                 } else {
                     nil
                 }

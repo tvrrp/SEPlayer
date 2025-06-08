@@ -8,29 +8,29 @@
 import Foundation.NSUUID
 
 public struct Window: Hashable {
-    var id: AnyHashable
+    internal(set) public var id: AnyHashable
 
-    var mediaItem: MediaItem
-    let presentationStartTimeMs: Int64
-    let windowStartTimeMs: Int64
-    let elapsedRealtimeEpochOffsetMs: Int64
+    internal(set) public var mediaItem: MediaItem
+    public let presentationStartTimeMs: Int64
+    public let windowStartTimeMs: Int64
+    public let elapsedRealtimeEpochOffsetMs: Int64
 
-    let isSeekable: Bool
-    let isDynamic: Bool
-    var isPlaceholder: Bool
+    public let isSeekable: Bool
+    public let isDynamic: Bool
+    internal(set) public var isPlaceholder: Bool
 
-    let defaultPositionUs: Int64
-    let durationUs: Int64
+    public let defaultPositionUs: Int64
+    public let durationUs: Int64
 
-    var firstPeriodIndex: Int
-    var lastPeriodIndex: Int
-    let positionInFirstPeriodUs: Int64
+    internal(set) public var firstPeriodIndex: Int
+    internal(set) public var lastPeriodIndex: Int
+    public let positionInFirstPeriodUs: Int64
 
-    var durationMs: Int64 {
+    public var durationMs: Int64 {
         return Time.usToMs(timeUs: durationUs)
     }
 
-    public init(
+    init(
         id: AnyHashable = Window.singleWindowId,
         mediaItem: MediaItem = Window.placeholderMediaItem,
         presentationStartTimeMs: Int64 = .zero,

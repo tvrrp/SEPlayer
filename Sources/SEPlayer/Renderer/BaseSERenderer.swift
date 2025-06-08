@@ -50,15 +50,15 @@ class BaseSERenderer: SERenderer {
         state = .enabled
         self.sampleStream = stream
         self.formats = formats
-        try onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
-        try replaceStream(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-        try resetPosition(new: startPosition, joining: joining)
+        try! onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
+        try! replaceStream(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
+        try! resetPosition(new: startPosition, joining: joining)
     }
 
     final func start() throws {
         assert(queue.isCurrent() && state == .enabled)
         state = .started
-        try onStarted()
+        try! onStarted()
     }
 
     final func replaceStream(
@@ -74,7 +74,7 @@ class BaseSERenderer: SERenderer {
         }
         self.formats = formats
         streamOffset = offset
-        try onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
+        try! onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
     }
 
     final func getStream() -> SampleStream? { sampleStream }
@@ -92,14 +92,14 @@ class BaseSERenderer: SERenderer {
     }
 
     final func resetPosition(new position: Int64) throws {
-        try resetPosition(new: position, joining: false)
+        try! resetPosition(new: position, joining: false)
     }
 
     private func resetPosition(new position: Int64, joining: Bool) throws {
         streamIsFinal = false
         lastResetPosition = position
         readingPosition = position
-        try onPositionReset(position: position, joining: joining)
+        try! onPositionReset(position: position, joining: joining)
     }
 
     func render(position: Int64, elapsedRealtime: Int64) throws {}
@@ -159,13 +159,12 @@ class BaseSERenderer: SERenderer {
     final func readSource(to buffer: DecoderInputBuffer, readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
         guard let sampleStream else { return .nothingRead }
 
-        let result = try sampleStream.readData(to: buffer, readFlags: readFlags)
+        let result = try! sampleStream.readData(to: buffer, readFlags: readFlags)
         if case .didReadBuffer = result {
             if buffer.flags.contains(.endOfStream) {
                 readingPosition = .endOfSource
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
-            print("👌 self = \(String(describing: self)), streamOffset = \(streamOffset)")
             buffer.time += streamOffset
             readingPosition = max(readingPosition, buffer.time)
         }

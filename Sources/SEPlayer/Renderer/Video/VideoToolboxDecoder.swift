@@ -31,7 +31,7 @@ final class VideoToolboxDecoder: SEDecoder {
     init(queue: Queue, formatDescription: CMFormatDescription) throws {
         self.queue = queue
         self.formatDescription = formatDescription
-        decompressedSamplesQueue = try TypedCMBufferQueue<VideoOutputWrapper>(capacity: .highWaterMark) { rhs, lhs in
+        decompressedSamplesQueue = try! TypedCMBufferQueue<VideoOutputWrapper>(capacity: .highWaterMark) { rhs, lhs in
             guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
 
             return rhs.presentationTime > lhs.presentationTime ? .compareGreaterThan : .compareLessThan
@@ -47,7 +47,7 @@ final class VideoToolboxDecoder: SEDecoder {
         buffersInUse = Array(repeating: false, count: .highWaterMark)
         framesInUse = Array(repeating: false, count: .highWaterMark)
 
-        try createDecompressionSession()
+        try! createDecompressionSession()
     }
 
     func dequeueInputBufferIndex() -> Int? {
@@ -78,9 +78,9 @@ final class VideoToolboxDecoder: SEDecoder {
 
     func queueInputBuffer(for index: Int, inputBuffer: DecoderInputBuffer) throws {
         assert(queue.isCurrent())
-        let buffer = try inputBuffer.dequeue()
+        let buffer = try! inputBuffer.dequeue()
 
-        let blockBuffer = try CMBlockBuffer(
+        let blockBuffer = try! CMBlockBuffer(
             length: inputBuffer.size,
             allocator: { _ in
                 return buffer
@@ -89,7 +89,7 @@ final class VideoToolboxDecoder: SEDecoder {
             flags: .assureMemoryNow
         )
 
-        let sampleBuffer = try CMSampleBuffer(
+        let sampleBuffer = try! CMSampleBuffer(
             dataBuffer: blockBuffer,
             formatDescription: formatDescription,
             numSamples: 1,
@@ -115,11 +115,12 @@ final class VideoToolboxDecoder: SEDecoder {
         return decompressedSamplesQueue.dequeue()
     }
 
-    func flush() {
+    func flush() throws {
         assert(queue.isCurrent())
         if let decompressionSession {
             VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
         }
+        try! decompressedSamplesQueue.reset()
         _isDecodingSample = false
         _framedBeingDecoded = 0
         _pendingSamples.removeAll()
@@ -210,10 +211,14 @@ final class VideoToolboxDecoder: SEDecoder {
         }
 
         if status != noErr {
-            // TODO: error DecoderErrors.vtError(.init(rawValue: status))
-//            _isDecodingSample = false
-//            _framedBeingDecoded -= 1
-//            decodeNextSampleIfNeeded()
+            let error = VTDSessionErrors.osStatus(.init(rawValue: status))
+            print("❌ error at decodeSample = \(error)")
+
+            if case let .osStatus(vTError) = error, vTError == .invalidSession {
+                _isDecodingSample = false
+                self._pendingSamples.insert((index, sampleBuffer, sampleFlags), at: 0)
+                try! createDecompressionSession()
+            }
         }
     }
 
@@ -226,8 +231,10 @@ final class VideoToolboxDecoder: SEDecoder {
 
         do {
             guard response.status == noErr else {
+                let error = VTDSessionErrors.osStatus(.init(rawValue: response.status))
+                print("❌ error at closure = \(error)")
                 if !response.sampleFlags.contains(.endOfStream) {
-                    assertionFailure()
+//                    assertionFailure()
                 }
                 return
             }
@@ -235,7 +242,7 @@ final class VideoToolboxDecoder: SEDecoder {
             buffersInUse[response.sampleIndex] = false
             framesInUse[response.sampleIndex] = true
 
-            try decompressedSamplesQueue.enqueue(.init(
+            try! decompressedSamplesQueue.enqueue(.init(
                 imageBuffer: response.imageBuffer,
                 sampleFlags: response.sampleFlags,
                 presentationTime: response.presentationTimeStamp.microseconds

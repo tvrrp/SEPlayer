@@ -14,7 +14,7 @@ public final class SEPlayerView: UIView {
         CALayer.self
     }
 
-    @MainActor public weak var player: SEPlayer.Player? {
+    @MainActor public weak var player: Player? {
         get {
             assert(Queues.mainQueue.isCurrent())
             return _player
@@ -30,7 +30,7 @@ public final class SEPlayerView: UIView {
         set { layer.contentsGravity = newValue }
     }
 
-    private weak var _player: SEPlayer.Player?
+    private weak var _player: Player?
     private var currentImageBuffer: CVImageBuffer?
 
     public init() {
@@ -57,8 +57,6 @@ extension SEPlayerView: PlayerBufferable {
         #else
         layer.contents = buffer
         #endif
-
-        delegate?.didRenderFrame()
     }
 
     public func end() {
@@ -68,7 +66,7 @@ extension SEPlayerView: PlayerBufferable {
 
 private extension SEPlayerView {
     @MainActor
-    func _set(player: SEPlayer.Player?) {
+    func _set(player: Player?) {
         _player?.remove(self)
         layer.contents = nil
 

@@ -63,8 +63,12 @@ final class SampleDataQueue {
             writeAllocationNode = firstAllocationNode
         } else {
             var lastNodeToKeep = firstAllocationNode
-            while totalBytesWritten > lastNodeToKeep.endPosition, let next = lastNodeToKeep.nextNode {
-                lastNodeToKeep = next
+            while totalBytesWritten > lastNodeToKeep.endPosition {
+                if let next = lastNodeToKeep.nextNode {
+                    lastNodeToKeep = next
+                } else {
+                    assertionFailure()
+                }
             }
 
             guard let firstNodeToDiscard = lastNodeToKeep.nextNode else {
@@ -93,7 +97,7 @@ final class SampleDataQueue {
 
     func readToBuffer(buffer: UnsafeMutableRawPointer, offset: Int, size: Int) throws {
         assert(queue.isCurrent())
-        readAllocationNode = try readData(
+        readAllocationNode = try! readData(
             allocationNode: readAllocationNode,
             absolutePosition: offset,
             target: buffer,
@@ -103,7 +107,7 @@ final class SampleDataQueue {
 
     func peekToBuffer(buffer: UnsafeMutableRawPointer, offset: Int, size: Int) throws {
         assert(queue.isCurrent())
-        try readData(
+        try! readData(
             allocationNode: readAllocationNode,
             absolutePosition: offset,
             target: buffer,
@@ -119,43 +123,38 @@ final class SampleDataQueue {
             allocator.release(allocation: firstAllocationNode.allocation)
             if let nextAllocation = firstAllocationNode.clear() {
                 firstAllocationNode = nextAllocation
+            } else {
+                assertionFailure()
             }
         }
+
         if readAllocationNode.startPosition < firstAllocationNode.startPosition {
             readAllocationNode = firstAllocationNode
         }
     }
 
     func getTotalBytesWritten() -> Int {
-        assert(queue.isCurrent())
         return totalBytesWritten
     }
 
-    func loadSampleData(
-        input: DataReader,
-        length: Int,
-        completionQueue: Queue,
-        completion: @escaping (Result<Int, Error>) -> Void
-    ) {
-        assert(queue.isCurrent())
+    func loadSampleData(input: DataReader, length: Int, allowEndOfInput: Bool) throws -> DataReaderReadResult {
         let readLenght = preAppend(length: length)
-
-        input.read(
+        let result = try input.read(
             allocation: writeAllocationNode.allocation,
             offset: writeAllocationNode.translateOffset(absolutePosition: totalBytesWritten),
-            length: readLenght,
-            completionQueue: queue
-        ) { [weak self] result in
-            guard let self else { return }
-            assert(queue.isCurrent())
+            length: readLenght
+        )
 
-            switch result {
-            case let .success(bytesRead):
-                postAppend(length: bytesRead)
-                completionQueue.async { completion(.success(bytesRead)) }
-            case let .failure(error):
-                completionQueue.async { completion(.failure(error)) }
+        switch result {
+        case let .success(bytesAppended):
+            postAppend(length: bytesAppended)
+            return result
+        case .endOfInput:
+            if allowEndOfInput {
+                return .endOfInput
             }
+            // TODO: throw error
+            fatalError()
         }
     }
 
@@ -166,24 +165,27 @@ final class SampleDataQueue {
     }
 
     private func preAppend(length: Int) -> Int {
-        assert(queue.isCurrent())
-        writeAllocationNode.initialize(
-            next: SampleAllocationNode(
-                allocation: allocator.allocate(),
-                startPosition: writeAllocationNode.endPosition,
-                allocationLength: allocationLength
+        if writeAllocationNode.nextNode == nil {
+            writeAllocationNode.initialize(
+                next: SampleAllocationNode(
+                    allocation: allocator.allocate(),
+                    startPosition: writeAllocationNode.endPosition,
+                    allocationLength: allocationLength
+                )
             )
-        )
+        }
 
         return min(length, writeAllocationNode.endPosition - totalBytesWritten)
     }
 
     private func postAppend(length: Int) {
-        assert(queue.isCurrent())
         totalBytesWritten += length
-        if totalBytesWritten == writeAllocationNode.endPosition,
-           let next = writeAllocationNode.nextNode {
-            writeAllocationNode = next
+        if totalBytesWritten >= writeAllocationNode.endPosition {
+            if let next = writeAllocationNode.nextNode {
+                writeAllocationNode = next
+            } else {
+                assertionFailure()
+            }
         }
     }
 
@@ -223,9 +225,14 @@ final class SampleDataQueue {
     ) -> SampleAllocationNode {
         assert(queue.isCurrent())
         var node = allocationNode
-        while absolutePosition >= node.endPosition, let next = node.nextNode {
-            node = next
+        while absolutePosition >= node.endPosition {
+            if let next = node.nextNode {
+                node = next
+            } else {
+                assertionFailure()
+            }
         }
+
         return node
     }
 }

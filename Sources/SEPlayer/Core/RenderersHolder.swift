@@ -109,8 +109,8 @@ final class RenderersHolder {
     }
 
     func setPlaybackSpeed(current: Float, target: Float) throws {
-        try primaryRenderer.setPlaybackSpeed(current: current, target: target)
-        try secondaryRenderer?.setPlaybackSpeed(current: current, target: target)
+        try! primaryRenderer.setPlaybackSpeed(current: current, target: target)
+        try! secondaryRenderer?.setPlaybackSpeed(current: current, target: target)
     }
 
     func setTimeline(_ timeline: Timeline) {
@@ -129,13 +129,13 @@ final class RenderersHolder {
 
     func render(rendererPositionUs: Int64, rendererPositionElapsedRealtimeUs: Int64) throws {
         if isRendererEnabled(renderer: primaryRenderer) {
-            try primaryRenderer.render(
+            try! primaryRenderer.render(
                 position: rendererPositionUs,
                 elapsedRealtime: rendererPositionElapsedRealtimeUs
             )
         }
         if let secondaryRenderer, isRendererEnabled(renderer: secondaryRenderer) {
-            try secondaryRenderer.render(
+            try! secondaryRenderer.render(
                 position: rendererPositionUs,
                 elapsedRealtime: rendererPositionElapsedRealtimeUs
             )
@@ -152,11 +152,11 @@ final class RenderersHolder {
 
     func start() throws {
         if primaryRenderer.getState() == .enabled, prewarmingState != .transitioningToPrimary {
-            try primaryRenderer.start()
+            try! primaryRenderer.start()
         } else if let secondaryRenderer,
                   secondaryRenderer.getState() == .enabled,
                   prewarmingState != .transitioningToSecondary {
-            try secondaryRenderer.start()
+            try! secondaryRenderer.start()
         }
     }
 
@@ -185,7 +185,7 @@ final class RenderersHolder {
 
         if enablePrimary {
             primaryRequiresReset = true
-            try primaryRenderer.enable(
+            try! primaryRenderer.enable(
                 formats: formats,
                 stream: stream,
                 position: positionUs,
@@ -198,7 +198,7 @@ final class RenderersHolder {
             mediaClock.onRendererEnabled(renderer: primaryRenderer)
         } else if let secondaryRenderer {
             secondaryRequiresReset = true
-            try secondaryRenderer.enable(
+            try! secondaryRenderer.enable(
                 formats: formats,
                 stream: stream,
                 position: positionUs,
@@ -219,7 +219,7 @@ final class RenderersHolder {
             disableRenderer(renderer: secondaryRenderer, mediaClock: mediaClock)
             maybeResetRenderer(resetPrimary: false)
             if shouldTransferResources {
-                try transferResources(transferToPrimary: true)
+                try! transferResources(transferToPrimary: true)
             }
         }
 
@@ -228,7 +228,7 @@ final class RenderersHolder {
 
     func maybeHandlePrewarmingTransition() throws {
         if prewarmingState == .transitioningToSecondary || prewarmingState == .transitioningToPrimary {
-            try transferResources(transferToPrimary: prewarmingState == .transitioningToPrimary)
+            try! transferResources(transferToPrimary: prewarmingState == .transitioningToPrimary)
             prewarmingState = prewarmingState == .transitioningToPrimary ? .notPrewarmingUsingPrimary : .notPrewarmingUsingSecondary
         } else if prewarmingState == .prewarmingPrimary {
             prewarmingState = .notPrewarmingUsingPrimary
@@ -255,7 +255,7 @@ final class RenderersHolder {
         rendererPositionUs: Int64,
         streamReset: Bool
     ) throws {
-        try maybeDisableOrResetPositionInternal(
+        try! maybeDisableOrResetPositionInternal(
             renderer: primaryRenderer,
             sampleStream: sampleStream,
             mediaClock: mediaClock,
@@ -264,7 +264,7 @@ final class RenderersHolder {
         )
 
         if let secondaryRenderer {
-            try maybeDisableOrResetPositionInternal(
+            try! maybeDisableOrResetPositionInternal(
                 renderer: secondaryRenderer,
                 sampleStream: sampleStream,
                 mediaClock: mediaClock,
@@ -275,7 +275,7 @@ final class RenderersHolder {
     }
 
     func resetPosition(for holder: MediaPeriodHolder?, positionUs: Int64) throws {
-        try rendererReading(from: holder)?.resetPosition(new: positionUs)
+        try! rendererReading(from: holder)?.resetPosition(new: positionUs)
     }
 
     func reset() {
@@ -293,7 +293,7 @@ final class RenderersHolder {
         newTrackSelectorResult: TrackSelectionResult,
         mediaClock: DefaultMediaClock
     ) throws -> Bool {
-        let primaryRendererResult = try replaceStreamsOrDisableRendererForTransitionInternal(
+        let primaryRendererResult = try! replaceStreamsOrDisableRendererForTransitionInternal(
             primaryRenderer,
             readingPeriodHolder: readingPeriodHolder,
             newTrackSelectorResult: newTrackSelectorResult,
@@ -301,7 +301,7 @@ final class RenderersHolder {
             
         )
 
-        let secondaryRendererResult = try replaceStreamsOrDisableRendererForTransitionInternal(
+        let secondaryRendererResult = try! replaceStreamsOrDisableRendererForTransitionInternal(
             secondaryRenderer,
             readingPeriodHolder: readingPeriodHolder,
             newTrackSelectorResult: newTrackSelectorResult,
@@ -422,7 +422,7 @@ private extension RenderersHolder {
         if sampleStream !== renderer.getStream() {
             disableRenderer(renderer: renderer, mediaClock: mediaClock)
         } else {
-            try renderer.resetPosition(new: rendererPositionUs)
+            try! renderer.resetPosition(new: rendererPositionUs)
         }
     }
 
@@ -472,7 +472,7 @@ private extension RenderersHolder {
 
         if !renderer.isCurrentStreamFinal(), let sampleStream = readingPeriodHolder.sampleStreams[index] {
             let formats = formats(from: newTrackSelectorResult.selections[index])
-            try renderer.replaceStream(
+            try! renderer.replaceStream(
                 formats: formats,
                 stream: sampleStream,
                 startPosition: readingPeriodHolder.getStartPositionRendererTime(),

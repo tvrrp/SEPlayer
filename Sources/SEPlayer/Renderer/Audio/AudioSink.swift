@@ -118,7 +118,7 @@ final class AudioSink: IAudioSink {
         assert(inputBuffer == nil || inputBuffer?.has(same: buffer) == true)
 
         if let pendingConfiguration {
-            if try !drainToEndOfStream() {
+            if try! !drainToEndOfStream() {
                 return false
             } else if let configuration, !pendingConfiguration.canReuseAudioQueue(new: configuration) {
                 playPendingData()
@@ -134,7 +134,7 @@ final class AudioSink: IAudioSink {
         }
 
         if audioQueue == nil {
-            try initializeAudioQueue()
+            try! initializeAudioQueue()
         }
 
         if startMediaTimeNeedsInit {
@@ -158,7 +158,7 @@ final class AudioSink: IAudioSink {
             }
 
             if startMediaTimeNeedsSync {
-                guard try drainToEndOfStream() else { return false }
+                guard try! drainToEndOfStream() else { return false }
                 let adjustmentTime = presentationTime - expectedPresentationTime
                 startMediaTime += adjustmentTime
                 startMediaTimeNeedsSync = false
@@ -168,10 +168,10 @@ final class AudioSink: IAudioSink {
                 }
             }
             submitedFrames += Int64(buffer.numSamples)
-            inputBuffer = try AudioSampleByfferWrapper(sample: buffer)
+            inputBuffer = try! AudioSampleByfferWrapper(sample: buffer)
         }
 
-        try processBuffers()
+        try! processBuffers()
 
         if inputBuffer?.hasRemaining() == false {
             inputBuffer = nil
@@ -192,28 +192,28 @@ final class AudioSink: IAudioSink {
     }
 
     private func initializeAudioQueue() throws {
-        try createAudioQueue()
+        try! createAudioQueue()
         startMediaTimeNeedsInit = true
     }
 
     private func processBuffers() throws {
-        try drainOutputBuffer()
+        try! drainOutputBuffer()
         guard outputBuffer == nil, let inputBuffer else { return }
 
         outputBuffer = inputBuffer
-        try drainOutputBuffer()
+        try! drainOutputBuffer()
     }
 
     private func drainToEndOfStream() throws -> Bool {
-        try drainOutputBuffer()
+        try! drainOutputBuffer()
         return outputBuffer == nil
     }
 
     private func drainOutputBuffer() throws {
         guard buffersInUse.contains(false), let outputBuffer else { return }
 
-        let bytesRemaining = try outputBuffer.bytesRemaining()
-        let bytesWrittenOrOSStatus = try writeBytesToAudioBuffer(outputBuffer: outputBuffer)
+        let bytesRemaining = try! outputBuffer.bytesRemaining()
+        let bytesWrittenOrOSStatus = try! writeBytesToAudioBuffer(outputBuffer: outputBuffer)
 
         if bytesWrittenOrOSStatus < 0 {
             fatalError()
@@ -229,7 +229,7 @@ final class AudioSink: IAudioSink {
     }
 
     func playToEndOfStream() throws {
-        if !didHandleEndOfStream, audioQueue != nil, try drainToEndOfStream() {
+        if !didHandleEndOfStream, audioQueue != nil, try! drainToEndOfStream() {
             playPendingData()
             didHandleEndOfStream = true
         }
@@ -262,8 +262,8 @@ final class AudioSink: IAudioSink {
 
     func flush() {
         guard let audioQueue else { return }
-        resetSinkStateForFlush()
         AudioQueuePause(audioQueue)
+        resetSinkStateForFlush()
         if pendingConfiguration != nil {
             configuration = pendingConfiguration
             pendingConfiguration = nil
@@ -347,7 +347,7 @@ final class AudioSink: IAudioSink {
         var availableSize = audioQueueBuffer.pointee.mAudioDataBytesCapacity
 
         while outputBuffer.hasRemaining() {
-            let result = try outputBuffer.nextBuffer { audioBuffer, audioPacketDescription in
+            let result = try! outputBuffer.nextBuffer { audioBuffer, audioPacketDescription in
                 let packetSize = audioBuffer.mDataByteSize
                 guard availableSize > packetSize else { return false }
 
@@ -400,9 +400,9 @@ final class AudioSink: IAudioSink {
                 audioQueuePropertyCallback,
                 userData
             )
-            AudioQueueFlush(audioQueue)
-            AudioQueueStop(audioQueue, false)
-            AudioQueueDispose(audioQueue, false)
+//            AudioQueueFlush(audioQueue)
+            AudioQueueStop(audioQueue, true)
+            AudioQueueDispose(audioQueue, true)
         }
     }
 }
@@ -574,7 +574,8 @@ extension AudioSink {
         }
 
         func canReuseAudioQueue(new configuration: Configuration) -> Bool {
-            outputFormat == configuration.outputFormat
+//            outputFormat == configuration.outputFormat
+            return false
         }
 
         func framesToDuration(frameCount: Int64) -> Int64 {
@@ -611,16 +612,16 @@ private final class AudioSampleByfferWrapper {
     init(sample: CMSampleBuffer) throws {
         self.sample = sample
         isPCM = sample.formatDescription?.audioStreamBasicDescription?.mFormatID == kAudioFormatLinearPCM
-        self.audioPacketDescriptions = try sample.audioStreamPacketDescriptions()
+        self.audioPacketDescriptions = try! sample.audioStreamPacketDescriptions()
 
-        try sample.withAudioBufferList { audioBufferList, retainingBlockBuffer in
+        try! sample.withAudioBufferList { audioBufferList, retainingBlockBuffer in
             self.maxBuffers = audioBufferList.count
         }
     }
 
     func nextBuffer(_ buffer: (UnsafeMutableAudioBufferListPointer.Element, AudioStreamPacketDescription?) -> Bool) throws -> Bool {
         guard bufferIndex < maxBuffers else { return false }
-        return try sample.withAudioBufferList { audioBufferList, _ in
+        return try! sample.withAudioBufferList { audioBufferList, _ in
             let audioBuffer = audioBufferList[bufferIndex]
             let audioPacketDescription: AudioStreamPacketDescription? = isPCM ? nil : audioPacketDescriptions[bufferIndex]
 
@@ -641,7 +642,7 @@ private final class AudioSampleByfferWrapper {
         guard bufferIndex < maxBuffers else {
             return 0
         }
-        return try sample.withAudioBufferList { audioBufferList, _ in
+        return try! sample.withAudioBufferList { audioBufferList, _ in
             var bytes: Int64 = 0
             for buffer in audioBufferList[bufferIndex..<maxBuffers] {
                 bytes += Int64(buffer.mDataByteSize)

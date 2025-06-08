@@ -19,7 +19,7 @@ public struct TrackGroup: Hashable {
 
     init(id: String? = nil, formats: [CMFormatDescription]) throws(TrackGroupError) {
         self.id = id ?? ""
-        self.type = try TrackGroup.verify(formats: formats)
+        self.type = try! TrackGroup.verify(formats: formats)
         self.formats = formats
     }
 

@@ -9,7 +9,7 @@ import CoreMedia.CMSampleBuffer
 
 extension CMSampleBuffer {
     func nanoseconds(_ value: Int64) throws -> CMSampleBuffer {
-        try CMSampleBuffer(
+        try! CMSampleBuffer(
             copying: self,
             withNewTiming: self.sampleTimingInfos().map { oldTiming in
                 CMSampleTimingInfo(

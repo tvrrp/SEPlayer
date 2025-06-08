@@ -33,7 +33,7 @@ extension AbstractConcatenatedTimeline {
         ConcatenatedId(childTimelineId, childPeriodOrWindowId)
     }
 
-    func nextWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+    func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         var shuffleModeEnabled = shuffleModeEnabled
         var repeatMode = repeatMode
 
@@ -72,7 +72,7 @@ extension AbstractConcatenatedTimeline {
         return nil
     }
 
-    func previousWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+    func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         var shuffleModeEnabled = shuffleModeEnabled
         var repeatMode = repeatMode
 

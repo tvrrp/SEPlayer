@@ -10,39 +10,45 @@ import CoreMedia.CMTime
 struct BoxParser {
     func parseTraks(
         moov: ContainerBox,
-        duration: Int64
+        duration: Int64,
+        ignoreEditLists: Bool,
+        isQuickTime: Bool
     ) throws -> [TrackSampleTable] {
-        return try moov.containerChildren
+        return try! moov.containerChildren
             .filter { $0.type == .trak }
             .compactMap { atom in
                 guard let track = try? parseTrak(
                     trak: atom,
                     mvhd: moov.getLeafBoxOfType(type: .mvhd)
                         .checkNotNil(BoxParserErrors.missingBox(type: .mvhd)),
-                    duration: duration
+                    duration: duration,
+                    ignoreEditLists: ignoreEditLists,
+                    isQuickTime: isQuickTime
                 ) else { return nil }
 
-                let stbl = try atom.getContainerBoxOfType(type: .mdia)
+                let stbl = try! atom.getContainerBoxOfType(type: .mdia)
                     .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
                     .getContainerBoxOfType(type: .minf)
                     .checkNotNil(BoxParserErrors.missingBox(type: .minf))
                     .getContainerBoxOfType(type: .stbl)
                     .checkNotNil(BoxParserErrors.missingBox(type: .stbl))
 
-                return try parseStbl(track: track, stblBox: stbl)
+                return try! parseStbl(track: track, stblBox: stbl)
             }
     }
 
     func parseTrak(
         trak: ContainerBox,
         mvhd: LeafBox,
-        duration: Int64
+        duration: Int64,
+        ignoreEditLists: Bool,
+        isQuickTime: Bool
     ) throws -> Track? {
         var duration = duration
-        let mdia = try trak.getContainerBoxOfType(type: .mdia)
+        let mdia = try! trak.getContainerBoxOfType(type: .mdia)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
 
-        let trackType = try TrackType(rawValue: parseHdlr(
+        let trackType = try! TrackType(rawValue: parseHdlr(
                 hdlr: mdia.getLeafBoxOfType(type: .hdlr)
                     .checkNotNil(BoxParserErrors.missingBox(type: .hdlr)).data
             )
@@ -50,7 +56,7 @@ struct BoxParser {
 
         guard trackType != .unknown else { return nil }
 
-        let tkhdData = try TkhdData(tkhd: trak
+        let tkhdData = try! TkhdData(tkhd: trak
             .getLeafBoxOfType(type: .tkhd)
             .checkNotNil(BoxParserErrors.missingBox(type: .tkhd)).data
         )
@@ -59,19 +65,19 @@ struct BoxParser {
             duration = tkhdData.duration
         }
 
-        let movieTimescale = try Mp4TimestampData(mvhd: mvhd.data).timescale
+        let movieTimescale = try! Mp4TimestampData(mvhd: mvhd.data).timescale
         let durationUs: Int64 = if duration == .timeUnset {
             .timeUnset
         } else {
             Util.scaleLargeTimestamp(duration, multiplier: Int64.microsecondsPerSecond, divisor: movieTimescale)
         }
 
-        let stbl = try mdia.getContainerBoxOfType(type: .minf)
+        let stbl = try! mdia.getContainerBoxOfType(type: .minf)
             .checkNotNil(BoxParserErrors.missingBox(type: .minf))
             .getContainerBoxOfType(type: .stbl)
             .checkNotNil(BoxParserErrors.missingBox(type: .stbl))
 
-        let mdhdData = try MdhdData(mdhd: mdia
+        let mdhdData = try! MdhdData(mdhd: mdia
             .getLeafBoxOfType(type: .mdhd)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdhd)).data
         )
@@ -80,23 +86,24 @@ struct BoxParser {
             throw BoxParserErrors.badBoxContent(type: .stbl, reason: "Sample table (stbl) missing sample description (stsd)")
         }
 
-        let stsdData = try StsdData(stsd: stsd.data, trackId: tkhdData.trackId)
+        let stsdData = try! StsdData(stsd: stsd.data, trackId: tkhdData.trackId)
 
-        return Track(
+        return try! Track(
             id: tkhdData.trackId,
             type: trackType,
             format: stsdData.description,
             timescale: mdhdData.timescale,
             movieTimescale: movieTimescale,
             durationUs: durationUs,
-            mediaDurationUs: mdhdData.mediaDurationUs
+            mediaDurationUs: mdhdData.mediaDurationUs,
+            editList: ignoreEditLists ? nil : EdtsData(edtsData: trak.getContainerBoxOfType(type: .edts))
         )
     }
 
     func parseHdlr(hdlr: ByteBuffer) throws -> UInt32 {
         var hdlr = hdlr
         hdlr.moveReaderIndex(to: Int(MP4Box.fullHeaderSize) + 4)
-        return try hdlr.readInt(as: UInt32.self)
+        return try! hdlr.readInt(as: UInt32.self)
     }
 }
 
@@ -109,15 +116,15 @@ extension BoxParser {
         init(mvhd: ByteBuffer?) throws {
             guard var mvhd else { throw BoxParserErrors.missingBox(type: .mvhd) }
             mvhd.moveReaderIndex(to: Int(MP4Box.headerSize))
-            let (version, _) = try BoxParser.readFullboxExtra(reader: &mvhd)
+            let (version, _) = try! BoxParser.readFullboxExtra(reader: &mvhd)
             if version == 0 {
-                creationTimestampSeconds = try Int64(mvhd.readInt(as: UInt32.self))
-                modificationTimestampSeconds = try Int64(mvhd.readInt(as: UInt32.self))
+                creationTimestampSeconds = try! Int64(mvhd.readInt(as: UInt32.self))
+                modificationTimestampSeconds = try! Int64(mvhd.readInt(as: UInt32.self))
             } else {
-                creationTimestampSeconds = try Int64(mvhd.readInt(as: UInt64.self))
-                modificationTimestampSeconds = try Int64(mvhd.readInt(as: UInt64.self))
+                creationTimestampSeconds = try! Int64(mvhd.readInt(as: UInt64.self))
+                modificationTimestampSeconds = try! Int64(mvhd.readInt(as: UInt64.self))
             }
-            self.timescale = try Int64(mvhd.readInt(as: UInt32.self))
+            self.timescale = try! Int64(mvhd.readInt(as: UInt32.self))
         }
     }
 
@@ -128,15 +135,15 @@ extension BoxParser {
         init(tkhd: ByteBuffer) throws {
             var tkhd = tkhd
             tkhd.moveReaderIndex(to: Int(MP4Box.headerSize))
-            let (version, _) = try BoxParser.readFullboxExtra(reader: &tkhd)
+            let (version, _) = try! BoxParser.readFullboxExtra(reader: &tkhd)
             tkhd.moveReaderIndex(forwardBy: version == 0 ? 8 : 16)
-            trackId = try Int(tkhd.readInt(as: UInt32.self))
+            trackId = try! Int(tkhd.readInt(as: UInt32.self))
             tkhd.moveReaderIndex(forwardBy: 4)
 
             duration = if version == 1 {
-                try Int64(tkhd.readInt(as: UInt64.self))
+                try! Int64(tkhd.readInt(as: UInt64.self))
             } else {
-                try Int64(tkhd.readInt(as: UInt32.self))
+                try! Int64(tkhd.readInt(as: UInt32.self))
             }
         }
     }
@@ -148,18 +155,49 @@ extension BoxParser {
         init(mdhd: ByteBuffer) throws {
             var mdhd = mdhd
             mdhd.moveReaderIndex(to: MP4Box.headerSize)
-            let (version, _) = try BoxParser.readFullboxExtra(reader: &mdhd)
+            let (version, _) = try! BoxParser.readFullboxExtra(reader: &mdhd)
 
             if version == 1 {
                 mdhd.moveReaderIndex(forwardBy: 16)
-                timescale = try Int64(mdhd.readInt(as: UInt32.self))
-                mediaDurationUs = try Int64(mdhd.readInt(as: UInt64.self))
+                timescale = try! Int64(mdhd.readInt(as: UInt32.self))
+                mediaDurationUs = try! Int64(mdhd.readInt(as: UInt64.self))
             } else {
                 mdhd.moveReaderIndex(forwardBy: 8)
-                timescale = try Int64(mdhd.readInt(as: UInt32.self))
-                let d = try mdhd.readInt(as: UInt32.self)
+                timescale = try! Int64(mdhd.readInt(as: UInt32.self))
+                let d = try! mdhd.readInt(as: UInt32.self)
                 mediaDurationUs = d == UInt32.max ? Int64.max : Int64(d)
             }
+        }
+    }
+
+    struct EdtsData {
+        let data: [(editListDuration: Int64, editListMediaTime: Int64)]
+
+        init?(edtsData: ContainerBox?) throws {
+            guard var elst = edtsData?.getLeafBoxOfType(type: .elst)?.data else {
+                return nil
+            }
+
+            elst.moveReaderIndex(to: MP4Box.headerSize)
+            let (version, _) = try! BoxParser.readFullboxExtra(reader: &elst)
+            let entryCount = try! elst.readInt(as: UInt32.self)
+
+            var data = [(editListDuration: Int64, editListMediaTime: Int64)]()
+
+            for _ in 0..<Int(entryCount) {
+                let editListDuration = try! version == 1 ? Int64(elst.readInt(as: UInt64.self)) : Int64(elst.readInt(as: UInt32.self))
+                let editListMediaTime = try! version == 1 ? elst.readInt(as: Int64.self) : Int64(elst.readInt(as: Int32.self))
+                let mediaRateInteger = try! elst.readInt(as: Int16.self)
+
+                if mediaRateInteger != 1 {
+                    throw BoxParserErrors.badBoxContent(type: .edts, reason: "Unsupported media rate.")
+                }
+
+                data.append((editListDuration, editListMediaTime))
+                elst.moveReaderIndex(forwardBy: 2)
+            }
+
+            self.data = data
         }
     }
 }
@@ -189,7 +227,7 @@ extension BoxParser {
     }
 
     static func readFullboxVersionNoFlags(reader: inout ByteBuffer) throws -> UInt8 {
-        let (version, flags) = try readFullboxExtra(reader: &reader)
+        let (version, flags) = try! readFullboxExtra(reader: &reader)
 
         if flags != 0 {
             throw BoxParserErrors.flagsNotZeroInBoxExtra

@@ -13,15 +13,15 @@ struct PlaybackInfo {
     private(set) var periodId: MediaPeriodId
     private(set) var requestedContentPositionUs: Int64
     private(set) var discontinuityStartPositionUs: Int64
-    private(set) var state: SEPlayer.State
+    private(set) var state: PlayerState
     private(set) var playbackError: Error?
     private(set) var isLoading: Bool
     private(set) var trackGroups: [TrackGroup]
     private(set) var trackSelectorResult: TrackSelectionResult
     private(set) var loadingMediaPeriodId: MediaPeriodId
     private(set) var playWhenReady: Bool
-    private(set) var playWhenReadyChangeReason: SEPlayer.PlayWhenReadyChangeReason
-    private(set) var playbackSuppressionReason: SEPlayer.PlaybackSuppressionReason
+    private(set) var playWhenReadyChangeReason: PlayWhenReadyChangeReason
+    private(set) var playbackSuppressionReason: PlaybackSuppressionReason
     private(set) var playbackParameters: PlaybackParameters
     var bufferedPositionUs: Int64
     var totalBufferedDurationUs: Int64
@@ -88,7 +88,7 @@ struct PlaybackInfo {
         return newValue
     }
 
-    func playbackState(_ state: SEPlayer.State) -> PlaybackInfo {
+    func playbackState(_ state: PlayerState) -> PlaybackInfo {
         var newValue = self
         newValue.state = state
         return newValue
@@ -114,8 +114,8 @@ struct PlaybackInfo {
 
     func playWhenReady(
         _ playWhenReady: Bool,
-        playWhenReadyChangeReason: SEPlayer.PlayWhenReadyChangeReason,
-        playbackSuppressionReason: SEPlayer.PlaybackSuppressionReason
+        playWhenReadyChangeReason: PlayWhenReadyChangeReason,
+        playbackSuppressionReason: PlaybackSuppressionReason
     ) -> Self {
         var newValue = self
         newValue.playWhenReady = playWhenReady

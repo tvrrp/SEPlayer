@@ -7,22 +7,7 @@
 
 final class MediaPeriodHolder {
     var allRenderersInCorrectState: Bool = false
-    var renderPositionOffset: Int64 {
-//        didSet {
-//            if renderPositionOffset < MediaPeriodQueue.initialRendererPositionOffsetUs {
-//                print()
-//            }
-//        }
-        get { _renderPositionOffset }
-        set {
-            if newValue < _renderPositionOffset {
-                print()
-            }
-            _renderPositionOffset = newValue
-        }
-    }
-
-    var _renderPositionOffset: Int64
+    var renderPositionOffset: Int64
     var trackSelectorResults: TrackSelectionResult
 
     let queue: Queue
@@ -59,7 +44,7 @@ final class MediaPeriodHolder {
     ) throws {
         self.queue = queue
         self.rendererCapabilities = rendererCapabilities
-        self._renderPositionOffset = rendererPositionOffsetUs
+        self.renderPositionOffset = rendererPositionOffsetUs
         self.sampleStreams = Array(repeating: nil, count: rendererCapabilities.count)
         self.targetPreloadBufferDurationUs = targetPreloadBufferDurationUs
         self.mayRetainStreamFlags = Array(repeating: false, count: rendererCapabilities.count)
@@ -69,7 +54,7 @@ final class MediaPeriodHolder {
         self.trackSelector = trackSelector
         self.trackSelectorResults = emptyTrackSelectorResult
 
-        self.mediaPeriod = try Self.createMediaPeriod(
+        self.mediaPeriod = try! Self.createMediaPeriod(
             id: info.id,
             mediaSourceList: mediaSourceList,
             allocator: allocator,
@@ -276,7 +261,7 @@ final class MediaPeriodHolder {
         startPositionUs: Int64,
         endPositionUs: Int64
     ) throws -> MediaPeriod {
-        let mediaPeriod = try mediaSourceList.createPeriod(
+        let mediaPeriod = try! mediaSourceList.createPeriod(
             id: id,
             allocator: allocator,
             startPosition: startPositionUs

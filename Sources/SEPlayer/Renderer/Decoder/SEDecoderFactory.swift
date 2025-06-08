@@ -27,7 +27,7 @@ final class DefaultSEDecoderFactory: SEDecoderFactory {
             throw FactoryErrors.notRegistered
         }
 
-        return try factory(queue, format) as! D
+        return try! factory(queue, format) as! D
     }
 }
 

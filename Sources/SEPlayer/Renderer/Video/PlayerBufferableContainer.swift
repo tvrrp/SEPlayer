@@ -7,7 +7,7 @@
 
 import CoreVideo
 
-final class PlayerBufferableContainer {
+public final class PlayerBufferableContainer {
     private let displayLink: DisplayLinkProvider
 
     private var action: PlayerBufferableAction = .reset
@@ -47,7 +47,10 @@ final class PlayerBufferableContainer {
     }
 
     func flush() {
-        Queues.mainQueue.async { self.lastPixelBuffer = nil }
+        Queues.mainQueue.async { [self] in
+            lastPixelBuffer = nil
+            bufferables.forEach { $0.end() }
+        }
     }
 
     func register(_ bufferable: PlayerBufferable) {
@@ -75,22 +78,25 @@ final class PlayerBufferableContainer {
 }
 
 extension PlayerBufferableContainer: DisplayLinkListener {
-    func displayLinkTick(_ info: DisplayLinkInfo) {
+    public func displayLinkTick(_ info: DisplayLinkInfo) {
+        guard let sampleQueue else { assertionFailure(); return }
         let deadline = info.currentTimestampNs...info.targetTimestampNs
 
-        if let sampleWrapper = sampleQueue?.dequeue() {
+        if let sampleWrapper = sampleQueue.dequeue() {
             if sampleWrapper.presentationTime > info.targetTimestampNs {
-                print("ℹ️ pixel buffer is early")
-                try? sampleQueue?.enqueue(sampleWrapper)
+//                print("ℹ️ pixel buffer is early")
+                try! sampleQueue.enqueue(sampleWrapper)
             } else if deadline.contains(sampleWrapper.presentationTime) {
                 guard let pixelBuffer = sampleWrapper.imageBuffer else { return }
                 lastPixelBuffer = pixelBuffer
                 bufferables.forEach { $0.enqueue(pixelBuffer) }
-                print("💕 enqueuing pixel buffer")
+//                print("💕 enqueuing pixel buffer")
             } else {
-                print("💔 missed sample")
+                print("💔 missed sample, deadline = \(deadline), time = \(sampleWrapper.presentationTime)")
                 displayLinkTick(info)
             }
+        } else {
+            print("💔 NO SAMPLE")
         }
     }
 }

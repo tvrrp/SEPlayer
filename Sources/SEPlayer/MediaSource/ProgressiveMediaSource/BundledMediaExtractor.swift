@@ -28,9 +28,11 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
     }
 
     func release() {
-        extractor?.release()
-        extractor = nil
-        extractorInput = nil
+        queue.async { [self] in
+            extractor?.release()
+            extractor = nil
+            extractorInput = nil
+        }
     }
 
     func getCurrentInputPosition() -> Int? {
@@ -43,14 +45,12 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
         extractor?.seek(to: position, timeUs: time)
     }
 
-    func read(completion: @escaping (ExtractorReadResult) -> Void) {
+    func read() throws -> ExtractorReadResult {
         assert(queue.isCurrent())
         guard let extractor, let extractorInput else {
-            completion(.error(ErrorBuilder.illegalState)); return
+            throw ErrorBuilder.illegalState
         }
 
-        extractor.read(input: extractorInput) { result in
-            completion(result)
-        }
+        return try extractor.read(input: extractorInput)
     }
 }

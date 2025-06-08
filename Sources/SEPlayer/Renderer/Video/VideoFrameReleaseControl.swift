@@ -10,26 +10,35 @@ import CoreMedia.CMSync
 struct VideoFrameReleaseControl {
     weak var frameTimingEvaluator: FrameTimingEvaluator?
     private var frameReleaseHelper: VideoFrameReleaseHelper
+    private let allowedJoiningTimeMs: Int64
 
     private var started: Bool = false
-    private var firstFrameState: FirstFrameState = .notRenderedOnlyAllowedIfStarted
-    private var initialPosition: Int64?
-    private var lastReleaseRealtime: Int64 = 0
-    private var lastPresentationTime: Int64 = 0
+    private var firstFrameState: FirstFrameState
+    private var initialPositionUs: Int64
+    private var lastReleaseRealtimeUs: Int64
+    private var lastPresentationTimeUs: Int64
 
-    private var joiningDeadline: Int64?
+    private var joiningDeadlineMs: Int64
     private var joiningRenderNextFrameImmediately: Bool = false
 
-    private var playbackSpeed: Float = 1.0
+    private var playbackSpeed: Float
     private let clock: CMClock
 
     init(
         queue: Queue,
         clock: CMClock,
-        displayLink: DisplayLinkProvider
+        displayLink: DisplayLinkProvider,
+        allowedJoiningTimeMs: Int64
     ) {
-        frameReleaseHelper = VideoFrameReleaseHelper(queue: queue, displayLink: displayLink)
         self.clock = clock
+        self.allowedJoiningTimeMs = allowedJoiningTimeMs
+        frameReleaseHelper = VideoFrameReleaseHelper(queue: queue, displayLink: displayLink)
+        firstFrameState = .notRenderedOnlyAllowedIfStarted
+        initialPositionUs = .timeUnset
+        lastReleaseRealtimeUs = .zero
+        lastPresentationTimeUs = .timeUnset
+        joiningDeadlineMs = .timeUnset
+        playbackSpeed = 1.0
     }
 
     mutating func enable(releaseFirstFrameBeforeStarted: Bool) {
@@ -37,18 +46,25 @@ struct VideoFrameReleaseControl {
     }
 
     mutating func disable() {
-        firstFrameState = .notRenderedOnlyAllowedIfStarted
+        lowerFirstFrameState(to: .notRenderedOnlyAllowedIfStarted)
     }
 
     mutating func start() {
+        guard !started else { return }
         started = true
-        lastReleaseRealtime = clock.microseconds
+        lastReleaseRealtimeUs = clock.microseconds
         frameReleaseHelper.start()
     }
 
     mutating func stop() {
+        guard started else { return }
         started = false
+        joiningDeadlineMs = .timeUnset
         frameReleaseHelper.stop()
+    }
+
+    mutating func processedStreamChanged() {
+        lowerFirstFrameState(to: .notRenderedAfterStreamChanged)
     }
 
     func setFrameRate(_ frameRate: Float) {
@@ -59,7 +75,7 @@ struct VideoFrameReleaseControl {
     mutating func didReleaseFrame() -> Bool {
         let firstFrame = firstFrameState != .rendered
         firstFrameState = .rendered
-        lastReleaseRealtime = clock.microseconds
+        lastReleaseRealtimeUs = clock.microseconds
         return firstFrame
     }
 
@@ -69,77 +85,95 @@ struct VideoFrameReleaseControl {
         }
     }
 
-    func isReady() -> Bool {
-        // TODO: joining
-        return firstFrameState == .rendered
+    mutating func isReady(rendererOtherwiseReady: Bool) -> Bool {
+        if rendererOtherwiseReady, firstFrameState == .rendered {
+            // Ready. If we were joining then we've now joined, so clear the joining deadline.
+            joiningDeadlineMs = .timeUnset
+            return true
+        } else if joiningDeadlineMs == .timeUnset {
+            // Not joining.
+            return false
+        } else if clock.milliseconds < joiningDeadlineMs {
+            // Joining and still withing the deadline.
+            return true
+        } else {
+            // The joining deadline has been exceeded. Give up and clear the deadline.
+            joiningDeadlineMs = .timeUnset
+            return false
+        }
+    }
+
+    mutating func join(renderNextFrameImmediately: Bool) {
+        joiningRenderNextFrameImmediately = renderNextFrameImmediately
+        joiningDeadlineMs = allowedJoiningTimeMs > 0 ? (clock.milliseconds + allowedJoiningTimeMs) : .timeUnset
     }
 
     mutating func frameReleaseAction(
-        presentationTime: Int64,
-        position: Int64,
-        elapsedRealtime: Int64,
-        outputStreamStartPosition: Int64,
+        presentationTimeUs: Int64,
+        positionUs: Int64,
+        elapsedRealtimeUs: Int64,
+        outputStreamStartPositionUs: Int64,
         isDecodeOnlyFrame: Bool,
         isLastFrame: Bool
     ) -> FrameReleaseAction {
         guard let frameTimingEvaluator else {
             assertionFailure(); return .tryAgainLater
         }
-        if initialPosition == nil {
-            initialPosition = position
+        if initialPositionUs == .timeUnset {
+            initialPositionUs = positionUs
         }
 
-        if lastPresentationTime != presentationTime {
-            frameReleaseHelper.onNextFrame(framePresentationTime: presentationTime)
-            lastPresentationTime = presentationTime
+        if lastPresentationTimeUs != presentationTimeUs {
+            frameReleaseHelper.onNextFrame(framePresentationTime: presentationTimeUs)
+            lastPresentationTimeUs = presentationTimeUs
         }
 
-        var earlyTime = calculateEarlyTime(
-            position: position,
-            elapsedRealtime: elapsedRealtime,
-            framePresentationTime: presentationTime
+        var earlyTimeUs = calculateEarlyTime(
+            positionUs: positionUs,
+            elapsedRealtimeUs: elapsedRealtimeUs,
+            framePresentationTimeUs: presentationTimeUs
         )
 
         if isDecodeOnlyFrame && !isLastFrame {
             return .skip
         }
 
-        if shouldForceRelease(position: position, earlyTime: earlyTime, outputStreamStartPosition: outputStreamStartPosition) {
+        if shouldForceRelease(positionUs: positionUs, earlyTimeUs: earlyTimeUs, outputStreamStartPositionUs: outputStreamStartPositionUs) {
             return .immediately
         }
 
-        if !started || position == initialPosition {
+        if !started || positionUs == initialPositionUs {
             return .tryAgainLater
         }
 
-        let clockTime = clock.nanoseconds
-        let releaseTime = frameReleaseHelper.adjustReleaseTime(releaseTime: clockTime + (earlyTime * 1000))
-        earlyTime = (releaseTime - clockTime) / 1000
-        let treatDropAsSkip = joiningDeadline != nil && !joiningRenderNextFrameImmediately
+        let clockTimeNs = clock.nanoseconds
+        let releaseTimeNs = frameReleaseHelper.adjustReleaseTime(releaseTime: clockTimeNs + (earlyTimeUs * 1000))
+        earlyTimeUs = (releaseTimeNs - clockTimeNs) / 1000
+        let treatDropAsSkip = joiningDeadlineMs != .timeUnset && !joiningRenderNextFrameImmediately
 
-        if frameTimingEvaluator.shouldIgnoreFrame(earlyTime: earlyTime,
-                                                  position: position,
-                                                  elapsedRealtime: elapsedRealtime,
+        if frameTimingEvaluator.shouldIgnoreFrame(earlyTimeUs: earlyTimeUs,
+                                                  positionUs: positionUs,
+                                                  elapsedRealtimeUs: elapsedRealtimeUs,
                                                   isLast: isLastFrame,
                                                   treatDroppedAsSkipped: treatDropAsSkip) {
             return .ignore
-        } else if frameTimingEvaluator.shouldDropFrame(earlyTime: earlyTime,
-                                                       elapsedSinceLastRelease: elapsedRealtime,
+        } else if frameTimingEvaluator.shouldDropFrame(earlyTimeUs: earlyTimeUs,
+                                                       elapsedSinceLastReleaseUs: elapsedRealtimeUs,
                                                        isLast: isLastFrame) {
             return treatDropAsSkip ? .skip : .drop
-        } else if earlyTime > .maxEarlyTreashold {
+        } else if earlyTimeUs > .maxEarlyTreashold {
             return .tryAgainLater
         }
 
-        return .scheduled(releaseTime: releaseTime)
+        return .scheduled(releaseTimeNs: releaseTimeNs)
     }
 
     mutating func reset() {
         frameReleaseHelper.reset()
-        lastPresentationTime = .zero
-        initialPosition = .zero
-        firstFrameState = .notRendered
-        joiningDeadline = nil
+        lastPresentationTimeUs = .timeUnset
+        initialPositionUs = .timeUnset
+        lowerFirstFrameState(to: .notRendered)
+        joiningDeadlineMs = .timeUnset
     }
 
     mutating func setPlaybackSpeed(_ speed: Float) {
@@ -148,28 +182,39 @@ struct VideoFrameReleaseControl {
         frameReleaseHelper.playbackSpeedDidChanged(new: speed)
     }
 
-    private func calculateEarlyTime(position: Int64, elapsedRealtime: Int64, framePresentationTime: Int64) -> Int64 {
-        var earlyUs = Int64((Double(framePresentationTime - position) / Double(playbackSpeed)))
+    private mutating func lowerFirstFrameState(to state: FirstFrameState) {
+        firstFrameState = min(firstFrameState, state)
+    }
+
+    private func calculateEarlyTime(positionUs: Int64, elapsedRealtimeUs: Int64, framePresentationTimeUs: Int64) -> Int64 {
+        var earlyUs = Int64((Double(framePresentationTimeUs - positionUs) / Double(playbackSpeed)))
         if started {
-            earlyUs -= clock.microseconds - elapsedRealtime
+            earlyUs -= clock.microseconds - elapsedRealtimeUs
         }
 
         return earlyUs
     }
 
-    private func shouldForceRelease(position: Int64, earlyTime: Int64, outputStreamStartPosition: Int64) -> Bool {
+    private func shouldForceRelease(positionUs: Int64, earlyTimeUs: Int64, outputStreamStartPositionUs: Int64) -> Bool {
         guard let frameTimingEvaluator else {
             assertionFailure(); return false
         }
+
+        guard joiningDeadlineMs == .timeUnset || joiningRenderNextFrameImmediately else {
+            return false
+        }
+
         switch firstFrameState {
         case .notRenderedOnlyAllowedIfStarted:
             return started
         case .notRendered:
             return true
+        case .notRenderedAfterStreamChanged:
+            return positionUs >= outputStreamStartPositionUs
         case .rendered:
-            let elapsedTimeSinceLastRelease = clock.microseconds - lastReleaseRealtime
+            let elapsedTimeSinceLastReleaseUs = clock.microseconds - lastReleaseRealtimeUs
             return started && frameTimingEvaluator.shouldForceReleaseFrame(
-                earlyTime: earlyTime, elapsedSinceLastRelease: elapsedTimeSinceLastRelease
+                earlyTimeUs: earlyTimeUs, elapsedSinceLastReleaseUs: elapsedTimeSinceLastReleaseUs
             )
         }
     }
@@ -177,12 +222,12 @@ struct VideoFrameReleaseControl {
 
 extension VideoFrameReleaseControl {
     protocol FrameTimingEvaluator: AnyObject {
-        func shouldForceReleaseFrame(earlyTime: Int64, elapsedSinceLastRelease: Int64) -> Bool
-        func shouldDropFrame(earlyTime: Int64, elapsedSinceLastRelease: Int64, isLast: Bool) -> Bool
+        func shouldForceReleaseFrame(earlyTimeUs: Int64, elapsedSinceLastReleaseUs: Int64) -> Bool
+        func shouldDropFrame(earlyTimeUs: Int64, elapsedSinceLastReleaseUs: Int64, isLast: Bool) -> Bool
         func shouldIgnoreFrame(
-            earlyTime: Int64,
-            position: Int64,
-            elapsedRealtime: Int64,
+            earlyTimeUs: Int64,
+            positionUs: Int64,
+            elapsedRealtimeUs: Int64,
             isLast: Bool,
             treatDroppedAsSkipped: Bool
         ) -> Bool
@@ -190,17 +235,22 @@ extension VideoFrameReleaseControl {
 
     enum FrameReleaseAction {
         case immediately
-        case scheduled(releaseTime: Int64)
+        case scheduled(releaseTimeNs: Int64)
         case drop
         case skip
         case ignore
         case tryAgainLater
     }
 
-    enum FirstFrameState {
-        case notRenderedOnlyAllowedIfStarted
-        case notRendered
-        case rendered
+    enum FirstFrameState: Int, Comparable {
+        case notRenderedOnlyAllowedIfStarted = 0
+        case notRendered = 1
+        case notRenderedAfterStreamChanged = 2
+        case rendered = 3
+
+        static func < (lhs: VideoFrameReleaseControl.FirstFrameState, rhs: VideoFrameReleaseControl.FirstFrameState) -> Bool {
+            return lhs.rawValue < rhs.rawValue
+        }
     }
 }
 

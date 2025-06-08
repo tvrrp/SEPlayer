@@ -5,14 +5,14 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Darwin
+import Foundation
 
 public protocol AllocationNode: AnyObject {
     func getAllocation() -> Allocation
     func next() -> AllocationNode?
 }
 
-public protocol Allocator: AnyObject {
+public protocol Allocator: AnyObject, Sendable {
     var totalBytesAllocated: Int { get }
     var individualAllocationSize: Int { get }
     func allocate() -> Allocation
@@ -21,20 +21,15 @@ public protocol Allocator: AnyObject {
     func trim()
 }
 
-final class DefaultAllocator: Allocator {
+final class DefaultAllocator: Allocator, @unchecked Sendable {
     var totalBytesAllocated: Int {
-        assert(queue.isCurrent())
-        return allocatedCount * _individualAllocationSize
+        lock.withLock { return allocatedCount * individualAllocationSize }
     }
 
-    var individualAllocationSize: Int {
-        assert(queue.isCurrent())
-        return _individualAllocationSize
-    }
+    let individualAllocationSize: Int
 
-    private let queue: Queue
     private let trimOnReset: Bool
-    private let _individualAllocationSize: Int
+    private let lock: NSLock
 
     private var allocatedCount = 0
     private var availableCount = 0
@@ -43,34 +38,33 @@ final class DefaultAllocator: Allocator {
     private var availableAllocations: [Allocation] = []
 
     init(
-        queue: Queue,
         trimOnReset: Bool = true,
         individualAllocationSize: Int = Int(2 * getpagesize()),
         initialAllocationCount: Int = 0
     ) {
-        self.queue = queue
         self.trimOnReset = trimOnReset
-        self._individualAllocationSize = malloc_good_size(individualAllocationSize)
+        self.individualAllocationSize = malloc_good_size(individualAllocationSize)
+        self.lock = NSLock()
     }
 
     func reset() {
-        assert(queue.isCurrent())
         if trimOnReset {
             setTargetBufferSize(new: 0)
         }
     }
 
     func setTargetBufferSize(new targetBufferSize: Int) {
-        assert(queue.isCurrent())
+        lock.lock()
         let didReduceBufferSize = targetBufferSize < self.targetBufferSize
         self.targetBufferSize = targetBufferSize
+        lock.unlock()
         if didReduceBufferSize {
             trim()
         }
     }
 
     func allocate() -> Allocation {
-        assert(queue.isCurrent())
+        lock.lock(); defer { lock.unlock() }
         if availableCount > 0 {
             availableCount -= 1
             return availableAllocations.removeLast()
@@ -83,14 +77,14 @@ final class DefaultAllocator: Allocator {
     }
 
     func release(allocation: Allocation) {
-        assert(queue.isCurrent())
+        lock.lock(); defer { lock.unlock() }
         availableAllocations.append(allocation)
         availableCount += 1
         allocatedCount -= 1
     }
 
     func release(allocationNode: AllocationNode) {
-        assert(queue.isCurrent())
+        lock.lock(); defer { lock.unlock() }
         var allocationNode: AllocationNode? = allocationNode
         while let allocationNodeToClear = allocationNode {
             availableCount += 1
@@ -101,7 +95,7 @@ final class DefaultAllocator: Allocator {
     }
 
     func trim() {
-        assert(queue.isCurrent())
+        lock.lock(); defer { lock.unlock() }
         let targetAllocationCount = (targetBufferSize + individualAllocationSize - 1) / individualAllocationSize
         let targetAvailableCount = max(0, targetAllocationCount - allocatedCount)
         guard targetAvailableCount < availableCount else { return }

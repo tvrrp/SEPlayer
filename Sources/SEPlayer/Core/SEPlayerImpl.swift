@@ -7,11 +7,11 @@
 
 import CoreMedia.CMSync
 
-final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
+final class SEPlayerImpl: BasePlayer, SEPlayer {
     @MainActor public let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
 
     let clock: CMClock
-    var playbackState: SEPlayer.State { queue.sync { playbackInfo.state } }
+    var playbackState: PlayerState { queue.sync { playbackInfo.state } }
 
     var isPlaying: Bool { queue.sync { playbackInfo.isPlaying } }
 
@@ -20,7 +20,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         set { setPlayWhenReady(newValue) }
     }
 
-    var repeatMode: SEPlayer.RepeatMode {
+    var repeatMode: RepeatMode {
         get { queue.sync { _repeatMode } }
         set { setRepeatMode(newValue) }
     }
@@ -100,7 +100,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
     private var period: Period
     private var mediaSourceHolderSnapshots: [MediaSourceHolderSnapshot] = []
     private var playbackInfo: PlaybackInfo
-    private var _repeatMode: SEPlayer.RepeatMode
+    private var _repeatMode: RepeatMode
     private var _shuffleModeEnabled: Bool
     private var _seekParameters: SeekParameters
     private var _shufflerOrder: ShuffleOrder
@@ -111,7 +111,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
     private var maskingPeriodIndex: Int = 0
     private var maskingWindowPositionMs: Int64 = 0
     private var pendingOperationAcks: Int = 0
-    private var pendingDiscontinuityReason: SEPlayer.DiscontinuityReason = .autoTransition
+    private var pendingDiscontinuityReason: DiscontinuityReason = .autoTransition
     private var pendingDiscontinuity: Bool = false
 
     init(
@@ -189,6 +189,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
             let playbackInfo = mask(
                 playbackState: playbackInfo.timeline.isEmpty ? .ended : .buffering, playbackInfo: playbackInfo.setPlaybackError(nil)
             )
+            pendingOperationAcks += 1
             internalPlayer.prepare()
             updatePlaybackInfo(
                 new: playbackInfo,
@@ -363,13 +364,14 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
             }
 
             let oldTimeline = timeline
+            pendingOperationAcks += 1
             let finalInsertIndex = adjustedNewIndex > fromIndex ? adjustedNewIndex - itemCount : adjustedNewIndex
             if #available(iOS 18.0, *) {
                 mediaSourceHolderSnapshots.moveSubranges(.init(clampedRange), to: finalInsertIndex)
             } else {
                 let itemsToMove = Array(mediaSourceHolderSnapshots[clampedRange])
                 mediaSourceHolderSnapshots.removeSubrange(clampedRange)
-                
+
                 mediaSourceHolderSnapshots.insert(contentsOf: itemsToMove, at: finalInsertIndex)
             }
 
@@ -442,6 +444,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
                     windowPositionMs: currentPosition
                 )
             )
+            pendingOperationAcks += 1
             internalPlayer.setShuffleOrder(shuffleOrder)
             updatePlaybackInfo(
                 new: newPlaybackInfo,
@@ -470,7 +473,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         }
     }
 
-    private func setRepeatMode(_ repeatMode: SEPlayer.RepeatMode) {
+    private func setRepeatMode(_ repeatMode: RepeatMode) {
         queue.async { [weak self] in
             guard let self, _repeatMode != repeatMode else { return }
             _repeatMode = repeatMode
@@ -505,6 +508,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
 
             // TODO: ad
 
+            pendingOperationAcks += 1
             var newPlaybackInfo = if playbackInfo.state == .ready || (playbackInfo.state == .ended && !timeline.isEmpty) {
                 mask(playbackState: .buffering, playbackInfo: playbackInfo)
             } else {
@@ -543,6 +547,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
             guard let self, playbackInfo.playbackParameters != playbackParameters else { return }
 
             let newPlaybackInfo = playbackInfo.playbackParameters(playbackParameters)
+            pendingOperationAcks += 1
             internalPlayer.setPlaybackParameters(playbackParameters)
             updatePlaybackInfo(
                 new: newPlaybackInfo,
@@ -571,7 +576,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
     }
 
     func release() {
-        queue.async { [weak self] in
+        queue.async {
 //            guard let self else { return }
             // TODO: a lot of stuff
         }
@@ -603,7 +608,17 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         if let error {
             playbackInfo = playbackInfo.setPlaybackError(error)
         }
+        pendingOperationAcks += 1
         internalPlayer.stop()
+        updatePlaybackInfo(
+            new: playbackInfo,
+            timelineChangeReason: .playlistChanged,
+            positionDiscontinuity: false,
+            positionDiscontinuityReason: .internal,
+            discontinuityWindowStartPositionUs: .timeUnset,
+            oldMaskingMediaItemIndex: nil,
+            repeatCurrentMediaItem: false
+        )
     }
 
     private func currentWindowIndexInternal(playbackInfo: PlaybackInfo) -> Int? {
@@ -640,9 +655,9 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
 
     private func updatePlaybackInfo(
         new playbackInfo: PlaybackInfo,
-        timelineChangeReason: SEPlayer.TimelineChangeReason,
+        timelineChangeReason: TimelineChangeReason,
         positionDiscontinuity: Bool,
-        positionDiscontinuityReason: SEPlayer.DiscontinuityReason,
+        positionDiscontinuityReason: DiscontinuityReason,
         discontinuityWindowStartPositionUs: Int64,
         oldMaskingMediaItemIndex: Int?,
         repeatCurrentMediaItem: Bool
@@ -772,10 +787,10 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
     }
 
     private func previousPositionInfo(
-        positionDiscontinuityReason: SEPlayer.DiscontinuityReason,
+        positionDiscontinuityReason: DiscontinuityReason,
         oldPlaybackInfo: PlaybackInfo,
         oldMaskingMediaItemIndex: Int?
-    ) -> SEPlayer.PositionInfo {
+    ) -> PositionInfo {
         assert(queue.isCurrent())
         var oldWindowId: AnyHashable?
         var oldPeriodId: AnyHashable?
@@ -804,7 +819,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
             oldContentPositionUs = oldPositionUs
         }
 
-        return SEPlayer.PositionInfo(
+        return PositionInfo(
             windowId: oldWindowId,
             mediaItemIndex: oldMediaItemIndex,
             mediaItem: oldMediaItem,
@@ -815,7 +830,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         )
     }
 
-    private func positionInfo(for discontinuityWindowStartPositionUs: Int64) -> SEPlayer.PositionInfo {
+    private func positionInfo(for discontinuityWindowStartPositionUs: Int64) -> PositionInfo {
         assert(queue.isCurrent())
         var newWindowId: AnyHashable?
         var newPeriodId: AnyHashable?
@@ -832,7 +847,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         }
 
         let positionMs = Time.usToMs(timeUs: discontinuityWindowStartPositionUs)
-        return SEPlayer.PositionInfo(
+        return PositionInfo(
             windowId: newWindowId,
             mediaItemIndex: newMediaItemIndex,
             mediaItem: newMediaItem,
@@ -860,10 +875,10 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         playbackInfo: PlaybackInfo,
         oldPlaybackInfo: PlaybackInfo,
         positionDiscontinuity: Bool,
-        positionDiscontinuityReason: SEPlayer.DiscontinuityReason,
+        positionDiscontinuityReason: DiscontinuityReason,
         timelineChanged: Bool,
         repeatCurrentMediaItem: Bool
-    ) -> (didTransition: Bool, reason: SEPlayer.MediaItemTransitionReason?) {
+    ) -> (didTransition: Bool, reason: MediaItemTransitionReason?) {
         assert(queue.isCurrent())
         let oldTimeline = oldPlaybackInfo.timeline
         let newTimeline = playbackInfo.timeline
@@ -880,7 +895,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         let newWindowId = newTimeline.getWindow(windowIndex: newWindowIndex, window: &window).id
 
         if oldWindowId != newWindowId {
-            let transitionReason: SEPlayer.MediaItemTransitionReason? = if positionDiscontinuity, positionDiscontinuityReason == .autoTransition {
+            let transitionReason: MediaItemTransitionReason? = if positionDiscontinuity, positionDiscontinuityReason == .autoTransition {
                 .auto
             } else if positionDiscontinuity, positionDiscontinuityReason == .seek {
                 .seek
@@ -919,6 +934,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         var startPositionMs = startPositionMs
         let currentWindowIndex = currentWindowIndexInternal(playbackInfo: playbackInfo)
         let currentPositionMs = currentPosition
+        pendingOperationAcks += 1
         if !mediaSourceHolderSnapshots.isEmpty {
             removeMediaSourceHolders(range: 0..<mediaSourceHolderSnapshots.count)
         }
@@ -1006,6 +1022,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         at index: Int
     ) -> PlaybackInfo {
         assert(queue.isCurrent())
+        pendingOperationAcks += 1
         let oldTimeline = playbackInfo.timeline
         let holders = addMediaSourceHolders(mediaSources, at: index)
         let newTimeline = createMaskingTimeline()
@@ -1031,6 +1048,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         let contentPositionMs = contentPositionInternal(playbackInfo: playbackInfo)
         let oldTimeline = playbackInfo.timeline
         let currentMediaSourceCount = mediaSourceHolderSnapshots.count
+        pendingOperationAcks += 1
         removeMediaSourceHolders(range: range)
         let newTimeline = createMaskingTimeline()
         var newPlaybackInfo = maskTimelineAndPosition(
@@ -1170,7 +1188,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
     }
 
     private func mask(
-        playbackState: SEPlayer.State,
+        playbackState: PlayerState,
         playbackInfo: PlaybackInfo
     ) -> PlaybackInfo {
         var playbackInfo = playbackInfo.playbackState(playbackState)
@@ -1268,7 +1286,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         return windowPositionUs + period.positionInWindowUs
     }
 
-    private func updatePlayWhenReady(_ playWhenReady: Bool, changeReason: SEPlayer.PlayWhenReadyChangeReason) {
+    private func updatePlayWhenReady(_ playWhenReady: Bool, changeReason: PlayWhenReadyChangeReason) {
         assert(queue.isCurrent())
         let playbackSuppressionReason = computePlaybackSuppressionReason(playWhenReady: playWhenReady)
         guard playbackInfo.playWhenReady != playWhenReady ||
@@ -1277,6 +1295,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
             return
         }
 
+        pendingOperationAcks += 1
         let newPlaybackInfo = playbackInfo.playWhenReady(
             playWhenReady,
             playWhenReadyChangeReason: changeReason,
@@ -1300,7 +1319,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
         )
     }
 
-    private func computePlaybackSuppressionReason(playWhenReady: Bool) -> SEPlayer.PlaybackSuppressionReason {
+    private func computePlaybackSuppressionReason(playWhenReady: Bool) -> PlaybackSuppressionReason {
         assert(queue.isCurrent())
         // TODO: some stuff in future
         return .none
@@ -1321,6 +1340,7 @@ final class SEPlayerImpl: BasePlayer, BaseSEPlayer {
 
     private func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) {
         assert(queue.isCurrent())
+        pendingOperationAcks += 1
         internalPlayer.updateMediaSources(with: mediaItems, range: range)
         for (offset, index) in range.enumerated() {
             mediaSourceHolderSnapshots[index].timeline = TimelineWithUpdatedMediaItem(

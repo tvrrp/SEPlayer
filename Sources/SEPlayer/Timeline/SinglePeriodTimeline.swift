@@ -8,7 +8,7 @@
 import Foundation.NSUUID
 
 struct SinglePeriodTimeline: Timeline {
-    static let uuid = UUID()
+    private static let uuid = UUID()
     private let mediaItem: MediaItem
     private let presentationStartTimeMs: Int64
     private let windowStartTimeMs: Int64

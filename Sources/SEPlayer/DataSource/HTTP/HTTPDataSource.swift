@@ -1,8 +1,8 @@
 //
-//  HTTPDataSource.swift
+//  HTTPDataSource2.swift
 //  SEPlayer
 //
-//  Created by Damir Yackupov on 06.01.2025.
+//  Created by Damir Yackupov on 04.06.2025.
 //
 
 import Foundation.NSURLSession
@@ -14,9 +14,11 @@ final class DefautlHTTPDataSource: DataSource {
     var urlResponce: HTTPURLResponse? { queue.sync { _urlResponce } }
 
     let queue: Queue
+    private let connectTimeout: TimeInterval
+    private let readTimeout: TimeInterval
     private let networkLoader: IPlayerSessionLoader
-
-    private var isClosed: Bool = false
+    private let operation: ConditionVariable
+    private let lock: NSLock
 
     private var currentDataSpec: DataSpec?
     private var currentTask: URLSessionDataTask?
@@ -25,236 +27,248 @@ final class DefautlHTTPDataSource: DataSource {
     private var _url: URL?
     private var _urlResponce: HTTPURLResponse?
 
-    private var openCompletion: OpenCompletion?
-    private var requestedReadAmount: Int?
-    private var readCompletion: ((Result<Int, Error>) -> Void)?
+    private var openResult: Result<HTTPURLResponse, Error>?
+    private var loadError: Error?
 
-    init(queue: Queue, networkLoader: IPlayerSessionLoader, components: DataSourceOpaque? = nil) {
+    private var didStart = false
+    private var isClosed = false
+    private var didFinish = false
+    private var bytesRemaining = 0
+    private var currentConnectionTimeout: TimeInterval
+    private var currentReadTimeout: TimeInterval
+
+    init(
+        queue: Queue,
+        networkLoader: IPlayerSessionLoader,
+        components: DataSourceOpaque? = nil,
+        connectTimeout: TimeInterval = 10,
+        readTimeout: TimeInterval = 10
+    ) {
         self.queue = queue
         self.components = components ?? DataSourceOpaque(isNetwork: true)
         self.networkLoader = networkLoader
+        self.connectTimeout = 10
+        self.readTimeout = 10
+        operation = ConditionVariable()
+        lock = NSLock()
+        currentConnectionTimeout = Date().timeIntervalSince1970
+        currentReadTimeout =  Date().timeIntervalSince1970
     }
 
-    func open(dataSpec: DataSpec, completionQueue: Queue, completion: @escaping (Result<Int, any Error>) -> Void) {
-        queue.async { [weak self] in
-            guard let self else { completionQueue.async { completion(.failure(CancellationError())) }; return }
-            close()
-            openCompletion = .init(completionQueue: completionQueue, completion: completion)
-            createConnection(with: dataSpec, completionQueue: completionQueue)
-        }
+    func open(dataSpec: DataSpec) throws -> Int {
+        assert(queue.isCurrent())
+        operation.close()
+        currentDataSpec = dataSpec
+        resetConnectTimeout()
+        return try createConnection(with: dataSpec)
     }
 
     @discardableResult
     func close() -> ByteBuffer? {
-        queue.sync { [weak self] in
-            guard let self else { return nil }
-            let openCompletion = openCompletion
-            let readCompletion = readCompletion
-            self.openCompletion = nil
-            self.readCompletion = nil
-
-            openCompletion?.run(with: .failure(CancellationError()))
-            readCompletion?(.failure(CancellationError()))
-
+        return lock.withLock {
             isClosed = true
+            didFinish = false
+            openResult = nil
             currentTask?.cancel()
             currentTask = nil
-            requestedReadAmount = nil
+            currentDataSpec = nil
             let buffer = intermidateBuffer
             intermidateBuffer.clear()
             return buffer
         }
     }
 
-    func read(to buffer: ByteBuffer, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(ByteBuffer, Int), Error>) -> Void) {
-        queue.async { [weak self] in
-            guard let self, let currentDataSpec else {
-                completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return
-            }
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
+        guard length > 0 else { return .success(amount: .zero) }
+        assert(queue.isCurrent())
+        lock.lock()
 
-            do {
-                if intermidateBuffer.readableBytes >= length {
-                    let buffer = try readFully(to: buffer, offset: offset, length: length)
-                    completionQueue.async { completion(.success((buffer, length))) }; return
-                } else {
-                    let requestedReadAmount = min(length, currentDataSpec.range.length + 1 - intermidateBuffer.readerIndex)
+        guard bytesRemaining > 0 else {
+            return .endOfInput
+        }
 
-                    if requestedReadAmount == intermidateBuffer.readableBytes {
-                        let buffer = try readFully(to: buffer, offset: offset, length: requestedReadAmount)
-                        completionQueue.async { completion(.success((buffer, requestedReadAmount))) }; return
-                    }
+        if let loadError {
+            throw loadError
+        }
 
-                    self.requestedReadAmount = requestedReadAmount
-                    readCompletion = { [weak self] result in
-                        guard let self else { completionQueue.async { completion(.failure(CancellationError())) }; return }
-                        do {
-                            switch result {
-                            case let .success(availableBytesCount):
-                                let buffer = try self.readFully(to: buffer, offset: offset, length: availableBytesCount)
-                                completionQueue.async { completion(.success((buffer, availableBytesCount))) }
-                            case let .failure(error):
-                                completionQueue.async { completion(.failure(error)) }
-                            }
-                        } catch {
-                            completionQueue.async { completion(.failure(error)) }
-                        }
-                    }
-                }
-            } catch {
-                completionQueue.async { completion(.failure(error)) }
+        if intermidateBuffer.readableBytes <= 0 {
+            lock.unlock()
+            operation.close()
+            operation.block(timeout: readTimeout)
+            lock.lock()
+
+            if didFinish {
+                bytesRemaining = 0
+                lock.unlock()
+                return .endOfInput
             }
         }
+
+        let readAmount = min(intermidateBuffer.readableBytes, length)
+        try readFully(to: &buffer, offset: offset, length: readAmount)
+        lock.unlock()
+        return .success(amount: readAmount)
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<Int, Error>) -> Void) {
-        queue.async { [weak self] in
-            guard let self, let currentDataSpec else { completionQueue.async { completion(.failure(DataReaderError.connectionNotOpened)) }; return }
+    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+        guard length > 0 else { return .success(amount: .zero) }
+        assert(queue.isCurrent())
+        lock.lock()
 
-            do {
-                if intermidateBuffer.readableBytes >= length {
-                    try readFully(to: allocation, offset: offset, length: length)
-                    completionQueue.async { completion(.success(length)) }
-                } else {
-                    let requestedReadAmount = min(length, currentDataSpec.range.length + 1 - intermidateBuffer.readerIndex)
-                    if requestedReadAmount == intermidateBuffer.readableBytes {
-                        try readFully(to: allocation, offset: offset, length: requestedReadAmount)
-                        completionQueue.async { completion(.success(requestedReadAmount)) }; return
-                    }
+        guard bytesRemaining > 0 else { return .endOfInput }
 
-                    self.requestedReadAmount = requestedReadAmount
-                    readCompletion = { [weak self] result in
-                        guard let self else { completionQueue.async { completion(.failure(CancellationError())) }; return }
-                        do {
-                            switch result {
-                            case let .success(availableBytesCount):
-                                try self.readFully(to: allocation, offset: offset, length: availableBytesCount)
-                                completionQueue.async { completion(.success((availableBytesCount))) }
-                            case let .failure(error):
-                                completionQueue.async { completion(.failure(error)) }
-                            }
-                        } catch {
-                            completionQueue.async { completion(.failure(error)) }
-                        }
-                    }
-                }
-            } catch {
-                completionQueue.async { completion(.failure(error)) }
+        if let loadError {
+            throw loadError
+        }
+
+        if intermidateBuffer.readableBytes <= 0 {
+            lock.unlock()
+            operation.close()
+            operation.block(timeout: readTimeout)
+            lock.unlock()
+
+            if didFinish {
+                bytesRemaining = 0
+                lock.unlock()
+                return .endOfInput
             }
         }
+
+        let readAmount = min(intermidateBuffer.readableBytes, length)
+        try readFully(to: allocation, offset: offset, length: readAmount)
+        lock.unlock()
+        return .success(amount: readAmount)
     }
 
-    private func readFully(to buffer: ByteBuffer, offset: Int, length: Int) throws -> ByteBuffer {
-        let data = try intermidateBuffer.readData(count: length)
-        var buffer = buffer
+    private func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int) throws {
+        let data = try! intermidateBuffer.readData(count: length)
         buffer.moveWriterIndex(to: offset)
         buffer.writeBytes(data)
-        return buffer
+        bytesRemaining -= length
     }
 
     private func readFully(to allocation: Allocation, offset: Int, length: Int) throws {
-        try intermidateBuffer.readWithUnsafeReadableBytes { pointer in
+        try! intermidateBuffer.readWithUnsafeReadableBytes { pointer in
             guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
             memcpy(allocation.data.advanced(by: offset), baseAdress, length)
             return length
         }
+        bytesRemaining -= length
     }
 }
 
-private extension DefautlHTTPDataSource {
-    private func createConnection(with dataSpec: DataSpec, completionQueue: Queue) {
+extension DefautlHTTPDataSource: PlayerSessionDelegate {
+    private func createConnection(with dataSpec: DataSpec) throws -> Int {
         assert(queue.isCurrent())
         let request = dataSpec.createURLRequest()
-        intermidateBuffer.clear()
-        intermidateBuffer.reserveCapacity(dataSpec.length)
+        lock.withLock {
+            didFinish = false
+            isClosed = false
+            intermidateBuffer.clear()
+            intermidateBuffer.reserveCapacity(dataSpec.length)
+        }
 
-        let task = networkLoader.createTask(
-            request: request,
-            didRecieveResponce: { [weak self] response, task in
-                guard self?.currentTask == task else { return .cancel }
-                return self?.didRecieveResponce(response, dataSpec: dataSpec, completionQueue: completionQueue) ?? .cancel
-            },
-            didReciveBuffer: { [weak self] buffer, task in
-                guard self?.currentTask == task else { return }
-                self?.didRecieveBuffer(buffer)
-            },
-            didFinishCollectingMetrics: { [weak self] metrics, bytesTransfered, task in
-                guard self?.currentTask == task else { return }
-                self?.didFinishCollectingMetrics(metrics)
-            },
-            completion: { [weak self] error, task in
-                guard self?.currentTask == task else { return }
-                self?.didCompleteTask(error: error)
-            }
-        )
+        let task = networkLoader.createTask(request: request, delegate: self)
         task.resume()
         self.currentTask = task
         transferInitializing(source: self)
+
+        let connectionOpened = blockUntilConnectTimeout()
+        guard let openResult, connectionOpened else { throw DataReaderError.connectionNotOpened }
+
+        switch openResult {
+        case let .success(urlResponce):
+            let contentLength = contentLength(from: urlResponce)
+            lock.withLock {
+                bytesRemaining = contentLength
+                didStart = true
+            }
+            return contentLength
+        case let .failure(error):
+            throw error
+        }
     }
 
-    func didRecieveResponce(_ response: URLResponse, dataSpec: DataSpec, completionQueue: Queue) -> URLSession.ResponseDisposition {
-        assert(queue.isCurrent())
-        let openCompletion = openCompletion
-        self.openCompletion = nil
-
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask) -> URLSession.ResponseDisposition {
+        assert(!queue.isCurrent())
+        guard lock.withLock({ !isClosed && currentTask == task }) else {
+            return .cancel
+        }
         guard let urlResponce = response as? HTTPURLResponse else {
-            openCompletion?.run(with: .failure(DataReaderError.wrongURLResponce))
+            lock.withLock {
+                openResult = .failure(DataReaderError.wrongURLResponce)
+                isClosed = true
+                operation.close()
+            }
             return .cancel
         }
 
-        self.currentDataSpec = dataSpec
-        let contentLength = contentLength(from: urlResponce)
-        openCompletion?.run(with: .success(contentLength))
+        lock.withLock {
+            didStart = true
+            openResult = .success(urlResponce)
+        }
+
+        operation.open()
         return .allow
     }
 
-    func didRecieveBuffer(_ buffer: Data) {
-        assert(queue.isCurrent())
+    func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
+        assert(!queue.isCurrent())
+        guard lock.withLock({ !isClosed && currentTask == task }) else { return }
+        lock.lock()
         intermidateBuffer.writeBytes(buffer)
-
-        if let requestedReadAmount, intermidateBuffer.readableBytes >= requestedReadAmount {
-            let readCompletion = self.readCompletion
-            self.readCompletion = nil
-            readCompletion?(.success(requestedReadAmount))
-            self.requestedReadAmount = nil
-        }
+        lock.unlock()
+        operation.open()
     }
 
-    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics) {
-        assert(queue.isCurrent())
+    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask) {
+        assert(!queue.isCurrent())
         transferEnded(source: self, metrics: metrics)
     }
 
-    func didCompleteTask(error: Error?) {
-        assert(queue.isCurrent())
-        let readCompletion = readCompletion
-        let openCompletion = openCompletion
-        self.readCompletion = nil
-        self.openCompletion = nil
+    func didFinishTask(_ task: URLSessionTask, error: (any Error)?) {
+        assert(!queue.isCurrent())
 
-        if let error {
-            openCompletion?.run(with: .failure(error))
-            readCompletion?(.failure(error))
+        lock.withLock {
+            guard !isClosed && currentTask == task else { return }
+
+            if let error {
+                if openResult == nil {
+                    openResult = .failure(error)
+                } else {
+                    loadError = error
+                }
+            }
+            currentTask = nil
         }
 
-        currentTask = nil
-        requestedReadAmount = nil
+        operation.open()
     }
 }
 
 private extension DefautlHTTPDataSource {
-    private var availableReadLenght: Int? {
-        if let currentDataSpec {
-            return currentDataSpec.range.length + 1 - intermidateBuffer.readerIndex
-        } else {
-            return nil
+    private func blockUntilConnectTimeout() -> Bool {
+        assert(queue.isCurrent())
+        var now = Date().timeIntervalSince1970
+        var opened = false
+
+        while !opened, now < currentConnectionTimeout {
+            opened = operation.block(timeout: currentConnectionTimeout - now + 5)
+            now = Date().timeIntervalSince1970
         }
+
+        return opened
+    }
+
+    private func resetConnectTimeout() {
+        currentConnectionTimeout = Date().addingTimeInterval(connectTimeout).timeIntervalSince1970
     }
 }
 
 private extension DefautlHTTPDataSource {
     func contentLength(from httpResponse: HTTPURLResponse) -> Int {
         httpResponse
-            .value(forHeaderKey: "Content-Range")?
+            .value(forHeaderKey: "Content-Length")?
             .components(separatedBy: "/").last
             .flatMap(Int.init) ?? 0
     }
@@ -265,23 +279,5 @@ private extension HTTPURLResponse {
         return allHeaderFields
             .first { $0.key.description.caseInsensitiveCompare(key) == .orderedSame }?
             .value as? String
-    }
-}
-
-private extension DefautlHTTPDataSource {
-    struct OpenCompletion {
-        private let completionQueue: Queue
-        private let completion: (Result<Int, Error>) -> Void
-
-        init(completionQueue: Queue, completion: @escaping (Result<Int, Error>) -> Void) {
-            self.completionQueue = completionQueue
-            self.completion = completion
-        }
-
-        func run(with result: Result<Int, Error>) {
-            completionQueue.async {
-                completion(result)
-            }
-        }
     }
 }

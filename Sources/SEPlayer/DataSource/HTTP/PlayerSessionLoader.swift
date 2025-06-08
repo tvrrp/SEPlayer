@@ -1,26 +1,30 @@
 //
-//  PlayerSessionLoader.swift
+//  PlayerSessionLoader2.swift
 //  SEPlayer
 //
-//  Created by Damir Yackupov on 06.01.2025.
+//  Created by Damir Yackupov on 04.06.2025.
 //
+
 
 import Foundation.NSURLSession
 
 public protocol IPlayerSessionLoader {
-    func createTask(
-        request: URLRequest,
-        didRecieveResponce: @escaping (URLResponse, URLSessionTask) -> URLSession.ResponseDisposition,
-        didReciveBuffer: @escaping (Data, URLSessionTask) -> Void,
-        didFinishCollectingMetrics: @escaping (URLSessionTaskMetrics, Int64, URLSessionTask) -> Void,
-        completion: @escaping (Error?, URLSessionTask) -> Void
-    ) -> URLSessionDataTask
+    func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask
+}
+
+public protocol PlayerSessionDelegate: AnyObject {
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask) -> URLSession.ResponseDisposition
+    func didReciveBuffer(_ buffer: Data, task: URLSessionTask)
+    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask)
+    func didFinishTask(_ task: URLSessionTask, error: Error?)
 }
 
 final class PlayerSessionLoader: IPlayerSessionLoader {
     private let queue: OperationQueue
     let session: URLSession
     private let impl = _DataLoader()
+
+    private let handlers = NSMapTable<URLSessionTask, AnyObject>.weakToWeakObjects()
 
     init(configuration: URLSessionConfiguration = .default, queue: OperationQueue? = nil) {
         let queue = queue ?? PlayerSessionLoader.createOperationQueue()
@@ -33,26 +37,13 @@ final class PlayerSessionLoader: IPlayerSessionLoader {
 
         session.sessionDescription = "Player URLSession"
         if queue.maxConcurrentOperationCount != 1 {
-            // It's better to crash here because we would eventually crash at runtime with EXC_BAD_ACCESS
-            // while mutating _DataLoader's handlers dictionary from a concurrent queue.
-            fatalError("OperationQueue passed to PlayerMediaSessionLoader has a maxConcurrentOperationCount != 1, which is prohibited!")
+            assertionFailure("OperationQueue passed to PlayerMediaSessionLoader has a maxConcurrentOperationCount != 1, which is prohibited!")
+            queue.maxConcurrentOperationCount = 1
         }
     }
 
-    func createTask(
-        request: URLRequest,
-        didRecieveResponce: @escaping (URLResponse, URLSessionTask) -> URLSession.ResponseDisposition,
-        didReciveBuffer: @escaping (Data, URLSessionTask) -> Void,
-        didFinishCollectingMetrics: @escaping (URLSessionTaskMetrics, Int64, URLSessionTask) -> Void,
-        completion: @escaping ((any Error)?, URLSessionTask) -> Void
-    ) -> URLSessionDataTask {
-        impl.createTask(
-            session, request: request,
-            response: didRecieveResponce,
-            buffer: didReciveBuffer,
-            metrics: didFinishCollectingMetrics,
-            completion: completion
-        )
+    func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask {
+        impl.createTask(session, request: request, delegate: delegate)
     }
 
     private static func createOperationQueue() -> OperationQueue {
@@ -63,48 +54,19 @@ final class PlayerSessionLoader: IPlayerSessionLoader {
 }
 
 private final class _DataLoader: NSObject, URLSessionDataDelegate {
-    private var delegateHandlers = [URLSessionTask: SessionHandler]()
-    private var metricsHandlers = [URLSessionTask: MetricsHandler]()
+    private var handlers = [URLSessionTask: PlayerSessionDelegate]()
 
     func createTask(
         _ session: URLSession,
         request: URLRequest,
-        metrics: @escaping (URLSessionTaskMetrics, Int64, URLSessionTask) -> Void,
-        completion: @escaping (Data?, URLResponse?, (any Error)?) -> Void
+        delegate: any PlayerSessionDelegate
     ) -> URLSessionDataTask {
-        let metricsHandler = MetricsHandler(didFinishCollectingMetrics: metrics)
-        let dataTask = session.dataTask(with: request) { data, response, error in
-            session.delegateQueue.addOperation {
-                completion(data, response, error)
-            }
-        }
-
-        session.delegateQueue.addOperation {
-            self.metricsHandlers[dataTask] = metricsHandler
-        }
-
-        dataTask.taskDescription = "Player loading task with completion"
-        return dataTask
-    }
-
-    func createTask(
-        _ session: URLSession,
-        request: URLRequest,
-        response: @escaping (URLResponse, URLSessionTask) -> URLSession.ResponseDisposition,
-        buffer: @escaping (Data, URLSessionTask) -> Void,
-        metrics: @escaping (URLSessionTaskMetrics, Int64, URLSessionTask) -> Void,
-        completion: @escaping (Error?, URLSessionTask) -> Void
-    ) -> URLSessionDataTask {
-        let delegateHandler = SessionHandler(didRecieveResponse: response, didReciveBuffer: buffer, completion: completion)
-        let metricsHandler = MetricsHandler(didFinishCollectingMetrics: metrics)
         let dataTask = session.dataTask(with: request)
 
         session.delegateQueue.addOperation {
-            self.delegateHandlers[dataTask] = delegateHandler
-            self.metricsHandlers[dataTask] = metricsHandler
+            self.handlers[dataTask] = delegate
         }
 
-        dataTask.taskDescription = "Player loading task with delegate"
         return dataTask
     }
 
@@ -117,60 +79,33 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void) {
-        guard let handler = delegateHandlers[dataTask] else {
+        guard let handler = handlers[dataTask] else {
             completionHandler(.cancel); return
         }
 
-        completionHandler(handler.didRecieveResponse(response, dataTask))
+        completionHandler(handler.didRecieveResponse(response, task: dataTask))
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let handler = delegateHandlers[dataTask] else {
+        guard let handler = handlers[dataTask] else {
             return
         }
 
-        handler.didReciveBuffer(data, dataTask)
+        handler.didReciveBuffer(data, task: dataTask)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
-        guard let handler = delegateHandlers[task] else { return }
+        guard let handler = handlers[task] else { return }
 
-        delegateHandlers[task] = nil
-        handler.completion(error, task)
+        handlers[task] = nil
+        handler.didFinishTask(task, error: error)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
-        guard let handler = metricsHandlers[task] else {
+        guard let handler = handlers[task] else {
             return
         }
 
-        metricsHandlers[task] = nil
-        handler.didFinishCollectingMetrics(metrics, task.countOfBytesReceived, task)
-    }
-}
-
-extension _DataLoader {
-    private final class SessionHandler {
-        let didRecieveResponse: (URLResponse, URLSessionTask) -> URLSession.ResponseDisposition
-        let didReciveBuffer: (Data, URLSessionTask) -> Void
-        let completion: (Error?, URLSessionTask) -> Void
-
-        init(
-            didRecieveResponse: @escaping (URLResponse, URLSessionTask) -> URLSession.ResponseDisposition,
-            didReciveBuffer: @escaping (Data, URLSessionTask) -> Void,
-            completion: @escaping (Error?, URLSessionTask) -> Void
-        ) {
-            self.didRecieveResponse = didRecieveResponse
-            self.didReciveBuffer = didReciveBuffer
-            self.completion = completion
-        }
-    }
-
-    private final class MetricsHandler {
-        let didFinishCollectingMetrics: (URLSessionTaskMetrics, Int64, URLSessionTask) -> Void
-
-        init(didFinishCollectingMetrics: @escaping (URLSessionTaskMetrics, Int64, URLSessionTask) -> Void) {
-            self.didFinishCollectingMetrics = didFinishCollectingMetrics
-        }
+        handler.didFinishCollectingMetrics(metrics, task: task)
     }
 }

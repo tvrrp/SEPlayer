@@ -6,14 +6,14 @@
 //
 
 public struct Period: Hashable {
-    let id: AnyHashable?
-    var uid: AnyHashable?
-    var windowIndex: Int
-    let durationUs: Int64
-    let positionInWindowUs: Int64
-    var isPlaceholder: Bool
+    public let id: AnyHashable?
+    internal(set) public var uid: AnyHashable?
+    internal(set) public var windowIndex: Int
+    public let durationUs: Int64
+    public let positionInWindowUs: Int64
+    internal(set) public var isPlaceholder: Bool
 
-    public init(
+    init(
         id: AnyHashable? = nil,
         uid: AnyHashable? = nil,
         windowIndex: Int = .zero,

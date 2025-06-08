@@ -7,10 +7,10 @@
 
 import Foundation.NSUUID
 
-public protocol Timeline {
+public protocol Timeline: Sendable {
     func windowCount() -> Int
-    func nextWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int?
-    func previousWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int?
+    func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int?
+    func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int?
     func lastWindowIndex(shuffleModeEnabled: Bool) -> Int?
     func firstWindowIndex(shuffleModeEnabled: Bool) -> Int?
     @discardableResult
@@ -24,10 +24,10 @@ public protocol Timeline {
     func id(for periodIndex: Int) -> AnyHashable
 }
 
-extension Timeline {
+public extension Timeline {
     var isEmpty: Bool { windowCount() == .zero }
 
-    func nextWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+    func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         switch repeatMode {
         case .off:
             return if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
@@ -46,7 +46,7 @@ extension Timeline {
         }
     }
 
-    func previousWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+    func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         switch repeatMode {
         case .off:
             return if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
@@ -82,7 +82,7 @@ extension Timeline {
         periodIndex: Int,
         period: inout Period,
         window: inout Window,
-        repeatMode: SEPlayer.RepeatMode,
+        repeatMode: RepeatMode,
         shuffleModeEnabled: Bool
     ) -> Int? {
         let windowIndex = getPeriod(periodIndex: periodIndex, period: &period).windowIndex
@@ -104,7 +104,7 @@ extension Timeline {
         periodIndex: Int,
         period: inout Period,
         window: inout Window,
-        repeatMode: SEPlayer.RepeatMode,
+        repeatMode: RepeatMode,
         shuffleModeEnabled: Bool
     ) -> Bool {
         nil == nextPeriodIndex(

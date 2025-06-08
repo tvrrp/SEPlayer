@@ -26,7 +26,7 @@ final class TypedCMBufferQueue<T: CMBuffer> {
 
     init(capacity: CMItemCount = 120, handlers: CMBufferQueue.Handlers = .outputPTSSortedSampleBuffers) throws {
         self.capacity = capacity
-        bufferQueue = try CMBufferQueue(
+        bufferQueue = try! CMBufferQueue(
             capacity: capacity,
             handlers: handlers
         )
@@ -49,7 +49,7 @@ final class TypedCMBufferQueue<T: CMBuffer> {
             }
             $0.getSize { _ in return .zero }
         }
-        bufferQueue = try CMBufferQueue(
+        bufferQueue = try! CMBufferQueue(
             capacity: capacity,
             handlers: handlers
         )
@@ -64,7 +64,7 @@ final class TypedCMBufferQueue<T: CMBuffer> {
     }
 
     func enqueue(_ buffer: T) throws {
-        try bufferQueue.enqueue(buffer)
+        try! bufferQueue.enqueue(buffer)
     }
 
     @discardableResult
@@ -77,11 +77,11 @@ final class TypedCMBufferQueue<T: CMBuffer> {
     }
 
     func markEndOfData() throws {
-        try bufferQueue.markEndOfData()
+        try! bufferQueue.markEndOfData()
     }
 
     func reset() throws {
-        try bufferQueue.reset()
+        try! bufferQueue.reset()
     }
 }
 

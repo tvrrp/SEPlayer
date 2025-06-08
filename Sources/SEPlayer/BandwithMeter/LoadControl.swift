@@ -55,7 +55,7 @@ struct DefaultLoadControl: LoadControl {
         retainBackBufferFromKeyframe: Bool = DefaultConstants.retainBackBufferFromKeyframe
     ) {
         self.queue = queue
-        self.allocator = allocator ?? DefaultAllocator(queue: queue)
+        self.allocator = allocator ?? DefaultAllocator()
 
         self.minBufferUs = Time.msToUs(timeMs: minBufferMs)
         self.maxBufferUs = Time.msToUs(timeMs: maxBufferMs)

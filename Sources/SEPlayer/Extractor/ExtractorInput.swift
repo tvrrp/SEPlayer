@@ -11,30 +11,62 @@ public enum ExtractorInputReadResult {
 }
 
 public protocol ExtractorInput: DataReader {
-    var queue: Queue { get }
+    @discardableResult
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult
 
-    func read(to buffer: ByteBuffer, offset: Int, length: Int, completion: @escaping (ExtractorInputReadResult) -> Void)
-    func skip(length: Int, completion: @escaping (DataReaderError?) -> Void)
-    func peek(to buffer: ByteBuffer, offset: Int, length: Int, completion: @escaping (ExtractorInputReadResult) -> Void)
-    func advancePeekPosition(lenght: Int, completion: @escaping (DataReaderError?) -> Void)
+    @discardableResult
+    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool
+
+    @discardableResult
+    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult
+
+    @discardableResult
+    func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool
+
+    @discardableResult
+    func skip(length: Int) throws -> DataReaderReadResult
+
+    @discardableResult
+    func skipFully(length: Int, allowEndOfInput: Bool) throws -> Bool
+
+    @discardableResult
+    func peek(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult
+
+    @discardableResult
+    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool
+
+    @discardableResult
+    func advancePeekPosition(length: Int, allowEndOfInput: Bool) throws -> Bool
+
+    func resetPeekPosition()
+
+    func getPeekPosition() -> Int
 
     func getPosition() -> Int
-    func getLength() -> Int
-    func getPeekPosition() -> Int
-    func resetPeekPosition()
+
+    func getLength() -> Int?
+
+    func set<E: Error>(retryPosition: Int, using error: E) throws
 }
 
-public extension ExtractorInput {
-    func read(to buffer: ByteBuffer, offset: Int, length: Int, completionQueue: Queue, completion: @escaping (Result<(ByteBuffer, Int), Error>) -> Void) {
-        queue.async {
-            read(to: buffer, offset: offset, length: length) { result in
-                switch result {
-                case let .bytesRead(buffer, bytesRead):
-                    completionQueue.async { completion(.success((buffer, bytesRead))) }
-                case .endOfInput:
-                    completionQueue.async { completion(.failure(DataReaderError.endOfInput)) }
-                }
-            }
-        }
+extension ExtractorInput {
+    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int) throws {
+        try readFully(to: &buffer, offset: offset, length: length, allowEndOfInput: false)
+    }
+
+    func readFully(allocation: Allocation, offset: Int, length: Int) throws {
+        try readFully(allocation: allocation, offset: offset, length: length, allowEndOfInput: false)
+    }
+
+    func skipFully(length: Int) throws {
+        try skipFully(length: length, allowEndOfInput: false)
+    }
+
+    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int) throws {
+        try peekFully(to: &buffer, offset: offset, length: length, allowEndOfInput: false)
+    }
+
+    func advancePeekPosition(length: Int) throws {
+        try advancePeekPosition(length: length, allowEndOfInput: false)
     }
 }

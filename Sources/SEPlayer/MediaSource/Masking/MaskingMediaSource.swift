@@ -190,7 +190,7 @@ final class MaskingMediaSource: WrappingMediaSource {
 }
 
 extension MaskingMediaSource {
-    final class MaskingTimeline: ForwardingTimeline {
+    final class MaskingTimeline: ForwardingTimeline, @unchecked Sendable {
         static let maskingExternalPeriodId: AnyHashable = UUID()
         let replacedInternalWindowId: AnyHashable?
         let replacedInternalPeriodId: AnyHashable?

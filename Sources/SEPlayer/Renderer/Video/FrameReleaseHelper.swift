@@ -32,6 +32,7 @@ final class VideoFrameReleaseHelper {
 
     func start() {
         assert(queue.isCurrent())
+        guard !started else { return }
         displayLink.addObserver()
         started = true
         resetAdjustment()
@@ -71,6 +72,7 @@ final class VideoFrameReleaseHelper {
 
     func stop() {
         assert(queue.isCurrent())
+        guard started else { return }
         started = false
         displayLink.removeObserver()
     }

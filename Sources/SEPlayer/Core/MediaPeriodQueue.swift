@@ -19,7 +19,7 @@ final class MediaPeriodQueue {
     private let builder: (MediaPeriodInfo, Int64) throws -> MediaPeriodHolder
 
     private var nextWindowSequenceNumber: Int = 0
-    private var repeatMode: SEPlayer.RepeatMode = .off
+    private var repeatMode: RepeatMode = .off
     private var shuffleModeEnabled: Bool = false
     private var preloadConfiguration: PreloadConfiguration
     private var count: Int = 0
@@ -37,7 +37,7 @@ final class MediaPeriodQueue {
         self.preloadConfiguration = preloadConfiguration
     }
 
-    func updateRepeatMode(new repeatMode: SEPlayer.RepeatMode, timeline: Timeline) -> UpdatePeriodQueueResult {
+    func updateRepeatMode(new repeatMode: RepeatMode, timeline: Timeline) -> UpdatePeriodQueueResult {
         self.repeatMode = repeatMode
         return updateForPlaybackModeChange(with: timeline)
     }
@@ -49,7 +49,7 @@ final class MediaPeriodQueue {
 
     func updatePreloadConfiguration(new preloadConfiguration: PreloadConfiguration, timeline: Timeline) throws {
         self.preloadConfiguration = preloadConfiguration
-        try invalidatePreloadPool(timeline: timeline)
+        try! invalidatePreloadPool(timeline: timeline)
     }
 
     func isLoading(mediaPeriod: any MediaPeriod) -> Bool {
@@ -73,29 +73,15 @@ final class MediaPeriodQueue {
     }
 
     func nextMediaPeriodInfo(rendererPositionUs: Int64, playbackInfo: PlaybackInfo) -> MediaPeriodInfo? {
-        let result = if let loading {
-            followingMediaPeriodInfo(
+        if let loading {
+            return followingMediaPeriodInfo(
                 timeline: playbackInfo.timeline,
                 mediaPeriodHolder: loading,
                 rendererPositionUs: rendererPositionUs
             )
         } else {
-            firstMediaPeriodInfo(with: playbackInfo)
+            return firstMediaPeriodInfo(with: playbackInfo)
         }
-
-        if let result {
-            if let loading {
-                return followingMediaPeriodInfo(
-                    timeline: playbackInfo.timeline,
-                    mediaPeriodHolder: loading,
-                    rendererPositionUs: rendererPositionUs
-                )
-            } else {
-                return firstMediaPeriodInfo(with: playbackInfo)
-            }
-        }
-
-        return result
     }
 
     func enqueueNextMediaPeriodHolder(info: MediaPeriodInfo) throws -> MediaPeriodHolder {
@@ -105,7 +91,7 @@ final class MediaPeriodQueue {
             Self.initialRendererPositionOffsetUs
         }
 
-        let newPeriodHolder = try removePreloadedMediaPeriodHolder(info: info) ?? builder(info, rendererPositionOffsetUs)
+        let newPeriodHolder = try! removePreloadedMediaPeriodHolder(info: info) ?? builder(info, rendererPositionOffsetUs)
         newPeriodHolder.info = info
         newPeriodHolder.renderPositionOffset = rendererPositionOffsetUs
 
@@ -153,7 +139,7 @@ final class MediaPeriodQueue {
                 nextMediaPeriodHolder = next
             } else {
                 let rendererPositionOffsetUs = loading.renderPositionOffset + loading.info.durationUs - nextInfo.startPositionUs
-                nextMediaPeriodHolder = try builder(nextInfo, rendererPositionOffsetUs)
+                nextMediaPeriodHolder = try! builder(nextInfo, rendererPositionOffsetUs)
             }
             newPreloadPriorityList.append(nextMediaPeriodHolder)
         }
@@ -240,6 +226,7 @@ final class MediaPeriodQueue {
         return prewarming
     }
 
+    @discardableResult
     func advancePlayingPeriod() -> MediaPeriodHolder? {
         guard let playing else { return nil }
 
@@ -686,7 +673,7 @@ final class MediaPeriodQueue {
         let isLastInWindow = isLastInWindow(timeline: timeline, id: id)
         let isLastInTimeline = isLastInTimeline(timeline, id: id, isLastMediaPeriodInPeriod: isLastInPeriod)
 
-        var durationUs = period.durationUs
+        let durationUs = period.durationUs
         var startPositionUs = startPositionUs
         if durationUs != .timeUnset && startPositionUs >= durationUs {
             startPositionUs = max(0, durationUs - (isLastInTimeline ? 1 : 0))

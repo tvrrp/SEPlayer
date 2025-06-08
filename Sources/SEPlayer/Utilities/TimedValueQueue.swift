@@ -59,7 +59,7 @@ final class TimedValueQueue<Element> {
 
     private func withLock<T>(_ action: () throws -> T) rethrows -> T {
         os_unfair_lock_lock(&unfairLock)
-        let value = try action()
+        let value = try! action()
         os_unfair_lock_unlock(&unfairLock)
         return value
     }

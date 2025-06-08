@@ -12,7 +12,7 @@ public protocol DataSource: DataReader {
     var urlResponce: HTTPURLResponse? { get }
     var queue: Queue { get }
     var components: DataSourceOpaque { get }
-    func open(dataSpec: DataSpec, completionQueue: Queue, completion: @escaping (Result<Int, Error>) -> Void)
+    func open(dataSpec: DataSpec) throws -> Int
     @discardableResult func close() -> ByteBuffer?
 }
 
@@ -38,5 +38,5 @@ public final class DataSourceOpaque {
     fileprivate let isNetwork: Bool
     fileprivate let transferListeners = MulticastDelegate<TransferListener>(isThreadSafe: true)
 
-    init(isNetwork: Bool) { self.isNetwork = isNetwork }
+    public init(isNetwork: Bool) { self.isNetwork = isNetwork }
 }

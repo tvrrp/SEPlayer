@@ -9,7 +9,7 @@ public final class Allocation {
     let data: UnsafeMutableRawPointer
     let capacity: Int
 
-    init(data: UnsafeMutableRawPointer, capacity: Int) {
+    public init(data: UnsafeMutableRawPointer, capacity: Int) {
         self.data = data
         self.capacity = capacity
     }

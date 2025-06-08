@@ -17,7 +17,7 @@ extension BoxParser {
             var size = Int32(MemoryLayout<AudioStreamBasicDescription>.size)
             let propertyID = kAudioFormatProperty_ASBDFromESDS
 
-            try payload.withUnsafeBytes { pointer in
+            try! payload.withUnsafeBytes { pointer in
                 return AudioFormatGetProperty(
                     propertyID,
                     UInt32(payload.count),
@@ -27,7 +27,7 @@ extension BoxParser {
                 )
             }.validate()
 
-            codecInfo = try CMAudioFormatDescription(audioStreamBasicDescription: description)
+            codecInfo = try! CMAudioFormatDescription(audioStreamBasicDescription: description)
         }
     }
 }

@@ -12,6 +12,6 @@ protocol SEDecoder: AnyObject {
     func queueInputBuffer(for index: Int, inputBuffer: DecoderInputBuffer) throws
 
     func dequeueOutputBuffer() -> OutputBuffer?
-    func flush()
+    func flush() throws
     func release()
 }

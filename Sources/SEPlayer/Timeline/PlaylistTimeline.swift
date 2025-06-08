@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 21.05.2025.
 //
 
-struct PlaylistTimeline: AbstractConcatenatedTimeline {
+struct PlaylistTimeline: AbstractConcatenatedTimeline, @unchecked Sendable {
     let timelines: [Timeline]
     let shuffleOrder: ShuffleOrder
     let isAtomic: Bool = false
@@ -96,7 +96,7 @@ struct PlaylistTimeline: AbstractConcatenatedTimeline {
 }
 
 private extension PlaylistTimeline {
-    final class ForwardingTimelineImpl: ForwardingTimeline {
+    final class ForwardingTimelineImpl: ForwardingTimeline, @unchecked Sendable {
         private let window = Window()
 
         override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {

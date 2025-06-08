@@ -9,7 +9,7 @@ import Foundation
 
 protocol Loadable {
     func cancelLoad()
-    func load(queue: Queue, completion: @escaping (Error?) -> Void)
+    func load() throws
 }
 
 final class Loader {
@@ -46,10 +46,12 @@ final class Loader {
 
     func cancelLoading() {
         operationQueue.cancelAllOperations()
+        withLock { currentTask = nil }
     }
 
     func release(completion: (() -> Void)? = nil) {
         operationQueue.cancelAllOperations()
+        withLock { currentTask = nil }
         if let completion {
             operationQueue.addOperation {
                 completion()
@@ -59,7 +61,11 @@ final class Loader {
 
     private func handleLoadCompletion<T: Loadable>(loadable: T, callback: any Callback<T>, error: Error?) {
         if let error {
-            
+            if error is CancellationError {
+                callback.onLoadCancelled(loadable: loadable, onTime: .zero, loadDurationMs: .zero, released: false)
+            } else {
+                callback.onLoadError(loadable: loadable, onTime: .zero, loadDurationMs: .zero, error: error, errorCount: 1)
+            }
         } else {
             callback.onLoadCompleted(loadable: loadable, onTime: .zero, loadDurationMs: .zero)
         }
@@ -69,7 +75,7 @@ final class Loader {
 
     private func withLock<T>(_ action: () throws -> T) rethrows -> T {
         os_unfair_lock_lock(&unfairLock)
-        let value = try action()
+        let value = try! action()
         os_unfair_lock_unlock(&unfairLock)
         return value
     }
@@ -98,6 +104,7 @@ extension Loader {
         func onLoadStarted(loadable: T, onTime: Int64, loadDurationMs: Int64, retryCount: Int)
         func onLoadCompleted(loadable: T, onTime: Int64, loadDurationMs: Int64)
         func onLoadCancelled(loadable: T, onTime: Int64, loadDurationMs: Int64, released: Bool)
+        @discardableResult
         func onLoadError(loadable: T, onTime: Int64, loadDurationMs: Int64, error: Error, errorCount: Int) -> Loader.LoadErrorAction
     }
 }
@@ -127,12 +134,14 @@ private extension Loader {
         }
 
         override func work(_ finish: @escaping () -> Void) {
-            loadable.load(queue: queue) { [weak self] error in
-                guard let self else { return }
+            do {
+                try loadable.load()
+                completion(nil)
+            } catch {
                 completion(error)
-
-                finish()
             }
+
+            finish()
         }
 
         override func cancel() {

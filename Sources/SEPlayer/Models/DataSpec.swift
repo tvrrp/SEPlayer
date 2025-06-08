@@ -42,10 +42,16 @@ extension DataSpec {
 
     func createURLRequest() -> URLRequest {
         var request = URLRequest(url: url)
-        if length > 0 {
+
+        if offset > 0 {
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.addValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
+            var rangeString = "bytes=\(range.lowerBound)-"
+            if length > 0 {
+                rangeString.append("\(range.upperBound)")
+            }
+            request.addValue(rangeString, forHTTPHeaderField: "Range")
         }
+
         return request
     }
 }

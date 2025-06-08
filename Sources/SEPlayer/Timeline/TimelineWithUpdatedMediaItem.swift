@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
-final class TimelineWithUpdatedMediaItem: ForwardingTimeline {
+final class TimelineWithUpdatedMediaItem: ForwardingTimeline, @unchecked Sendable {
     private let updatedMediaItem: MediaItem
 
     init(timeline: any Timeline, updatedMediaItem: MediaItem) {

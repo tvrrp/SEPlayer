@@ -6,7 +6,7 @@
 //
 
 public protocol Extractor: AnyObject {
-    func read(input: ExtractorInput, completion: @escaping (ExtractorReadResult) -> Void)
+    func read(input: ExtractorInput) throws -> ExtractorReadResult
     func seek(to position: Int, timeUs: Int64)
     func release()
 }

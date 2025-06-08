@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
-public protocol ShuffleOrder {
+public protocol ShuffleOrder: Sendable {
     var count: Int { get }
     var lastIndex: Int? { get }
     var firstIndex: Int? { get }

@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
-public protocol BasePlayer: SEPlayer.Player {
+public protocol BasePlayer: Player {
     var window: Window { get set }
     func seek(to mediaItemIndex: Int?, positionMs: Int64, isRepeatingCurrentItem: Bool)
 }
@@ -159,7 +159,18 @@ extension BasePlayer {
     }
 
     public func seekToPrevious() {
-        // TODO: getTimeline
+        let timeline = timeline
+        if timeline.isEmpty {
+            ignoreSeek()
+            return
+        }
+
+        let hasPreviousMediaItem = hasPreviousMediaItem
+        if hasPreviousMediaItem, currentPosition <= maxSeekToPreviousPosition {
+            seekToPreviousMediaItemInternal()
+        } else {
+            seekToCurrentItem(positionMs: .zero)
+        }
     }
 
     public func seekToNextMediaItem() {
@@ -167,7 +178,17 @@ extension BasePlayer {
     }
 
     public func seekToNext() {
-        // TODO: getTimeline
+        let timeline = timeline
+        if timeline.isEmpty {
+            ignoreSeek()
+            return
+        }
+
+        if hasNextMediaItem {
+            seekToNextMediaItemInternal()
+        } else {
+            ignoreSeek()
+        }
     }
 
     public func seek(to positionMs: Int64) {
@@ -188,7 +209,7 @@ extension BasePlayer {
 }
 
 private extension BasePlayer {
-    var repeatModeForNavigation: SEPlayer.RepeatMode {
+    var repeatModeForNavigation: RepeatMode {
         repeatMode == .one ? .off : repeatMode
     }
 

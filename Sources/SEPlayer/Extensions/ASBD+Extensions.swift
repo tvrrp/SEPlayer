@@ -70,5 +70,6 @@ extension AudioStreamBasicDescription: @retroactive Equatable {
             && lhs.mBytesPerFrame == rhs.mBytesPerFrame
             && lhs.mChannelsPerFrame == rhs.mChannelsPerFrame
             && lhs.mBitsPerChannel == rhs.mBitsPerChannel
+            && lhs.mReserved == rhs.mReserved
     }
 }

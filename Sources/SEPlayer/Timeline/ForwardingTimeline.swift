@@ -5,53 +5,53 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
-class ForwardingTimeline: Timeline {
-    let timeline: Timeline
+public class ForwardingTimeline: Timeline, @unchecked Sendable {
+    public let timeline: Timeline
 
-    init(timeline: Timeline) {
+    public init(timeline: Timeline) {
         self.timeline = timeline
     }
 
-    func windowCount() -> Int { timeline.windowCount() }
+    public func windowCount() -> Int { timeline.windowCount() }
 
-    func nextWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+    public func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         timeline.nextWindowIndex(windowIndex: windowIndex, repeatMode: repeatMode, shuffleModeEnabled: shuffleModeEnabled)
     }
 
-    func previousWindowIndex(windowIndex: Int, repeatMode: SEPlayer.RepeatMode, shuffleModeEnabled: Bool) -> Int? {
+    public func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         timeline.previousWindowIndex(windowIndex: windowIndex, repeatMode: repeatMode, shuffleModeEnabled: shuffleModeEnabled)
     }
 
-    func lastWindowIndex(shuffleModeEnabled: Bool) -> Int? {
+    public func lastWindowIndex(shuffleModeEnabled: Bool) -> Int? {
         timeline.lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
     }
 
-    func firstWindowIndex(shuffleModeEnabled: Bool) -> Int? {
+    public func firstWindowIndex(shuffleModeEnabled: Bool) -> Int? {
         timeline.firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
     }
 
     @discardableResult
-    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
+    public func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
         timeline.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
     }
 
-    func periodCount() -> Int { timeline.periodCount() }
+    public func periodCount() -> Int { timeline.periodCount() }
 
     @discardableResult
-    func periodById(_ id: AnyHashable, period: inout Period) -> Period {
+    public func periodById(_ id: AnyHashable, period: inout Period) -> Period {
         defaultPeriodById(id, period: &period)
     }
 
     @discardableResult
-    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
+    public func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
         timeline.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
     }
 
-    func indexOfPeriod(by id: AnyHashable) -> Int? {
+    public func indexOfPeriod(by id: AnyHashable) -> Int? {
         timeline.indexOfPeriod(by: id)
     }
 
-    func id(for periodIndex: Int) -> AnyHashable {
+    public func id(for periodIndex: Int) -> AnyHashable {
         timeline.id(for: periodIndex)
     }
 }

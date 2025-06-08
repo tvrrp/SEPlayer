@@ -12,5 +12,5 @@ protocol ProgressiveMediaExtractor {
     func release()
     func getCurrentInputPosition() -> Int?
     func seek(position: Int, time: Int64)
-    func read(completion: @escaping (ExtractorReadResult) -> Void)
+    func read() throws -> ExtractorReadResult
 }
