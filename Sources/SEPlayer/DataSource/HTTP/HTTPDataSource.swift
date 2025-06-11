@@ -125,7 +125,7 @@ final class DefautlHTTPDataSource: DataSource {
             lock.unlock()
             operation.close()
             operation.block(timeout: readTimeout)
-            lock.unlock()
+            lock.lock()
 
             if didFinish {
                 bytesRemaining = 0
@@ -168,6 +168,7 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
             intermidateBuffer.reserveCapacity(dataSpec.length)
         }
 
+//        print("✅ createConnection, dataSpec = \(dataSpec), \(request.allHTTPHeaderFields)")
         let task = networkLoader.createTask(request: request, delegate: self)
         task.resume()
         self.currentTask = task
@@ -239,10 +240,11 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
                     loadError = error
                 }
             }
+            isClosed = true
             currentTask = nil
-        }
 
-        operation.open()
+            operation.open()
+        }
     }
 }
 

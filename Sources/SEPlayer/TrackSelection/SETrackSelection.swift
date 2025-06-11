@@ -38,7 +38,7 @@ protocol TrackSelector {
         trackGroups: [TrackGroup],
         periodId: MediaPeriodId,
         timeline: Timeline
-    ) -> TrackSelectionResult
+    ) throws -> TrackSelectionResult
 }
 
 struct DefaultTrackSelector: TrackSelector {

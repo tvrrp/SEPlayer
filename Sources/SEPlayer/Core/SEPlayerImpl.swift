@@ -126,8 +126,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         mediaSourceFactory: MediaSourceFactory,
         useLazyPreparation: Bool = true,
         seekParameters: SeekParameters = .default,
-        seekBackIncrementMs: Int64 = 5000,
-        seekForwardIncrementMs: Int64 = 15_000,
+        seekBackIncrementMs: Int64 = 10_000,
+        seekForwardIncrementMs: Int64 = 10_000,
         maxSeekToPreviousPositionMs: Int64 = 3000,
         pauseAtTheEndOfMediaItem: Bool = false
     ) {
@@ -576,7 +576,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
     }
 
     func release() {
-        queue.async {
+        queue.sync {
+            internalPlayer.release()
+            playbackInfo = mask(playbackState: .idle, playbackInfo: playbackInfo)
+            playbackInfo = playbackInfo.loadingMediaPeriodId(playbackInfo.periodId)
+            // playerReleased
 //            guard let self else { return }
             // TODO: a lot of stuff
         }

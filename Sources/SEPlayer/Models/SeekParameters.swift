@@ -10,7 +10,7 @@ public struct SeekParameters: Hashable {
     public let toleranceAfterUs: Int64
 
     public init(toleranceBeforeUs: Int64, toleranceAfterUs: Int64) {
-        assert(toleranceBeforeUs > 0 && toleranceAfterUs > 0)
+        assert(toleranceBeforeUs >= 0 && toleranceAfterUs >= 0)
         self.toleranceBeforeUs = toleranceBeforeUs
         self.toleranceAfterUs = toleranceAfterUs
     }
@@ -61,5 +61,5 @@ extension SeekParameters {
     public static let closestSync = SeekParameters(toleranceBeforeUs: .max, toleranceAfterUs: .max)
     public static let previousSync = SeekParameters(toleranceBeforeUs: .max, toleranceAfterUs: .zero)
     public static let nextSync = SeekParameters(toleranceBeforeUs: .zero, toleranceAfterUs: .max)
-    public static let `default` = closestSync
+    public static let `default` = exact
 }

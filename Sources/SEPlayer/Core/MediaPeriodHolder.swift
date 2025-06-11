@@ -95,11 +95,11 @@ final class MediaPeriodHolder {
         !isPrepared ? .zero : mediaPeriod.getNextLoadPositionUs()
     }
 
-    func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) {
+    func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws {
         assert(queue.isCurrent())
         isPrepared = true
         trackGroups = mediaPeriod.trackGroups
-        let selectorResult = selectTracks(
+        let selectorResult = try selectTracks(
             playbackSpeed: playbackSpeed,
             timeline: timeline,
             playWhenReady: playWhenReady
@@ -125,8 +125,8 @@ final class MediaPeriodHolder {
         mediaPeriod.continueLoading(with: loadingInfo)
     }
 
-    func selectTracks(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) -> TrackSelectionResult {
-        let selectorResult = trackSelector.selectTracks(
+    func selectTracks(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws -> TrackSelectionResult {
+        let selectorResult = try trackSelector.selectTracks(
             rendererCapabilities: rendererCapabilities,
             trackGroups: trackGroups,
             periodId: info.id,

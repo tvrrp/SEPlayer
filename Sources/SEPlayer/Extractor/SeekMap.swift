@@ -5,13 +5,13 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-public protocol SeekMap {
+public protocol SeekMap: AnyObject {
     func isSeekable() -> Bool
     func getDurationUs() -> Int64
     func getSeekPoints(for timeUs: Int64) -> SeekPoints
 }
 
-public struct Unseekable: SeekMap {
+public final class Unseekable: SeekMap {
     private let durationUs: Int64
     private let startSeekPoints: SeekPoints
 

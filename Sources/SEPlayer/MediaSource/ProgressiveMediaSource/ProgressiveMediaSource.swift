@@ -16,7 +16,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     private let loaderQueue: Queue
     private var mediaItem: MediaItem
     private let dataSourceFactory: DataSourceFactory
-    private let progressiveMediaExtractor: ProgressiveMediaExtractor
+    private let extractorsFactory: ExtractorsFactory
     private let continueLoadingCheckIntervalBytes: Int
 
     private var timelineIsPlaceholder: Bool
@@ -26,7 +26,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     private var mediaTransferListener: TransferListener?
 
-    convenience init(
+    init(
         queue: Queue,
         loaderQueue: Queue,
         mediaItem: MediaItem,
@@ -34,30 +34,11 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         extractorsFactory: ExtractorsFactory,
         continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
     ) {
-        let progressiveMediaExtractor = BundledMediaExtractor(queue: loaderQueue, extractorsFactory: extractorsFactory)
-        self.init(
-            queue: queue,
-            loaderQueue: loaderQueue,
-            mediaItem: mediaItem,
-            dataSourceFactory: dataSourceFactory,
-            progressiveMediaExtractor: progressiveMediaExtractor,
-            continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
-        )
-    }
-
-    init(
-        queue: Queue,
-        loaderQueue: Queue,
-        mediaItem: MediaItem,
-        dataSourceFactory: DataSourceFactory,
-        progressiveMediaExtractor: ProgressiveMediaExtractor,
-        continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
-    ) {
         self.queue = queue
         self.loaderQueue = loaderQueue
         self.mediaItem = mediaItem
         self.dataSourceFactory = dataSourceFactory
-        self.progressiveMediaExtractor = progressiveMediaExtractor
+        self.extractorsFactory = extractorsFactory
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
         self.timelineIsPlaceholder = true
         self.timelineDurationUs = .timeUnset
@@ -94,7 +75,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
             queue: queue,
             loaderQueue: loaderQueue,
             dataSource: dataSource,
-            progressiveMediaExtractor: progressiveMediaExtractor,
+            progressiveMediaExtractor: BundledMediaExtractor(queue: loaderQueue, extractorsFactory: extractorsFactory),
             listener: self,
             allocator: allocator,
             continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes

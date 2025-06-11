@@ -6,6 +6,9 @@
 //
 
 import UIKit
+import SEPlayer
+
+let playerFactory = SEPlayerFactory()
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 

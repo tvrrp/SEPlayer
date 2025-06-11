@@ -31,47 +31,47 @@
 
 public extension SEPlayerDelegate {
     func player(_ player: Player, didChangeTimeline timeline: Timeline, reason: TimelineChangeReason) {
-        print("🔥 didChangeTimeline")
+//        print("🔥 didChangeTimeline")
     }
 
     func player(_ player: Player, didTransitionMediaItem mediaItem: MediaItem?, reason: MediaItemTransitionReason?) {
-        print("🔥 didTransitionMediaItem")
+//        print("🔥 didTransitionMediaItem")
     }
 
     func player(_ player: Player, didChangeIsLoading isLoading: Bool) {
-        print("🔥 didChangeIsLoading")
+//        print("🔥 didChangeIsLoading")
     }
 
     func player(_ player: Player, didChangePlaybackState state: PlayerState) {
-        print("🔥 didChangePlaybackState = \(state)")
+//        print("🔥 didChangePlaybackState = \(state)")
     }
 
     func player(_ player: Player, didChangePlayWhenReady playWhenReady: Bool, reason: PlayWhenReadyChangeReason) {
-        print("🔥 didChangePlayWhenReady")
+//        print("🔥 didChangePlayWhenReady")
     }
 
     func player(_ player: Player, didChangePlaybackSuppressionReason reason: PlaybackSuppressionReason) {
-        print("🔥 didChangePlaybackSuppressionReason")
+//        print("🔥 didChangePlaybackSuppressionReason")
     }
 
     func player(_ player: Player, didChangeIsPlaying isPlaying: Bool) {
-        print("🔥 didChangeIsPlaying")
+//        print("🔥 didChangeIsPlaying")
     }
 
     func player(_ player: Player, didChangeRepeatMode repeatMode: RepeatMode) {
-        print("🔥 didChangeRepeatMode")
+//        print("🔥 didChangeRepeatMode")
     }
 
     func player(_ player: Player, didChangeShuffleMode shuffleModeEnabled: Bool) {
-        print("🔥 didChangeShuffleMode")
+//        print("🔥 didChangeShuffleMode")
     }
 
     func player(_ player: Player, onPlayerError error: Error) {
-        print("🔥 onPlayerError")
+//        print("🔥 onPlayerError")
     }
 
     func player(_ player: Player, didChangePlayerError error: Error?) {
-        print("🔥 didChangePlayerError")
+//        print("🔥 didChangePlayerError")
     }
 
     func player(
@@ -80,7 +80,7 @@ public extension SEPlayerDelegate {
         newPosition: PositionInfo,
         reason: DiscontinuityReason
     ) {
-        print("🔥 didChangePositionDiscontinuity")
+//        print("🔥 didChangePositionDiscontinuity")
     }
     func player(_ player: Player, didChangePlaybackParameters playbackParameters: PlaybackParameters) {}
     func player(_ player: Player, didChangeSeekBackIncrement seekBackIncrementMs: Int64) {}

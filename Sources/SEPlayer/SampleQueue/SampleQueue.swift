@@ -382,9 +382,10 @@ private extension SampleQueue {
         let relativeReadIndex = getRelativeIndex(offset: readPosition)
         let sampleInfo = samples[relativeReadIndex]
         buffer.flags = sampleInfo.flags
-        if sampleInfo.flags.contains(.endOfStream) {
-            print()
+        if readPosition == (length - 1) && (loadingFinished || isLastSampleQueued) {
+            buffer.flags.insert(.lastSample)
         }
+
         buffer.size = sampleInfo.size
         buffer.time = sampleInfo.time
         let extras = SampleExtrasHolder(

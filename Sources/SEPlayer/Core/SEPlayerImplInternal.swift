@@ -128,7 +128,6 @@ final class SEPlayerImplInternal {
         timer.setEventHandler { [weak self] in
             self?.doSomeWork()
         }
-        timer.activate()
     }
 
     func prepare() {
@@ -144,6 +143,7 @@ final class SEPlayerImplInternal {
             loadControl.onPrepared(playerId: identifier)
             setState(playbackInfo.timeline.isEmpty ? .ended : .buffering)
             try! mediaSourceList.prepare(mediaTransferListener: bandwidthMeter.transferListener)
+            timer.activate()
             queue.justDispatch { self.doSomeWork() }
 
             maybeNotifyPlaybackInfoChanged()
@@ -357,9 +357,8 @@ final class SEPlayerImplInternal {
 
     func stop() {
         assert(queue.isCurrent())
-        playbackInfoUpdate.incrementPendingOperationAcks(1) // TODO: acknowledgeStop
+        stopInternal(forceResetRenderers: false, acknowledgeStop: true)
         maybeNotifyPlaybackInfoChanged()
-        fatalError()
     }
 
     func setMediaSources(
@@ -435,8 +434,9 @@ final class SEPlayerImplInternal {
         guard !released || !timer.isCancelled else {
             return true
         }
+        releaseInternal()
         maybeNotifyPlaybackInfoChanged()
-        fatalError()
+        return released
     }
 
     private func handleError(error: Error) {
@@ -473,7 +473,7 @@ extension SEPlayerImplInternal: MediaPeriodCallback {
                     return
                 }
 
-                preloadHolder.handlePrepared(
+                try preloadHolder.handlePrepared(
                     playbackSpeed: playbackInfo.playbackParameters.playbackRate,
                     timeline: playbackInfo.timeline,
                     playWhenReady: playbackInfo.playWhenReady
@@ -891,7 +891,7 @@ private extension SEPlayerImplInternal {
             return
         }
 
-        guard let next = readingPeriodHolder.next, pendingPauseAtEndOfPeriod else {
+        guard let next = readingPeriodHolder.next, !pendingPauseAtEndOfPeriod else {
             if readingPeriodHolder.info.isFinal || pendingPauseAtEndOfPeriod {
                 for renderer in renderers where
                 renderer.isReading(from: readingPeriodHolder) &&
@@ -905,12 +905,15 @@ private extension SEPlayerImplInternal {
                     renderer.setCurrentStreamFinal(for: readingPeriodHolder, streamEndPositionUs: streamEndPositionUs)
                 }
             }
-            
+
             return
         }
 
-        guard hasReadingPeriodFinishedReading() else { return }
-        guard !(areRenderersPrewarming() && periodQueue.prewarming == periodQueue.reading) else {
+        if !hasReadingPeriodFinishedReading() {
+            return
+        }
+
+        if areRenderersPrewarming() && periodQueue.prewarming == periodQueue.reading {
             return
         }
 
@@ -951,7 +954,7 @@ private extension SEPlayerImplInternal {
                     }
                 }
             }
-            
+
             if !arePrewarmingRenderersHandlingDiscontinuity {
                 setAllNonPrewarmingRendererStreamsFinal(
                     streamEndPositionUs: readingPeriodHolder.getStartPositionRendererTime()
@@ -965,7 +968,7 @@ private extension SEPlayerImplInternal {
                 return
             }
         }
-        
+
         renderers.forEach {
             $0.maybeSetOldStreamToFinal(
                 oldTrackSelectorResult: oldTrackSelectorResult,
@@ -1104,17 +1107,17 @@ private extension SEPlayerImplInternal {
         guard let playingTracks = periodQueue.playing?.trackSelectorResults else {
             return
         }
-        
+
         for (index, renderer) in renderers.enumerated() where playingTracks.isRendererEnabled(for: index) {
             renderer.enableMayRenderStartOfStream()
         }
     }
-    
+
     func resetPendingPauseAtEndOfPeriod() {
         pendingPauseAtEndOfPeriod = if let playingPeriod = periodQueue.playing {
-            playingPeriod.info.isLastInTimelineWindow
+            playingPeriod.info.isLastInTimelineWindow && pauseAtEndOfWindow
         } else {
-            pauseAtEndOfWindow
+            false
         }
     }
 
@@ -1123,7 +1126,7 @@ private extension SEPlayerImplInternal {
               pendingPauseAtEndOfPeriod,
               let playingPeriodHolder = periodQueue.playing,
               let nextPlayingPeriodHolder = playingPeriodHolder.next else { return false }
-        
+
         return rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime()
         && nextPlayingPeriodHolder.allRenderersInCorrectState
     }
@@ -1143,7 +1146,7 @@ private extension SEPlayerImplInternal {
 
     private func handleLoadingPeriodPrepared(loadingPeriodHolder: MediaPeriodHolder) throws {
         if !loadingPeriodHolder.isPrepared {
-            loadingPeriodHolder.handlePrepared(
+            try loadingPeriodHolder.handlePrepared(
                 playbackSpeed: playbackInfo.playbackParameters.playbackRate,
                 timeline: playbackInfo.timeline,
                 playWhenReady: playbackInfo.playWhenReady
@@ -1904,7 +1907,7 @@ private extension SEPlayerImplInternal {
         let currentTime = DispatchTime.now()
 
         do {
-            try  updatePeriods()
+            try updatePeriods()
 
             guard playbackInfo.state != .idle || playbackInfo.state != .ended else {
                 return
@@ -1915,7 +1918,7 @@ private extension SEPlayerImplInternal {
                 return
             }
 
-            try  updatePlaybackPositions()
+            try updatePlaybackPositions()
 
             var renderersEnded = true
             var renderersAllowPlayback = true
@@ -1956,7 +1959,7 @@ private extension SEPlayerImplInternal {
 
             if finishedRendering, pendingPauseAtEndOfPeriod {
                 pendingPauseAtEndOfPeriod = false
-                try  setPlayWhenReadyInternal(
+                try setPlayWhenReadyInternal(
                     false,
                     reason: .endOfMediaItem,
                     playbackSuppressionReason: playbackInfo.playbackSuppressionReason,
@@ -1978,7 +1981,7 @@ private extension SEPlayerImplInternal {
                         resetLastRebufferRealtimeMs: false
                     )
                     mediaClock.start()
-                    try  startRenderers()
+                    try startRenderers()
                 }
             } else if playbackInfo.state == .ready,
                       !(enabledRendererCount == 0 ? isTimelineReady() : renderersAllowPlayback) {
@@ -2047,6 +2050,38 @@ private extension SEPlayerImplInternal {
         }
 
         timer.schedule(deadline: .now() + .milliseconds(Int(wakeUpTimeIntervalMs)))
+    }
+
+    private func stopInternal(forceResetRenderers: Bool, acknowledgeStop: Bool) {
+        assert(queue.isCurrent())
+        resetInternal(
+            resetRenderers: forceResetRenderers,
+            resetPosition: false,
+            releaseMediaSourceList: true,
+            resetError: false
+        )
+        playbackInfoUpdate.incrementPendingOperationAcks(acknowledgeStop ? 1 : 0)
+        loadControl.onStopped(playerId: identifier)
+        setState(.idle)
+    }
+
+    func releaseInternal() {
+        assert(queue.isCurrent())
+        resetInternal(
+            resetRenderers: true,
+            resetPosition: false,
+            releaseMediaSourceList: true,
+            resetError: false
+        )
+        if timerIsSuspended {
+            timer.resume()
+            timerIsSuspended = false
+        }
+        timer.cancel()
+        releaseRenderers()
+        loadControl.onReleased(playerId: identifier)
+        setState(.idle)
+        released = true
     }
 
     func resetInternal(

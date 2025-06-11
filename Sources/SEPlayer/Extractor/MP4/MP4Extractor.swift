@@ -61,6 +61,8 @@ final class MP4Extractor: Extractor {
         containerAtoms.removeAll()
         atomHeaderBytesRead = 0
         sampleTrackIndex = nil
+        sampleBytesRead = 0
+        sampleBytesWritten = 0
         if position == 0 {
             enterReadingAtomHeaderState()
         } else {
@@ -79,7 +81,6 @@ extension MP4Extractor: SeekMap {
     }
 
     func getDurationUs() -> Int64 {
-        assert(parserState == .readingSample)
         return duration
     }
 
@@ -239,7 +240,7 @@ private extension MP4Extractor {
                 try input.skipFully(length: atomPayloadSize)
             } else {
                 position = input.getPosition() + atomPayloadSize
-                seekRequired = false
+                seekRequired = true
             }
         }
 

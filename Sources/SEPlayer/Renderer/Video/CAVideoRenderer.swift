@@ -154,6 +154,14 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     override func onPositionReset(position: Int64, joining: Bool) throws {
         try! super.onPositionReset(position: position, joining: joining)
+        print("ON POSITION RESEEEEEEET, new position = \(position)")
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
         inputStreamEnded = false
         outputStreamEnded = false
         initialPosition = nil
@@ -372,6 +380,8 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
             isLastFrame: false
         )
 
+        print("💔 action = \(frameReleaseAction)")
+        print()
         let result: Bool
         switch frameReleaseAction {
         case .immediately:
@@ -394,6 +404,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         case .tryAgainLater:
             result = false
         case .ignore, .skip, .drop:
+            print("frameReleaseAction = \(frameReleaseAction)")
             result = true
         }
 

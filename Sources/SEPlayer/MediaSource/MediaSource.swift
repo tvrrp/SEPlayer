@@ -71,7 +71,7 @@ class BaseMediaSource: MediaSource {
     func canUpdateMediaItem(new item: MediaItem) -> Bool { false }
     func updateMediaItem(new item: MediaItem) {}
     func prepareSourceInternal(mediaTransferListener: TransferListener?) { fatalError("To override") }
-    func releaseSourceInternal() { fatalError("To override") }
+    func releaseSourceInternal() {}
     func updateMediaItem() { fatalError("To override") }
     func enableInternal() {}
     func createPeriod(

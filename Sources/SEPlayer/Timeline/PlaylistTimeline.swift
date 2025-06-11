@@ -97,9 +97,8 @@ struct PlaylistTimeline: AbstractConcatenatedTimeline, @unchecked Sendable {
 
 private extension PlaylistTimeline {
     final class ForwardingTimelineImpl: ForwardingTimeline, @unchecked Sendable {
-        private let window = Window()
-
         override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
+            // TODO: live
             var superPeriod = super.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
             superPeriod.isPlaceholder = true
             return superPeriod

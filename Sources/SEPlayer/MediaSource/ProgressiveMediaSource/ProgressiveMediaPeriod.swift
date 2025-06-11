@@ -36,7 +36,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     private var haveAudioVideoTracks: Bool = false
     private var isSingleSample: Bool = false
     private var trackState = TrackState.empty
-    private var seekMap: SeekMap?
+    private weak var seekMap: SeekMap?
     private var durationUs: Int64 = .zero
     private var isLive: Bool = false
 
@@ -88,6 +88,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         }
 
         callback = nil
+        seekMap = nil
         didRelease = true
     }
 
@@ -398,11 +399,9 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
 extension ProgressiveMediaPeriod: Loader.Callback {
     func onLoadStarted(loadable: ExtractingLoadable, onTime: Int64, loadDurationMs: Int64, retryCount: Int) {
-        print("ℹ️ onLoadStarted")
     }
 
     func onLoadCompleted(loadable: ExtractingLoadable, onTime: Int64, loadDurationMs: Int64) {
-        print("ℹ️ onLoadCompleted")
         queue.async { [self] in
             if durationUs == .timeUnset, let seekMap {
                 let largestQueuedTimestampUs = getLargestQueuedTimestampUs(includeDisabledTracks: false)
@@ -415,7 +414,6 @@ extension ProgressiveMediaPeriod: Loader.Callback {
     }
 
     func onLoadCancelled(loadable: ExtractingLoadable, onTime: Int64, loadDurationMs: Int64, released: Bool) {
-        print("ℹ️ onLoadCancelled")
         queue.async { [self] in
             if !released {
                 sampleQueues.forEach { $0.reset() }
@@ -425,7 +423,6 @@ extension ProgressiveMediaPeriod: Loader.Callback {
     }
 
     func onLoadError(loadable: ExtractingLoadable, onTime: Int64, loadDurationMs: Int64, error: Error, errorCount: Int) -> Loader.LoadErrorAction {
-        print("ℹ️ onLoadError")
         return .init(type: .retry, retryDelayMillis: .zero)
     }
 
@@ -625,9 +622,11 @@ extension ProgressiveMediaPeriod {
         private let requestContiniueLoading: () -> Void
         private var position: Int = 0
 
-        private var seekTime: Int64?
+        private var pendingExtractorSeek = true
+        private var seekTime: Int64 = .zero
         private var didFinish: Bool = false
-        private var isCancelled: Bool = false // TODO: guard by lock
+        private var isCancelled: Bool = false
+        private let lock = NSLock()
 
         init(
             url: URL,
@@ -650,19 +649,18 @@ extension ProgressiveMediaPeriod {
         }
 
         func cancelLoad() {
-            isCancelled = true
+            lock.withLock { isCancelled = true }
         }
 
         func load() throws {
-            print("🥵 START LOAD")
             assert(queue.isCurrent())
             var result: ExtractorReadResult = .continueRead
 
-            while result == .continueRead, !isCancelled {
+            while result == .continueRead, lock.withLock { !isCancelled } {
                 do {
                     let dataSpec = buildDataSpec(position: position)
                     var length = try dataSource.open(dataSpec: dataSpec)
-                    guard !isCancelled else { break }
+                    guard lock.withLock({ !isCancelled }) else { break }
 
                     try progressiveMediaExtractor.prepare(
                         dataReader: dataSource,
@@ -672,12 +670,12 @@ extension ProgressiveMediaPeriod {
                         output: extractorOutput
                     )
 
-                    if let seekTime {
+                    if pendingExtractorSeek {
                         progressiveMediaExtractor.seek(position: position, time: seekTime)
-                        self.seekTime = nil
+                        pendingExtractorSeek = false
                     }
 
-                    while result == .continueRead, !isCancelled {
+                    while result == .continueRead, lock.withLock({ !isCancelled }) {
                         loadCondition.block()
                         result = try progressiveMediaExtractor.read()
                         if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(),
@@ -699,6 +697,7 @@ extension ProgressiveMediaPeriod {
         func setLoadPosition(position: Int, time: Int64) {
             self.position = position
             self.seekTime = time
+            pendingExtractorSeek = true
         }
 
         private func postLoadTask(result: inout ExtractorReadResult) {

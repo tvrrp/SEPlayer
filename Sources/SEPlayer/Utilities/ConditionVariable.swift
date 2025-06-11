@@ -30,10 +30,9 @@ final class ConditionVariable {
     @discardableResult
     func close() -> Bool {
         condition.lock()
+        defer { condition.unlock() }
         let wasOpen = _isOpen
         _isOpen = false
-        condition.broadcast()
-        condition.unlock()
 
         return wasOpen
     }
@@ -41,6 +40,7 @@ final class ConditionVariable {
     func cancel() {
         condition.lock()
         _didRelease = true
+        _isOpen = false
         condition.broadcast()
         condition.unlock()
     }
@@ -66,7 +66,7 @@ final class ConditionVariable {
         if end < now {
             condition.wait()
         } else {
-            while !_isOpen, !_didRelease {
+            while !_isOpen, !_didRelease, now < end {
                 condition.wait(until: Date(timeIntervalSinceNow: end - now))
                 now = Date().timeIntervalSince1970
             }

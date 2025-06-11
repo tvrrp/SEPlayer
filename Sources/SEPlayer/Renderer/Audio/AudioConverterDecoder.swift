@@ -111,22 +111,30 @@ final class AudioConverterDecoder: AQDecoder {
         assert(queue.isCurrent())
         let buffer = try! inputBuffer.dequeue()
 
-        let blockBuffer = try! CMBlockBuffer(
-            length: inputBuffer.size,
-            allocator: { _ in
-                return buffer
-            },
-            deallocator: { _, _ in },
-            flags: .assureMemoryNow
-        )
+        let isEndOfStream = inputBuffer.flags.contains(.endOfStream)
+        let blockBuffer: CMBlockBuffer? = if !isEndOfStream {
+            try! CMBlockBuffer(
+                length: inputBuffer.size,
+                allocator: { _ in
+                    return buffer
+                },
+                deallocator: { _, _ in },
+                flags: .assureMemoryNow
+            )
+        } else {
+            nil
+        }
 
         let formatDescription = try! CMFormatDescription(audioStreamBasicDescription: sourceFormat)
+        let sampleTimings = !isEndOfStream ? [inputBuffer.sampleTimings] : []
+        let sampleSizes = !isEndOfStream ? [inputBuffer.size] : []
+
         let sampleBuffer = try! CMSampleBuffer(
             dataBuffer: blockBuffer,
             formatDescription: formatDescription,
             numSamples: 1,
-            sampleTimings: [inputBuffer.sampleTimings],
-            sampleSizes: [inputBuffer.size]
+            sampleTimings: sampleTimings,
+            sampleSizes: sampleSizes
         )
         _pendingSamples.append((index, sampleBuffer, inputBuffer.flags))
         decodeNextSampleIfNeeded()
@@ -158,6 +166,7 @@ final class AudioConverterDecoder: AQDecoder {
             AudioConverterDispose(audioConverter)
             self.audioConverter = nil
         }
+        free(outputBufferList.unsafeMutablePointer)
         _isDecodingSample = false
         _framedBeingDecoded = 0
         _pendingSamples.removeAll()
@@ -189,6 +198,7 @@ final class AudioConverterDecoder: AQDecoder {
 
         if sampleFlags.contains(.endOfStream) {
             handleSample(index: index, itemsCount: .zero, pts: .zero, sampleFlags: sampleFlags)
+            return
         }
         guard let audioConverter else { return }
 
@@ -198,6 +208,7 @@ final class AudioConverterDecoder: AQDecoder {
         outputBufferList[0].mNumberChannels = destinationFormat.mChannelsPerFrame
         outputBufferList[0].mDataByteSize = UInt32(individualBufferSize)
         outputBufferList[0].mData = decodedSamples[index]
+        var pointer = outputBufferList.unsafeMutablePointer
 
         do {
             let result = try! sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
@@ -211,16 +222,18 @@ final class AudioConverterDecoder: AQDecoder {
                         packetDescription: descriptionPointer
                     )
 
-                    return withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
+                    let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
                         AudioConverterFillComplexBuffer(
                             audioConverter,
                             converterComplexBufferCallback,
                             dataObjectRef,
                             &ioOutputDataPackets,
-                            outputBufferList.unsafeMutablePointer,
+                            pointer,
                             &packetDescription
                         )
                     }
+                    descriptionPointer.deallocate()
+                    return result
                 }
             }
 

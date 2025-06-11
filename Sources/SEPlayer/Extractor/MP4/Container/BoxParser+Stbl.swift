@@ -212,7 +212,7 @@ extension BoxParser {
                     offset: updatedSample.offset,
                     size: updatedSample.size,
                     presentationTimeStampUs: updatedSample.presentationTimeStampUs,
-                    flags: [updatedSample.flags, .endOfStream]
+                    flags: [updatedSample.flags, .lastSample]
                 )
             }
             self.samples = samples
