@@ -1,0 +1,364 @@
+//
+//  DefaltExtractorInput.swift
+//  SEPlayer
+//
+//  Created by Damir Yackupov on 06.01.2025.
+//
+
+import Foundation.NSRange
+
+final class DefaltExtractorInput: ExtractorInput {
+    private let dataReader: DataReader
+    private let streamLength: Int?
+
+    private var position: Int
+    private var peekBuffer: ByteBuffer
+    private var peekBufferPosition: Int
+    private var peekBufferLength: Int
+
+    let queue: Queue
+
+    init(dataReader: DataReader, queue: Queue, range: NSRange? = nil) {
+        self.dataReader = dataReader
+        self.position = range?.location ?? 0
+        self.streamLength = range?.length
+
+        self.peekBuffer = ByteBuffer()
+        self.peekBufferPosition = 0
+        self.peekBufferLength = 0
+        self.queue = queue
+    }
+
+    @discardableResult
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
+        assert(queue.isCurrent())
+        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
+        if bytesRead == 0 {
+            bytesRead = try readFromUpstream(
+                buffer: &buffer,
+                offset: offset,
+                length: length,
+                bytesAlreadyRead: 0,
+                allowEndOfInput: true
+            )
+        }
+        commit(bytes: bytesRead)
+
+        if bytesRead == .resultEndOfInput {
+            return .endOfInput
+        } else {
+            return .success(amount: bytesRead)
+        }
+    }
+
+    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
+        assert(queue.isCurrent())
+        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
+
+        while bytesRead < length && bytesRead != .resultEndOfInput {
+            bytesRead = try readFromUpstream(
+                buffer: &buffer,
+                offset: offset,
+                length: length,
+                bytesAlreadyRead: bytesRead,
+                allowEndOfInput: allowEndOfInput
+            )
+        }
+
+        commit(bytes: bytesRead)
+        return bytesRead != .resultEndOfInput
+    }
+
+    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+        var buffer = ByteBuffer()
+        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
+        if bytesRead != 0 {
+            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
+                bytesRead = 0
+            }
+        }
+
+        if bytesRead == 0 {
+            bytesRead = try readFromUpstream(
+                allocation: allocation,
+                offset: offset,
+                length: length,
+                bytesAlreadyRead: 0,
+                allowEndOfInput: true
+            )
+        }
+        commit(bytes: bytesRead)
+
+        if bytesRead == .resultEndOfInput {
+            return .endOfInput
+        } else {
+            return .success(amount: bytesRead)
+        }
+    }
+
+    func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
+        assert(queue.isCurrent())
+        var buffer = ByteBuffer()
+        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
+        if bytesRead != 0 {
+            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
+                bytesRead = 0
+            }
+        }
+
+        while bytesRead < length && bytesRead != .resultEndOfInput {
+            bytesRead = try readFromUpstream(
+                allocation: allocation,
+                offset: offset,
+                length: length,
+                bytesAlreadyRead: bytesRead,
+                allowEndOfInput: allowEndOfInput
+            )
+        }
+
+        commit(bytes: bytesRead)
+        return bytesRead != .resultEndOfInput
+    }
+
+    func skip(length: Int) throws -> DataReaderReadResult {
+        assert(queue.isCurrent())
+        var scratchBuffer = ByteBuffer()
+        var bytesSkipped = skipFromPeekBuffer(length: length)
+        if bytesSkipped == 0 {
+            bytesSkipped = try readFromUpstream(
+                buffer: &scratchBuffer,
+                offset: .zero,
+                length: length,
+                bytesAlreadyRead: .zero,
+                allowEndOfInput: true
+            )
+        }
+
+        commit(bytes: bytesSkipped)
+        if bytesSkipped == .resultEndOfInput {
+            return .endOfInput
+        } else {
+            return .success(amount: bytesSkipped)
+        }
+    }
+
+    func skipFully(length: Int, allowEndOfInput: Bool) throws -> Bool {
+        assert(queue.isCurrent())
+        var scratchBuffer = ByteBuffer()
+        var bytesSkipped = skipFromPeekBuffer(length: length)
+
+        while bytesSkipped < length && bytesSkipped != .resultEndOfInput {
+            bytesSkipped = try readFromUpstream(
+                buffer: &scratchBuffer,
+                offset: .zero,
+                length: length,
+                bytesAlreadyRead: bytesSkipped,
+                allowEndOfInput: allowEndOfInput
+            )
+        }
+
+        commit(bytes: bytesSkipped)
+        return bytesSkipped != .resultEndOfInput
+    }
+
+    func peek(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
+        assert(queue.isCurrent())
+        let peekBufferRemainingBytes = peekBufferLength - peekBufferPosition
+        var bytesPeeked: Int = 0
+
+        if peekBufferRemainingBytes == 0 {
+            bytesPeeked = try readFromUpstream(
+                buffer: &peekBuffer,
+                offset: peekBufferPosition,
+                length: length,
+                bytesAlreadyRead: .zero,
+                allowEndOfInput: true
+            )
+
+            if bytesPeeked == .resultEndOfInput {
+                return .endOfInput
+            }
+
+            peekBufferLength += bytesPeeked
+        } else {
+            bytesPeeked = min(length, peekBufferRemainingBytes)
+        }
+
+        var buffer = buffer
+        buffer.moveWriterIndex(to: offset)
+        peekBuffer.moveReaderIndex(to: peekBufferPosition)
+        guard var slice = peekBuffer.readSlice(length: bytesPeeked) else {
+            return .endOfInput
+        }
+
+        buffer.writeBuffer(&slice)
+
+        peekBufferPosition += bytesPeeked
+        return .success(amount: bytesPeeked)
+    }
+
+    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
+        if try !advancePeekPosition(length: length, allowEndOfInput: allowEndOfInput) {
+            return false
+        }
+
+        peekBuffer.moveReaderIndex(to: peekBufferLength)
+        guard var slice = peekBuffer.readSlice(length: length) else {
+            return false
+        }
+        var buffer = buffer
+        buffer.moveWriterIndex(to: offset)
+        buffer.writeBuffer(&slice)
+
+        return true
+    }
+
+    func advancePeekPosition(length: Int, allowEndOfInput: Bool) throws -> Bool {
+        assert(queue.isCurrent())
+        var bytesPeeked = peekBufferLength - peekBufferPosition
+        while bytesPeeked < length {
+            bytesPeeked = try readFromUpstream(
+                buffer: &peekBuffer,
+                offset: peekBufferPosition,
+                length: length,
+                bytesAlreadyRead: bytesPeeked,
+                allowEndOfInput: allowEndOfInput
+            )
+
+            if bytesPeeked == .resultEndOfInput {
+                return false
+            }
+
+            peekBufferLength = peekBufferPosition + bytesPeeked
+        }
+
+        peekBufferPosition += length
+        return true
+    }
+
+    func resetPeekPosition() {
+        assert(queue.isCurrent())
+        peekBufferPosition = 0
+    }
+
+    func getPeekPosition() -> Int {
+        assert(queue.isCurrent())
+        return position + peekBufferPosition
+    }
+
+    func getPosition() -> Int {
+        assert(queue.isCurrent())
+        return position
+    }
+
+    func getLength() -> Int? {
+        assert(queue.isCurrent())
+        return streamLength
+    }
+
+    func set<E>(retryPosition: Int, using error: E) throws where E : Error {
+        self.position = retryPosition
+        throw error
+    }
+}
+
+private extension DefaltExtractorInput {
+    private func skipFromPeekBuffer(length: Int) -> Int {
+        let skipped = min(peekBufferLength, length)
+        updatePeekBuffer(consumed: skipped)
+        return skipped
+    }
+
+    private func readFromPeekBuffer(_ buffer: inout ByteBuffer, offset: Int, length: Int) -> Int {
+        guard peekBufferLength > 0 else { return .zero }
+        let peekBytes = min(peekBufferLength, length)
+
+        guard var slice = peekBuffer.readSlice(length: peekBytes) else {
+            return .zero
+        }
+        buffer.moveWriterIndex(to: offset)
+        buffer.writeBuffer(&slice)
+        updatePeekBuffer(consumed: peekBytes)
+
+        return peekBytes
+    }
+
+    private func updatePeekBuffer(consumed: Int) {
+        peekBufferLength -= consumed
+        peekBufferPosition = 0
+    }
+
+    private func readFromUpstream(
+        buffer: inout ByteBuffer,
+        offset: Int,
+        length: Int,
+        bytesAlreadyRead: Int,
+        allowEndOfInput: Bool
+    ) throws -> Int {
+        let result = try dataReader.read(
+            to: &buffer,
+            offset: offset + bytesAlreadyRead,
+            length: length - bytesAlreadyRead
+        )
+
+        switch result {
+        case let .success(amount):
+            return bytesAlreadyRead + amount
+        case .endOfInput:
+            if bytesAlreadyRead == 0, allowEndOfInput {
+                return .resultEndOfInput
+            }
+
+            // TODO: throw EndOfFileError
+            fatalError()
+        }
+    }
+
+    private func readFromUpstream(
+        allocation: Allocation,
+        offset: Int,
+        length: Int,
+        bytesAlreadyRead: Int,
+        allowEndOfInput: Bool
+    ) throws -> Int {
+        let result = try dataReader.read(
+            allocation: allocation,
+            offset: offset,
+            length: length
+        )
+
+        switch result {
+        case let .success(amount):
+            return bytesAlreadyRead + amount
+        case .endOfInput:
+            if bytesAlreadyRead == 0, allowEndOfInput {
+                return .resultEndOfInput
+            }
+
+            // TODO: throw EndOfFileError
+            fatalError()
+        }
+    }
+
+    private func readFromBuffer(
+        _ buffer: ByteBuffer,
+        to allocation: Allocation,
+        offset: Int,
+        length: Int
+    ) -> Bool {
+        buffer.withUnsafeReadableBytes { pointer in
+            guard let baseAdress = pointer.baseAddress else { return false }
+            memcpy(allocation.data.advanced(by: offset), baseAdress, length)
+            return true
+        }
+    }
+
+    private func commit(bytes read: Int) {
+        guard read != .resultEndOfInput else { return }
+        position += read
+    }
+}
+
+private extension Int {
+    static let resultEndOfInput: Int = -1
+}
