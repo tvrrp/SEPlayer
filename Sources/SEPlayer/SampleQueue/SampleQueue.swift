@@ -225,7 +225,9 @@ class SampleQueue {
             )
         }
 
-        guard offset != -1 else { return false }
+        guard offset != -1 else {
+            return false
+        }
         startTime = time
         readPosition += offset
         return true
@@ -308,6 +310,7 @@ extension SampleQueue: TrackOutput {
 
     func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int) {
         let isKeyframe = flags.contains(.keyframe)
+        var flags = flags
         if upstreamKeyframeRequired {
             guard isKeyframe else { return }
             upstreamKeyframeRequired = false
@@ -316,7 +319,8 @@ extension SampleQueue: TrackOutput {
         let time = time + sampleOffsetTime
         if allSamplesAreSyncSamples {
             if time < startTime { return }
-            // TODO: update samples flags
+            // TODO: log bad data
+            flags.insert(.keyframe)
         }
 
         if pendingSplice {
@@ -373,7 +377,7 @@ private extension SampleQueue {
         }
 
         let readIndex = getReadIndex()
-        if let format = sharedSampleMetadata.first(where: { $0.0 == readIndex })?.1,
+        if let format = sharedSampleMetadata.first(where: { readIndex <= $0.0 })?.1,
            formatRequired || format != downstreamFormat {
             downstreamFormat = format
             return (.didReadFormat(format: format),nil)
@@ -418,6 +422,9 @@ private extension SampleQueue {
             assert(samples[previousSampleRelativeIndex].offset + samples[previousSampleRelativeIndex].size <= offset)
         }
 
+        if upstreamFormat?.mediaType == .video {
+            print("🫟 commitSample, time = \(time), IDR = \(sampleFlags.contains(.keyframe)), offset = \(offset)")
+        }
         isLastSampleQueued = sampleFlags.contains(.lastSample)
         largestQueuedTimestamp = max(largestQueuedTimestamp, time)
 
@@ -478,8 +485,8 @@ private extension SampleQueue {
     private func findSampleBefore(relativeStartIndex: Int, length: Int, time: Int64, keyframe: Bool) -> Int {
         var sampleCountToTarget = -1
         var searchIndex = relativeStartIndex
-        
-        for i in 0..<length {
+
+        for i in 0..<length where samples[searchIndex].time <= time {
             if !keyframe || samples[searchIndex].flags.contains(.keyframe) {
                 sampleCountToTarget = i
 
@@ -595,6 +602,6 @@ extension SampleQueue {
 
 extension SampleQueue: CustomDebugStringConvertible {
     var debugDescription: String {
-        upstreamFormat.debugDescription
+        "\(upstreamFormat!.mediaType)"
     }
 }

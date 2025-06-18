@@ -132,7 +132,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
     }
 
     override func onPositionReset(position: Int64, joining: Bool) throws {
-        audioSink.flush()
+        audioSink.flush(reuse: true)
 
         currentPosition = position
         nextBufferToWritePresentationTime = nil

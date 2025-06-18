@@ -1080,7 +1080,7 @@ private extension SEPlayerImplInternal {
                 positionUs: newPlayingPeriodHolder.info.startPositionUs,
                 requestedContentPositionUs: newPlayingPeriodHolder.info.requestedContentPositionUs,
                 discontinuityStartPositionUs: newPlayingPeriodHolder.info.startPositionUs,
-                reportDiscontinuity: false,
+                reportDiscontinuity: true,
                 discontinuityReason: .autoTransition
             )
 
@@ -1123,12 +1123,12 @@ private extension SEPlayerImplInternal {
 
     private func shouldAdvancePlayingPeriod() -> Bool {
         guard shouldPlayWhenReady(),
-              pendingPauseAtEndOfPeriod,
+              !pendingPauseAtEndOfPeriod,
               let playingPeriodHolder = periodQueue.playing,
               let nextPlayingPeriodHolder = playingPeriodHolder.next else { return false }
 
         return rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime()
-        && nextPlayingPeriodHolder.allRenderersInCorrectState
+            && nextPlayingPeriodHolder.allRenderersInCorrectState
     }
 
     private func hasReadingPeriodFinishedReading() -> Bool {
@@ -1252,7 +1252,7 @@ private extension SEPlayerImplInternal {
 
         return shouldContinueLoading
     }
-    
+
     private func isLoadingPossible(mediaPeriodHolder: MediaPeriodHolder?) -> Bool {
         guard let mediaPeriodHolder else { return false }
 
@@ -1936,7 +1936,7 @@ private extension SEPlayerImplInternal {
                         continue
                     }
 
-                    try  renderer.render(
+                    try renderer.render(
                         rendererPositionUs: rendererPositionUs,
                         rendererPositionElapsedRealtimeUs: rendererPositionElapsedRealtimeUs
                     )
@@ -1945,7 +1945,7 @@ private extension SEPlayerImplInternal {
                     maybeTriggerOnRendererReadyChanged(rendererIndex: index, allowsPlayback: allowsPlayback)
                     renderersAllowPlayback = renderersAllowPlayback && allowsPlayback
                     if !allowsPlayback {
-                        try  maybeThrowRendererStreamError()
+                        try maybeThrowRendererStreamError()
                     }
                 }
             } else {
@@ -1972,10 +1972,12 @@ private extension SEPlayerImplInternal {
                 stopRenderers()
             } else if playbackInfo.state == .buffering,
                       shouldTransitionToReadyState(renderersReadyOrEnded: renderersAllowPlayback) {
+                print("🫟 READY")
                 setState(.ready)
                 pendingRecoverableRendererError = nil
 
                 if shouldPlayWhenReady() {
+                    print("🫟 START PLAYBACK")
                     updateRebufferingState(
                         isRebuffering: false,
                         resetLastRebufferRealtimeMs: false
@@ -1985,6 +1987,7 @@ private extension SEPlayerImplInternal {
                 }
             } else if playbackInfo.state == .ready,
                       !(enabledRendererCount == 0 ? isTimelineReady() : renderersAllowPlayback) {
+                print("🫟 BUFFERING STATE")
                 updateRebufferingState(isRebuffering: shouldPlayWhenReady(), resetLastRebufferRealtimeMs: false)
                 setState(.buffering)
                 if isRebuffering {

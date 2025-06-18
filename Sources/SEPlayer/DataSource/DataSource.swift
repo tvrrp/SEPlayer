@@ -9,7 +9,7 @@ import Foundation.NSURLSession
 
 public protocol DataSource: DataReader {
     var url: URL? { get }
-    var urlResponce: HTTPURLResponse? { get }
+    var urlResponse: HTTPURLResponse? { get }
     var queue: Queue { get }
     var components: DataSourceOpaque { get }
     func open(dataSpec: DataSpec) throws -> Int

@@ -134,25 +134,25 @@ struct VideoFrameReleaseControl {
             framePresentationTimeUs: presentationTimeUs
         )
 
-        print("💔 will calculate")
-        print("💔 presentationTimeUs = \(presentationTimeUs)")
-        print("💔 positionUs = \(positionUs)")
-        print("💔 elapsedRealtimeUs = \(elapsedRealtimeUs)")
-        print("💔 outputStreamStartPositionUs = \(outputStreamStartPositionUs)")
-        print("💔 isDecodeOnlyFrame = \(isDecodeOnlyFrame)")
-        print("💔 isLastFrame = \(isLastFrame)")
+//        print("💔 will calculate")
+//        print("💔 presentationTimeUs = \(presentationTimeUs)")
+//        print("💔 positionUs = \(positionUs)")
+//        print("💔 elapsedRealtimeUs = \(elapsedRealtimeUs)")
+//        print("💔 outputStreamStartPositionUs = \(outputStreamStartPositionUs)")
+//        print("💔 isDecodeOnlyFrame = \(isDecodeOnlyFrame)")
+//        print("💔 isLastFrame = \(isLastFrame)")
         if isDecodeOnlyFrame && !isLastFrame {
-            print("✅ result skip")
+//            print("✅ result skip")
             return .skip
         }
 
         if shouldForceRelease(positionUs: positionUs, earlyTimeUs: earlyTimeUs, outputStreamStartPositionUs: outputStreamStartPositionUs) {
-            print("✅ result immediately")
+//            print("✅ result immediately")
             return .immediately
         }
 
         if !started || positionUs == initialPositionUs {
-            print("✅ result tryAgainLater")
+//            print("✅ result tryAgainLater")
             return .tryAgainLater
         }
 
@@ -166,14 +166,14 @@ struct VideoFrameReleaseControl {
                                                   elapsedRealtimeUs: elapsedRealtimeUs,
                                                   isLast: isLastFrame,
                                                   treatDroppedAsSkipped: treatDropAsSkip) {
-            print("✅ result ignore")
+//            print("✅ result ignore")
             return .ignore
         } else if frameTimingEvaluator.shouldDropFrame(earlyTimeUs: earlyTimeUs,
                                                        elapsedSinceLastReleaseUs: elapsedRealtimeUs,
                                                        isLast: isLastFrame) {
             return treatDropAsSkip ? .skip : .drop
         } else if earlyTimeUs > .maxEarlyTreashold {
-            print("✅ result tryAgainLater")
+//            print("✅ result tryAgainLater")
             return .tryAgainLater
         }
 

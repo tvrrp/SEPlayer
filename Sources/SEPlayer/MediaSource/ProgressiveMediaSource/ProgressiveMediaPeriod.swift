@@ -338,11 +338,6 @@ final class ProgressiveMediaPeriod: MediaPeriod {
             sampleQueues[track].isReady(loadingFinished: false) {
             return
         }
-//        guard pendingDeferredRetry
-//                || (!haveAudioVideoTracks && trackState.isAudioOrVideo[track])
-//                || !sampleQueues[track].isReady(loadingFinished: false) else {
-//            return
-//        }
 
         pendingResetPositionUs = .zero
         pendingDeferredRetry = false
@@ -665,7 +660,7 @@ extension ProgressiveMediaPeriod {
                     try progressiveMediaExtractor.prepare(
                         dataReader: dataSource,
                         url: url,
-                        response: dataSource.urlResponce,
+                        response: dataSource.urlResponse,
                         range: NSRange(location: position, length: length),
                         output: extractorOutput
                     )
@@ -677,6 +672,7 @@ extension ProgressiveMediaPeriod {
 
                     while result == .continueRead, lock.withLock({ !isCancelled }) {
                         loadCondition.block()
+                        guard lock.withLock({ !isCancelled }) else { break }
                         result = try progressiveMediaExtractor.read()
                         if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(),
                            currentInputPosition > position + continueLoadingCheckIntervalBytes {

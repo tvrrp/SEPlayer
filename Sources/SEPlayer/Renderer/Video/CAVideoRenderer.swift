@@ -380,8 +380,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
             isLastFrame: false
         )
 
-        print("💔 action = \(frameReleaseAction)")
-        print()
+        print("💔 action = \(frameReleaseAction), time = \(buffer.presentationTime)")
         let result: Bool
         switch frameReleaseAction {
         case .immediately:
@@ -404,11 +403,10 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         case .tryAgainLater:
             result = false
         case .ignore, .skip, .drop:
-            print("frameReleaseAction = \(frameReleaseAction)")
             result = true
         }
 
-        return result && pendingFramesAfterStop.isEmpty
+        return result
     }
 }
 

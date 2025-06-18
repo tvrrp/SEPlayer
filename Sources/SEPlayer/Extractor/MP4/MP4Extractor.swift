@@ -186,8 +186,12 @@ private extension MP4Extractor {
         }
 
         guard atomSize >= atomHeaderBytesRead else {
-            // TODO: throw Atom size less than header length unsupported
-            fatalError()
+            let reason = "Atom size less than header length unsupported"
+            if let boxType = MP4Box.BoxType(rawValue: atomType) {
+                throw BoxParser.BoxParserErrors.badBoxContent(type: boxType, reason: reason)
+            } else {
+                throw ErrorBuilder(errorDescription: reason)
+            }
         }
 
         if shouldParseContainerAtom(atom: atomType) {

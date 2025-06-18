@@ -11,7 +11,7 @@ final class DefautlHTTPDataSource: DataSource {
     let components: DataSourceOpaque
 
     var url: URL? { queue.sync { _url } }
-    var urlResponce: HTTPURLResponse? { queue.sync { _urlResponce } }
+    var urlResponse: HTTPURLResponse? { lock.withLock { _urlResponce } }
 
     let queue: Queue
     private let connectTimeout: TimeInterval
@@ -66,6 +66,7 @@ final class DefautlHTTPDataSource: DataSource {
     @discardableResult
     func close() -> ByteBuffer? {
         return lock.withLock {
+            print("❌ close connection, dataSpec = \(currentDataSpec)")
             isClosed = true
             didFinish = false
             openResult = nil
@@ -84,6 +85,7 @@ final class DefautlHTTPDataSource: DataSource {
         lock.lock()
 
         guard bytesRemaining > 0 else {
+            lock.unlock()
             return .endOfInput
         }
 
@@ -115,7 +117,10 @@ final class DefautlHTTPDataSource: DataSource {
         assert(queue.isCurrent())
         lock.lock()
 
-        guard bytesRemaining > 0 else { return .endOfInput }
+        guard bytesRemaining > 0 else {
+            lock.unlock()
+            return .endOfInput
+        }
 
         if let loadError {
             throw loadError
@@ -168,7 +173,7 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
             intermidateBuffer.reserveCapacity(dataSpec.length)
         }
 
-//        print("✅ createConnection, dataSpec = \(dataSpec), \(request.allHTTPHeaderFields)")
+        print("✅ createConnection, dataSpec = \(dataSpec), \(request.allHTTPHeaderFields)")
         let task = networkLoader.createTask(request: request, delegate: self)
         task.resume()
         self.currentTask = task
@@ -181,7 +186,11 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
         case let .success(urlResponce):
             let contentLength = contentLength(from: urlResponce)
             lock.withLock {
-                bytesRemaining = contentLength
+                bytesRemaining = if let currentDataSpec, currentDataSpec.length > 0 {
+                    currentDataSpec.length
+                } else {
+                    contentLength
+                }
                 didStart = true
             }
             return contentLength
@@ -207,6 +216,7 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
         lock.withLock {
             didStart = true
             openResult = .success(urlResponce)
+            self._urlResponce = urlResponce
         }
 
         operation.open()
@@ -215,7 +225,9 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
 
     func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
         assert(!queue.isCurrent())
-        guard lock.withLock({ !isClosed && currentTask == task }) else { return }
+        guard lock.withLock({ !isClosed && currentTask == task }) else {
+            return
+        }
         lock.lock()
         intermidateBuffer.writeBytes(buffer)
         lock.unlock()

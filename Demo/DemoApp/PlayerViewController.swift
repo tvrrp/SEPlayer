@@ -22,12 +22,12 @@ class PlayerViewController: UIViewController {
     let currentTimeLabel = UILabel()
     let durationLabel = UILabel()
     let seekSlider = UISlider()
+    private var playWhenReadyBeforeSlider = false
 
     let speedGestureRecogniser = UILongPressGestureRecognizer()
     let feedback = UIImpactFeedbackGenerator()
 
     var timer: Timer?
-    var dontUpdateValue = false
 
     init() {
         player = playerFactory.buildPlayer()
@@ -50,6 +50,7 @@ class PlayerViewController: UIViewController {
         super.viewDidDisappear(animated)
         player.stop()
         player.release()
+        timer?.invalidate()
     }
 
     override func viewDidLoad() {
@@ -63,6 +64,7 @@ class PlayerViewController: UIViewController {
         view.addSubview(durationLabel)
         view.addSubview(seekSlider)
 
+        view.backgroundColor = .black
         playButton.translatesAutoresizingMaskIntoConstraints = false
         backwardsButton.translatesAutoresizingMaskIntoConstraints = false
         forwardsButton.translatesAutoresizingMaskIntoConstraints = false
@@ -82,16 +84,21 @@ class PlayerViewController: UIViewController {
         [currentTimeLabel, durationLabel].forEach {
             $0.font = UIFont.monospacedDigitSystemFont(ofSize: UIFont.smallSystemFontSize, weight: .regular)
             $0.textAlignment = .natural
-            $0.numberOfLines = 1
+            $0.numberOfLines = 0
             $0.textColor = .white
             $0.text = "0"
         }
 
         seekSlider.minimumValue = .zero
         seekSlider.value = .zero
+        seekSlider.minimumTrackTintColor = .white
+        seekSlider.maximumTrackTintColor = .gray
         seekSlider.addTarget(self, action: #selector(sliderTouchDown), for: .touchDown)
         seekSlider.addTarget(self, action: #selector(sliderTouchUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         seekSlider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
+        if #available(iOS 26, *) {
+            seekSlider.sliderStyle = .thumbless
+        }
 
         view.addGestureRecognizer(speedGestureRecogniser)
         speedGestureRecogniser.minimumPressDuration = 0.3
@@ -119,45 +126,34 @@ class PlayerViewController: UIViewController {
             forwardsButton.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
             forwardsButton.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: 60),
 
-            currentTimeLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            currentTimeLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            seekSlider.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            seekSlider.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            seekSlider.bottomAnchor.constraint(equalTo: currentTimeLabel.topAnchor),
 
-            durationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            durationLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            currentTimeLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            currentTimeLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32),
 
-            seekSlider.leadingAnchor.constraint(equalTo: currentTimeLabel.trailingAnchor, constant: 12),
-            seekSlider.trailingAnchor.constraint(equalTo: durationLabel.leadingAnchor, constant: -12),
-            seekSlider.centerYAnchor.constraint(equalTo: currentTimeLabel.centerYAnchor)
+            durationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            durationLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
         ])
     }
 
     @objc private func sliderTouchDown(_ sender: UISlider) {
-        dontUpdateValue = true
+        print("🤬 sliderTouchDown")
+        timer?.invalidate()
+        playWhenReadyBeforeSlider = player.playWhenReady
+        player.pause()
     }
 
     @objc private func sliderTouchUp(_ sender: UISlider) {
-        dontUpdateValue = false
         let newTime = Int64(sender.value)
-        print("SEEEEEEEEEEEEEEEK")
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
         player.seek(to: newTime)
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
+        player.playWhenReady = playWhenReadyBeforeSlider
+        updateTime()
     }
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
-        // Optional: show preview or current time label update
+        currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
     }
 
     @objc func handleLongPress(_ sender: UILongPressGestureRecognizer) {
@@ -196,17 +192,19 @@ class PlayerViewController: UIViewController {
     }
 
     @objc func backwardsTap() {
-//        player.seekToPreviousMediaItem()
         player.seekBack()
+        handleTimer()
     }
 
     @objc func forwardsTap() {
-//        player.seekToNextMediaItem()
         player.seekForward()
+        handleTimer()
     }
 
     private func updateTime() {
-        let timer = Timer(timeInterval: 1 / 30, repeats: true, block: { [weak self] _ in
+        timer?.invalidate()
+
+        let timer = Timer(timeInterval: 0.2, repeats: true, block: { [weak self] _ in
             self?.handleTimer()
         })
         self.timer = timer
@@ -220,18 +218,12 @@ class PlayerViewController: UIViewController {
 
     private func handleTimer() {
         let position = player.contentPosition
-        currentTimeLabel.text = "\(position)"
-        if !dontUpdateValue {
-            seekSlider.setValue(Float(position), animated: true)
-        }
+        currentTimeLabel.text = "\(player.bufferedPosition)|\(position)"
+        seekSlider.setValue(Float(position), animated: true)
     }
 
     private func createButtonConfig(imageName: String) -> UIButton.Configuration {
-        var config = if #available(iOS 26, *) {
-            UIButton.Configuration.glass()
-        } else {
-            UIButton.Configuration.plain()
-        }
+        var config = UIButton.Configuration.borderless()
 
         config.image = UIImage(systemName: imageName)?.withTintColor(.white, renderingMode: .alwaysOriginal)
         config.buttonSize = .large
@@ -254,4 +246,3 @@ extension PlayerViewController: SEPlayerDelegate {
         }
     }
 }
-

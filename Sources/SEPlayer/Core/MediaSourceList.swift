@@ -156,7 +156,8 @@ final class MediaSourceList {
     }
 
     func prepare(mediaTransferListener: TransferListener?) throws {
-        guard !isPrepared else { return } // TODO: Throw
+        guard !isPrepared else { assertionFailure(); return }
+
         self.mediaTransferListener = mediaTransferListener
         for holder in mediaSourceHolders {
             prepareChildSource(from: holder)
@@ -173,8 +174,7 @@ final class MediaSourceList {
         let mediaSourceHolderId = mediaSourceHolderId(for: id.periodId)
         let childMediaPeriodId = id.copy(with: childPeriodId(from: id.periodId))
         guard let holder = mediaSourceById[mediaSourceHolderId] else {
-            // TODO: throw
-            fatalError()
+            throw ErrorBuilder(errorDescription: "Holder is missing")
         }
 
         enableMediaSource(holder: holder)

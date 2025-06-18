@@ -166,6 +166,7 @@ class BaseSERenderer: SERenderer {
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
             buffer.time += streamOffset
+            print("😎 \(String(describing: self)) – readSource, time = \(buffer.time)")
             readingPosition = max(readingPosition, buffer.time)
         }
 

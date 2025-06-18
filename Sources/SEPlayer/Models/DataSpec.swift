@@ -43,7 +43,7 @@ extension DataSpec {
     func createURLRequest() -> URLRequest {
         var request = URLRequest(url: url)
 
-        if offset > 0 {
+        if offset > 0 || length > 0 {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             var rangeString = "bytes=\(range.lowerBound)-"
             if length > 0 {

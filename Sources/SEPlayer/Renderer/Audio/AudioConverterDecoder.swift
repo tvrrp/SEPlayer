@@ -324,9 +324,11 @@ final class AudioConverterDecoder: AQDecoder {
                 )
             } else {
                 fatalError()
+                samplesInUse[index] = false
+                return
             }
 
-            try  decompressedSamplesQueue.enqueue(.init(
+            try! decompressedSamplesQueue.enqueue(.init(
                 sampleFlags: sampleFlags,
                 presentationTime: pts.microseconds,
                 audioBuffer: sampleBuffer

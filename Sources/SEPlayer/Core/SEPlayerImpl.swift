@@ -76,7 +76,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
     }
 
     var bufferedPosition: Int64 { queue.sync { contentBufferedPosition } }
-    
+
     var totalBufferedDuration: Int64 { queue.sync { Time.usToMs(timeUs: playbackInfo.totalBufferedDurationUs) } }
 
     var contentPosition: Int64 { queue.sync { contentPositionInternal(playbackInfo: playbackInfo) } }
@@ -374,6 +374,10 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
 
                 mediaSourceHolderSnapshots.insert(contentsOf: itemsToMove, at: finalInsertIndex)
             }
+
+            _shufflerOrder = _shufflerOrder
+                .cloneAndRemove(indexFrom: clampedRange.lowerBound, indexToExclusive: clampedRange.upperBound)
+                .cloneAndInsert(insertionIndex: finalInsertIndex, insertionCount: clampedRange.count)
 
             let newTimeline = createMaskingTimeline()
             let newPlaybackInfo = maskTimelineAndPosition(

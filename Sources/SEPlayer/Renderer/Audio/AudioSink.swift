@@ -25,7 +25,8 @@ protocol IAudioSink: AnyObject {
     func hasPendingData() -> Bool
     func setPlaybackParameters(new playbackParameters: PlaybackParameters)
     func getPlaybackParameters() -> PlaybackParameters
-    func flush()
+//    func flush()
+    func flush(reuse: Bool)
     func reset()
 }
 
@@ -125,7 +126,7 @@ final class AudioSink: IAudioSink {
                 if hasPendingData() {
                     return false
                 }
-                flush()
+                flush(reuse: true)
             } else {
                 configuration = pendingConfiguration
                 self.pendingConfiguration = nil
@@ -179,12 +180,7 @@ final class AudioSink: IAudioSink {
         }
 
         if audioQueuePositionTracker.isStalled(writtenFrames: getWrittenFrames()) {
-            flush()
-            return true
-        }
-
-        if audioQueuePositionTracker.isStalled(writtenFrames: getWrittenFrames()) {
-            flush()
+            flush(reuse: false)
             return true
         }
 
@@ -210,7 +206,7 @@ final class AudioSink: IAudioSink {
     }
 
     private func drainOutputBuffer() throws {
-        guard buffersInUse.contains(false), let outputBuffer else { return }
+        guard buffersInUse[filledBufferIndex] == false, let outputBuffer else { return }
 
         let bytesRemaining = try! outputBuffer.bytesRemaining()
         let bytesWrittenOrOSStatus = try! writeBytesToAudioBuffer(outputBuffer: outputBuffer)
@@ -256,26 +252,44 @@ final class AudioSink: IAudioSink {
     func pause() {
         isPlaying = false
         if let audioQueue, audioQueuePositionTracker.pause() {
-            AudioQueuePause(audioQueue)
+//            AudioQueuePause(audioQueue)
+            pauseAudioQueue()
         }
     }
 
-    func flush() {
+    private func pauseAudioQueue() {
         guard let audioQueue else { return }
+//        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, .zero)
         AudioQueuePause(audioQueue)
+//        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, 1.0)
+    }
+
+    func flush(reuse: Bool) {
+        guard let audioQueue else { return }
+//        AudioQueuePause(audioQueue)
+        pauseAudioQueue()
         resetSinkStateForFlush()
-        if pendingConfiguration != nil {
+        var reuse = reuse
+        if let pendingConfiguration {
+            reuse = reuse && configuration == pendingConfiguration
             configuration = pendingConfiguration
-            pendingConfiguration = nil
+            self.pendingConfiguration = nil
         }
         audioQueuePositionTracker.reset()
         self.audioQueue = nil
         didStartAudioQueue = false
-        releaseAudioQueue(audioQueue: audioQueue)
+
+        switch reuse {
+        case true:
+            let result = AudioQueueReset(audioQueue)
+            if result != noErr { fallthrough }
+        case false:
+            releaseAudioQueue(audioQueue: audioQueue)
+        }
     }
 
     func reset() {
-        flush()
+        flush(reuse: false)
         isPlaying = false
     }
 
@@ -400,7 +414,7 @@ final class AudioSink: IAudioSink {
                 audioQueuePropertyCallback,
                 userData
             )
-//            AudioQueueFlush(audioQueue)
+            AudioQueueFlush(audioQueue)
             AudioQueueStop(audioQueue, true)
             AudioQueueDispose(audioQueue, true)
         }
@@ -493,7 +507,7 @@ private extension AudioSink {
     func handleAudioQueuePropertyCallback(propertyId: AudioQueuePropertyID) {
         switch propertyId {
         case kAudioQueueProperty_IsRunning:
-            print("running")
+             print("running")
 //            startCondition.signal()
         default:
             return
@@ -557,7 +571,7 @@ extension AudioSink {
         }
     }
 
-    struct Configuration {
+    struct Configuration: Equatable {
         var outputFormat: AudioStreamBasicDescription
         let outputMode: OutputMode
         let bufferSize: UInt32
@@ -574,8 +588,7 @@ extension AudioSink {
         }
 
         func canReuseAudioQueue(new configuration: Configuration) -> Bool {
-//            outputFormat == configuration.outputFormat
-            return false
+            outputFormat == configuration.outputFormat
         }
 
         func framesToDuration(frameCount: Int64) -> Int64 {

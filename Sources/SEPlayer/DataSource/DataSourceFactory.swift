@@ -21,9 +21,13 @@ public struct DefaultDataSourceFactory: DataSourceFactory {
     }
 
     public func createDataSource() -> DataSource {
-        DefautlHTTPDataSource(
+        RangeRequestHTTPDataSource(
             queue: loaderQueue,
             networkLoader: networkLoader
         )
+//        DefautlHTTPDataSource(
+//            queue: loaderQueue,
+//            networkLoader: networkLoader
+//        )
     }
 }

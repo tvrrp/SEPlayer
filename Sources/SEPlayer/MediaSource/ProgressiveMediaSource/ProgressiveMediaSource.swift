@@ -83,10 +83,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     }
 
     override func release(mediaPeriod: MediaPeriod) {
-        guard let mediaPeriod = mediaPeriod as? ProgressiveMediaPeriod else {
-            assertionFailure("Wrong media period type"); return
-        }
-        mediaPeriod.release()
+        (mediaPeriod as! ProgressiveMediaPeriod).release()
     }
 
     func sourceInfoRefreshed(durationUs: Int64, seekMap: SeekMap, isLive: Bool) {

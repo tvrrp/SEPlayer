@@ -136,7 +136,7 @@ private extension Loader {
         override func work(_ finish: @escaping () -> Void) {
             do {
                 try loadable.load()
-                completion(nil)
+                completion(isCancelled ? CancellationError() : nil)
             } catch {
                 completion(error)
             }
