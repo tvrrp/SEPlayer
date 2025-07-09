@@ -20,7 +20,7 @@ public final class PlayerBufferableContainer {
         self.displayLink = displayLink
     }
 
-    func prepare(sampleQueue: TypedCMBufferQueue<ImageBufferWrapper>) {
+    func prepare(sampleQueue: TypedCMBufferQueue<ImageBufferWrapper>, action: PlayerBufferableAction) {
         Queues.mainQueue.async { [self] in
             self.sampleQueue = sampleQueue
             lastPixelBuffer = nil

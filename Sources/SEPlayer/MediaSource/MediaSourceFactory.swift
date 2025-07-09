@@ -23,6 +23,7 @@ struct DefaultMediaSourceFactory: MediaSourceFactory {
             loaderQueue: loaderQueue,
             mediaItem: mediaItem,
             dataSourceFactory: dataSourceFactory,
-            extractorsFactory: extractorsFactory)
+            extractorsFactory: extractorsFactory
+        )
     }
 }

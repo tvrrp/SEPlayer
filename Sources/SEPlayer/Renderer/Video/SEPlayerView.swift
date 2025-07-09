@@ -46,6 +46,7 @@ public final class SEPlayerView: UIView {
 extension SEPlayerView: PlayerBufferable {
     public func prepare(for action: PlayerBufferableAction) {
         if action == .reset {
+            currentImageBuffer = nil
             layer.contents = nil
         }
     }

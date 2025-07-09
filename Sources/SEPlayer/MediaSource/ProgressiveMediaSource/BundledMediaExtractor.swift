@@ -21,10 +21,39 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
 
     func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws {
         assert(queue.isCurrent())
-        extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: queue, range: range)
+        let extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: queue, range: range)
+        self.extractorInput = extractorInput
         guard extractor == nil else { return }
         let httpHeaders = (response as? HTTPURLResponse)?.allHeaderFields ?? [:]
-        extractor = extractorsFactory.createExtractors(output: output, url: url, httpHeaders: httpHeaders)[0]
+        let extractors = extractorsFactory.createExtractors(output: output, url: url, httpHeaders: httpHeaders)
+
+        var sniffFailures = [SniffFailure]()
+        if extractors.count == 1 {
+            extractor = extractors[0]
+        } else {
+            for extractor in extractors {
+                func postAction() { extractorInput.resetPeekPosition() }
+
+                do {
+                    if try extractor.shiff(input: extractorInput) {
+                        self.extractor = extractor
+                        postAction()
+                        break
+                    } else {
+                        sniffFailures.append(contentsOf: extractor.getSniffFailureDetails())
+                    }
+                } catch {
+                    // do nothing
+                }
+
+                postAction()
+            }
+
+            if extractor == nil {
+                fatalError("\(sniffFailures)")
+                // TODO: throw error
+            }
+        }
     }
 
     func release() {

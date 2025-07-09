@@ -118,7 +118,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
         try! super.onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
         videoFrameReleaseControl.enable(releaseFirstFrameBeforeStarted: mayRenderStartOfStream)
-        bufferableContainer.prepare(sampleQueue: outputSampleQueue)
+        bufferableContainer.prepare(sampleQueue: outputSampleQueue, action: .reset)
     }
 
     override func enableRenderStartOfStream() {
@@ -234,6 +234,10 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         decoderReinitializationState = .none
         decoderReceivedBuffers = false
         buffersInCodecCount = 0
+        pendingFramesAfterStop.removeAll()
+        try? outputSampleQueue.reset()
+        bufferableContainer.flush()
+        bufferableContainer.prepare(sampleQueue: outputSampleQueue, action: .reset)
 
         if let decoder {
             decoder.release()

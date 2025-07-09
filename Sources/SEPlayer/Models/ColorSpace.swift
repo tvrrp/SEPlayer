@@ -89,3 +89,8 @@ enum ColorTransfer: Int {
         }
     }
 }
+
+enum ColorRange {
+    case limited
+    case full
+}

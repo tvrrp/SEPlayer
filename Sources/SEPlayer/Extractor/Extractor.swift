@@ -6,12 +6,15 @@
 //
 
 public protocol Extractor: AnyObject {
+    func shiff(input: ExtractorInput) throws -> Bool
+    func getSniffFailureDetails() -> [SniffFailure]
     func read(input: ExtractorInput) throws -> ExtractorReadResult
     func seek(to position: Int, timeUs: Int64)
     func release()
 }
 
-extension Extractor {
+public extension Extractor {
+    func getSniffFailureDetails() -> [SniffFailure] { [] }
     func release() {}
 }
 
@@ -19,7 +22,6 @@ public enum ExtractorReadResult: Equatable {
     case continueRead
     case endOfInput
     case seek(offset: Int)
-    case error(Error)
 
     public static func == (lhs: ExtractorReadResult, rhs: ExtractorReadResult) -> Bool {
         switch (lhs, rhs) {
@@ -28,8 +30,6 @@ public enum ExtractorReadResult: Equatable {
         case (.endOfInput, .endOfInput):
             return true
         case (.seek(_), .seek(_)):
-            return true
-        case (.error(_), .error(_)):
             return true
         default:
             return false

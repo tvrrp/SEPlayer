@@ -597,9 +597,10 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         }
 
         if playbackInfo.loadingMediaPeriodId.windowSequenceNumber != playbackInfo.periodId.windowSequenceNumber {
-            return playbackInfo.timeline.getWindow(windowIndex: currentMediaItemIndex, window: &window).durationUs
+            let timeUs = playbackInfo.timeline.getWindow(windowIndex: currentMediaItemIndex, window: &window).durationUs
+            return Time.usToMs(timeUs: timeUs)
         }
-        
+
         return Time.usToMs(timeUs: periodPositionUs(
             to: playbackInfo.bufferedPositionUs,
             timeline: playbackInfo.timeline,

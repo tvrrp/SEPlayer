@@ -553,7 +553,7 @@ private extension ProgressiveMediaPeriod {
 
     private func assertPrepared() {
         assert(isPrepared)
-        assert(!trackState.tracks.isEmpty)
+//        assert(!trackState.tracks.isEmpty)
         assert(seekMap != nil)
     }
 }

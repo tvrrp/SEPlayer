@@ -15,8 +15,9 @@ struct Track {
     let movieTimescale: Int64
     let durationUs: Int64
     let mediaDurationUs: Int64
-    let editList: BoxParser.EdtsData?
-//    let format2: Format
+    let editListDurations: [Int64]?
+    let editListMediaTimes: [Int64]?
+    var format2: Format
 
     enum TrackFormat {
         case video(CMVideoFormatDescription)

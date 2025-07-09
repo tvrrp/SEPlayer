@@ -31,11 +31,21 @@ final class ViewController: UIViewController {
 }
 
 struct UrlListScreen: View {
-    // MARK: – Входные данные
     weak var hostViewController: UIViewController?
-    
-    // MARK: – Состояние
+
     @State private var urls: [String] = [
+        "https://download.dolby.com/us/en/test-tones/dolby-atmos-trailer_amaze_1080.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_3.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_4.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_5.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_6.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_7.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_8.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_9.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_10.mp4",
+        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_11.mp4",
         "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
         "https://html5demos.com/assets/dizzy.mp4",
         "https://streams.videolan.org/streams/mp4/GHOST_IN_THE_SHELL_V5_DOLBY%20-%203.m4v",
@@ -49,7 +59,7 @@ struct UrlListScreen: View {
         NavigationView {
             VStack(spacing: 0) {
                 
-                // Верхняя строка ввода + “Add”
+
                 HStack {
                     TextField("Enter URL", text: $newUrl)
                         .textFieldStyle(.roundedBorder)
@@ -80,8 +90,7 @@ struct UrlListScreen: View {
                     .onMove(perform: move)
                 }
                 .listStyle(.plain)
-                
-                // Кнопка “Play”
+
                 Button("Play") {
                     openPlayer(urls: urls)
                 }
@@ -92,8 +101,6 @@ struct UrlListScreen: View {
             .toolbar { EditButton() }
         }
     }
-    
-    // MARK: – Действия
 
     private func addUrl() {
         let trimmed = newUrl.trimmingCharacters(in: .whitespacesAndNewlines)

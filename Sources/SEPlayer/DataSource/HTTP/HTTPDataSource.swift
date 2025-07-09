@@ -55,6 +55,7 @@ final class DefautlHTTPDataSource: DataSource {
         currentReadTimeout =  Date().timeIntervalSince1970
     }
 
+    @discardableResult
     func open(dataSpec: DataSpec) throws -> Int {
         assert(queue.isCurrent())
         operation.close()

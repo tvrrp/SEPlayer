@@ -8,19 +8,50 @@
 import Foundation
 
 enum Util {
-    @inlinable
+    @inline(__always)
+    static func binarySearchCeil<T: Comparable>(array: [T], value: T, inclusive: Bool, stayInBounds: Bool) -> Int {
+        var index = array.binarySearch(value: value)
+
+        if index < 0 {
+            index = ~index
+        } else {
+            while index + 1 < array.count && array[index + 1] == value {
+                index += 1
+            }
+            if inclusive { index -= 1 }
+        }
+
+        return stayInBounds ? min(array.count - 1, index) : index
+    }
+
+    @inline(__always)
+    static func binarySearch<T: Comparable>(array: [T], value: T, inclusive: Bool, stayInBounds: Bool) -> Int {
+        var index = array.binarySearch(value: value)
+
+        if index < 0 {
+            index = -(index + 2)
+        } else {
+            while index > 0 && array[index - 1] == value {
+                index -= 1
+            }
+            if inclusive { index += 1 }
+        }
+
+        return stayInBounds ? max(0, index) : index
+    }
+
+    @inline(__always)
     static func scaleLargeTimestamp(_ timestamp: Int64, multiplier: Int64, divisor: Int64) -> Int64 {
         scaleLargeValue(timestamp, multiplier: multiplier, divisor: divisor, roundingMode: .down)
     }
 
-    @inlinable
+    @inline(__always)
     static func scaleLargeValue(
         _ value: Int64,
         multiplier: Int64,
         divisor: Int64,
         roundingMode: RoundingMode
     ) -> Int64 {
-
         guard value != 0, multiplier != 0 else { return 0 }
 
         if divisor >= multiplier, divisor % multiplier == 0 {
@@ -56,14 +87,13 @@ extension Util {
         case unnecessary
     }
 
+    @inline(__always)
     private static func scaleLargeValueFallback(
         _ value: Int64,
         multiplier: Int64,
         divisor: Int64,
         roundingMode: RoundingMode
     ) -> Int64 {
-
-        // Use Foundation.Decimal (128-bit BCD) to keep full precision.
         let decimalResult = (Decimal(value) * Decimal(multiplier)) / Decimal(divisor)
 
         let rounded: Decimal = {
@@ -71,9 +101,9 @@ extension Util {
             var result = Decimal()
             let mode: NSDecimalNumber.RoundingMode = {
                 switch roundingMode {
-                case .down:        return .down          // toward zero
-                case .up:          return .up            // away from zero
-                case .unnecessary: return .plain         // we’ll check below
+                case .down:        return .down
+                case .up:          return .up
+                case .unnecessary: return .plain
                 }
             }()
             NSDecimalRound(&result, &tmp, 0, mode)
@@ -123,5 +153,26 @@ private extension Int64 {
         guard overflow else { return result }
 
         return (lhs ^ rhs) >= 0 ? .max : .min
+    }
+}
+
+private extension Array where Element: Comparable {
+    @inline(__always)
+    func binarySearch(value: Element) -> Int {
+        var low = 0
+        var high = count - 1
+
+        while low <= high {
+            let mid = (low + high) >> 1
+            if self[mid] < value {
+                low = mid + 1
+            } else if self[mid] > value {
+                high = mid - 1
+            } else {
+                return mid
+            }
+        }
+
+        return -(low + 1)
     }
 }

@@ -429,6 +429,7 @@ final class SEPlayerImplInternal {
         maybeNotifyPlaybackInfoChanged()
     }
 
+    @discardableResult
     func release() -> Bool {
         assert(queue.isCurrent())
         guard !released || !timer.isCancelled else {
@@ -1152,7 +1153,7 @@ private extension SEPlayerImplInternal {
                 playWhenReady: playbackInfo.playWhenReady
             )
         }
-        
+
         updateLoadControlTrackSelection(
             mediaPeriodId: loadingPeriodHolder.info.id,
             trackGroups: loadingPeriodHolder.trackGroups,
@@ -2274,7 +2275,7 @@ extension SEPlayerImplInternal {
         let windowIndex: Int
         let windowPositionUs: Int64
     }
-    
+
     private struct PositionUpdateForPlaylistChange {
         let periodId: MediaPeriodId
         let periodPositionUs: Int64

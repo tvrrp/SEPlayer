@@ -286,7 +286,10 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
 
         nextBufferToWritePresentationTime = nil
         if audioTrackNeedsConfigure {
-            try! audioSink.configure(inputFormat: inputFormat)
+            try! audioSink.configure(
+                inputFormat: inputFormat,
+                channelLayout: sampleBuffer.formatDescription?.audioChannelLayout
+            )
             audioTrackNeedsConfigure = false
         }
 

@@ -202,11 +202,10 @@ final class DefaltExtractorInput: ExtractorInput {
             return false
         }
 
-        peekBuffer.moveReaderIndex(to: peekBufferLength)
+        peekBuffer.moveReaderIndex(to: peekBufferPosition - length)
         guard var slice = peekBuffer.readSlice(length: length) else {
             return false
         }
-        var buffer = buffer
         buffer.moveWriterIndex(to: offset)
         buffer.writeBuffer(&slice)
 
@@ -239,6 +238,7 @@ final class DefaltExtractorInput: ExtractorInput {
     func resetPeekPosition() {
         assert(queue.isCurrent())
         peekBufferPosition = 0
+        peekBuffer.moveReaderIndex(to: .zero)
     }
 
     func getPeekPosition() -> Int {
@@ -265,6 +265,7 @@ final class DefaltExtractorInput: ExtractorInput {
 private extension DefaltExtractorInput {
     private func skipFromPeekBuffer(length: Int) -> Int {
         let skipped = min(peekBufferLength, length)
+        peekBuffer.moveReaderIndex(forwardBy: skipped)
         updatePeekBuffer(consumed: skipped)
         return skipped
     }
@@ -286,6 +287,7 @@ private extension DefaltExtractorInput {
     private func updatePeekBuffer(consumed: Int) {
         peekBufferLength -= consumed
         peekBufferPosition = 0
+        peekBuffer.discardReadBytes()
     }
 
     private func readFromUpstream(

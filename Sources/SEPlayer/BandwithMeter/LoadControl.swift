@@ -207,12 +207,12 @@ final class DefaultLoadControl: LoadControl {
 
 extension DefaultLoadControl {
     public enum DefaultConstants {
-        static let minBufferMs: Int64 = 10000
-        static let maxBufferMs: Int64 = 50000
-        static let bufferForPlaybackMs: Int64 = 1000
-        static let bufferForPlaybackAfterRebuffer: Int64 = 5000
-        static let backBufferDurationMs: Int64 = 1000
-        static let retainBackBufferFromKeyframe: Bool = true
+        public static let minBufferMs: Int64 = 10000
+        public static let maxBufferMs: Int64 = 50000
+        public static let bufferForPlaybackMs: Int64 = 1000
+        public static let bufferForPlaybackAfterRebuffer: Int64 = 5000
+        public static let backBufferDurationMs: Int64 = 15000
+        public static let retainBackBufferFromKeyframe: Bool = true
     }
 
     private struct PlayerLoadingState {

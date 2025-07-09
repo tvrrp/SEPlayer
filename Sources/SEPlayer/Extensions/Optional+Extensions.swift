@@ -13,7 +13,7 @@ extension Optional {
 
     mutating func withTransform<T>(_ transform: (inout Wrapped) throws -> T) rethrows -> T? {
         if var value = self {
-            let result = try! transform(&value)
+            let result = try transform(&value)
             self = value
             return result
         }

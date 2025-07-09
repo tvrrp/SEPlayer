@@ -12,6 +12,7 @@ final class MP4Extractor: Extractor {
     private let extractorOutput: ExtractorOutput
     private let boxParser = BoxParser()
 
+    private var lastSniffFailures = [SniffFailure]()
     private var parserState: State = .readingAtomHeader
     private var bytesToEnqueue: Int = MP4Box.headerSize
 
@@ -36,6 +37,20 @@ final class MP4Extractor: Extractor {
         self.queue = queue
         self.extractorOutput = extractorOutput
         self.atomHeader = ByteBuffer()
+    }
+
+    func shiff(input: any ExtractorInput) throws -> Bool {
+        assert(queue.isCurrent())
+        let sniffer = Sniffer()
+        let result = try sniffer.sniffUnfragmented(input: input, acceptHeic: false)
+        lastSniffFailures = [result].compactMap { $0 }
+
+        return result == nil
+    }
+
+    func getSniffFailureDetails() -> [any SniffFailure] {
+        assert(queue.isCurrent())
+        return lastSniffFailures
     }
 
     func read(input: any ExtractorInput) throws -> ExtractorReadResult {
@@ -190,7 +205,7 @@ private extension MP4Extractor {
             if let boxType = MP4Box.BoxType(rawValue: atomType) {
                 throw BoxParser.BoxParserErrors.badBoxContent(type: boxType, reason: reason)
             } else {
-                throw ErrorBuilder(errorDescription: reason)
+                throw ParserException(unsupportedContainerFeature: reason)
             }
         }
 
@@ -311,8 +326,10 @@ private extension MP4Extractor {
 //            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
 //        )
 
+        var gaplessInfoHolder = GaplessInfoHolder()
         let trackSampleTables = try! boxParser.parseTraks(
             moov: moov,
+            gaplessInfoHolder: &gaplessInfoHolder,
             duration: .timeUnset,
             ignoreEditLists: false,
             isQuickTime: false

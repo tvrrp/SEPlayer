@@ -7,10 +7,7 @@
 
 public struct SampleFlags: OptionSet {
     public let rawValue: UInt8
-    
-    public init(rawValue: UInt8) {
-        self.rawValue = rawValue
-    }
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
 
     public static let keyframe = SampleFlags(rawValue: 1)
     public static let endOfStream = SampleFlags(rawValue: 1 << 1)

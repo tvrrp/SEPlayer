@@ -48,19 +48,27 @@ struct DefaultTrackSelector: TrackSelector {
         periodId: MediaPeriodId,
         timeline: Timeline
     ) -> TrackSelectionResult {
-        let updatedGroups: [TrackGroup] = trackGroups.map { group -> (Int, TrackGroup)? in
-            if let index = findRenderer(rendererCapabilities: rendererCapabilities, group: group) {
-                return (index, group)
+        var updatedGroups: [TrackGroup?] = Array(repeating: nil, count: rendererCapabilities.count)
+
+        for (index, rendererCapability) in rendererCapabilities.enumerated() {
+            for group in trackGroups {
+                if rendererSupported(rendererCapability, group: group) {
+                    updatedGroups[index] = group
+                }
             }
-            return nil
         }
-        .compactMap { $0 }
-        .sorted(by: { $0.0 < $1.0 })
-        .map { $0.1 }
+
+        let selections: [SETrackSelection?] = updatedGroups.map { trackGroup in
+            if let trackGroup {
+                return FixedTrackSelection(trackGroup: trackGroup)
+            } else {
+                return nil
+            }
+        }
 
         return TrackSelectionResult(
             renderersConfig: updatedGroups.map { _ in true },
-            selections: updatedGroups.map { FixedTrackSelection(trackGroup: $0) },
+            selections: selections,
             tracks: Tracks.empty
         )
     }
@@ -75,6 +83,16 @@ struct DefaultTrackSelector: TrackSelector {
         }
 
         return nil
+    }
+
+    func rendererSupported(_ rendererCapability: RendererCapabilities, group: TrackGroup) -> Bool {
+        for format in group.formats {
+            if rendererCapability.supportsFormat(format) {
+                return true
+            }
+        }
+
+        return false
     }
 
     func supportsFormat(rendererCapabilities: RendererCapabilities, trackGroup: TrackGroup) -> [Bool] {

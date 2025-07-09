@@ -11,6 +11,7 @@ import CoreMedia.CMBlockBuffer
 final class AudioConverterDecoder: AQDecoder {
     private let queue: Queue
     private var sourceFormat: AudioStreamBasicDescription
+    private var sourceChannelLayout: ManagedAudioChannelLayout?
     private var destinationFormat: AudioStreamBasicDescription
     private let decompressedSamplesQueue: TypedCMBufferQueue<AudioSampleWrapper>
     private var audioConverter: AudioConverterRef?
@@ -33,6 +34,7 @@ final class AudioConverterDecoder: AQDecoder {
         guard let sourceFormat = formatDescription.audioStreamBasicDescription else { fatalError() }
         self.queue = queue
         self.sourceFormat = sourceFormat
+        self.sourceChannelLayout = formatDescription.audioChannelLayout
         destinationFormat = AudioStreamBasicDescription(
             format: .pcmInt16,
             sampleRate: sourceFormat.mSampleRate,
@@ -208,7 +210,7 @@ final class AudioConverterDecoder: AQDecoder {
         outputBufferList[0].mNumberChannels = destinationFormat.mChannelsPerFrame
         outputBufferList[0].mDataByteSize = UInt32(individualBufferSize)
         outputBufferList[0].mData = decodedSamples[index]
-        var pointer = outputBufferList.unsafeMutablePointer
+        let pointer = outputBufferList.unsafeMutablePointer
 
         do {
             let result = try! sampleBuffer.withUnsafeAudioStreamPacketDescriptions { description in
@@ -218,7 +220,7 @@ final class AudioConverterDecoder: AQDecoder {
                     descriptionPointer.initialize(to: description[0])
 
                     var dataObject = DataObject(
-                        bufferList: audioBuffer.unsafeMutablePointer,
+                        bufferList: audioBuffer,
                         packetDescription: descriptionPointer
                     )
 
@@ -274,14 +276,17 @@ final class AudioConverterDecoder: AQDecoder {
             return AudioConverterErrors.Status.custom_nilDataObjectPointer.rawValue
         }
 
+        let ioDataPointer = UnsafeMutableAudioBufferListPointer(ioData)
         guard !dataObject.pointee.didReadData else {
             dataPacketsCount.pointee = 0
-            ioData.pointee.mBuffers.mDataByteSize = 0
+            ioDataPointer[0].mDataByteSize = 0
             return AudioConverterErrors.Status.custom_noMoreData.rawValue
         }
 
         outDataPktDesc?.pointee = dataObject.pointee.packetDescription
-        ioData.pointee = dataObject.pointee.bufferList.pointee
+        ioDataPointer[0].mData = dataObject.pointee.bufferList[0].mData
+        ioDataPointer[0].mDataByteSize = dataObject.pointee.bufferList[0].mDataByteSize
+        ioDataPointer[0].mNumberChannels = dataObject.pointee.bufferList[0].mNumberChannels
 
         dataObject.pointee.didReadData = true
         dataPacketsCount.pointee = 1
@@ -290,7 +295,10 @@ final class AudioConverterDecoder: AQDecoder {
 
     func handleSample(index: Int, itemsCount: Int, pts: CMTime, sampleFlags: SampleFlags) {
         do {
-            let formatDescription = try! CMFormatDescription(audioStreamBasicDescription: destinationFormat)
+            let formatDescription = try! CMFormatDescription(
+                audioStreamBasicDescription: destinationFormat,
+                layout: sourceChannelLayout
+            )
             let sampleBuffer: CMSampleBuffer
 
             if itemsCount > 0 {
@@ -343,7 +351,7 @@ final class AudioConverterDecoder: AQDecoder {
 
 extension AudioConverterDecoder {
     private struct DataObject {
-        let bufferList: UnsafeMutablePointer<AudioBufferList>
+        let bufferList: UnsafeMutableAudioBufferListPointer//UnsafeMutablePointer<AudioBufferList>
         let packetDescription: UnsafeMutablePointer<AudioStreamPacketDescription>
         var didReadData: Bool = false
         var error: Error?
@@ -354,7 +362,7 @@ struct AudioConverterRendererCapabilities: RendererCapabilities {
     let trackType: TrackType = .audio
 
     func supportsFormat(_ format: CMFormatDescription) -> Bool {
-        guard var sourceFormat = format.audioStreamBasicDescription else {
+        guard format.mediaType == .audio, var sourceFormat = format.audioStreamBasicDescription else {
             return false
         }
         var destinationFormat = AudioStreamBasicDescription(

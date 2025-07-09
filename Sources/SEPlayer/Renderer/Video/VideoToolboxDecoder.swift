@@ -128,7 +128,7 @@ final class VideoToolboxDecoder: SEDecoder {
         if let decompressionSession {
             VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
         }
-        try! decompressedSamplesQueue.reset()
+        try decompressedSamplesQueue.reset()
         _isDecodingSample = false
         _framedBeingDecoded = 0
         _pendingSamples.removeAll()
@@ -145,6 +145,7 @@ final class VideoToolboxDecoder: SEDecoder {
             VTDecompressionSessionInvalidate(decompressionSession)
             self.decompressionSession = nil
         }
+        try? decompressedSamplesQueue.reset()
         buffers.forEach { $0.deallocate() }
     }
 

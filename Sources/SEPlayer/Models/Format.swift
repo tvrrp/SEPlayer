@@ -6,8 +6,15 @@
 //
 
 import Foundation
+import CoreMedia
 
-struct Format: Hashable {
+extension Format {
+    protocol InitializationData: Hashable {
+        func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription
+    }
+}
+
+struct Format {
     let id: String?
     let label: String?
     let labels: [String]
@@ -15,7 +22,6 @@ struct Format: Hashable {
     let averageBitrate: Int
     let peakBitrate: Int
     let codecs: String?
-//    let customData: Any?
 
     // Container specific.
     let containerMimeType: String?
@@ -24,18 +30,16 @@ struct Format: Hashable {
     let sampleMimeType: String?
     let maxInputSize: Int
     let maxNumReorderSamples: Int
-    let initializationData: Data?
+    let initializationData: InitializationData?
     let subsampleOffsetUs: Int64
     let hasPrerollSamples: Bool
 
     // Video specific.
-    let size: CGSize
+    let width: Int
+    let height: Int
     let frameRate: Float
     let rotationDegrees: Int
     let pixelWidthHeightRatio: Float
-    let projectionData: Data?
-    // let stereoMode: StereoMode
-    // let colorInfo: ColorInfo
     let maxSubLayers: Int
 
     // Audio specific.
@@ -53,7 +57,6 @@ struct Format: Hashable {
         averageBitrate = builder.averageBitrate
         peakBitrate = builder.peakBitrate
         codecs = builder.codecs
-//        customData = builder.customData
         // Container specific.
         containerMimeType = builder.containerMimeType
         // Sample specific.
@@ -64,11 +67,11 @@ struct Format: Hashable {
         subsampleOffsetUs = builder.subsampleOffsetUs
         hasPrerollSamples = builder.hasPrerollSamples
         // Video specific.
-        size = builder.size
+        width = builder.width
+        height = builder.height
         frameRate = builder.frameRate
         rotationDegrees = builder.rotationDegrees
         pixelWidthHeightRatio = builder.pixelWidthHeightRatio
-        projectionData = builder.projectionData
         maxSubLayers = builder.maxSubLayers
         // Audio specific.
         channelCount = builder.channelCount
@@ -78,11 +81,69 @@ struct Format: Hashable {
     }
 
     func buildUpon() -> Builder { Builder(format: self) }
+
+    func buildFormatDescription() throws -> CMFormatDescription? {
+        try initializationData?.buildCMFormatDescription(using: self)
+    }
 }
 
 extension Format {
     static let noValue: Int = -1
     static let offsetSampleRelative = Int64.max
+}
+
+extension Format: Hashable {
+    static func == (lhs: Format, rhs: Format) -> Bool {
+        return lhs.id == rhs.id &&
+            lhs.label == rhs.label &&
+            lhs.labels == rhs.labels &&
+            lhs.language == rhs.language &&
+            lhs.averageBitrate == rhs.averageBitrate &&
+            lhs.peakBitrate == rhs.peakBitrate &&
+            lhs.codecs == rhs.codecs &&
+            lhs.containerMimeType == rhs.containerMimeType &&
+            lhs.sampleMimeType == rhs.sampleMimeType &&
+            lhs.maxInputSize == rhs.maxInputSize &&
+            lhs.maxNumReorderSamples == rhs.maxNumReorderSamples &&
+            lhs.subsampleOffsetUs == rhs.subsampleOffsetUs &&
+            lhs.hasPrerollSamples == rhs.hasPrerollSamples &&
+            lhs.width == rhs.width &&
+            lhs.height == rhs.height &&
+            lhs.frameRate == rhs.frameRate &&
+            lhs.rotationDegrees == rhs.rotationDegrees &&
+            lhs.pixelWidthHeightRatio == rhs.pixelWidthHeightRatio &&
+            lhs.maxSubLayers == rhs.maxSubLayers &&
+            lhs.channelCount == rhs.channelCount &&
+            lhs.sampleRate == rhs.sampleRate &&
+            lhs.encoderDelay == rhs.encoderDelay &&
+            lhs.encoderPadding == rhs.encoderPadding
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(label)
+        hasher.combine(labels)
+        hasher.combine(language)
+        hasher.combine(averageBitrate)
+        hasher.combine(peakBitrate)
+        hasher.combine(codecs)
+        hasher.combine(containerMimeType)
+        hasher.combine(sampleMimeType)
+        hasher.combine(maxInputSize)
+        hasher.combine(maxNumReorderSamples)
+        hasher.combine(subsampleOffsetUs)
+        hasher.combine(hasPrerollSamples)
+        hasher.combine(width)
+        hasher.combine(height)
+        hasher.combine(frameRate)
+        hasher.combine(rotationDegrees)
+        hasher.combine(pixelWidthHeightRatio)
+        hasher.combine(maxSubLayers)
+        hasher.combine(channelCount)
+        hasher.combine(sampleRate)
+        hasher.combine(encoderDelay)
+        hasher.combine(encoderPadding)
+    }
 }
 
 extension Format {
@@ -94,7 +155,6 @@ extension Format {
         fileprivate var averageBitrate: Int
         fileprivate var peakBitrate: Int
         fileprivate var codecs: String?
-//        private var customData: Any?
 
         // Container specific.
         fileprivate var containerMimeType: String?
@@ -103,18 +163,16 @@ extension Format {
         fileprivate var sampleMimeType: String?
         fileprivate var maxInputSize: Int
         fileprivate var maxNumReorderSamples: Int
-        fileprivate var initializationData: Data?
+        fileprivate var initializationData: InitializationData?
         fileprivate var subsampleOffsetUs: Int64
         fileprivate var hasPrerollSamples: Bool
 
         // Video specific.
-        fileprivate var size: CGSize
+        fileprivate var width: Int
+        fileprivate var height: Int
         fileprivate var frameRate: Float
         fileprivate var rotationDegrees: Int
         fileprivate var pixelWidthHeightRatio: Float
-        fileprivate var projectionData: Data?
-        // private(set) var stereoMode: StereoMode
-        // private(set) var colorInfo: ColorInfo
         fileprivate var maxSubLayers: Int
 
         // Audio specific.
@@ -134,7 +192,8 @@ extension Format {
             subsampleOffsetUs = Format.offsetSampleRelative
             hasPrerollSamples = false
             // Video specific.
-            size = CGSize(width: Format.noValue, height: Format.noValue)
+            width = Format.noValue
+            height = Format.noValue
             frameRate = Float(Format.noValue)
             rotationDegrees = .zero
             pixelWidthHeightRatio = 1.0
@@ -155,7 +214,6 @@ extension Format {
             averageBitrate = format.averageBitrate
             peakBitrate = format.peakBitrate
             codecs = format.codecs
-//            customData = format.customData
             // Container specific.
             containerMimeType = format.containerMimeType
             // Sample specific.
@@ -166,11 +224,11 @@ extension Format {
             subsampleOffsetUs = format.subsampleOffsetUs
             hasPrerollSamples = format.hasPrerollSamples
             // Video specific.
-            size = format.size
+            width = format.width
+            height = format.height
             frameRate = format.frameRate
             rotationDegrees = format.rotationDegrees
             pixelWidthHeightRatio = format.pixelWidthHeightRatio
-            projectionData = format.projectionData
             maxSubLayers = format.maxSubLayers
             // Audio specific.
             channelCount = format.channelCount
@@ -180,9 +238,9 @@ extension Format {
         }
 
         @discardableResult
-        func setId(_ id: String?) -> Builder {
+        func setId(_ id: Int) -> Builder {
             var value = self
-            value.id = id
+            value.id = String(id)
             return value
         }
 
@@ -228,13 +286,6 @@ extension Format {
             return value
         }
 
-//        @discardableResult
-//        func setCustomData(_ customData: Any?) -> Builder {
-//            var value = self
-//            value.customData = customData
-//            return value
-//        }
-
         // Container specific
         @discardableResult
         func setContainerMimeType(_ containerMimeType: String?) -> Builder {
@@ -266,7 +317,7 @@ extension Format {
         }
 
         @discardableResult
-        func setInitializationData(_ initializationData: Data?) -> Builder {
+        func setInitializationData(_ initializationData: InitializationData?) -> Builder {
             var value = self
             value.initializationData = initializationData
             return value
@@ -288,9 +339,10 @@ extension Format {
 
         // Video specific
         @discardableResult
-        func setSize(_ size: CGSize) -> Builder {
+        func setSize(width: Int, height: Int) -> Builder {
             var value = self
-            value.size = size
+            value.width = width
+            value.height = height
             return value
         }
 
@@ -312,13 +364,6 @@ extension Format {
         func setPixelWidthHeightRatio(_ ratio: Float) -> Builder {
             var value = self
             value.pixelWidthHeightRatio = ratio
-            return value
-        }
-
-        @discardableResult
-        func setProjectionData(_ projectionData: Data?) -> Builder {
-            var value = self
-            value.projectionData = projectionData
             return value
         }
 

@@ -61,5 +61,5 @@ extension SeekParameters {
     public static let closestSync = SeekParameters(toleranceBeforeUs: .max, toleranceAfterUs: .max)
     public static let previousSync = SeekParameters(toleranceBeforeUs: .max, toleranceAfterUs: .zero)
     public static let nextSync = SeekParameters(toleranceBeforeUs: .zero, toleranceAfterUs: .max)
-    public static let `default` = exact
+    public static let `default` = closestSync
 }

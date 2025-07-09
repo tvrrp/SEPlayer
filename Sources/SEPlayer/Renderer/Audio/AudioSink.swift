@@ -15,7 +15,7 @@ protocol AudioSinkDelegate: AnyObject {
 protocol IAudioSink: AnyObject {
     var delegate: AudioSinkDelegate? { get set }
     func getPosition() -> Int64?
-    func configure(inputFormat: AudioStreamBasicDescription) throws
+    func configure(inputFormat: AudioStreamBasicDescription, channelLayout: ManagedAudioChannelLayout?) throws
     func play()
     func pause()
     func handleDiscontinuity()
@@ -87,8 +87,11 @@ final class AudioSink: IAudioSink {
         return applyMediaPositionParameters(position: position)
     }
 
-    func configure(inputFormat: AudioStreamBasicDescription) throws {
-        let pendingConfiguration = Configuration(outputFormat: inputFormat)
+    func configure(
+        inputFormat: AudioStreamBasicDescription,
+        channelLayout: ManagedAudioChannelLayout?
+    ) throws {
+        let pendingConfiguration = Configuration(outputFormat: inputFormat, channelLayout: channelLayout)
         if audioQueue != nil {
             self.pendingConfiguration = pendingConfiguration
         } else {
@@ -457,7 +460,6 @@ private extension AudioSink {
         }
 
         var enableTimePitchConversion: UInt32 = 1
-
         let timePitchStatus = AudioQueueSetProperty(
             audioQueue,
             kAudioQueueProperty_EnableTimePitch,
@@ -467,6 +469,34 @@ private extension AudioSink {
 
         if timePitchStatus != noErr {
             throw AudioQueueErrors.osStatus(.init(rawValue: timePitchStatus), timePitchStatus)
+        }
+
+        var timePitchAlgorithm = kAudioQueueTimePitchAlgorithm_TimeDomain
+        let timePitchAlgorithmStatus = AudioQueueSetProperty(
+            audioQueue,
+            kAudioQueueProperty_TimePitchAlgorithm,
+            &timePitchAlgorithm,
+            UInt32(MemoryLayout.size(ofValue: timePitchAlgorithm))
+        )
+
+        if timePitchAlgorithmStatus != noErr {
+            throw AudioQueueErrors.osStatus(.init(rawValue: timePitchAlgorithmStatus), timePitchAlgorithmStatus)
+        }
+
+        if var audioChannelLayout = configuration.channelLayout {
+            let audioChanellStatus = try audioChannelLayout.withUnsafeMutablePointer { channelLayout in
+                let size = UInt32(MemoryLayout.size(ofValue: channelLayout.pointee))
+                return AudioQueueSetProperty(
+                    audioQueue,
+                    kAudioQueueProperty_ChannelLayout,
+                    channelLayout,
+                    size
+                )
+            }
+
+            if audioChanellStatus != noErr {
+                throw AudioQueueErrors.osStatus(.init(rawValue: audioChanellStatus), audioChanellStatus)
+            }
         }
 
         let propertyStatus = AudioQueueAddPropertyListener(
@@ -573,6 +603,7 @@ extension AudioSink {
 
     struct Configuration: Equatable {
         var outputFormat: AudioStreamBasicDescription
+        var channelLayout: ManagedAudioChannelLayout?
         let outputMode: OutputMode
         let bufferSize: UInt32
 
@@ -581,8 +612,13 @@ extension AudioSink {
             case passthrough
         }
 
-        init(outputFormat: AudioStreamBasicDescription, bufferSize: UInt32? = nil) {
+        init(
+            outputFormat: AudioStreamBasicDescription,
+            channelLayout: ManagedAudioChannelLayout?,
+            bufferSize: UInt32? = nil
+        ) {
             self.outputFormat = outputFormat
+            self.channelLayout = channelLayout
             self.outputMode = outputFormat.mFormatID == kAudioFormatLinearPCM ? .pcm : .passthrough
             self.bufferSize = bufferSize ?? UInt32(outputFormat.mBytesPerPacket * outputFormat.mChannelsPerFrame * 1024)
         }

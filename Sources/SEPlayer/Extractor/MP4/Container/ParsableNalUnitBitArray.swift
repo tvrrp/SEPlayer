@@ -6,13 +6,13 @@
 //
 
 struct ParsableNalUnitBitArray {
-    private let data: [UInt8]
+    private let data: ByteBufferView
 
     private var byteLimit: Int
     private var byteOffset: Int
     private var bitOffset: Int
 
-    init(data: [UInt8], offset: Int = 0, limit: Int? = nil) throws {
+    init(data: ByteBufferView, offset: Int = 0, limit: Int? = nil) throws {
         let end = limit ?? data.count
         guard offset >= 0, end <= data.count, offset <= end else {
             throw Error.invalidOffset

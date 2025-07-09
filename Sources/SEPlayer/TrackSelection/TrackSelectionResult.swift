@@ -11,7 +11,7 @@ struct TrackSelectionResult: Equatable {
     let renderersConfig: [Bool?]
     let selections: [SETrackSelection?]
     let tracks: Tracks
-    
+
     static func == (lhs: TrackSelectionResult, rhs: TrackSelectionResult) -> Bool {
         guard lhs.selections.count == rhs.selections.count else { return false }
 
