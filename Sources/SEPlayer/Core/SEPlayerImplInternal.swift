@@ -6,15 +6,41 @@
 //
 
 import CoreMedia.CMSync
+import UIKit
 
 protocol SEPlayerImplInternalDelegate: AnyObject {
     func onPlaybackInfoUpdate(playbackInfoUpdate: SEPlayerImplInternal.PlaybackInfoUpdate)
 }
 
-final class SEPlayerImplInternal {
+final class SEPlayerImplInternal: @unchecked Sendable {
     weak var playbackInfoUpdateListener: SEPlayerImplInternalDelegate?
 
     let identifier: UUID
+
+    var volume: Float {
+        get { _volume }
+        set {
+            _volume = volume
+            renderers.forEach { $0.volume = newValue }
+        }
+    }
+
+    var isMuted: Bool {
+        get { _isMuted }
+        set {
+            if _isMuted != newValue {
+                renderers.forEach { $0.volume = newValue ? .zero : _volume }
+            }
+
+            _isMuted = newValue
+
+            audioSessionManager.setPrefferedStrategy(
+                strategy: newValue ? .mixWithOthers : .playback,
+                for: identifier
+            )
+
+        }
+    }
 
     private let queue: Queue
     private let renderers: [RenderersHolder]
@@ -24,7 +50,8 @@ final class SEPlayerImplInternal {
     private let emptyTrackSelectorResult: TrackSelectionResult
     private let loadControl: LoadControl
     private let bandwidthMeter: BandwidthMeter
-    private let timer: DispatchSourceTimer
+//    private let timer: DispatchSourceTimer
+    private let timer: SimpleEventTimer
     private var window: Window
     private var period: Period
     private let backBufferDurationUs: Int64
@@ -34,8 +61,11 @@ final class SEPlayerImplInternal {
     private let periodQueue: MediaPeriodQueue
     private let mediaSourceList: MediaSourceList
     private let bufferableContainer: PlayerBufferableContainer
+    private let audioSessionManager: IAudioSessionManager
     private let hasSecondaryRenderers: Bool
 
+    private var _volume: Float = 1.0
+    private var _isMuted: Bool = false
     private var seekParameters: SeekParameters
     private var playbackInfo: PlaybackInfo
     private var playbackInfoUpdate: PlaybackInfoUpdate
@@ -58,6 +88,7 @@ final class SEPlayerImplInternal {
     private var prewarmingMediaPeriodDiscontinuity = Int64.timeUnset
     private var isPrewarmingDisabledUntilNextTransition: Bool = false
     private var timerIsSuspended: Bool = false
+    private var ignoreAudioSinkFlushError = false
 
     init(
         queue: Queue,
@@ -71,10 +102,12 @@ final class SEPlayerImplInternal {
         seekParameters: SeekParameters,
         pauseAtEndOfWindow: Bool,
         clock: CMClock,
+        mediaClock: DefaultMediaClock,
         identifier: UUID,
         preloadConfiguration: PreloadConfiguration,
-        bufferableContainer: PlayerBufferableContainer
-    ) {
+        bufferableContainer: PlayerBufferableContainer,
+        audioSessionManager: IAudioSessionManager
+    ) throws {
         self.queue = queue
         self.identifier = identifier
         self.trackSelector = trackSelector
@@ -86,8 +119,10 @@ final class SEPlayerImplInternal {
         self.seekParameters = seekParameters
         self.pauseAtEndOfWindow = pauseAtEndOfWindow
         self.clock = clock
+        self.mediaClock = mediaClock
         self.bufferableContainer = bufferableContainer
         self.preloadConfiguration = preloadConfiguration
+        self.audioSessionManager = audioSessionManager
 
         playbackMaybeBecameStuckAtMs = .timeUnset
         lastRebufferRealtimeMs = .timeUnset
@@ -102,7 +137,6 @@ final class SEPlayerImplInternal {
         rendererReportedReady = Array(repeating: false, count: renderers.count)
         hasSecondaryRenderers = false
 
-        mediaClock = DefaultMediaClock(clock: clock)
         window = Window()
         period = Period()
 
@@ -121,18 +155,52 @@ final class SEPlayerImplInternal {
                 targetPreloadBufferDurationUs: preloadConfiguration.targetPreloadDurationUs
             )
         })
-
-        self.timer = DispatchSource.makeTimerSource(queue: queue.queue)
+//        self.timer = DispatchSource.makeTimerSource(queue: queue.queue)
+        timer = SimpleEventTimer(queue: queue)
 
         mediaSourceList.delegate = self
-        timer.setEventHandler { [weak self] in
-            self?.doSomeWork()
+//        timer.setEventHandler { [weak self] in
+//            self?.doSomeWork()
+//        }
+        NotificationCenter.default
+            .addObserver(self, selector: #selector(didGoBS), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default
+            .addObserver(self, selector: #selector(didgoFromBg), name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    @objc private func didGoBS() {
+        queue.async { [self] in
+            do {
+                try setPlayWhenReady(
+                    false,
+                    playWhenReadyChangeReason: .userRequest,
+                    playbackSuppressionReason: .none
+                )
+            } catch {
+                handleError(error: error)
+            }
+        }
+    }
+
+    @objc private func didgoFromBg() {
+        queue.async { [self] in
+            do {
+                try reselectTracksInternalAndSeek()
+                try setPlayWhenReady(
+                    true,
+                    playWhenReadyChangeReason: .userRequest,
+                    playbackSuppressionReason: .none
+                )
+            } catch {
+                handleError(error: error)
+            }
         }
     }
 
     func prepare() {
         assert(queue.isCurrent())
         do {
+            audioSessionManager.registerPlayer(self, playerId: identifier)
             playbackInfoUpdate.incrementPendingOperationAcks(1)
             resetInternal(
                 resetRenderers: false,
@@ -143,7 +211,10 @@ final class SEPlayerImplInternal {
             loadControl.onPrepared(playerId: identifier)
             setState(playbackInfo.timeline.isEmpty ? .ended : .buffering)
             try! mediaSourceList.prepare(mediaTransferListener: bandwidthMeter.transferListener)
-            timer.activate()
+//            timer.activate()
+            timer.setActionHandler { [weak self] in
+                self?.doSomeWork()
+            }
             queue.justDispatch { self.doSomeWork() }
 
             maybeNotifyPlaybackInfoChanged()
@@ -159,17 +230,42 @@ final class SEPlayerImplInternal {
     ) {
         assert(queue.isCurrent())
         do {
-            try! setPlayWhenReadyInternal(
+            playbackInfoUpdate.incrementPendingOperationAcks(1)
+            try! updatePlayWhenReadyWithAudioFocus(
                 playWhenReady,
-                reason: playWhenReadyChangeReason,
                 playbackSuppressionReason: playbackSuppressionReason,
-                operationAck: true
+                playWhenReadyChangeReason: playWhenReadyChangeReason
             )
 
             maybeNotifyPlaybackInfoChanged()
         } catch {
             handleError(error: error)
         }
+    }
+
+    private func setPlayWhenReadyInternalWithAudioFocus() {
+//        assert(queue.isCurrent())
+//        do {
+//            try! setPlayWhenReadyInternal(
+//                false,
+//                reason: .routeChanged,
+//                playbackSuppressionReason: .audioSessionLoss,
+//                operationAck: false
+//            )
+//
+//            queue.justDispatch {
+//                try! self.setPlayWhenReadyInternal(
+//                    true,
+//                    reason: .routeChanged,
+//                    playbackSuppressionReason: .none,
+//                    operationAck: false
+//                )
+//            }
+//
+//            maybeNotifyPlaybackInfoChanged()
+//        } catch {
+//            handleError(error: error)
+//        }
     }
 
     func setPauseAtEndOfWindow(_ pauseAtEndOfWindow: Bool) {
@@ -432,26 +528,38 @@ final class SEPlayerImplInternal {
     @discardableResult
     func release() -> Bool {
         assert(queue.isCurrent())
-        guard !released || !timer.isCancelled else {
+//        guard !released || !timer.isCancelled else {
+//            return true
+//        }
+        guard !released else {
             return true
         }
+        audioSessionManager.removePlayer(self, playerId: identifier)
         releaseInternal()
         maybeNotifyPlaybackInfoChanged()
         return released
     }
 
     private func handleError(error: Error) {
-        fatalError()
+        do {
+//            if !ignoreAudioSinkFlushError {
+                try reselectTracksInternalAndSeek()
+//                ignoreAudioSinkFlushError = false
+//            }
+        } catch {
+            fatalError()
+        }
     }
 }
 
 extension SEPlayerImplInternal: MediaSourceList.Delegate {
     func playlistUpdateRequested() {
         assert(queue.isCurrent())
-        if !timerIsSuspended {
-            timer.suspend()
-            timerIsSuspended = true
-        }
+//        if !timerIsSuspended {
+//            timer.suspend()
+//            timerIsSuspended = true
+//        }
+        timer.suspendTimer()
         handleMediaSourceListInfoRefreshed(
             timeline: mediaSourceList.createTimeline(),
             isSourceRefresh: true
@@ -514,14 +622,22 @@ private extension SEPlayerImplInternal {
         periodId: MediaPeriodId,
         periodPositionUs: Int64,
         forceBufferingState: Bool,
-        forceDisableRenderers: Bool? = nil
+    ) throws -> Int64 {
+        try seekToPeriodPosition(
+            periodId: periodId,
+            periodPositionUs: periodPositionUs,
+            forceDisableRenderers: periodQueue.playing !== periodQueue.reading,
+            forceBufferingState: forceBufferingState,
+        )
+    }
+
+    func seekToPeriodPosition(
+        periodId: MediaPeriodId,
+        periodPositionUs: Int64,
+        forceDisableRenderers: Bool,
+        forceBufferingState: Bool
     ) throws -> Int64 {
         var periodPositionUs = periodPositionUs
-        let forceDisableRenderers = if let forceDisableRenderers {
-            forceDisableRenderers
-        } else {
-            periodQueue.playing !== periodQueue.reading
-        }
 
         stopRenderers()
         updateRebufferingState(isRebuffering: false, resetLastRebufferRealtimeMs: true)
@@ -537,10 +653,15 @@ private extension SEPlayerImplInternal {
             newPlayingPeriodHolder = unwrappedPeriod.next
         }
 
+        let newPlayingPeriodCheck = if let newPlayingPeriodHolder {
+            newPlayingPeriodHolder.toRendererTime(periodTime: periodPositionUs) < 0
+        } else {
+            false
+        }
+
         let shouldResetRenderers =
             forceDisableRenderers ||
-            oldPlayingPeriodHolder !== newPlayingPeriodHolder ||
-            (newPlayingPeriodHolder?.toRendererTime(periodTime: periodPositionUs) ?? 0) < 0
+            oldPlayingPeriodHolder !== newPlayingPeriodHolder || newPlayingPeriodCheck
 
         if shouldResetRenderers {
             try! disableRenderers()
@@ -592,15 +713,29 @@ private extension SEPlayerImplInternal {
         }
     }
 
-    func setPlayWhenReadyInternal(
+    func updatePlayWhenReadyWithAudioFocus(
         _ playWhenReady: Bool,
-        reason: PlayWhenReadyChangeReason,
         playbackSuppressionReason: PlaybackSuppressionReason,
-        operationAck: Bool
+        playWhenReadyChangeReason: PlayWhenReadyChangeReason
     ) throws {
-        playbackInfoUpdate.incrementPendingOperationAcks(operationAck ? 1 : 0)
-        let playWhenReadyChangeReason = updatePlayWhenReadyChangeReason(playWhenReadyChangeReason: reason)
-        let playbackSuppressionReason = updatePlaybackSuppressionReason(playbackSuppressionReason: playbackSuppressionReason)
+        // TODO: make call to audioSession
+        try updatePlayWhenReadyWithAudioFocus(
+            playWhenReady,
+            playerCommand: .playWhenReady,
+            reason: playWhenReadyChangeReason,
+            playbackSuppressionReason: playbackSuppressionReason
+        )
+    }
+
+    func updatePlayWhenReadyWithAudioFocus(
+        _ playWhenReady: Bool,
+        playerCommand: PlayerCommand,
+        reason: PlayWhenReadyChangeReason,
+        playbackSuppressionReason: PlaybackSuppressionReason
+    ) throws {
+        let playWhenReady = playWhenReady && playerCommand != .doNotPlay
+        let playWhenReadyChangeReason = updatePlayWhenReadyChangeReason(playerCommand: playerCommand, playWhenReadyChangeReason: reason)
+        let playbackSuppressionReason = updatePlaybackSuppressionReason(playerCommand: playerCommand, playbackSuppressionReason: playbackSuppressionReason)
 
         guard playbackInfo.playWhenReady != playWhenReady ||
               playbackInfo.playbackSuppressionReason != playbackSuppressionReason ||
@@ -622,6 +757,7 @@ private extension SEPlayerImplInternal {
             periodQueue.reevaluateBuffer(rendererPositionUs: rendererPositionUs)
         } else {
             if playbackInfo.state == .ready {
+                bufferableContainer.setControlTimebase(mediaClock.getTimebase())
                 mediaClock.start()
                 try! startRenderers()
                 queue.justDispatch { self.doSomeWork() }
@@ -1377,16 +1513,20 @@ private extension SEPlayerImplInternal {
             mediaPeriodId: periodHolder.info.id,
             mediaClock: mediaClock
         )
-        
+
+        renderer.requestMediaDataWhenReady(playingPeriodHolder: periodHolder, on: queue) { [weak self] in
+            self?.timer.scheduleJob(deadline: .now())
+        }
+
         if playing, playingAndReadingTheSamePeriod {
             try! renderer.start()
         }
     }
-    
+
     private func releaseRenderers() {
         renderers.forEach { $0.release() }
     }
-    
+
     func handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: Bool) {
         let loading = periodQueue.loading
         let loadingMediaPeriodId = if let loading {
@@ -1731,18 +1871,58 @@ extension SEPlayerImplInternal {
         }
     }
 
-    private func updatePlayWhenReadyChangeReason(playWhenReadyChangeReason: PlayWhenReadyChangeReason) -> PlayWhenReadyChangeReason {
-        // TODO: handle AVAudioSession interruption
-        if playWhenReadyChangeReason == .audioSessionInterruption {
-            return .userRequest
-        }
+    private func updatePlayWhenReadyChangeReason(
+        playerCommand: PlayerCommand,
+        playWhenReadyChangeReason: PlayWhenReadyChangeReason
+    ) -> PlayWhenReadyChangeReason {
+//        if playerCommand == .doNotPlay {
+//            return .audioSessionInterruption
+//        }
+//
+//        if playWhenReadyChangeReason == .audioSessionInterruption {
+//            return .userRequest
+//        }
 
         return playWhenReadyChangeReason
     }
 
-    private func updatePlaybackSuppressionReason(playbackSuppressionReason: PlaybackSuppressionReason) -> PlaybackSuppressionReason {
-        // TODO: handle AVAudioSession interruption
+    private func updatePlaybackSuppressionReason(
+        playerCommand: PlayerCommand,
+        playbackSuppressionReason: PlaybackSuppressionReason
+    ) -> PlaybackSuppressionReason {
+        if playerCommand == .doNotPlay {
+            return .audioSessionLoss
+        }
+
+        if playbackSuppressionReason == .audioSessionLoss {
+            return .none
+        }
+
+        // TODO
         return .none
+    }
+}
+
+extension SEPlayerImplInternal: AudioSessionObserver {
+    func executePlayerCommand(_ command: PlayerCommand) {
+//        TODO: queue.sync {
+//            do {
+//                try updatePlayWhenReadyWithAudioFocus(
+//                    true,
+//                    playerCommand: command,
+//                    reason: playbackInfo.playWhenReadyChangeReason,
+//                    playbackSuppressionReason: playbackInfo.playbackSuppressionReason,
+//                )
+//            } catch {
+//                handleError(error: error)
+//            }
+//        }
+    }
+
+    func audioDeviceDidChange() {
+        queue.async { [self] in
+//            ignoreAudioSinkFlushError = true
+        }
     }
 }
 
@@ -1752,17 +1932,17 @@ private extension SEPlayerImplInternal {
         for index in 0..<renderers.count {
             try! disableRenderer(rendererIndex: index)
         }
-
+        
         prewarmingMediaPeriodDiscontinuity = .timeUnset
     }
-
+    
     private func disableRenderer(rendererIndex: Int) throws {
         let renderersBeforeDisabling = renderers[rendererIndex].enabledRendererCount
         try! renderers[rendererIndex].disable(mediaClock: mediaClock)
         maybeTriggerOnRendererReadyChanged(rendererIndex: rendererIndex, allowsPlayback: false)
         enabledRendererCount -= renderersBeforeDisabling
     }
-
+    
     func disableAndResetPrewarmingRenderers() {
         guard hasSecondaryRenderers, areRenderersPrewarming() else {
             return
@@ -1773,8 +1953,154 @@ private extension SEPlayerImplInternal {
             renderer.disablePrewarming(mediaClock: mediaClock)
             enabledRendererCount -= renderersBeforeDisabling - renderer.enabledRendererCount
         }
-
+        
         prewarmingMediaPeriodDiscontinuity = .timeUnset
+    }
+    
+    private func isRendererPrewarmingMediaPeriod(rendererIndex: Int, mediaPeriodId: MediaPeriodId) -> Bool {
+        assert(queue.isCurrent())
+        guard let prewarming = periodQueue.prewarming else {
+            return false
+        }
+        
+        if prewarming.info.id != mediaPeriodId {
+            return false
+        } else {
+            return renderers[rendererIndex].isPrewarming(period: prewarming)
+        }
+    }
+
+    private func reselectTracksInternalAndSeek() throws {
+        try reselectTracksInternal()
+        try seekToCurrentPosition(sendDiscontinuity: true)
+    }
+
+    private func reselectTracksInternal() throws {
+        let playbackSpeed = mediaClock.getPlaybackParameters().playbackRate
+        var periodHolder = periodQueue.playing
+        let readingPeriodHolder = periodQueue.reading
+        var selectionsChangedForReadPeriod = true
+        var newTrackSelectorResult: TrackSelectionResult
+        // Keep playing period result in case of track selection change for reading period only.
+        var newPlayingPeriodTrackSelectorResult: TrackSelectionResult?
+
+        while true {
+            guard let periodHolderCopy = periodHolder, periodHolderCopy.isPrepared else {
+                // The reselection did not change any prepared periods.
+                return
+            }
+
+            newTrackSelectorResult = try periodHolderCopy.selectTracks(
+                playbackSpeed: playbackSpeed,
+                timeline: playbackInfo.timeline,
+                playWhenReady: playbackInfo.playWhenReady
+            )
+
+            if periodHolderCopy == periodQueue.playing {
+                newPlayingPeriodTrackSelectorResult = newTrackSelectorResult
+            }
+
+            if newTrackSelectorResult != periodHolderCopy.trackSelectorResults {
+                break
+            }
+
+            if periodHolderCopy == readingPeriodHolder {
+                // The track reselection didn't affect any period that has been read.
+                selectionsChangedForReadPeriod = false
+            }
+
+            periodHolder = periodHolderCopy.next
+        }
+
+        if selectionsChangedForReadPeriod {
+            guard let playingPeriodHolder = periodQueue.playing,
+                  let newPlayingPeriodTrackSelectorResult else {
+                fatalError(); return
+            }
+            let removeAfterResult = periodQueue.removeAfter(mediaPeriodHolder: playingPeriodHolder)
+            let recreateStreams = removeAfterResult.contains(.alteredReadingPeriod)
+            var streamResetFlags = Array(repeating: false, count: renderers.count)
+
+            let periodPositionUs = playingPeriodHolder.applyTrackSelection(
+                newTrackSelectorResult: newPlayingPeriodTrackSelectorResult,
+                positionUs: playbackInfo.positionUs,
+                forceRecreateStreams: recreateStreams,
+                streamResetFlags: &streamResetFlags
+            )
+
+            let hasDiscontinuity = playbackInfo.state != .ended && periodPositionUs != playbackInfo.positionUs
+            playbackInfo = handlePositionDiscontinuity(
+                mediaPeriodId: playbackInfo.periodId,
+                positionUs: periodPositionUs,
+                requestedContentPositionUs: playbackInfo.requestedContentPositionUs,
+                discontinuityStartPositionUs: playbackInfo.discontinuityStartPositionUs,
+                reportDiscontinuity: hasDiscontinuity,
+                discontinuityReason: .internal
+            )
+
+            if hasDiscontinuity {
+                try resetRendererPosition(periodPositionUs: periodPositionUs)
+            }
+
+            disableAndResetPrewarmingRenderers()
+
+            var rendererWasEnabledFlags = Array(repeating: false, count: renderers.count)
+            for (index, renderer) in renderers.enumerated() {
+                let enabledRendererCountBeforeDisabling = renderer.enabledRendererCount
+                rendererWasEnabledFlags[index] = renderer.isRendererEnabled
+
+                guard let sampleStream = playingPeriodHolder.sampleStreams[index] else {
+                    continue
+                }
+
+                try renderer.maybeDisableOrResetPosition(
+                    sampleStream: sampleStream,
+                    mediaClock: mediaClock,
+                    rendererPositionUs: rendererPositionUs,
+                    streamReset: streamResetFlags[index]
+                )
+
+                if enabledRendererCountBeforeDisabling - renderer.enabledRendererCount > 0 {
+                    maybeTriggerOnRendererReadyChanged(rendererIndex: index, allowsPlayback: false)
+                }
+
+                enabledRendererCount -= enabledRendererCountBeforeDisabling - renderer.enabledRendererCount
+            }
+
+            try enableRenderers(
+                rendererWasEnabledFlags: rendererWasEnabledFlags,
+                startPositionUs: rendererPositionUs
+            )
+            playingPeriodHolder.allRenderersInCorrectState = true
+        } else {
+            guard let periodHolder else { return }
+            periodQueue.removeAfter(mediaPeriodHolder: periodHolder)
+            if periodHolder.isPrepared {
+                let loadingPeriodPositionUs = max(
+                    periodHolder.info.startPositionUs,
+                    periodHolder.toPeriodTime(rendererTime: rendererPositionUs)
+                )
+
+                if hasSecondaryRenderers,
+                   areRenderersPrewarming(),
+                   periodQueue.prewarming == periodHolder {
+                    disableAndResetPrewarmingRenderers()
+                }
+
+                periodHolder.applyTrackSelection(
+                    trackSelectorResult: newTrackSelectorResult,
+                    positionUs: loadingPeriodPositionUs,
+                    forceRecreateStreams: false
+                )
+            }
+        }
+
+        handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: true)
+        if playbackInfo.state != .ended {
+            maybeContinueLoading()
+            try updatePlaybackPositions()
+            queue.justDispatch { self.doSomeWork() }
+        }
     }
 
     func isTimelineReady() -> Bool {
@@ -1800,8 +2126,8 @@ private extension SEPlayerImplInternal {
         let newPositionUs = try! seekToPeriodPosition(
             periodId: periodId,
             periodPositionUs: playbackInfo.positionUs,
-            forceBufferingState: false,
-            forceDisableRenderers: true
+            forceDisableRenderers: true,
+            forceBufferingState: false
         )
 
         if newPositionUs != playbackInfo.positionUs {
@@ -1896,7 +2222,7 @@ private extension SEPlayerImplInternal {
         } else {
             MediaPeriodQueue.initialRendererPositionOffsetUs + periodPositionUs
         }
-        mediaClock.resetPosition(position: rendererPositionUs)
+        mediaClock.resetPosition(positionUs: rendererPositionUs)
         try! renderers.forEach { try! $0.resetPosition(for: playingMediaPeriod, positionUs: rendererPositionUs) }
         // TODO: notifyTrackSelectionDiscontinuity
     }
@@ -1905,7 +2231,9 @@ private extension SEPlayerImplInternal {
 private extension SEPlayerImplInternal {
     private func doSomeWork() {
         assert(queue.isCurrent())
+        timer.cleanQueue()
         let currentTime = DispatchTime.now()
+//        print("🫟 currentTime = \(currentTime)")
 
         do {
             try updatePeriods()
@@ -1960,11 +2288,16 @@ private extension SEPlayerImplInternal {
 
             if finishedRendering, pendingPauseAtEndOfPeriod {
                 pendingPauseAtEndOfPeriod = false
-                try setPlayWhenReadyInternal(
+//                try setPlayWhenReady(
+//                    false,
+//                    reason: .endOfMediaItem,
+//                    playbackSuppressionReason: playbackInfo.playbackSuppressionReason,
+//                    operationAck: false
+//                )
+                try setPlayWhenReady(
                     false,
-                    reason: .endOfMediaItem,
-                    playbackSuppressionReason: playbackInfo.playbackSuppressionReason,
-                    operationAck: false
+                    playWhenReadyChangeReason: .endOfMediaItem,
+                    playbackSuppressionReason: playbackInfo.playbackSuppressionReason
                 )
             }
 
@@ -1983,6 +2316,7 @@ private extension SEPlayerImplInternal {
                         isRebuffering: false,
                         resetLastRebufferRealtimeMs: false
                     )
+                    bufferableContainer.setControlTimebase(mediaClock.getTimebase())
                     mediaClock.start()
                     try startRenderers()
                 }
@@ -2045,15 +2379,18 @@ private extension SEPlayerImplInternal {
         let wakeUpTimeIntervalMs: Int64 = if playbackInfo.state == .ready, !shouldPlayWhenReady() {
             1000 // TODO: conts
         } else {
-            Time.usToMs(timeUs: 10_000) // TODO: conts
+//            Time.usToMs(timeUs: 10_000) // TODO: conts
+            1000
         }
 
-        if timerIsSuspended {
-            timer.resume()
-            timerIsSuspended = false
-        }
+//        if timerIsSuspended {
+//            timer.resume()
+//            timerIsSuspended = false
+//        }
 
-        timer.schedule(deadline: .now() + .milliseconds(Int(wakeUpTimeIntervalMs)))
+        timer.activateTimer()
+        timer.scheduleJob(deadline: .now() + .milliseconds(Int(wakeUpTimeIntervalMs)))
+//        timer.schedule(deadline: .now() + .milliseconds(Int(wakeUpTimeIntervalMs)))
     }
 
     private func stopInternal(forceResetRenderers: Bool, acknowledgeStop: Bool) {
@@ -2077,11 +2414,13 @@ private extension SEPlayerImplInternal {
             releaseMediaSourceList: true,
             resetError: false
         )
-        if timerIsSuspended {
-            timer.resume()
-            timerIsSuspended = false
-        }
-        timer.cancel()
+//        if timerIsSuspended {
+//            timer.resume()
+//            timerIsSuspended = false
+//        }
+//        timer.cancel()
+        timer.deactivate()
+        timer.setActionHandler(nil)
         releaseRenderers()
         loadControl.onReleased(playerId: identifier)
         setState(.idle)
@@ -2094,10 +2433,11 @@ private extension SEPlayerImplInternal {
         releaseMediaSourceList: Bool,
         resetError: Bool
     ) {
-        if !timerIsSuspended {
-            timer.suspend()
-            timerIsSuspended = true
-        }
+//        if !timerIsSuspended {
+//            timer.suspend()
+//            timerIsSuspended = true
+//        }
+        timer.suspendTimer()
 
         pendingRecoverableRendererError = nil
         updateRebufferingState(isRebuffering: false, resetLastRebufferRealtimeMs: true)
@@ -2220,20 +2560,21 @@ private extension SEPlayerImplInternal {
 }
 
 extension SEPlayerImplInternal {
-    @MainActor func register(_ bufferable: PlayerBufferable) {
-        bufferableContainer.register(bufferable)
-
+    func register(_ bufferable: PlayerBufferable) {
         queue.async { [weak self] in
             guard let self else { return }
 
+            bufferableContainer.register(bufferable)
             if [.ready, .buffering].contains(playbackInfo.state) {
-                queue.justDispatch { self.doSomeWork() }
+                self.queue.justDispatch { self.doSomeWork() }
             }
         }
     }
 
-    @MainActor func remove(_ bufferable: PlayerBufferable) {
-        bufferableContainer.remove(bufferable)
+    func remove(_ bufferable: PlayerBufferable) {
+        queue.async { [weak self] in
+            self?.bufferableContainer.remove(bufferable)
+        }
     }
 }
 

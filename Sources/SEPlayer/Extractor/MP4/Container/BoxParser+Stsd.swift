@@ -5,8 +5,6 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia.CMFormatDescription
-
 extension BoxParser {
 //    struct AudioSampleEntry {
 //        let codecInfo: CMAudioFormatDescription?

@@ -5,38 +5,40 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia.CMFormatDescription
-
 public struct TrackGroup: Hashable {
     let id: String
     var length: Int { formats.count }
     let type: TrackType
-    let formats: [CMFormatDescription]
+    let formats: [Format]
 
     enum TrackGroupError: Error {
         case differentFormatsForTrackGroup
     }
 
-    init(id: String? = nil, formats: [CMFormatDescription]) throws(TrackGroupError) {
+    init(id: String? = nil, formats: [Format]) throws(TrackGroupError) {
         self.id = id ?? ""
         self.type = try! TrackGroup.verify(formats: formats)
         self.formats = formats
     }
 
-    private static func verify(formats: [CMFormatDescription]) throws(TrackGroupError) -> TrackType {
-        let types = Set(formats.map { $0.mediaType })
+    private static func verify(formats: [Format]) throws(TrackGroupError) -> TrackType {
+        let types = Set(formats.map { $0.sampleMimeType })
         if types.count > 1 { throw TrackGroupError.differentFormatsForTrackGroup }
+
+        // TODO: compare samples
         for type in types {
-            switch type {
-            case .video:
-                return TrackType.video
-            case .audio:
-                return TrackType.audio
-            default:
-                return TrackType.unknown
+            guard let type else { continue }
+
+            if type.isVideo {
+                return .video
+            } else if type.isAudio {
+                return .audio
+            } else {
+                return .unknown
             }
         }
-        throw TrackGroupError.differentFormatsForTrackGroup
+
+        return .none
     }
 
     public static func == (lhs: TrackGroup, rhs: TrackGroup) -> Bool {

@@ -17,16 +17,17 @@ public final class DecoderInputBuffer: Buffer {
     var size: Int = 0
     var isReady: Bool { data != nil }
 
-    private var data: UnsafeMutableRawPointer?
+    private var data: UnsafeMutableRawBufferPointer?
 
     init() {}
 
-    func enqueue(buffer: UnsafeMutableRawPointer) {
+    func enqueue(buffer: UnsafeMutableRawBufferPointer) {
+        precondition(!buffer.isEmpty)
         self.data = buffer
     }
 
-    func dequeue() throws -> UnsafeMutableRawPointer {
-        guard let data else {
+    func dequeue() throws -> UnsafeMutableRawBufferPointer {
+        guard let data, data.count > 0 else {
             throw BufferErrors.insufficientCapacity
         }
 

@@ -13,12 +13,12 @@ final class DefautlHTTPDataSource: DataSource {
     var url: URL? { queue.sync { _url } }
     var urlResponse: HTTPURLResponse? { lock.withLock { _urlResponce } }
 
-    let queue: Queue
+    private let queue: Queue
     private let connectTimeout: TimeInterval
     private let readTimeout: TimeInterval
     private let networkLoader: IPlayerSessionLoader
     private let operation: ConditionVariable
-    private let lock: NSLock
+    private let lock: NSRecursiveLock
 
     private var currentDataSpec: DataSpec?
     private var currentTask: URLSessionDataTask?
@@ -50,7 +50,7 @@ final class DefautlHTTPDataSource: DataSource {
         self.connectTimeout = 10
         self.readTimeout = 10
         operation = ConditionVariable()
-        lock = NSLock()
+        lock = NSRecursiveLock()
         currentConnectionTimeout = Date().timeIntervalSince1970
         currentReadTimeout =  Date().timeIntervalSince1970
     }
@@ -66,8 +66,8 @@ final class DefautlHTTPDataSource: DataSource {
 
     @discardableResult
     func close() -> ByteBuffer? {
+//        operation.cancel()
         return lock.withLock {
-            print("❌ close connection, dataSpec = \(currentDataSpec)")
             isClosed = true
             didFinish = false
             openResult = nil
@@ -155,8 +155,7 @@ final class DefautlHTTPDataSource: DataSource {
 
     private func readFully(to allocation: Allocation, offset: Int, length: Int) throws {
         try! intermidateBuffer.readWithUnsafeReadableBytes { pointer in
-            guard let baseAdress = pointer.baseAddress else { throw DataReaderError.endOfInput }
-            memcpy(allocation.data.advanced(by: offset), baseAdress, length)
+            allocation.writeBuffer(offset: offset, lenght: length, buffer: pointer)
             return length
         }
         bytesRemaining -= length
@@ -174,7 +173,6 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
             intermidateBuffer.reserveCapacity(dataSpec.length)
         }
 
-        print("✅ createConnection, dataSpec = \(dataSpec), \(request.allHTTPHeaderFields)")
         let task = networkLoader.createTask(request: request, delegate: self)
         task.resume()
         self.currentTask = task

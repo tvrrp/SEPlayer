@@ -6,8 +6,7 @@
 //
 
 public protocol Extractor: AnyObject {
-    func shiff(input: ExtractorInput) throws -> Bool
-    func getSniffFailureDetails() -> [SniffFailure]
+    func shiff(input: ExtractorInput) throws
     func read(input: ExtractorInput) throws -> ExtractorReadResult
     func seek(to position: Int, timeUs: Int64)
     func release()

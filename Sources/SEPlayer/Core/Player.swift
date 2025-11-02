@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
+import Dispatch
+
 public protocol Player: AnyObject {
     @MainActor var delegate: MulticastDelegate<SEPlayerDelegate> { get }
     var playbackState: PlayerState { get }
@@ -12,6 +14,8 @@ public protocol Player: AnyObject {
     var playWhenReady: Bool { get set }
     var repeatMode: RepeatMode { get set }
     var shuffleModeEnabled: Bool { get set }
+    var volume: Float { get set }
+    var isMuted: Bool { get set }
     var isLoading: Bool { get }
     var seekBackIncrement: Int64 { get }
     var seekForwardIncrement: Int64 { get }
@@ -74,8 +78,8 @@ public protocol Player: AnyObject {
 
     func mediaItem(at index: Int) -> MediaItem
 
-    @MainActor func register(_ bufferable: PlayerBufferable)
-    @MainActor func remove(_ bufferable: PlayerBufferable)
+    func register(_ bufferable: PlayerBufferable)
+    func remove(_ bufferable: PlayerBufferable)
 }
 
 @frozen public enum PlayerState: Equatable {
@@ -88,6 +92,7 @@ public protocol Player: AnyObject {
 @frozen public enum PlayWhenReadyChangeReason {
     case userRequest
     case audioSessionInterruption
+    case routeChanged
     case endOfMediaItem
 }
 

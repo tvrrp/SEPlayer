@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 23.04.2025.
 //
 
-import CoreVideo
+import AVFoundation
 
 public enum PlayerBufferableAction {
     case reset
@@ -13,8 +13,12 @@ public enum PlayerBufferableAction {
 }
 
 public protocol PlayerBufferable: AnyObject {
+    var isReadyForMoreMediaData: Bool { get }
+    func setControlTimebase(_ timebase: CMTimebase)
     func prepare(for action: PlayerBufferableAction)
-    func enqueue(_ buffer: CVPixelBuffer)
+    func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void)
+    func stopRequestingMediaData()
+    func enqueue(_ buffer: CMSampleBuffer, format: Format?)
     func end()
 
     func equal(to other: PlayerBufferable) -> Bool

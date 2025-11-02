@@ -15,7 +15,7 @@ protocol Loadable {
 final class Loader {
     private let queue: Queue
     private let operationQueue: OperationQueue
-    private var currentTask: AsyncOperation?
+    @UnfairLocked private var currentTask: AsyncOperation?
 
     init(queue: Queue) {
         self.queue = queue
@@ -32,26 +32,26 @@ final class Loader {
             defaultMinRetryCount: defaultMinRetryCount
         ) { [weak self] error in
             guard let self else { return }
-            withLock { self.currentTask = nil }
+            self.currentTask = nil
             handleLoadCompletion(loadable: loadable, callback: callback, error: error)
         }
 
-        withLock { currentTask = operation }
+        currentTask = operation
         operationQueue.addOperation(operation)
     }
 
     func isLoading() -> Bool {
-        withLock { currentTask != nil }
+        currentTask != nil
     }
 
     func cancelLoading() {
         operationQueue.cancelAllOperations()
-        withLock { currentTask = nil }
+        currentTask = nil
     }
 
     func release(completion: (() -> Void)? = nil) {
         operationQueue.cancelAllOperations()
-        withLock { currentTask = nil }
+        currentTask = nil
         if let completion {
             operationQueue.addOperation {
                 completion()
@@ -69,15 +69,6 @@ final class Loader {
         } else {
             callback.onLoadCompleted(loadable: loadable, onTime: .zero, loadDurationMs: .zero)
         }
-    }
-
-    private var unfairLock = os_unfair_lock_s()
-
-    private func withLock<T>(_ action: () throws -> T) rethrows -> T {
-        os_unfair_lock_lock(&unfairLock)
-        let value = try! action()
-        os_unfair_lock_unlock(&unfairLock)
-        return value
     }
 }
 

@@ -9,14 +9,14 @@ import CoreMedia.CMSync
 
 extension CMClock {
     var milliseconds: Int64 {
-        time.seconds.millisecondsPerSecond
+        time.milliseconds
     }
 
     var microseconds: Int64 {
-        time.seconds.microsecondsPerSecond
+        time.microseconds
     }
 
     var nanoseconds: Int64 {
-        time.seconds.nanosecondsPerSecond
+        time.nanoseconds
     }
 }

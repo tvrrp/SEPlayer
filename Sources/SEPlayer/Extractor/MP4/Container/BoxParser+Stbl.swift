@@ -26,7 +26,7 @@ extension BoxParser {
 
         if track.type == .video, track.mediaDurationUs > 0 {
             let frameRate = Float(sampleCount) / ((Float(track.mediaDurationUs) / 1000000))
-            track.format2 = track.format2.buildUpon().setFrameRate(frameRate).build()
+            track.format = track.format.buildUpon().setFrameRate(frameRate).build()
         }
 
         // Entries are byte offsets of chunks.
@@ -238,13 +238,13 @@ extension BoxParser {
                 let paddingTimeUnits = duration - editEndTime
                 let encoderDelay = Util.scaleLargeTimestamp(
                     editStartTime - timestamps[0],
-                    multiplier: Int64(track.format2.sampleRate),
+                    multiplier: Int64(track.format.sampleRate),
                     divisor: track.timescale
                 )
 
                 let encoderPadding = Util.scaleLargeTimestamp(
                     paddingTimeUnits,
-                    multiplier: Int64(track.format2.sampleRate),
+                    multiplier: Int64(track.format.sampleRate),
                     divisor: track.timescale
                 )
 
@@ -433,8 +433,8 @@ extension BoxParser {
 
         let editedDurationUs = Util.scaleLargeTimestamp(pts, multiplier: .microsecondsPerSecond, divisor: track.movieTimescale)
         if hasPrerollSamples {
-            let newFormat = track.format2.buildUpon().setHasPrerollSamples(true).build()
-            track.format2 = newFormat
+            let newFormat = track.format.buildUpon().setHasPrerollSamples(true).build()
+            track.format = newFormat
         }
 
         let editedSamples = editedOffsets.enumerated().map { index, _ in

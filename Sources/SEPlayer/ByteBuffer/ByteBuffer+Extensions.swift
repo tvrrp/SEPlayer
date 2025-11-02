@@ -51,8 +51,8 @@ extension ByteBuffer {
         return slice
     }
 
-    func slice(at offset: Int, length: Int) throws -> ByteBuffer {
-        if let slice = getSlice(at: offset, length: length) {
+    func slice(at offset: Int? = nil, length: Int) throws -> ByteBuffer {
+        if let slice = getSlice(at: offset ?? readerIndex, length: length) {
             return slice
         } else {
             throw ByteBufferError.endOfData

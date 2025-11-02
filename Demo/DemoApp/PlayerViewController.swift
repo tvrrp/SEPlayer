@@ -8,18 +8,23 @@
 import AVFAudio
 import UIKit
 import SEPlayer
+import MediaPlayer
 
 class PlayerViewController: UIViewController {
     let player: Player
+
     let playerView = SEPlayerView()
+
     var videoUrls = [URL]()
     var repeatMode: RepeatMode = .off
+    let volumeView = UISlider()
 
     let backwardsButton = UIButton(type: .system)
     let forwardsButton = UIButton(type: .system)
     let seekBackwardsButton = UIButton(type: .system)
     let seekForwardsButton = UIButton(type: .system)
     let playButton = UIButton(type: .system)
+    let muteButton = UIButton(type: .system)
     let buttonStackView = UIStackView()
 
     let currentTimeLabel = UILabel()
@@ -69,13 +74,15 @@ class PlayerViewController: UIViewController {
         view.addSubview(currentTimeLabel)
         view.addSubview(durationLabel)
         view.addSubview(seekSlider)
-
-        view.backgroundColor = .black
+        view.addSubview(volumeView)
+        view.addSubview(muteButton)
 
         currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
         seekSlider.translatesAutoresizingMaskIntoConstraints = false
         buttonStackView.translatesAutoresizingMaskIntoConstraints = false
+        volumeView.translatesAutoresizingMaskIntoConstraints = false
+        muteButton.translatesAutoresizingMaskIntoConstraints = false
 
         backwardsButton.configuration = createButtonConfig(imageName: "backward.fill")
         backwardsButton.addTarget(self, action: #selector(backwardsButtonTap), for: .touchUpInside)
@@ -91,6 +98,13 @@ class PlayerViewController: UIViewController {
 
         playButton.configuration = createButtonConfig(imageName: "pause.fill")
         playButton.addTarget(self, action: #selector(playPause), for: .touchUpInside)
+
+        muteButton.configuration = createButtonConfig(imageName: "speaker.slash.fill")
+        muteButton.addTarget(self, action: #selector(muteTapped), for: .touchUpInside)
+
+        volumeView.minimumValue = .zero
+        volumeView.maximumValue = 1.0
+        volumeView.value = 1.0
 
         [currentTimeLabel, durationLabel].forEach {
             $0.font = UIFont.monospacedDigitSystemFont(ofSize: UIFont.smallSystemFontSize, weight: .regular)
@@ -109,14 +123,16 @@ class PlayerViewController: UIViewController {
         seekSlider.addTarget(self, action: #selector(sliderTouchUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         seekSlider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
 
+        volumeView.addTarget(self, action: #selector(volumeSliderDidChange), for: .valueChanged)
         view.addGestureRecognizer(speedGestureRecogniser)
         speedGestureRecogniser.minimumPressDuration = 0.3
         speedGestureRecogniser.addTarget(self, action: #selector(handleLongPress))
 
-        try? AVAudioSession.sharedInstance().setActive(true)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: .duckOthers)
+        try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+        try! AVAudioSession.sharedInstance().setActive(true)
 
         playerView.gravity = .resizeAspect
+
         player.set(mediaItems: videoUrls.map { MediaItem(url: $0) })
         player.repeatMode = repeatMode
         player.delegate.addDelegate(self)
@@ -139,6 +155,13 @@ class PlayerViewController: UIViewController {
         view.addSubview(buttonStackView)
 
         NSLayoutConstraint.activate([
+            volumeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            volumeView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+
+            muteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            muteButton.leadingAnchor.constraint(equalTo: volumeView.trailingAnchor, constant: 16),
+            muteButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+
             buttonStackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             buttonStackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
@@ -155,7 +178,7 @@ class PlayerViewController: UIViewController {
     }
 
     @objc private func sliderTouchDown(_ sender: UISlider) {
-        print("🤬 sliderTouchDown")
+//        print("🤬 sliderTouchDown")
         timer?.invalidate()
         playWhenReadyBeforeSlider = player.playWhenReady
         player.pause()
@@ -170,6 +193,10 @@ class PlayerViewController: UIViewController {
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
         currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
+    }
+
+    @objc private func volumeSliderDidChange(_ sender: UISlider) {
+        player.volume = sender.value
     }
 
     @objc func handleLongPress(_ sender: UILongPressGestureRecognizer) {
@@ -225,6 +252,16 @@ class PlayerViewController: UIViewController {
         player.seekToNextMediaItem()
     }
 
+    @objc func muteTapped() {
+        if player.isMuted {
+            muteButton.configuration = createButtonConfig(imageName: "speaker.wave.2.fill")
+            player.isMuted = false
+        } else {
+            muteButton.configuration = createButtonConfig(imageName: "speaker.slash.fill")
+            player.isMuted = true
+        }
+    }
+
     private func updateTime() {
         timer?.invalidate()
 
@@ -243,7 +280,7 @@ class PlayerViewController: UIViewController {
     private func handleTimer() {
         let position = player.contentPosition
         currentTimeLabel.text = "\(player.bufferedPosition)|\(position)"
-        seekSlider.setValue(Float(position), animated: true)
+        seekSlider.setValue(Float(position), animated: false)
     }
 
     private func createButtonConfig(imageName: String) -> UIButton.Configuration {
@@ -257,7 +294,6 @@ class PlayerViewController: UIViewController {
 
 extension PlayerViewController: SEPlayerDelegate {
     func player(_ player: any Player, didChangePlaybackState state: PlayerState) {
-        print("🔥 didChangePlaybackState = \(state)")
         if state == .ready {
             seekSlider.isUserInteractionEnabled = true
             updateTime()
@@ -265,7 +301,6 @@ extension PlayerViewController: SEPlayerDelegate {
     }
 
     func player(_ player: any Player, didTransitionMediaItem mediaItem: MediaItem?, reason: MediaItemTransitionReason?) {
-        print("🔥 didTransitionMediaItem = \(mediaItem), reason = \(reason)")
         let duration = player.duration
         if duration != .timeUnset {
             durationLabel.text = "\(player.duration)"

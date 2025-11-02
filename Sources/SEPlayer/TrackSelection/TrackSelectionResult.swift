@@ -5,23 +5,23 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
-import CoreMedia.CMFormatDescription
-
-struct TrackSelectionResult: Equatable {
+public struct TrackSelectionResult: Equatable {
     let renderersConfig: [Bool?]
     let selections: [SETrackSelection?]
     let tracks: Tracks
 
-    static func == (lhs: TrackSelectionResult, rhs: TrackSelectionResult) -> Bool {
+    public static func == (lhs: TrackSelectionResult, rhs: TrackSelectionResult) -> Bool {
         guard lhs.selections.count == rhs.selections.count else { return false }
 
         for (firstSelection, secondSelection) in zip(lhs.selections, rhs.selections) {
-            if firstSelection?.id == secondSelection?.id {
-                return true
+            guard let firstSelection, let secondSelection else {
+                return false
             }
+
+            return true // TODO: compare properly
         }
 
-        return false
+        return true
     }
 
     func isRendererEnabled(for index: Int) -> Bool {
@@ -78,7 +78,7 @@ extension Tracks {
 
         var isSelected: Bool { trackSelected.contains(true) }
 
-        func format(for trackIndex: Int) -> CMFormatDescription {
+        func format(for trackIndex: Int) -> Format {
             mediaTrackGroup.formats[trackIndex]
         }
 

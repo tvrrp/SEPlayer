@@ -12,7 +12,7 @@ final class RangeRequestHTTPDataSource: DataSource {
     var urlResponse: HTTPURLResponse? { requestHandler?.urlResponse }
 
     let components: DataSourceOpaque
-    let queue: Queue
+    private let queue: Queue
     private let networkLoader: IPlayerSessionLoader
     private let defaultSegmentLenght: Int
 
@@ -95,7 +95,6 @@ final class RangeRequestHTTPDataSource: DataSource {
         let result = try requestHandler.open(dataSpec: dataSpec)
         guard let urlResponse else { throw DataReaderError.wrongURLResponce }
         bytesRemaining = contentLength(from: urlResponse) - dataSpec.offset
-        print("😭 openConnection, dataSpec = \(dataSpec), bytesRemaining = \(bytesRemaining), urlResponse = \(test(from: urlResponse))")
         if bytesRemaining == 0 {
             print()
         }

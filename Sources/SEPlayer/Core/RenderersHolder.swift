@@ -5,17 +5,24 @@
 //  Created by Damir Yackupov on 25.05.2025.
 //
 
-import CoreMedia.CMFormatDescription
-
 final class RenderersHolder {
+    var volume: Float {
+        get {
+            (primaryRenderer as? AudioRenderer)?.volume ?? .zero
+        }
+        set {
+            (primaryRenderer as? AudioRenderer)?.volume = newValue
+        }
+    }
+    
     private let primaryRenderer: SERenderer
     private let index: Int
     private let secondaryRenderer: SERenderer?
-
+    
     private var prewarmingState: RendererPrewarmingState
     private var primaryRequiresReset: Bool
     private var secondaryRequiresReset: Bool
-
+    
     init(primaryRenderer: SERenderer, secondaryRenderer: SERenderer? = nil, index: Int) {
         self.primaryRenderer = primaryRenderer
         self.secondaryRenderer = secondaryRenderer
@@ -24,7 +31,7 @@ final class RenderersHolder {
         self.primaryRequiresReset = false
         self.secondaryRequiresReset = false
     }
-
+    
     func startPrewarming() {
         guard !isPrewarming else { return }
         
@@ -38,21 +45,21 @@ final class RenderersHolder {
             }
         }
     }
-
+    
     func isRendererPrewarming(id: Int) -> Bool {
         let isPrewarmingPrimaryRenderer = isPrimaryRendererPrewarming && id == index
         let isPrewarmingSecondaryRenderer = isSecondaryRendererPrewarming && id == index
         return isPrewarmingPrimaryRenderer || isPrewarmingSecondaryRenderer
     }
-
+    
     func readingPositionUs(for holder: MediaPeriodHolder?) -> Int64 {
         rendererReading(from: holder)?.getReadingPosition() ?? .timeUnset
     }
-
+    
     func didReadStreamToEnd(for holder: MediaPeriodHolder) -> Bool {
         rendererReading(from: holder)?.didReadStreamToEnd() ?? true
     }
-
+    
     func setCurrentStreamFinal(for holder: MediaPeriodHolder, streamEndPositionUs: Int64) {
         guard let renderer = rendererReading(from: holder) else {
             assertionFailure()
@@ -61,7 +68,7 @@ final class RenderersHolder {
         
         setCurrentStreamFinalInternal(renderer: renderer, streamEndPositionUs: streamEndPositionUs)
     }
-
+    
     func maybeSetOldStreamToFinal(
         oldTrackSelectorResult: TrackSelectionResult,
         newTrackSelectorResult: TrackSelectionResult,
@@ -70,36 +77,36 @@ final class RenderersHolder {
         let oldRendererEnabled = oldTrackSelectorResult.isRendererEnabled(for: index)
         let newRendererEnabled = newTrackSelectorResult.isRendererEnabled(for: index)
         let isPrimaryOldRenderer = secondaryRenderer == nil
-            || prewarmingState == .transitioningToSecondary
-            || ( prewarmingState == .notPrewarmingUsingPrimary && isRendererEnabled(renderer: primaryRenderer))
-
+        || prewarmingState == .transitioningToSecondary
+        || ( prewarmingState == .notPrewarmingUsingPrimary && isRendererEnabled(renderer: primaryRenderer))
+        
         let oldRenderer = isPrimaryOldRenderer ? primaryRenderer : secondaryRenderer
         guard let oldRenderer else { return }
-
+        
         if oldRendererEnabled, !oldRenderer.isCurrentStreamFinal() {
             let isNoSampleRenderer = trackType == .none
             let oldConfig = oldTrackSelectorResult.renderersConfig[index]
             let newConfig = newTrackSelectorResult.renderersConfig[index]
-
+            
             if !newRendererEnabled || oldConfig != newConfig || isNoSampleRenderer || isPrewarming {
                 setCurrentStreamFinalInternal(renderer: oldRenderer, streamEndPositionUs: streamEndPositionUs)
             }
         }
     }
-
+    
     func setAllNonPrewarmingRendererStreamsFinal(streamEndPositionUs: Int64) {
         if isRendererEnabled(renderer: primaryRenderer),
            prewarmingState != .transitioningToPrimary,
            prewarmingState != .prewarmingPrimary {
             setCurrentStreamFinalInternal(renderer: primaryRenderer, streamEndPositionUs: streamEndPositionUs)
         }
-
+        
         if let secondaryRenderer, isRendererEnabled(renderer: secondaryRenderer),
            prewarmingState != .transitioningToSecondary {
             setCurrentStreamFinalInternal(renderer: secondaryRenderer, streamEndPositionUs: streamEndPositionUs)
         }
     }
-
+    
     func enableMayRenderStartOfStream() {
         if isRendererEnabled(renderer: primaryRenderer) {
             primaryRenderer.enableRenderStartOfStream()
@@ -107,19 +114,26 @@ final class RenderersHolder {
             secondaryRenderer.enableRenderStartOfStream()
         }
     }
-
+    
     func setPlaybackSpeed(current: Float, target: Float) throws {
         try! primaryRenderer.setPlaybackSpeed(current: current, target: target)
         try! secondaryRenderer?.setPlaybackSpeed(current: current, target: target)
     }
-
+    
     func setTimeline(_ timeline: Timeline) {
         primaryRenderer.setTimeline(timeline)
         secondaryRenderer?.setTimeline(timeline)
     }
-
+    
     func isReading(from period: MediaPeriodHolder) -> Bool {
         return rendererReading(from: period) != nil
+    }
+    
+    func isPrewarming(period: MediaPeriodHolder) -> Bool {
+        let isPrimaryRendererPrewarming = isPrimaryRendererPrewarming && rendererReading(from: period) === primaryRenderer
+        let isSecondaryRendererPrewarming = isSecondaryRendererPrewarming && rendererReading(from: period) === secondaryRenderer
+
+        return isPrimaryRendererPrewarming || isSecondaryRendererPrewarming
     }
 
     func hasFinishedReading(from period: MediaPeriodHolder) -> Bool {
@@ -129,13 +143,13 @@ final class RenderersHolder {
 
     func render(rendererPositionUs: Int64, rendererPositionElapsedRealtimeUs: Int64) throws {
         if isRendererEnabled(renderer: primaryRenderer) {
-            try! primaryRenderer.render(
+            try primaryRenderer.render(
                 position: rendererPositionUs,
                 elapsedRealtime: rendererPositionElapsedRealtimeUs
             )
         }
         if let secondaryRenderer, isRendererEnabled(renderer: secondaryRenderer) {
-            try! secondaryRenderer.render(
+            try secondaryRenderer.render(
                 position: rendererPositionUs,
                 elapsedRealtime: rendererPositionElapsedRealtimeUs
             )
@@ -319,7 +333,17 @@ final class RenderersHolder {
         secondaryRequiresReset = false
     }
 
+    func requestMediaDataWhenReady(
+        playingPeriodHolder: MediaPeriodHolder,
+        on queue: Queue,
+        block: @escaping () -> Void
+    ) {
+        guard let renderer = rendererReading(from: playingPeriodHolder) else {
+            return
+        }
 
+        renderer.requestMediaDataWhenReady(on: queue, block: block)
+    }
 }
 
 extension RenderersHolder {
@@ -433,7 +457,8 @@ private extension RenderersHolder {
         }
 
         guard isRendererEnabled(renderer: renderer) else { return }
-        mediaClock.onRendererEnabled(renderer: renderer)
+        renderer.stopRequestingMediaData()
+        mediaClock.onRendererDisabled(renderer: renderer)
         ensureStopped(renderer: renderer)
         renderer.disable()
     }
@@ -493,7 +518,7 @@ private extension RenderersHolder {
         }
     }
 
-    func formats(from newSelection: SETrackSelection?) -> [CMFormatDescription] {
+    func formats(from newSelection: SETrackSelection?) -> [Format] {
         guard let newSelection else { return [] }
 
         return (0..<newSelection.trackGroup.length).map { newSelection.format(for: $0) }

@@ -5,12 +5,12 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
-import CoreMedia.CMFormatDescription
+import Foundation.NSUUID
 
 public protocol SETrackSelection: TrackSelection {
     var id: UUID { get }
     var selectedReason: TrackSelectionReason { get }
-    var selectedFormat: CMFormatDescription { get }
+    var selectedFormat: Format { get }
     var selectedIndex: Int { get }
 
     func enable()
@@ -32,7 +32,7 @@ public enum TrackSelectionReason {
     case trickPlay
 }
 
-protocol TrackSelector {
+public protocol TrackSelector {
     func selectTracks(
         rendererCapabilities: [RendererCapabilities],
         trackGroups: [TrackGroup],

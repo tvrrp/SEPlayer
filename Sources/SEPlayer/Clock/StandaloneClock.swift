@@ -8,58 +8,78 @@
 import CoreMedia.CMSync
 
 final class StandaloneClock: MediaClock {
+    let timebase: CMTimebase
     private let clock: CMClock
 
     private var playbackParameters: PlaybackParameters
     private var started: Bool = false
-    private var baseElapsed: Int64 = 0
-    private var baseTime: Int64 = 0
+    private var baseElapsedUs: Int64 = 0
+    private var baseUs: Int64 = 0
 
-    init(clock: CMClock) {
+    init(clock: CMClock) throws {
         self.clock = clock
+        timebase = try CMTimebase(sourceClock: clock)
         playbackParameters = .default
     }
 
     func start() {
         guard !started else { return }
-        baseElapsed = clock.microseconds
+
+        do {
+            try timebase.setRate(Double(playbackParameters.playbackRate))
+            try timebase.setTime(.from(microseconds: getPositionUs()))
+        } catch {
+            print(error)
+        }
+
+        baseElapsedUs = clock.microseconds
         started = true
     }
 
     func stop() {
         guard started else { return }
-        resetPosition(position: getPosition())
+        resetPosition(positionUs: getPositionUs())
         started = false
-    }
 
-    func resetPosition(position: Int64) {
-        baseTime = position
-        if started {
-            baseElapsed = clock.microseconds
+        do {
+            try timebase.setRate(Double(playbackParameters.playbackRate))
+        } catch {
+            print(error)
         }
     }
 
-    func getPosition() -> Int64  {
-        var position = baseTime
+    func resetPosition(positionUs: Int64) {
+        baseUs = positionUs
         if started {
-            let elapsedSinceBase = clock.microseconds - baseElapsed
-            position += playbackParameters.mediaTimeForPlaybackRate(elapsedSinceBase)
+            baseElapsedUs = clock.microseconds
+
+            do {
+                try timebase.setRate(Double(playbackParameters.playbackRate))
+                try timebase.setTime(.from(microseconds: positionUs))
+            } catch {
+                print(error)
+            }
+        }
+    }
+
+    func getPositionUs() -> Int64  {
+        var positionUs = baseUs
+        if started {
+            let elapsedSinceBase = clock.microseconds - baseElapsedUs
+            positionUs += playbackParameters.mediaTimeForPlaybackRate(elapsedSinceBase)
         }
 
-        return position
+        return positionUs
     }
 
     func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
+        if started {
+            resetPosition(positionUs: getPositionUs())
+        }
         self.playbackParameters = playbackParameters
     }
 
     func getPlaybackParameters() -> PlaybackParameters {
         playbackParameters
-    }
-
-    private func updatePlaybackParameters() {
-        if started {
-            resetPosition(position: getPosition())
-        }
     }
 }

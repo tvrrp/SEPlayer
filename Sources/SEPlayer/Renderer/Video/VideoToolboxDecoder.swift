@@ -16,80 +16,56 @@ final class VideoToolboxDecoder: SEDecoder {
     private var playbackSpeed: Float = 1.0
 
     private let individualBufferSize: Int
-    private var buffers: [UnsafeMutableRawPointer]
-    private var buffersInUse: [Bool]
-    private var bufferCounter = 0
-
-    private var framesInUse: [Bool]
-    private var framesReadCounter = 0
-    private var framesWriteCounter = 0
+    private let compressedBufferPool: CompressedBufferPool<UnsafeMutableRawBufferPointer, VideoOutputWrapper>
 
     private var _pendingSamples = [(Int, CMSampleBuffer, SampleFlags)]()
+    private var _decodingSamples = NSHashTable<Cancellable>()
     private var _isDecodingSample = false
     private var _framedBeingDecoded = 0
 
-    init(queue: Queue, formatDescription: CMFormatDescription) throws {
+    init(queue: Queue, format: Format) throws {
         self.queue = queue
-        self.formatDescription = formatDescription
-        decompressedSamplesQueue = try! TypedCMBufferQueue<VideoOutputWrapper>(capacity: .highWaterMark) { rhs, lhs in
-            guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
+        self.formatDescription = try format.buildFormatDescription()
+        decompressedSamplesQueue = try TypedCMBufferQueue<VideoOutputWrapper>(capacity: .highWaterMark) { rhs, lhs in
+            guard rhs != lhs else { return .compareEqualTo }
 
-            return rhs.presentationTime > lhs.presentationTime ? .compareGreaterThan : .compareLessThan
+            return rhs > lhs ? .compareGreaterThan : .compareLessThan
         }
-        let individualBufferSize = Int.defaultInputBufferSize
+        let individualBufferSize = format.maxInputSize > 0 ? format.maxInputSize : Int.defaultInputBufferSize
         self.individualBufferSize = individualBufferSize
-        buffers = (0..<Int.highWaterMark).map { _ in
-            UnsafeMutableRawPointer.allocate(
-                byteCount: individualBufferSize,
-                alignment: MemoryLayout<UInt8>.alignment
-            )
-        }
-        buffersInUse = Array(repeating: false, count: .highWaterMark)
-        framesInUse = Array(repeating: false, count: .highWaterMark)
 
-        try! createDecompressionSession()
+        compressedBufferPool = .init(
+            capacity: .highWaterMark,
+            decodedQueue: decompressedSamplesQueue,
+            allocateBuffer: {
+                let buffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: individualBufferSize)
+                return UnsafeMutableRawBufferPointer(buffer)
+            },
+            deallocateBuffer: { buffer in
+                buffer.deallocate()
+            }
+        )
+
+        try createDecompressionSession()
     }
 
     func dequeueInputBufferIndex() -> Int? {
         assert(queue.isCurrent())
-        guard !buffersInUse[bufferCounter], !framesInUse[framesWriteCounter] else {
-            return nil
-        }
-
-        let index = bufferCounter
-        buffersInUse[bufferCounter] = true
-        bufferCounter += 1
-        if bufferCounter >= .highWaterMark {
-            bufferCounter = 0
-        }
-
-        framesWriteCounter += 1
-        if framesWriteCounter >= .highWaterMark {
-            framesWriteCounter = 0
-        }
-
-        return index
+        return compressedBufferPool.tryAcquireIndex()
     }
 
-    func dequeueInputBuffer(for index: Int) -> UnsafeMutableRawPointer {
+    func dequeueInputBuffer(for index: Int) -> UnsafeMutableRawBufferPointer {
         assert(queue.isCurrent())
-        return buffers[index]
+        return compressedBufferPool.bufferView(for: index)
     }
 
     func queueInputBuffer(for index: Int, inputBuffer: DecoderInputBuffer) throws {
         assert(queue.isCurrent())
-        let buffer = try! inputBuffer.dequeue()
+        let buffer = try inputBuffer.dequeue()
 
         let isEndOfStream = inputBuffer.flags.contains(.endOfStream)
         let blockBuffer: CMBlockBuffer? = if !isEndOfStream {
-            try! CMBlockBuffer(
-                length: inputBuffer.size,
-                allocator: { _ in
-                    return buffer
-                },
-                deallocator: { _, _ in },
-                flags: .assureMemoryNow
-            )
+            try CMBlockBuffer(buffer: buffer[0..<inputBuffer.size], deallocator: { _, _ in })
         } else {
             nil
         }
@@ -97,56 +73,44 @@ final class VideoToolboxDecoder: SEDecoder {
         let sampleTimings = !isEndOfStream ? [inputBuffer.sampleTimings] : []
         let sampleSizes = !isEndOfStream ? [inputBuffer.size] : []
 
-        let sampleBuffer = try! CMSampleBuffer(
+        let sampleBuffer = try CMSampleBuffer(
             dataBuffer: blockBuffer,
             formatDescription: formatDescription,
             numSamples: 1,
             sampleTimings: sampleTimings,
             sampleSizes: sampleSizes
         )
+
         _pendingSamples.append((index, sampleBuffer, inputBuffer.flags))
         decodeNextSampleIfNeeded()
     }
 
     func dequeueOutputBuffer() -> VideoOutputWrapper? {
         assert(queue.isCurrent())
-        guard framesInUse[framesReadCounter] == true else {
-            return nil
-        }
-
-        framesInUse[framesReadCounter] = false
-        framesReadCounter += 1
-        if framesReadCounter >= .highWaterMark {
-            framesReadCounter = 0
-        }
-
-        return decompressedSamplesQueue.dequeue()
+        return compressedBufferPool.dequeueDecoded()
     }
 
     func flush() throws {
         assert(queue.isCurrent())
+        _decodingSamples.allObjects.forEach { $0.cancel() }
         if let decompressionSession {
             VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
         }
-        try decompressedSamplesQueue.reset()
         _isDecodingSample = false
         _framedBeingDecoded = 0
         _pendingSamples.removeAll()
-        buffersInUse = buffersInUse.map { _ in false }
-        bufferCounter = 0
-        framesInUse = framesInUse.map { _ in false }
-        framesReadCounter = 0
-        framesWriteCounter = 0
+        try compressedBufferPool.flush()
     }
 
     func release() {
         assert(queue.isCurrent())
+        try? flush()
+
         if let decompressionSession {
             VTDecompressionSessionInvalidate(decompressionSession)
             self.decompressionSession = nil
         }
-        try? decompressedSamplesQueue.reset()
-        buffers.forEach { $0.deallocate() }
+        try? compressedBufferPool.release()
     }
 
     private func createDecompressionSession() throws {
@@ -176,11 +140,13 @@ final class VideoToolboxDecoder: SEDecoder {
 
         _isDecodingSample = true
         let pending = _pendingSamples.removeFirst()
-        decodeSample(index: pending.0, sampleBuffer: pending.1, sampleFlags: pending.2)
+        let cancellable = decodeSample(index: pending.0, sampleBuffer: pending.1, sampleFlags: pending.2)
+        _decodingSamples.add(cancellable)
     }
 
-    private func decodeSample(index: Int, sampleBuffer: CMSampleBuffer, sampleFlags: SampleFlags) {
+    private func decodeSample(index: Int, sampleBuffer: CMSampleBuffer, sampleFlags: SampleFlags) -> Cancellable? {
         assert(queue.isCurrent())
+        let cancellable = Cancellable(queue: queue)
         if sampleFlags.contains(.endOfStream) {
             handleSample(response: .init(
                 status: noErr,
@@ -188,12 +154,13 @@ final class VideoToolboxDecoder: SEDecoder {
                 imageBuffer: nil,
                 presentationTimeStamp: .zero,
                 sampleIndex: index,
-                sampleFlags: sampleFlags
+                sampleFlags: sampleFlags,
+                cancellable: cancellable
             ))
-            return
+            return nil
         }
 
-        guard let decompressionSession else { return }
+        guard let decompressionSession else { return nil }
 
         var decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
         if playbackSpeed <= 1.0 { decodeFlags.insert(._1xRealTimePlayback) }
@@ -206,6 +173,7 @@ final class VideoToolboxDecoder: SEDecoder {
             infoFlagsOut: &infoFlagsOut
         ) { [weak self] status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
             guard let self else { return }
+
             queue.async {
                 self.handleSample(
                     response: .init(
@@ -214,7 +182,8 @@ final class VideoToolboxDecoder: SEDecoder {
                         imageBuffer: imageBuffer,
                         presentationTimeStamp: presentationTimeStamp,
                         sampleIndex: index,
-                        sampleFlags: sampleFlags
+                        sampleFlags: sampleFlags,
+                        cancellable: cancellable
                     )
                 )
             }
@@ -222,42 +191,42 @@ final class VideoToolboxDecoder: SEDecoder {
 
         if status != noErr {
             let error = VTDSessionErrors.osStatus(.init(rawValue: status))
-            print("❌ error at decodeSample = \(error)")
 
             if case let .osStatus(vTError) = error, vTError == .invalidSession {
                 _isDecodingSample = false
                 self._pendingSamples.insert((index, sampleBuffer, sampleFlags), at: 0)
-                try! createDecompressionSession()
+                try! createDecompressionSession() // TODO: fixme
             }
         }
+
+        return cancellable
     }
 
     private func handleSample(response: VTDecoderResponce) {
         defer {
+            _decodingSamples.remove(response.cancellable)
             _isDecodingSample = false
             _framedBeingDecoded -= 1
             decodeNextSampleIfNeeded()
         }
 
         do {
+            guard !response.cancellable.isCancelled else { return }
+
             guard response.status == noErr else {
-                let error = VTDSessionErrors.osStatus(.init(rawValue: response.status))
-                print("❌ error at closure = \(error)")
-                if !response.sampleFlags.contains(.endOfStream) {
-//                    assertionFailure()
-                }
-                return
+                throw VTDSessionErrors.osStatus(.init(rawValue: response.status))
             }
 
-            buffersInUse[response.sampleIndex] = false
-            framesInUse[response.sampleIndex] = true
-
-            try! decompressedSamplesQueue.enqueue(.init(
-                imageBuffer: response.imageBuffer,
-                sampleFlags: response.sampleFlags,
-                presentationTime: response.presentationTimeStamp.microseconds
-            ))
+            try compressedBufferPool.onDecodeSuccess(
+                fromCompressedIndex: response.sampleIndex,
+                decoded: VideoOutputWrapper(
+                    imageBuffer: response.imageBuffer,
+                    sampleFlags: response.sampleFlags,
+                    presentationTime: response.presentationTimeStamp.microseconds
+                )
+            )
         } catch {
+            compressedBufferPool.onDecodeError(fromCompressedIndex: response.sampleIndex)
             print(error)
         }
     }
@@ -272,26 +241,39 @@ extension VideoToolboxDecoder: CARendererDecoder {
         self.playbackSpeed = speed
     }
 
-    func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool {
+    // TODO: decoder reuse with flush for allocating larger buffers if needed
+    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
         assert(queue.isCurrent())
-        guard let decompressionSession else { return false }
+        guard let decompressionSession,
+              let newFormatDescription = try? newFormat.buildFormatDescription() else {
+            return false
+        }
+
+        if let oldFormat, oldFormat.maxInputSize > 0, newFormat.maxInputSize > 0,
+           oldFormat.maxInputSize < newFormat.maxInputSize {
+            return false
+        } else if newFormat.maxInputSize > individualBufferSize {
+            return false
+        }
+
         let result = VTDecompressionSessionCanAcceptFormatDescription(
             decompressionSession,
-            formatDescription: newFormat
+            formatDescription: newFormatDescription
         )
-        if result { formatDescription = newFormat }
+        if result { formatDescription = newFormatDescription }
         return result
     }
 }
 
 extension VideoToolboxDecoder {
-    struct VTDecoderResponce {
+    private struct VTDecoderResponce {
         let status: OSStatus
         let infoFlags: VTDecodeInfoFlags
         let imageBuffer: CVImageBuffer?
         let presentationTimeStamp: CMTime
         let sampleIndex: Int
         let sampleFlags: SampleFlags
+        let cancellable: Cancellable
     }
 
     enum VTDSessionErrors: Error {
@@ -348,7 +330,7 @@ extension VideoToolboxDecoder {
     }
 }
 
-final class VideoOutputWrapper: CoreVideoBuffer {
+final class VideoOutputWrapper: CoreVideoBuffer, Comparable {
     let imageBuffer: CVImageBuffer?
     let sampleFlags: SampleFlags
     let presentationTime: Int64
@@ -358,21 +340,42 @@ final class VideoOutputWrapper: CoreVideoBuffer {
         self.sampleFlags = sampleFlags
         self.presentationTime = presentationTime
     }
+
+    static func < (lhs: VideoOutputWrapper, rhs: VideoOutputWrapper) -> Bool {
+        lhs.presentationTime < rhs.presentationTime
+    }
+
+    static func == (lhs: VideoOutputWrapper, rhs: VideoOutputWrapper) -> Bool {
+        lhs.presentationTime == rhs.presentationTime
+    }
 }
 
 private struct VideoToolboxCapabilitiesResolver: RendererCapabilities {
     let trackType: TrackType = .video
 
-    func supportsFormat(_ format: CMFormatDescription) -> Bool {
-        guard format.mediaType == .video else { return false }
+    func supportsFormat(_ format: Format) -> Bool {
+        guard let mimeType = format.sampleMimeType else { return false }
 
-        switch format.mediaSubType.rawValue {
-        case kCMVideoCodecType_H264:
+        switch mimeType {
+        case .videoH264, .videoH265:
             return true
         default:
             return false
         }
     }
+}
+
+private final class Cancellable {
+    var isCancelled: Bool { queue.sync { _isCancelled } }
+
+    private let queue: Queue
+    private var _isCancelled = false
+
+    init(queue: Queue) {
+        self.queue = queue
+    }
+
+    func cancel() { queue.sync { _isCancelled = true } }
 }
 
 private extension Int {

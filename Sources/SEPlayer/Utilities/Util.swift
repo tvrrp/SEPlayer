@@ -8,6 +8,7 @@
 import Foundation
 
 enum Util {
+    // TODO: make indexUset as nil
     @inline(__always)
     static func binarySearchCeil<T: Comparable>(array: [T], value: T, inclusive: Bool, stayInBounds: Bool) -> Int {
         var index = array.binarySearch(value: value)
@@ -24,6 +25,7 @@ enum Util {
         return stayInBounds ? min(array.count - 1, index) : index
     }
 
+    // TODO: make indexUset as nil
     @inline(__always)
     static func binarySearch<T: Comparable>(array: [T], value: T, inclusive: Bool, stayInBounds: Bool) -> Int {
         var index = array.binarySearch(value: value)

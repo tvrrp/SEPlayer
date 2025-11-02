@@ -5,26 +5,34 @@
 //  Created by Damir Yackupov on 24.04.2025.
 //
 
-import AudioToolbox
-import CoreMedia
+import AVFoundation
 
 protocol AQDecoder: SEDecoder where OutputBuffer: AQOutputBuffer {
     static func getCapabilities() -> RendererCapabilities
-    func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool
+    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
 }
 
 protocol AQOutputBuffer: DecoderOutputBuffer {
     var audioBuffer: CMSampleBuffer? { get }
 }
 
-final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
+protocol AudioRenderer: SERenderer {
+    var volume: Float { get set }
+}
+
+final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRenderer {
+    var volume: Float {
+        get { audioSink.volume }
+        set { audioSink.volume = newValue }
+    }
+
     private var decoder: Decoder?
     private let audioSink: IAudioSink
     private let queue: Queue
     private let decoderFactory: SEDecoderFactory
 
     private let flagsOnlyBuffer: DecoderInputBuffer
-    private var inputFormat: CMFormatDescription?
+    private var inputFormat: Format?
 
     private var inputIndex: Int?
     private var inputBuffer: DecoderInputBuffer
@@ -60,9 +68,16 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
 
     private var currentPosition: Int64 = .zero
 
-    init(queue: Queue, clock: CMClock, audioSink: IAudioSink? = nil, decoderFactory: SEDecoderFactory) throws {
+    init(
+        queue: Queue,
+        clock: CMClock,
+        audioSink: IAudioSink? = nil,
+        renderSynchronizer: AVSampleBufferRenderSynchronizer,
+        decoderFactory: SEDecoderFactory
+    ) throws {
         self.queue = queue
-        self.audioSink = audioSink ?? AudioSink(queue: queue, clock: clock)
+//        self.audioSink = audioSink ?? AudioSink(queue: queue, clock: clock)
+        self.audioSink = audioSink ?? TestAudioSink(queue: queue, renderSynchronizer: renderSynchronizer)//AudioSink(queue: queue, clock: clock)
         self.decoderFactory = decoderFactory
         outputSampleQueue = try! TypedCMBufferQueue<CMSampleBuffer>()
         flagsOnlyBuffer = DecoderInputBuffer()
@@ -74,14 +89,24 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
 
     override func getMediaClock() -> MediaClock? { self }
 
+    override func getTimebase() -> CMTimebase? { audioSink.timebase }
+
     override func getCapabilities() -> any RendererCapabilities {
         Decoder.getCapabilities()
+    }
+
+    override func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void) {
+        audioSink.requestMediaDataWhenReady(on: queue, block: block)
+    }
+
+    override func stopRequestingMediaData() {
+        audioSink.stopRequestingMediaData()
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
         if outputStreamEnded {
             do {
-                try! audioSink.playToEndOfStream()
+                try audioSink.playToEndOfStream()
                 nextBufferToWritePresentationTime = lastBufferInStreamPresentationTime
             } catch {
                 throw error
@@ -93,14 +118,14 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
         if inputFormat == nil {
             flagsOnlyBuffer.reset()
 
-            switch try! readSource(to: flagsOnlyBuffer, readFlags: .requireFormat) {
+            switch try readSource(to: flagsOnlyBuffer, readFlags: .requireFormat) {
             case let .didReadFormat(format):
-                try! onInputFormatChanged(format: format)
+                try onInputFormatChanged(format: format)
             case .didReadBuffer:
                 assert(flagsOnlyBuffer.flags.contains(.endOfStream))
                 inputStreamEnded = true
                 do {
-                    try! processEndOfStream()
+                    try processEndOfStream()
                 } catch {
                     throw error
                 }
@@ -110,11 +135,11 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
             }
         }
 
-        try! maybeInitDecoder()
+        try maybeInitDecoder()
 
         if decoder != nil {
-            while try! drainOutputBuffer(position: position, elapsedRealtime: elapsedRealtime) {}
-            while try! feedInputBuffer() {}
+            while try drainOutputBuffer(position: position, elapsedRealtime: elapsedRealtime) {}
+            while try feedInputBuffer() {}
         }
     }
 
@@ -122,7 +147,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
         outputStreamEnded && audioSink.isEnded()
     }
 
-    override func onStreamChanged(formats: [CMFormatDescription], startPosition: Int64, offset: Int64, mediaPeriodId: MediaPeriodId) throws {
+    override func onStreamChanged(formats: [Format], startPosition: Int64, offset: Int64, mediaPeriodId: MediaPeriodId) throws {
         try! super.onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
         firstStreamSampleRead = false
         if self.startPosition == nil {
@@ -209,7 +234,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
         }
     }
     
-    func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool {
+    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
         decoder?.canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) ?? false
     }
 
@@ -219,11 +244,11 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
         self.decoder = decoder
     }
 
-    func createDecoder(format: CMFormatDescription) throws -> Decoder {
+    func createDecoder(format: Format) throws -> Decoder {
         return try! decoderFactory.create(type: Decoder.self, queue: queue, format: format)
     }
 
-    func onInputFormatChanged(format: CMFormatDescription) throws {
+    func onInputFormatChanged(format: Format) throws {
         waitingForFirstSampleInFormat = true
         let oldFormat = inputFormat
         inputFormat = format
@@ -268,7 +293,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
         if outputBuffer.sampleFlags.contains(.endOfStream) {
             if decoderReinitializationState == .waitEndOfStream {
                 releaseDecoder()
-                try! maybeInitDecoder()
+                try maybeInitDecoder()
                 audioTrackNeedsConfigure = true
             } else {
                 self.outputBuffer = nil
@@ -286,14 +311,24 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer {
 
         nextBufferToWritePresentationTime = nil
         if audioTrackNeedsConfigure {
-            try! audioSink.configure(
+            try audioSink.configure(
                 inputFormat: inputFormat,
                 channelLayout: sampleBuffer.formatDescription?.audioChannelLayout
             )
             audioTrackNeedsConfigure = false
         }
 
-        if try! audioSink.handleBuffer(sampleBuffer, presentationTime: outputBuffer.presentationTime) {
+        let updatedSampleBuffer = try CMSampleBuffer(
+            copying: sampleBuffer,
+            withNewTiming: [
+                CMSampleTimingInfo(
+                    duration: .invalid,
+                    presentationTimeStamp: CMTime.from(microseconds: outputBuffer.presentationTime),
+                    decodeTimeStamp: .invalid
+                )
+            ]
+        )
+        if try audioSink.handleBuffer(updatedSampleBuffer, presentationTime: outputBuffer.presentationTime) {
             self.outputBuffer = nil
             return true
         } else {
@@ -377,7 +412,7 @@ extension AudioQueueRenderer: AudioSinkDelegate {
 }
 
 extension AudioQueueRenderer: MediaClock {
-    func getPosition() -> Int64 {
+    func getPositionUs() -> Int64 {
         updateCurrentPosition()
         return currentPosition
     }

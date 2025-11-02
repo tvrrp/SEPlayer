@@ -255,21 +255,21 @@ final class MediaPeriodQueue {
         guard mediaPeriodHolder != loading else { return .init() }
 
         var removedResult = UpdatePeriodQueueResult()
-        var mediaPeriodHolder = mediaPeriodHolder
+        var mediaPeriodHolder2 = mediaPeriodHolder
         loading = mediaPeriodHolder
 
-        while let next = mediaPeriodHolder.next {
-            mediaPeriodHolder = next
-            if mediaPeriodHolder == reading {
+        while let next = mediaPeriodHolder2.next {
+            mediaPeriodHolder2 = next
+            if mediaPeriodHolder2 == reading {
                 reading = playing
                 prewarming = playing
                 removedResult = [.alteredReadingPeriod, .alteredPrewarmingPeriod]
             }
-            if mediaPeriodHolder == prewarming {
+            if mediaPeriodHolder2 == prewarming {
                 prewarming = reading
                 removedResult = [.alteredPrewarmingPeriod]
             }
-            mediaPeriodHolder.release()
+            mediaPeriodHolder2.release()
             count -= 1
         }
 

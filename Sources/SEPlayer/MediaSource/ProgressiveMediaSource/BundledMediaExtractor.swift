@@ -35,15 +35,14 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
                 func postAction() { extractorInput.resetPeekPosition() }
 
                 do {
-                    if try extractor.shiff(input: extractorInput) {
-                        self.extractor = extractor
-                        postAction()
-                        break
-                    } else {
-                        sniffFailures.append(contentsOf: extractor.getSniffFailureDetails())
-                    }
+                    try extractor.shiff(input: extractorInput)
+                    self.extractor = extractor
+                    postAction()
+                    break
                 } catch {
-                    // do nothing
+                    if let error = error as? SniffFailure {
+                        sniffFailures.append(error)
+                    }
                 }
 
                 postAction()

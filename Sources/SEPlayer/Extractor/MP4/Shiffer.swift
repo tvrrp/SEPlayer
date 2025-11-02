@@ -139,7 +139,7 @@ struct Sniffer {
         if brand >> 8 == 0x00336770 {
             // Brand starts with '3gp'.
             return true
-        } else if brand == brandHeic, acceptHeic {
+        } else if brand == Sniffer.brandHeic, acceptHeic {
             return true
         } else {
             return compatibleBrands.contains(brand)
@@ -147,8 +147,8 @@ struct Sniffer {
     }
 }
 
-private extension Sniffer {
-    var compatibleBrands: [UInt32] {
+extension Sniffer {
+    private var compatibleBrands: [UInt32] {
         [
             0x69736f6d, // isom
             0x69736f32, // iso2
@@ -174,7 +174,7 @@ private extension Sniffer {
             0x66347620, // f4v[space]
             0x6b646469, // kddi
             0x4d345650, // M4VP
-            brandQuickTime, // qt[space][space]
+            Sniffer.brandQuickTime, // qt[space][space]
             0x4d534e56, // MSNV, Sony PSP
             0x64627931, // dby1, Dolby Vision
             0x69736d6c, // isml
@@ -182,8 +182,8 @@ private extension Sniffer {
         ]
     }
 
-    var brandQuickTime: UInt32 { 0x71742020 }
-    var brandHeic: UInt32 { 0x68656963 }
+    static var brandQuickTime: UInt32 { 0x71742020 }
+    static var brandHeic: UInt32 { 0x68656963 }
 }
 
 private extension Int {

@@ -95,7 +95,7 @@ final class SampleDataQueue {
         readAllocationNode = firstAllocationNode
     }
 
-    func readToBuffer(buffer: UnsafeMutableRawPointer, offset: Int, size: Int) throws {
+    func readToBuffer(buffer: UnsafeMutableRawBufferPointer, offset: Int, size: Int) throws {
         assert(queue.isCurrent())
         readAllocationNode = try! readData(
             allocationNode: readAllocationNode,
@@ -105,7 +105,7 @@ final class SampleDataQueue {
         )
     }
 
-    func peekToBuffer(buffer: UnsafeMutableRawPointer, offset: Int, size: Int) throws {
+    func peekToBuffer(buffer: UnsafeMutableRawBufferPointer, offset: Int, size: Int) throws {
         assert(queue.isCurrent())
         try! readData(
             allocationNode: readAllocationNode,
@@ -193,7 +193,7 @@ final class SampleDataQueue {
     private func readData(
         allocationNode: SampleAllocationNode,
         absolutePosition: Int,
-        target: UnsafeMutableRawPointer,
+        target: UnsafeMutableRawBufferPointer,
         size: Int
     ) throws -> SampleAllocationNode {
         assert(queue.isCurrent())
@@ -203,10 +203,10 @@ final class SampleDataQueue {
         var bufferOffset = 0
 
         while remaining > 0 {
-            let baseAdress = target.advanced(by: bufferOffset)
+            let baseAdress = target.baseAddress!.advanced(by: bufferOffset)
             let toCopy = min(remaining, node.endPosition - absolutePosition)
             let nodeOffset = node.translateOffset(absolutePosition: absolutePosition)
-            memcpy(baseAdress, node.allocation.data.advanced(by: nodeOffset), toCopy)
+            memcpy(baseAdress, node.allocation.data.baseAddress!.advanced(by: nodeOffset), toCopy) // TODO: fix me
             remaining -= toCopy
             absolutePosition += toCopy
             bufferOffset += toCopy

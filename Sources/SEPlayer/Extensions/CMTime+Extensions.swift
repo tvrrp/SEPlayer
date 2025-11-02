@@ -24,12 +24,16 @@ extension CMTime: @retroactive Hashable {
 }
 
 extension CMTime {
+    var milliseconds: Int64 {
+        convertScale(1_000, method: .default).value
+    }
+
     var microseconds: Int64 {
-        seconds.microsecondsPerSecond
+        convertScale(1_000_000, method: .default).value
     }
 
     var nanoseconds: Int64 {
-        seconds.nanosecondsPerSecond
+        convertScale(1_000_000_000, method: .default).value
     }
 
     static func from(microseconds: Int64) -> CMTime {

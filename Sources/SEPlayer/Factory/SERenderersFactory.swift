@@ -5,14 +5,14 @@
 //  Created by Damir Yackupov on 05.05.2025.
 //
 
-import CoreMedia.CMSync
+import AVFoundation
 
-protocol RenderersFactory {
+public protocol RenderersFactory {
     func createRenderers(
         queue: Queue,
         clock: CMClock,
-        displayLink: DisplayLinkProvider,
-        bufferableContainer: PlayerBufferableContainer
+        bufferableContainer: PlayerBufferableContainer,
+        renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer]
 }
 
@@ -26,22 +26,22 @@ struct DefaultRenderersFactory: RenderersFactory {
     func createRenderers(
         queue: Queue,
         clock: CMClock,
-        displayLink: DisplayLinkProvider,
-        bufferableContainer: PlayerBufferableContainer
+        bufferableContainer: PlayerBufferableContainer,
+        renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {
         let renderers = [
             try? CAVideoRenderer<VideoToolboxDecoder>(
                 queue: queue,
                 clock: clock,
-                displayLink: displayLink,
                 bufferableContainer: bufferableContainer,
                 decoderFactory: decoderFactory
             ),
             try? AudioQueueRenderer<AudioConverterDecoder>(
                 queue: queue,
                 clock: clock,
-                decoderFactory: decoderFactory
-            )
+                renderSynchronizer: renderSynchronizer,
+                decoderFactory: decoderFactory,
+            ),
         ].compactMap { $0 }
 
         return renderers

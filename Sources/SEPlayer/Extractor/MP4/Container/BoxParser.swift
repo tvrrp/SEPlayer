@@ -7,6 +7,7 @@
 
 import CoreMedia.CMTime
 import AudioToolbox
+import QuartzCore
 
 struct BoxParser {
     func parseTraks(
@@ -92,6 +93,7 @@ struct BoxParser {
             stsd: stsd.data,
             trackId: tkhdData.trackId,
             rotationDegrees: tkhdData.rotationDegrees,
+            transform3D: tkhdData.transform3D,
             language: mdhdData.language,
             isQuickTime: isQuickTime
         )
@@ -104,19 +106,17 @@ struct BoxParser {
             editListMediaTimes = edtsData.editListMediaTimes
         }
 
-        if let format = stsdData.format,
-           let formatDescription = try format.buildFormatDescription() {
+        if let format = stsdData.format {
             return try Track(
                 id: tkhdData.trackId,
                 type: trackType,
-                format: (formatDescription.mediaType == .video) ? .video(formatDescription) : .audio(formatDescription),
+                format: format,
                 timescale: mdhdData.timescale,
                 movieTimescale: movieTimescale,
                 durationUs: durationUs,
                 mediaDurationUs: mdhdData.mediaDurationUs,
                 editListDurations: editListDurations,
-                editListMediaTimes: editListMediaTimes,
-                format2: format
+                editListMediaTimes: editListMediaTimes
             )
         } else {
             return nil
@@ -126,7 +126,8 @@ struct BoxParser {
     private func parseStsd(
         stsd: ByteBuffer,
         trackId: Int,
-        rotationDegrees: Int,
+        rotationDegrees: CGFloat,
+        transform3D: CATransform3D,
         language: String,
         isQuickTime: Bool
     ) throws -> StsdData2 {
@@ -151,20 +152,34 @@ struct BoxParser {
 
             if let childAtomType {
                 if videoSampleEntries.contains(childAtomType) {
-                    try parseVideoSampleEntry(
+                    let coreMediaParserResult = try CoreMediaParsedVideo.create(
                         parent: &stsd,
-                        atomType: childAtomType,
                         position: childStartPosition,
                         size: childAtomSize,
                         trackId: trackId,
                         rotationDegrees: rotationDegrees,
+                        transform3D: transform3D,
+                        isQuickTime: isQuickTime,
                         out: &out,
                         entryIndex: index
                     )
+
+                    if !coreMediaParserResult {
+                        try parseVideoSampleEntry(
+                            parent: &stsd,
+                            atomType: childAtomType,
+                            position: childStartPosition,
+                            size: childAtomSize,
+                            trackId: trackId,
+                            rotationDegrees: rotationDegrees,
+                            transform3D: transform3D,
+                            out: &out,
+                            entryIndex: index
+                        )
+                    }
                 } else if audioSampleEntries.contains(childAtomType) {
-                    try parseAudioSampleEntry(
+                    let coreMediaParserResult = try CoreMediaParsedAudio.create(
                         parent: &stsd,
-                        atomType: childAtomType,
                         position: childStartPosition,
                         size: childAtomSize,
                         trackId: trackId,
@@ -173,6 +188,20 @@ struct BoxParser {
                         out: &out,
                         entryIndex: index
                     )
+
+                    if !coreMediaParserResult {
+                        try parseAudioSampleEntry(
+                            parent: &stsd,
+                            atomType: childAtomType,
+                            position: childStartPosition,
+                            size: childAtomSize,
+                            trackId: trackId,
+                            language: language,
+                            isQuickTime: isQuickTime,
+                            out: &out,
+                            entryIndex: index
+                        )
+                    }
                 }
             }
 
@@ -188,7 +217,8 @@ struct BoxParser {
         position: Int,
         size: Int,
         trackId: Int,
-        rotationDegrees: Int,
+        rotationDegrees: CGFloat,
+        transform3D: CATransform3D,
         out: inout StsdData2,
         entryIndex: Int
     ) throws {
@@ -251,6 +281,15 @@ struct BoxParser {
             case .pasp:
                 pixelWidthHeightRatio = try parsePaspFrom(&parent, position: childStartPosition)
                 pixelWidthHeightRatioFromPasp = true
+            case .hvcC:
+                guard mimeType == nil else {
+                    throw BoxParserErrors.badBoxContent(type: atomType, reason: "Invalid box content")
+                }
+                mimeType = .videoH265
+                parent.moveReaderIndex(to: childStartPosition + MP4Box.headerSize)
+                let hevcConfig = try HEVCCodecInfo(reader: &parent)
+                initializationData = hevcConfig
+                out.nalUnitLengthFieldLength = hevcConfig.nalUnitLengthFieldLength
             default:
                 break
             }
@@ -262,11 +301,12 @@ struct BoxParser {
 
         let formatBuilder = Format.Builder()
             .setId(trackId)
-            .setSampleMimeType(mimeType.rawValue)
+            .setSampleMimeType(mimeType)
             .setCodecs(nil)
             .setSize(width: Int(width), height: Int(height))
             .setPixelWidthHeightRatio(pixelWidthHeightRatio)
             .setRotationDegrees(rotationDegrees)
+            .setTransform3D(transform3D)
             .setInitializationData(initializationData)
             .setMaxNumReorderSamples(maxNumReorderSamples)
             .setMaxSubLayers(.zero)
@@ -308,7 +348,6 @@ struct BoxParser {
         var codecs: String?
         var esdsData: EsdsData?
 
-        // TODO: in the future
         if quickTimeSoundDescriptionVersion == 0 || quickTimeSoundDescriptionVersion == 1 {
             channelCount = try Int(parent.readInt(as: UInt16.self))
             parent.moveReaderIndex(forwardBy: 6) // sampleSize, compressionId, packetSize.
@@ -322,8 +361,10 @@ struct BoxParser {
                 parent.moveReaderIndex(forwardBy: 16)
             }
         } else if quickTimeSoundDescriptionVersion == 2 {
+            // TODO: in the future
             return
         } else {
+            // Unsupported version.
             return
         }
 
@@ -344,19 +385,34 @@ struct BoxParser {
             let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
 
             if childAtomType == .esds || isQuickTime && childAtomType == .wave {
-                let esdsAtomPosition = childAtomType == .esds
-                    ? childPosition
-                    : try findBoxPosition(parent: &parent, boxType: .esds, parentBoxPosition: childPosition, parentBoxSize: childAtomSize)
+                let esdsAtomPosition: Int?
+                let esdsAtomSize: Int?
 
-                if let esdsAtomPosition {
-                    let esdsDataTest = try EsdsData(parent: &parent, position: esdsAtomPosition, size: childAtomSize)
+                if childAtomType == .esds {
+                    esdsAtomPosition = childPosition
+                    esdsAtomSize = childAtomSize
+                } else {
+                    let (position, size) = try findBoxPosition(
+                        parent: &parent,
+                        boxType: .esds,
+                        parentBoxPosition: childPosition,
+                        parentBoxSize: childAtomSize
+                    )
+
+                    esdsAtomPosition = position
+                    esdsAtomSize = size
+                }
+
+                if let esdsAtomPosition, let esdsAtomSize {
+                    let esdsDataTest = try EsdsData(parent: &parent, position: esdsAtomPosition, size: esdsAtomSize)
                     esdsData = esdsDataTest
                     initializationData = esdsData
                     mimeType = esdsDataTest.mimeType
                 }
             } else if childAtomType == .dOps {
+//                initializationData = try OpusData(parent: &parent, size: childAtomSize - MP4Box.headerSize)
                 initializationData = try OpusData(parent: &parent)
-                mimeType = .audioAAC
+                mimeType = .audioOPUS
             }
 
             childPosition += childAtomSize
@@ -365,7 +421,7 @@ struct BoxParser {
         if out.format == nil, let mimeType {
             let formatBuilder = Format.Builder()
                 .setId(trackId)
-                .setSampleMimeType(mimeType.rawValue)
+                .setSampleMimeType(mimeType)
                 .setCodecs(codecs)
                 .setChannelCount(channelCount)
                 .setSampleRate(sampleRate)
@@ -408,7 +464,8 @@ extension BoxParser {
     struct TkhdData {
         let trackId: Int
         let duration: Int64
-        let rotationDegrees: Int
+        let rotationDegrees: CGFloat
+        let transform3D: CATransform3D
 
         init(tkhd: ByteBuffer) throws {
             var tkhd = tkhd
@@ -417,7 +474,7 @@ extension BoxParser {
             tkhd.moveReaderIndex(forwardBy: version == 0 ? 8 : 16)
             trackId = try Int(tkhd.readInt(as: UInt32.self))
             tkhd.moveReaderIndex(forwardBy: 4)
-            
+
             var durationUnknown = false
             let durationPosition = tkhd.readerIndex
             let durationByteCount = version == 0 ? 4 : 8
@@ -428,7 +485,7 @@ extension BoxParser {
                     break
                 }
             }
-            
+
             var duration: Int64
             if durationUnknown {
                 tkhd.moveReaderIndex(forwardBy: durationByteCount)
@@ -444,23 +501,52 @@ extension BoxParser {
             self.duration = duration
 
             tkhd.moveReaderIndex(forwardBy: 16)
-            let a00 = try Int(tkhd.readInt(as: Int32.self))
-            let a01 = try Int(tkhd.readInt(as: Int32.self))
-            tkhd.moveReaderIndex(forwardBy: 4)
-            let a10 = try Int(tkhd.readInt(as: Int32.self))
-            let a11 = try Int(tkhd.readInt(as: Int32.self))
 
-            let fixedOne = 65536
-            rotationDegrees = if a00 == 0 && a01 == fixedOne && a10 == -fixedOne && a11 == 0 {
-                90
-            } else if a00 == 0 && a01 == -fixedOne && a10 == fixedOne && a11 == 0 {
-                270
-            } else if a00 == -fixedOne && a01 == 0 && a10 == 0 && a11 == -fixedOne {
-                180
-            } else {
-                // Only 0, 90, 180 and 270 are supported. Treat anything else as 0.
-                .zero
-            }
+            func int32() throws -> Int32 { try tkhd.readInt(as: Int32.self) }
+            func fx16(_ v: Int32) -> CGFloat { CGFloat(v) / 65536.0 }
+            func fx30(_ v: Int32) -> CGFloat { CGFloat(v) / 1073741824.0 } // 1<<30
+
+            let a  = try int32()
+            let b  = try int32()
+            let u  = try int32() // usually 0
+            let c  = try int32()
+            let d  = try int32()
+            let v  = try int32() // usually 0
+            let tx = try int32()
+            let ty = try int32()
+            let w  = try int32() // usually 1<<30 (i.e. 1.0)
+
+            let aF = fx16(a)
+            let bF = fx16(b)
+            let cF = fx16(c)
+            let dF = fx16(d)
+            let txF = fx16(tx)
+            let tyF = fx16(ty)
+            let _wF = fx30(w) // generally 1.0; not used below
+
+            // 4×4 CATransform3D (same as CATransform3DMakeAffineTransform(affine))
+            var t = CATransform3DIdentity
+            t.m11 = aF
+            t.m12 = bF
+            t.m21 = cF
+            t.m22 = dF
+            t.m41 = txF
+            t.m42 = tyF
+            self.transform3D = t
+
+            // Derive rotation in degrees from the 2×2 submatrix.
+            // Normalize by scale to be robust if a/c include scale.
+            let scaleX = sqrt(aF*aF + cF*cF)
+            let scaleY = sqrt(bF*bF + dF*dF)
+            let na = scaleX > 0 ? aF/scaleX : aF
+            let nb = scaleX > 0 ? bF/scaleX : bF
+            let angle = atan2(nb, na) // radians
+            var deg = angle * 180 / .pi
+            // Snap very-near multiples of 90° to exact ints to avoid -89.999 -> -90
+            let snapped = (deg/90).rounded()
+            if abs(deg - snapped*90) < 0.01 { deg = snapped*90 }
+            if deg < 0 { deg += 360 }
+            self.rotationDegrees = deg.truncatingRemainder(dividingBy: 360)
         }
     }
 
@@ -605,7 +691,7 @@ extension BoxParser {
 
     private func findBoxPosition(
         parent: inout ByteBuffer, boxType: MP4Box.BoxType, parentBoxPosition: Int, parentBoxSize: Int
-    ) throws -> Int? {
+    ) throws -> (position: Int?, atomSize: Int?) {
         var childAtomPosition = parent.readerIndex
         guard childAtomPosition >= parentBoxPosition else {
             throw ParserException(malformedContainer: "")
@@ -620,13 +706,13 @@ extension BoxParser {
 
             let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
             if childAtomType == boxType {
-                return childAtomPosition
+                return (childAtomPosition, childAtomSize)
             }
 
             childAtomPosition += childAtomSize
         }
 
-        return nil
+        return (nil, nil)
     }
 }
 

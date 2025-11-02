@@ -10,9 +10,9 @@ import Foundation
 
 public final class SEPlayerFactory {
     private let sessionLoader: IPlayerSessionLoader
-    private let decoderFactory: SEDecoderFactory
-    private let displayLink: DisplayLinkProvider
+    private let decodersFactory: SEDecoderFactory
     private let bandwidthMeter: BandwidthMeter
+    private let audioSessionManager: IAudioSessionManager
     private let clock: CMClock
 
     public init(configuration: URLSessionConfiguration = .default) {
@@ -20,20 +20,17 @@ public final class SEPlayerFactory {
         operationQueue.underlyingQueue = Queues.loaderQueue.queue
         operationQueue.maxConcurrentOperationCount = 1
         self.sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
-        self.decoderFactory = DefaultSEDecoderFactory()
-        self.displayLink = CADisplayLinkProvider()
+        self.decodersFactory = DefaultSEDecoderFactory()
         self.bandwidthMeter = DefaultBandwidthMeter()
         self.clock = CMClockGetHostTimeClock()
+        audioSessionManager = AudioSessionManager.shared
 
-        registerDecoders()
+        registerDefaultDecoders(factory: decodersFactory)
+        Prewarmer.shared.prewarm()
     }
 
     public func buildQueue(name: String? = nil, qos: DispatchQoS = .userInitiated) -> Queue {
         SignalQueue(name: name, qos: qos)
-    }
-
-    public func buildDisplayLinkProvider() -> DisplayLinkProvider {
-        displayLink
     }
 
     public func buildPlayer(
@@ -43,6 +40,11 @@ public final class SEPlayerFactory {
         dataSourceFactory: DataSourceFactory? = nil,
         extractorsFactory: ExtractorsFactory? = nil,
         mediaSourceFactory: MediaSourceFactory? = nil,
+        decodersFactory: SEDecoderFactory? = nil,
+        renderersFactory: RenderersFactory? = nil,
+        trackSelector: TrackSelector? = nil,
+        loadControl: LoadControl? = nil,
+        bandwidthMeter: BandwidthMeter? = nil
     ) -> SEPlayer {
         let workQueue = workQueue ?? SignalQueue(name: "com.seplayer.work_\(identifier)", qos: .userInitiated)
         let loaderQueue = loaderQueue ?? SignalQueue(name: "com.seplayer.loader_\(identifier)", qos: .userInitiated)
@@ -55,30 +57,35 @@ public final class SEPlayerFactory {
             dataSourceFactory: dataSourceFactory,
             extractorsFactory: extractorsFactory
         )
-        let renderersFactory = DefaultRenderersFactory(decoderFactory: decoderFactory)
-        let trackSelector = DefaultTrackSelector()
-        let loadControl = DefaultLoadControl(queue: workQueue)
+        let decodersFactory = decodersFactory ?? self.decodersFactory
+        let renderersFactory = renderersFactory ?? DefaultRenderersFactory(decoderFactory: decodersFactory)
+        let trackSelector = trackSelector ?? DefaultTrackSelector()
+        let loadControl = loadControl ?? DefaultLoadControl(queue: workQueue)
 
         return SEPlayerImpl(
             identifier: identifier,
             queue: workQueue,
             clock: clock,
             renderersFactory: renderersFactory,
-            displayLink: displayLink,
             trackSelector: trackSelector,
             loadControl: loadControl,
-            bandwidthMeter: bandwidthMeter,
-            mediaSourceFactory: mediaSourceFactory
+            bandwidthMeter: bandwidthMeter ?? self.bandwidthMeter,
+            mediaSourceFactory: mediaSourceFactory,
+            audioSessionManager: audioSessionManager
         )
     }
 
-    private func registerDecoders() {
-        decoderFactory.register(VideoToolboxDecoder.self) { queue, format in
-            try! VideoToolboxDecoder(queue: queue, formatDescription: format)
+    public func registerDefaultDecoders(factory: SEDecoderFactory) {
+        factory.register(VideoToolboxDecoder.self) { queue, format in
+            try VideoToolboxDecoder(queue: queue, format: format)
         }
 
-        decoderFactory.register(AudioConverterDecoder.self) { queue, format in
-            try! AudioConverterDecoder(queue: queue, formatDescription: format)
+        factory.register(AudioConverterDecoder.self) { queue, format in
+            try AudioConverterDecoder(queue: queue, format: format)
         }
+
+//        decoderFactory.register(OpusDecoder.self) { queue, format in
+//            try OpusDecoder(queue: queue, format: format)
+//        }
     }
 }

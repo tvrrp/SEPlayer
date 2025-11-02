@@ -10,7 +10,6 @@ import Foundation.NSURLSession
 public protocol DataSource: DataReader {
     var url: URL? { get }
     var urlResponse: HTTPURLResponse? { get }
-    var queue: Queue { get }
     var components: DataSourceOpaque { get }
     @discardableResult func open(dataSpec: DataSpec) throws -> Int
     @discardableResult func close() -> ByteBuffer?

@@ -5,17 +5,15 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia.CMFormatDescription
-
 public protocol SampleStream: AnyObject {
     func isReady() -> Bool
     func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult
     func skipData(position: Int64) -> Int
 }
 
-public enum SampleStreamReadResult: Equatable {
+@frozen public enum SampleStreamReadResult: Equatable {
     case nothingRead
-    case didReadFormat(format: CMFormatDescription)
+    case didReadFormat(format: Format)
     case didReadBuffer
 }
 
@@ -26,7 +24,7 @@ public struct ReadFlags: OptionSet {
         self.rawValue = rawValue
     }
 
-    static let peek = ReadFlags(rawValue: 1)
-    static let requireFormat = ReadFlags(rawValue: 1 << 1)
-    static let omitSampleData = ReadFlags(rawValue: 1 << 2)
+    public static let peek = ReadFlags(rawValue: 1)
+    public static let requireFormat = ReadFlags(rawValue: 1 << 1)
+    public static let omitSampleData = ReadFlags(rawValue: 1 << 2)
 }

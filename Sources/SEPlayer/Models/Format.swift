@@ -5,16 +5,17 @@
 //  Created by Damir Yackupov on 01.06.2025.
 //
 
-import Foundation
 import CoreMedia
+import Foundation
+import QuartzCore
 
-extension Format {
-    protocol InitializationData: Hashable {
+public extension Format {
+    protocol InitializationData: Hashable, Sendable {
         func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription
     }
 }
 
-struct Format {
+public final class Format: Sendable {
     let id: String?
     let label: String?
     let labels: [String]
@@ -24,13 +25,13 @@ struct Format {
     let codecs: String?
 
     // Container specific.
-    let containerMimeType: String?
+    let containerMimeType: MimeTypes?
 
     // Sample specific.
-    let sampleMimeType: String?
+    let sampleMimeType: MimeTypes?
     let maxInputSize: Int
     let maxNumReorderSamples: Int
-    let initializationData: InitializationData?
+    let initializationData: (any InitializationData)?
     let subsampleOffsetUs: Int64
     let hasPrerollSamples: Bool
 
@@ -38,7 +39,8 @@ struct Format {
     let width: Int
     let height: Int
     let frameRate: Float
-    let rotationDegrees: Int
+    let rotationDegrees: CGFloat
+    let transform3D: CATransform3D
     let pixelWidthHeightRatio: Float
     let maxSubLayers: Int
 
@@ -71,6 +73,7 @@ struct Format {
         height = builder.height
         frameRate = builder.frameRate
         rotationDegrees = builder.rotationDegrees
+        transform3D = builder.transform3D
         pixelWidthHeightRatio = builder.pixelWidthHeightRatio
         maxSubLayers = builder.maxSubLayers
         // Audio specific.
@@ -82,18 +85,26 @@ struct Format {
 
     func buildUpon() -> Builder { Builder(format: self) }
 
-    func buildFormatDescription() throws -> CMFormatDescription? {
-        try initializationData?.buildCMFormatDescription(using: self)
+    func buildFormatDescription() throws -> CMFormatDescription {
+        guard let initializationData else {
+            throw Error.initializationDataIsEmpty
+        }
+
+        return try initializationData.buildCMFormatDescription(using: self)
     }
 }
 
-extension Format {
+public extension Format {
     static let noValue: Int = -1
     static let offsetSampleRelative = Int64.max
+
+    enum Error: Swift.Error {
+        case initializationDataIsEmpty
+    }
 }
 
 extension Format: Hashable {
-    static func == (lhs: Format, rhs: Format) -> Bool {
+    public static func == (lhs: Format, rhs: Format) -> Bool {
         return lhs.id == rhs.id &&
             lhs.label == rhs.label &&
             lhs.labels == rhs.labels &&
@@ -119,7 +130,7 @@ extension Format: Hashable {
             lhs.encoderPadding == rhs.encoderPadding
     }
 
-    func hash(into hasher: inout Hasher) {
+    public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(label)
         hasher.combine(labels)
@@ -147,7 +158,7 @@ extension Format: Hashable {
 }
 
 extension Format {
-    struct Builder {
+    final class Builder {
         fileprivate var id: String?
         fileprivate var label: String?
         fileprivate var labels: [String]
@@ -157,13 +168,13 @@ extension Format {
         fileprivate var codecs: String?
 
         // Container specific.
-        fileprivate var containerMimeType: String?
+        fileprivate var containerMimeType: MimeTypes?
 
         // Sample specific.
-        fileprivate var sampleMimeType: String?
+        fileprivate var sampleMimeType: MimeTypes?
         fileprivate var maxInputSize: Int
         fileprivate var maxNumReorderSamples: Int
-        fileprivate var initializationData: InitializationData?
+        fileprivate var initializationData: (any Format.InitializationData)?
         fileprivate var subsampleOffsetUs: Int64
         fileprivate var hasPrerollSamples: Bool
 
@@ -171,7 +182,8 @@ extension Format {
         fileprivate var width: Int
         fileprivate var height: Int
         fileprivate var frameRate: Float
-        fileprivate var rotationDegrees: Int
+        fileprivate var rotationDegrees: CGFloat
+        fileprivate var transform3D: CATransform3D
         fileprivate var pixelWidthHeightRatio: Float
         fileprivate var maxSubLayers: Int
 
@@ -196,6 +208,7 @@ extension Format {
             height = Format.noValue
             frameRate = Float(Format.noValue)
             rotationDegrees = .zero
+            transform3D = CATransform3DIdentity
             pixelWidthHeightRatio = 1.0
             maxSubLayers = Format.noValue;
 
@@ -228,6 +241,7 @@ extension Format {
             height = format.height
             frameRate = format.frameRate
             rotationDegrees = format.rotationDegrees
+            transform3D = format.transform3D
             pixelWidthHeightRatio = format.pixelWidthHeightRatio
             maxSubLayers = format.maxSubLayers
             // Audio specific.
@@ -239,168 +253,151 @@ extension Format {
 
         @discardableResult
         func setId(_ id: Int) -> Builder {
-            var value = self
-            value.id = String(id)
-            return value
+            self.id = String(id)
+            return self
         }
 
         @discardableResult
         func setLabel(_ label: String?) -> Builder {
-            var value = self
-            value.label = label
-            return value
+            self.label = label
+            return self
         }
 
         @discardableResult
         func setLabels(_ labels: [String]) -> Builder {
-            var value = self
-            value.labels = labels
-            return value
+            self.labels = labels
+            return self
         }
 
         @discardableResult
         func setLanguage(_ language: String?) -> Builder {
-            var value = self
-            value.language = language
-            return value
+            self.language = language
+            return self
         }
 
         @discardableResult
         func setAverageBitrate(_ averageBitrate: Int) -> Builder {
-            var value = self
-            value.averageBitrate = averageBitrate
-            return value
+            self.averageBitrate = averageBitrate
+            return self
         }
 
         @discardableResult
         func setPeakBitrate(_ peakBitrate: Int) -> Builder {
-            var value = self
-            value.peakBitrate = peakBitrate
-            return value
+            self.peakBitrate = peakBitrate
+            return self
         }
 
         @discardableResult
         func setCodecs(_ codecs: String?) -> Builder {
-            var value = self
-            value.codecs = codecs
-            return value
+            self.codecs = codecs
+            return self
         }
 
         // Container specific
         @discardableResult
-        func setContainerMimeType(_ containerMimeType: String?) -> Builder {
-            var value = self
-            value.containerMimeType = containerMimeType
-            return value
+        func setContainerMimeType(_ containerMimeType: MimeTypes?) -> Builder {
+            self.containerMimeType = containerMimeType
+            return self
         }
 
         // Sample specific
         @discardableResult
-        func setSampleMimeType(_ sampleMimeType: String?) -> Builder {
-            var value = self
-            value.sampleMimeType = sampleMimeType
-            return value
+        func setSampleMimeType(_ sampleMimeType: MimeTypes?) -> Builder {
+            self.sampleMimeType = sampleMimeType
+            return self
         }
 
         @discardableResult
         func setMaxInputSize(_ maxInputSize: Int) -> Builder {
-            var value = self
-            value.maxInputSize = maxInputSize
-            return value
+            self.maxInputSize = maxInputSize
+            return self
         }
 
         @discardableResult
         func setMaxNumReorderSamples(_ maxNumReorderSamples: Int) -> Builder {
-            var value = self
-            value.maxNumReorderSamples = maxNumReorderSamples
-            return value
+            self.maxNumReorderSamples = maxNumReorderSamples
+            return self
         }
 
         @discardableResult
-        func setInitializationData(_ initializationData: InitializationData?) -> Builder {
-            var value = self
-            value.initializationData = initializationData
-            return value
+        func setInitializationData(_ initializationData: (any InitializationData)?) -> Builder {
+            self.initializationData = initializationData
+            return self
         }
 
         @discardableResult
         func setSubsampleOffsetUs(_ subsampleOffsetUs: Int64) -> Builder {
-            var value = self
-            value.subsampleOffsetUs = subsampleOffsetUs
-            return value
+            self.subsampleOffsetUs = subsampleOffsetUs
+            return self
         }
 
         @discardableResult
         func setHasPrerollSamples(_ hasPrerollSamples: Bool) -> Builder {
-            var value = self
-            value.hasPrerollSamples = hasPrerollSamples
-            return value
+            self.hasPrerollSamples = hasPrerollSamples
+            return self
         }
 
         // Video specific
         @discardableResult
         func setSize(width: Int, height: Int) -> Builder {
-            var value = self
-            value.width = width
-            value.height = height
-            return value
+            self.width = width
+            self.height = height
+            return self
         }
 
         @discardableResult
         func setFrameRate(_ frameRate: Float) -> Builder {
-            var value = self
-            value.frameRate = frameRate
-            return value
+            self.frameRate = frameRate
+            return self
         }
 
         @discardableResult
-        func setRotationDegrees(_ rotationDegrees: Int) -> Builder {
-            var value = self
-            value.rotationDegrees = rotationDegrees
-            return value
+        func setRotationDegrees(_ rotationDegrees: CGFloat) -> Builder {
+            self.rotationDegrees = rotationDegrees
+            return self
+        }
+
+        @discardableResult
+        func setTransform3D(_ transform3D: CATransform3D) -> Builder {
+            self.transform3D = transform3D
+            return self
         }
 
         @discardableResult
         func setPixelWidthHeightRatio(_ ratio: Float) -> Builder {
-            var value = self
-            value.pixelWidthHeightRatio = ratio
-            return value
+            self.pixelWidthHeightRatio = ratio
+            return self
         }
 
         @discardableResult
         func setMaxSubLayers(_ maxSubLayers: Int) -> Builder {
-            var value = self
-            value.maxSubLayers = maxSubLayers
-            return value
+            self.maxSubLayers = maxSubLayers
+            return self
         }
 
         // Audio specific
         @discardableResult
         func setChannelCount(_ channelCount: Int) -> Builder {
-            var value = self
-            value.channelCount = channelCount
-            return value
+            self.channelCount = channelCount
+            return self
         }
 
         @discardableResult
         func setSampleRate(_ sampleRate: Int) -> Builder {
-            var value = self
-            value.sampleRate = sampleRate
-            return value
+            self.sampleRate = sampleRate
+            return self
         }
 
         @discardableResult
         func setEncoderDelay(_ encoderDelay: Int) -> Builder {
-            var value = self
-            value.encoderDelay = encoderDelay
-            return value
+            self.encoderDelay = encoderDelay
+            return self
         }
 
         @discardableResult
         func setEncoderPadding(_ encoderPadding: Int) -> Builder {
-            var value = self
-            value.encoderPadding = encoderPadding
-            return value
+            self.encoderPadding = encoderPadding
+            return self
         }
 
         func build() -> Format { Format(builder: self) }

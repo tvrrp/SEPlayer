@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 27.06.2025.
 //
 
-struct TrackFragment {
+final class TrackFragment {
     var header: DefaultSampleValues?
     var atomPosition: Int
     var dataPosition: Int
@@ -15,7 +15,7 @@ struct TrackFragment {
     var trunDataPosition: [Int]
     var trunLength: [Int]
     var sampleSizeTable: [Int]
-    var samplePresentationTimesUs: [Int]
+    var samplePresentationTimesUs: [Int64]
     var sampleIsSyncFrameTable: [Bool]
     var nextFragmentDecodeTime: Int
     var nextFragmentDecodeTimeIncludesMoov: Bool
@@ -30,7 +30,7 @@ struct TrackFragment {
         trunDataPosition: [Int] = [],
         trunLength: [Int] = [],
         sampleSizeTable: [Int] = [],
-        samplePresentationTimesUs: [Int] = [],
+        samplePresentationTimesUs: [Int64] = [],
         sampleIsSyncFrameTable: [Bool] = [],
         nextFragmentDecodeTime: Int = 0,
         nextFragmentDecodeTimeIncludesMoov: Bool = false
@@ -50,13 +50,13 @@ struct TrackFragment {
         self.nextFragmentDecodeTimeIncludesMoov = nextFragmentDecodeTimeIncludesMoov
     }
 
-    mutating func reset() {
+    func reset() {
         trunCount = 0
         nextFragmentDecodeTime = 0
         nextFragmentDecodeTimeIncludesMoov = false
     }
 
-    mutating func initTables(trunCount: Int, sampleCount: Int) {
+    func initTables(trunCount: Int, sampleCount: Int) {
         self.trunCount = trunCount
         self.sampleCount = sampleCount
         if trunLength.count < trunCount {
@@ -71,6 +71,4 @@ struct TrackFragment {
             sampleIsSyncFrameTable = Array(repeating: false, count: tableSize)
         }
     }
-
-    
 }

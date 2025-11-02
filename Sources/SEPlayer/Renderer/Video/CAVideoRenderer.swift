@@ -10,7 +10,7 @@ import CoreMedia
 protocol CARendererDecoder: SEDecoder where OutputBuffer: CoreVideoBuffer {
     static func getCapabilities() -> RendererCapabilities
     func setPlaybackSpeed(_ speed: Float)
-    func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool
+    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
 }
 
 protocol CoreVideoBuffer: DecoderOutputBuffer {
@@ -24,7 +24,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     private let decoderFactory: SEDecoderFactory
 
     private let flagsOnlyBuffer: DecoderInputBuffer
-    private var inputFormat: CMFormatDescription?
+    private var inputFormat: Format?
 
     private var inputIndex: Int?
     private var inputBuffer: DecoderInputBuffer
@@ -42,47 +42,36 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     private var buffersInCodecCount = 0
     private var lastRenderTime: Int64 = 0
 
-    private var videoFrameReleaseControl: VideoFrameReleaseControl
-    private let outputSampleQueue: TypedCMBufferQueue<ImageBufferWrapper>
-
     private var playbackSpeed: Float = 1.0
     private var startPosition: Int64?
     private var lastFrameReleaseTime: Int64 = .zero
 
-    private var pendingFramesAfterStop: [ImageBufferWrapper] = []
-
     init(
         queue: Queue,
         clock: CMClock,
-        displayLink: DisplayLinkProvider,
         bufferableContainer: PlayerBufferableContainer,
         decoderFactory: SEDecoderFactory
     ) throws {
         self.queue = queue
         self.bufferableContainer = bufferableContainer
-        self.videoFrameReleaseControl = VideoFrameReleaseControl(
-            queue: queue,
-            clock: clock,
-            displayLink: displayLink,
-            allowedJoiningTimeMs: .zero
-        )
         self.decoderFactory = decoderFactory
 
-        outputSampleQueue = try! TypedCMBufferQueue(compareHandler: { rhs, lhs in
-            guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
-            return rhs.presentationTime > lhs.presentationTime ? .compareGreaterThan : .compareLessThan
-        }, ptsHandler: { buffer in
-            return CMTime.from(nanoseconds: buffer.presentationTime)
-        })
         flagsOnlyBuffer = DecoderInputBuffer()
         inputBuffer = DecoderInputBuffer()
 
         super.init(queue: queue, trackType: .video, clock: clock)
-        videoFrameReleaseControl.frameTimingEvaluator = self
     }
 
     override func getCapabilities() -> RendererCapabilities {
         Decoder.getCapabilities()
+    }
+
+    override func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void) {
+        bufferableContainer.requestMediaDataWhenReady(on: queue, block: block)
+    }
+
+    override func stopRequestingMediaData() {
+        bufferableContainer.stopRequestingMediaData()
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
@@ -117,16 +106,11 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
         try! super.onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
-        videoFrameReleaseControl.enable(releaseFirstFrameBeforeStarted: mayRenderStartOfStream)
-        bufferableContainer.prepare(sampleQueue: outputSampleQueue, action: .reset)
-    }
-
-    override func enableRenderStartOfStream() {
-        videoFrameReleaseControl.allowReleaseFirstFrameBeforeStarted()
+//        bufferableContainer.prepare(action: .reset) // TODO: think
     }
 
     override func onStreamChanged(
-        formats: [CMFormatDescription],
+        formats: [Format],
         startPosition: Int64,
         offset: Int64,
         mediaPeriodId: MediaPeriodId
@@ -145,7 +129,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     }
 
     private func onProcessedStreamChange() {
-        videoFrameReleaseControl.processedStreamChanged()
+//        videoFrameReleaseControl.processedStreamChanged()
     }
 
     private func updatePeriodDuration() {
@@ -154,14 +138,6 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     override func onPositionReset(position: Int64, joining: Bool) throws {
         try! super.onPositionReset(position: position, joining: joining)
-        print("ON POSITION RESEEEEEEET, new position = \(position)")
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
         inputStreamEnded = false
         outputStreamEnded = false
         initialPosition = nil
@@ -169,10 +145,10 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
             try! flushDecoder()
         }
 
-        videoFrameReleaseControl.reset()
-        if joining {
-            videoFrameReleaseControl.join(renderNextFrameImmediately: false)
-        }
+//        videoFrameReleaseControl.reset()
+//        if joining {
+//            videoFrameReleaseControl.join(renderNextFrameImmediately: false)
+//        }
     }
 
     override func isReady() -> Bool {
@@ -180,30 +156,25 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         if rendererOtherwiseReady, decoder == nil {
             return true
         }
-        return videoFrameReleaseControl.isReady(rendererOtherwiseReady: rendererOtherwiseReady)
+
+        return true
+        // TODO: return videoFrameReleaseControl.isReady(rendererOtherwiseReady: rendererOtherwiseReady)
     }
 
     override func onStarted() throws {
         try! super.onStarted()
         lastRenderTime = getClock().microseconds
         bufferableContainer.start()
-        videoFrameReleaseControl.start()
     }
 
     override func onStopped() {
         bufferableContainer.stop()
-        videoFrameReleaseControl.stop()
-        while let sampleWrapper = outputSampleQueue.dequeue() {
-            pendingFramesAfterStop.append(sampleWrapper)
-        }
         super.onStopped()
     }
 
     override func onDisabled() {
         inputFormat = nil
-        try! outputSampleQueue.reset()
         releaseDecoder()
-        videoFrameReleaseControl.stop()
         bufferableContainer.end()
         super.onDisabled()
     }
@@ -215,7 +186,6 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     private func flushDecoder() throws {
         buffersInCodecCount = 0
-        try! outputSampleQueue.reset()
         bufferableContainer.flush()
         if decoderReinitializationState != .none {
             releaseDecoder()
@@ -234,10 +204,8 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         decoderReinitializationState = .none
         decoderReceivedBuffers = false
         buffersInCodecCount = 0
-        pendingFramesAfterStop.removeAll()
-        try? outputSampleQueue.reset()
         bufferableContainer.flush()
-        bufferableContainer.prepare(sampleQueue: outputSampleQueue, action: .reset)
+//        bufferableContainer.prepare(action: .reset) // TODO: think about that
 
         if let decoder {
             decoder.release()
@@ -245,7 +213,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         }
     }
 
-    func canReuseDecoder(oldFormat: CMFormatDescription?, newFormat: CMFormatDescription) -> Bool {
+    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
         decoder?.canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) ?? false
     }
 
@@ -255,13 +223,13 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         self.decoder = decoder
     }
 
-    func createDecoder(format: CMFormatDescription) throws -> Decoder {
+    func createDecoder(format: Format) throws -> Decoder {
         let decoder = try! decoderFactory.create(type: Decoder.self, queue: queue, format: format)
         decoder.setPlaybackSpeed(playbackSpeed)
         return decoder
     }
 
-    func onInputFormatChanged(format: CMFormatDescription) throws {
+    func onInputFormatChanged(format: Format) throws {
         waitingForFirstSampleInFormat = true
         let oldFormat = inputFormat
         inputFormat = format
@@ -285,7 +253,6 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     override func setPlaybackSpeed(current: Float, target: Float) throws {
         try! super.setPlaybackSpeed(current: current, target: target)
         self.playbackSpeed = current
-        videoFrameReleaseControl.setPlaybackSpeed(current)
         decoder?.setPlaybackSpeed(current)
     }
 
@@ -339,8 +306,6 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     private func drainOutputBuffer(position: Int64, elapsedRealtime: Int64) throws -> Bool {
         outputBuffer = if let outputBuffer = self.outputBuffer {
             outputBuffer
-        } else if !pendingFramesAfterStop.isEmpty {
-            pendingFramesAfterStop.removeFirst().buffer
         } else {
             decoder?.dequeueOutputBuffer()
         }
@@ -359,7 +324,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
             return false
         }
 
-        if processOutputBuffer(buffer: outputBuffer, position: position, elapsedRealtime: elapsedRealtime) {
+        if try processOutputBuffer(buffer: outputBuffer, position: position, elapsedRealtime: elapsedRealtime) {
             self.outputBuffer = nil
             return true
         }
@@ -367,64 +332,29 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         return false
     }
 
-    func processOutputBuffer(buffer: CoreVideoBuffer, position: Int64, elapsedRealtime: Int64) -> Bool {
-        let buffer = pendingFramesAfterStop.isEmpty ? buffer : pendingFramesAfterStop.removeFirst().buffer
-
-        let outputStreamOffset = getStreamOffset()
-
+    func processOutputBuffer(buffer: CoreVideoBuffer, position: Int64, elapsedRealtime: Int64) throws -> Bool {
         let isDecodeOnlyFrame = buffer.presentationTime < getLastResetPosition()
-//        let isLastOutputBuffer = lastB // TODO: is last
-
-        let frameReleaseAction = videoFrameReleaseControl.frameReleaseAction(
-            presentationTimeUs: buffer.presentationTime,
-            positionUs: position,
-            elapsedRealtimeUs: elapsedRealtime,
-            outputStreamStartPositionUs: outputStreamOffset,
-            isDecodeOnlyFrame: isDecodeOnlyFrame,
-            isLastFrame: false
-        )
-
-        print("💔 action = \(frameReleaseAction), time = \(buffer.presentationTime)")
-        let result: Bool
-        switch frameReleaseAction {
-        case .immediately:
-            if let imageBuffer = buffer.imageBuffer {
-                bufferableContainer.renderImmediately(imageBuffer)
-            }
-            videoFrameReleaseControl.didReleaseFrame()
-            result = true
-        case let .scheduled(releaseTime):
-            do {
-                if releaseTime != lastFrameReleaseTime {
-                    try! outputSampleQueue.enqueue(.init(buffer: buffer, presentationTime: releaseTime))
-                    videoFrameReleaseControl.didReleaseFrame()
-                }
-                lastFrameReleaseTime = releaseTime
-                result = true
-            } catch {
-                result = false
-            }
-        case .tryAgainLater:
-            result = false
-        case .ignore, .skip, .drop:
-            result = true
+        guard !isDecodeOnlyFrame else {
+            return true
         }
 
-        return result
-    }
-}
+        guard let imageBuffer = buffer.imageBuffer else {
+            return true
+        }
 
-extension CAVideoRenderer: VideoFrameReleaseControl.FrameTimingEvaluator {
-    func shouldForceReleaseFrame(earlyTimeUs: Int64, elapsedSinceLastReleaseUs: Int64) -> Bool {
-        return earlyTimeUs < -30_000 && elapsedSinceLastReleaseUs > 100_000
-    }
+        let sampleBufferPresentationTime = buffer.presentationTime
+        let presentationTimeStamp = CMTime.from(microseconds: sampleBufferPresentationTime)
+        let sampleBuffer = try CMSampleBuffer(
+            imageBuffer: imageBuffer,
+            formatDescription: CMFormatDescription(imageBuffer: imageBuffer),
+            sampleTiming: CMSampleTimingInfo(
+                duration: .invalid,
+                presentationTimeStamp: presentationTimeStamp,
+                decodeTimeStamp: .invalid
+            )
+        )
 
-    func shouldDropFrame(earlyTimeUs: Int64, elapsedSinceLastReleaseUs: Int64, isLast: Bool) -> Bool {
-        return earlyTimeUs < -30_000 && !isLast
-    }
-
-    func shouldIgnoreFrame(earlyTimeUs: Int64, positionUs: Int64, elapsedRealtimeUs: Int64, isLast: Bool, treatDroppedAsSkipped: Bool) -> Bool {
-        return (earlyTimeUs < -500_000 && !isLast)
+        return bufferableContainer.enqueue(sampleBuffer, format: inputFormat)
     }
 }
 

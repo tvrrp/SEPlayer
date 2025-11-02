@@ -29,7 +29,7 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
     let individualAllocationSize: Int
 
     private let trimOnReset: Bool
-    private let lock: NSLock
+    private let lock: UnfairLock
 
     private var allocatedCount = 0
     private var availableCount = 0
@@ -44,7 +44,7 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
     ) {
         self.trimOnReset = trimOnReset
         self.individualAllocationSize = malloc_good_size(individualAllocationSize)
-        self.lock = NSLock()
+        self.lock = UnfairLock()
     }
 
     func reset() {
@@ -69,10 +69,7 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
             availableCount -= 1
             return availableAllocations.removeLast()
         } else {
-            let ptr = malloc(size_t(individualAllocationSize))!
-            ptr.bindMemory(to: UInt8.self, capacity: individualAllocationSize)
-
-            return .init(data: ptr, capacity: individualAllocationSize)
+            return .init(capacity: individualAllocationSize)
         }
     }
 

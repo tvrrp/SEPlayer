@@ -5,4 +5,4 @@
 //  Created by Damir Yackupov on 25.06.2025.
 //
 
-public protocol SniffFailure {}
+public protocol SniffFailure: Error {}

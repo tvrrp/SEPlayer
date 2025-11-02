@@ -11,6 +11,7 @@ final class DefaltExtractorInput: ExtractorInput {
     private let dataReader: DataReader
     private let streamLength: Int?
 
+    private var scratchBuffer: ByteBuffer
     private var position: Int
     private var peekBuffer: ByteBuffer
     private var peekBufferPosition: Int
@@ -23,7 +24,9 @@ final class DefaltExtractorInput: ExtractorInput {
         self.position = range?.location ?? 0
         self.streamLength = range?.length
 
-        self.peekBuffer = ByteBuffer()
+        let allocator = ByteBufferAllocator()
+        self.scratchBuffer = allocator.buffer(capacity: .scratchSpaceSize)
+        self.peekBuffer = allocator.buffer(capacity: .peekBufferSize)
         self.peekBufferPosition = 0
         self.peekBufferLength = 0
         self.queue = queue
@@ -122,13 +125,12 @@ final class DefaltExtractorInput: ExtractorInput {
 
     func skip(length: Int) throws -> DataReaderReadResult {
         assert(queue.isCurrent())
-        var scratchBuffer = ByteBuffer()
         var bytesSkipped = skipFromPeekBuffer(length: length)
         if bytesSkipped == 0 {
             bytesSkipped = try readFromUpstream(
                 buffer: &scratchBuffer,
                 offset: .zero,
-                length: length,
+                length: min(length, peekBuffer.capacity),
                 bytesAlreadyRead: .zero,
                 allowEndOfInput: true
             )
@@ -144,14 +146,14 @@ final class DefaltExtractorInput: ExtractorInput {
 
     func skipFully(length: Int, allowEndOfInput: Bool) throws -> Bool {
         assert(queue.isCurrent())
-        var scratchBuffer = ByteBuffer()
         var bytesSkipped = skipFromPeekBuffer(length: length)
 
         while bytesSkipped < length && bytesSkipped != .resultEndOfInput {
+            let minLenght = min(length, bytesSkipped + scratchBuffer.capacity)
             bytesSkipped = try readFromUpstream(
                 buffer: &scratchBuffer,
-                offset: .zero,
-                length: length,
+                offset: -bytesSkipped,
+                length: minLenght,
                 bytesAlreadyRead: bytesSkipped,
                 allowEndOfInput: allowEndOfInput
             )
@@ -311,8 +313,9 @@ private extension DefaltExtractorInput {
                 return .resultEndOfInput
             }
 
+            throw ErrorBuilder.init(errorDescription: "EndOfFileError")
             // TODO: throw EndOfFileError
-            fatalError()
+//            fatalError()
         }
     }
 
@@ -348,9 +351,8 @@ private extension DefaltExtractorInput {
         offset: Int,
         length: Int
     ) -> Bool {
-        buffer.withUnsafeReadableBytes { pointer in
-            guard let baseAdress = pointer.baseAddress else { return false }
-            memcpy(allocation.data.advanced(by: offset), baseAdress, length)
+        buffer.withUnsafeReadableBytes { buffer in
+            allocation.writeBuffer(offset: offset, lenght: length, buffer: buffer)
             return true
         }
     }
@@ -363,4 +365,6 @@ private extension DefaltExtractorInput {
 
 private extension Int {
     static let resultEndOfInput: Int = -1
+    static let scratchSpaceSize: Int = 4096
+    static let peekBufferSize: Int = 64 * 1024
 }

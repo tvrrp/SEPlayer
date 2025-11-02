@@ -5,98 +5,93 @@
 //  Created by Damir Yackupov on 23.04.2025.
 //
 
-import CoreVideo
+import AVFoundation
 
 public final class PlayerBufferableContainer {
-    private let displayLink: DisplayLinkProvider
-
     private var action: PlayerBufferableAction = .reset
     private(set) var bufferables: [PlayerBufferable] = []
 
     private var sampleQueue: TypedCMBufferQueue<ImageBufferWrapper>?
-    private var lastPixelBuffer: CVPixelBuffer?
+    private var timebase: CMTimebase?
+    private var lastSampleBuffer: CMSampleBuffer?
+    private var lastFormat: Format?
 
-    public init(displayLink: DisplayLinkProvider) {
-        self.displayLink = displayLink
+    private var didRenderFirstFrame = false
+    private var isStarted = false
+
+    public init() {}
+
+    func prepare(action: PlayerBufferableAction) {
+        lastSampleBuffer = nil
+        lastFormat = nil
+
+        bufferables.forEach { $0.prepare(for: action) }
     }
 
-    func prepare(sampleQueue: TypedCMBufferQueue<ImageBufferWrapper>, action: PlayerBufferableAction) {
-        Queues.mainQueue.async { [self] in
-            self.sampleQueue = sampleQueue
-            lastPixelBuffer = nil
-
-            bufferables.forEach { $0.prepare(for: action) }
+    func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void) {
+        bufferables.forEach { bufferable in
+            bufferable.requestMediaDataWhenReady(on: queue, block: block)
         }
+    }
+
+    func stopRequestingMediaData() {
+        bufferables.forEach { $0.stopRequestingMediaData() }
+    }
+
+    func setControlTimebase(_ timebase: CMTimebase) {
+        self.timebase = timebase
+
+        bufferables.forEach { $0.setControlTimebase(timebase) }
     }
 
     func end() {
-        Queues.mainQueue.async { [self] in
-            self.sampleQueue = nil
-            bufferables.forEach { $0.end() }
-        }
+        sampleQueue = nil
+        timebase = nil
 
-        displayLink.removeOutput(self)
+        bufferables.forEach { $0.end() }
     }
 
     func start() {
-        displayLink.addOutput(self)
+        isStarted = true
     }
 
     func stop() {
-        displayLink.removeOutput(self)
+        isStarted = false
     }
 
     func flush() {
-        Queues.mainQueue.async { [self] in
-            lastPixelBuffer = nil
-            bufferables.forEach { $0.end() }
-        }
+        didRenderFirstFrame = false
+        lastSampleBuffer = nil
+        lastFormat = nil
+
+        bufferables.forEach { $0.end() }
     }
 
     func register(_ bufferable: PlayerBufferable) {
-        Queues.mainQueue.async { [self] in
-            bufferables.append(bufferable)
+        bufferables.append(bufferable)
 
-            if let lastPixelBuffer {
-                bufferable.enqueue(lastPixelBuffer)
-            }
+        if let timebase {
+            bufferable.setControlTimebase(timebase)
+        }
+
+        if let lastSampleBuffer {
+            bufferable.enqueue(lastSampleBuffer, format: lastFormat)
         }
     }
 
     func remove(_ bufferable: PlayerBufferable) {
-        Queues.mainQueue.async { [self] in
-            bufferables.removeAll(where: { $0.equal(to: bufferable) })
-        }
+        bufferables.removeAll(where: { $0.equal(to: bufferable) })
     }
 
-    func renderImmediately(_ pixelBuffer: CVPixelBuffer) {
-        Queues.mainQueue.async { [self] in
-            lastPixelBuffer = pixelBuffer
-            bufferables.forEach { $0.enqueue(pixelBuffer) }
+    func enqueue(_ sampleBuffer: CMSampleBuffer, format: Format?) -> Bool {
+        guard isStarted || !didRenderFirstFrame else { return false }
+        didRenderFirstFrame = true
+        guard bufferables.allSatisfy({ $0.isReadyForMoreMediaData }) else {
+            return false
         }
-    }
-}
 
-extension PlayerBufferableContainer: DisplayLinkListener {
-    public func displayLinkTick(_ info: DisplayLinkInfo) {
-        guard let sampleQueue else { assertionFailure(); return }
-        let deadline = info.currentTimestampNs...info.targetTimestampNs
-
-        if let sampleWrapper = sampleQueue.dequeue() {
-            if sampleWrapper.presentationTime > info.targetTimestampNs {
-//                print("ℹ️ pixel buffer is early")
-                try! sampleQueue.enqueue(sampleWrapper)
-            } else if deadline.contains(sampleWrapper.presentationTime) {
-                guard let pixelBuffer = sampleWrapper.imageBuffer else { return }
-                lastPixelBuffer = pixelBuffer
-                bufferables.forEach { $0.enqueue(pixelBuffer) }
-//                print("💕 enqueuing pixel buffer")
-            } else {
-                print("💔 missed sample, deadline = \(deadline), time = \(sampleWrapper.presentationTime)")
-                displayLinkTick(info)
-            }
-        } else {
-//            print("💔 NO SAMPLE")
-        }
+        lastSampleBuffer = sampleBuffer
+        bufferables.forEach { $0.enqueue(sampleBuffer, format: format) }
+        return true
     }
 }

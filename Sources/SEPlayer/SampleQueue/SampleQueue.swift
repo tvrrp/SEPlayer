@@ -5,10 +5,10 @@
 //  Created by Damir Yackupov on 07.04.2025.
 //
 
-import CoreMedia.CMFormatDescription
+import Foundation
 
 protocol SampleQueueDelegate: AnyObject {
-    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: CMFormatDescription)
+    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format)
 }
 
 class SampleQueue {
@@ -18,7 +18,7 @@ class SampleQueue {
     private let sampleDataQueue: SampleDataQueue
     private let lock: NSRecursiveLock
 
-    private var downstreamFormat: CMFormatDescription?
+    private var downstreamFormat: Format?
 
     private var capacity: Int
     private var samples: [SampleWrapper]
@@ -36,14 +36,16 @@ class SampleQueue {
     private var upstreamKeyframeRequired: Bool
     private var upstreamFormatRequired: Bool
 
-    private var upstreamFormat: CMFormatDescription?
+    private var upstreamFormatAdjustmentRequired = false
+    private var unadjustedUpstreamFormat: Format?
+    private var upstreamFormat: Format?
 
     private var allSamplesAreSyncSamples: Bool
-    private var sampleOffsetTime: Int64 = 0
+    private var sampleOffsetUs: Int64 = 0
 
     private var pendingSplice: Bool = false
 
-    private var sharedSampleMetadata: [(Int, CMFormatDescription)] = []
+    private var sharedSampleMetadata: SpannedData<Format>
 
     init(queue: Queue, allocator: Allocator) {
         self.queue = queue
@@ -51,6 +53,7 @@ class SampleQueue {
         lock = NSRecursiveLock()
         capacity = 1000
         samples = Array(repeating: .init(), count: capacity)
+        sharedSampleMetadata = SpannedData<Format>(removeCallback: { _ in }) // TODO: fix
         startTime = .min
         largestDiscardedTimestamp = .min
         largestQueuedTimestamp = .min
@@ -73,7 +76,7 @@ class SampleQueue {
         largestDiscardedTimestamp = .min
         largestQueuedTimestamp = .min
         isLastSampleQueued = false
-        sharedSampleMetadata.removeAll()
+        sharedSampleMetadata.clear()
         if resetUpstreamFormat {
             upstreamFormat = nil
             upstreamFormatRequired = true
@@ -120,7 +123,7 @@ class SampleQueue {
         return absoluteFirstIndex + readPosition
     }
 
-    final func getUpstreamFormat() -> CMFormatDescription? {
+    final func getUpstreamFormat() -> Format? {
         lock.withLock { return upstreamFormatRequired ? nil : upstreamFormat }
     }
 
@@ -147,8 +150,7 @@ class SampleQueue {
                 || (upstreamFormat != nil && upstreamFormat != downstreamFormat)
         }
 
-        if let currentFormat = sharedSampleMetadata.first(where: { $0.0 == getReadIndex() })?.1,
-           let downstreamFormat, currentFormat != downstreamFormat {
+        if sharedSampleMetadata.get(getReadIndex()) != downstreamFormat {
             return true
         }
 
@@ -280,8 +282,8 @@ class SampleQueue {
     }
 
     func setSampleOffsetTime(_ sampleOffsetTime: Int64) {
-        guard sampleOffsetTime != self.sampleOffsetTime else { return }
-        self.sampleOffsetTime = sampleOffsetTime
+        guard sampleOffsetTime != self.sampleOffsetUs else { return }
+        self.sampleOffsetUs = sampleOffsetTime
     }
 
     func discardSampleMetadataToRead() -> Int? {
@@ -302,13 +304,24 @@ extension SampleQueue: TrackOutput {
         try sampleDataQueue.loadSampleData(input: input, length: length, allowEndOfInput: allowEndOfInput)
     }
 
-    func setFormat(_ format: CMFormatDescription) {
-        if setUpstreamFormat(format) {
-            queue.async { self.delegate?.sampleQueue(self, didChange: format) }
+    func setFormat(_ format: Format) {
+        let adjustedUpstreamFormat = getAdjustedUpstreamFormat(format)
+        upstreamFormatAdjustmentRequired = false
+        unadjustedUpstreamFormat = format
+        if setUpstreamFormat(adjustedUpstreamFormat) {
+            queue.async { self.delegate?.sampleQueue(self, didChange: adjustedUpstreamFormat) }
         }
     }
 
+    final func invalidateUpstreamFormatAdjustment() {
+        upstreamFormatAdjustmentRequired = true
+    }
+
     func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int) {
+        if upstreamFormatAdjustmentRequired, let unadjustedUpstreamFormat {
+            setFormat(unadjustedUpstreamFormat)
+        }
+
         let isKeyframe = flags.contains(.keyframe)
         var flags = flags
         if upstreamKeyframeRequired {
@@ -316,7 +329,7 @@ extension SampleQueue: TrackOutput {
             upstreamKeyframeRequired = false
         }
 
-        let time = time + sampleOffsetTime
+        let time = time + sampleOffsetUs
         if allSamplesAreSyncSamples {
             if time < startTime { return }
             // TODO: log bad data
@@ -351,6 +364,16 @@ private extension SampleQueue {
         return discardCount == -1 ? nil : discardSamples(discardCount: discardCount)
     }
 
+    private func getAdjustedUpstreamFormat(_ format: Format) -> Format {
+        var format = format
+        if sampleOffsetUs != 0, format.subsampleOffsetUs != Format.offsetSampleRelative {
+            format = format.buildUpon()
+                .setSubsampleOffsetUs(sampleOffsetUs)
+                .build()
+        }
+        return format
+    }
+
     private func rewind() {
         lock.lock(); defer { lock.unlock() }
         readPosition = 0
@@ -376,9 +399,8 @@ private extension SampleQueue {
             }
         }
 
-        let readIndex = getReadIndex()
-        if let format = sharedSampleMetadata.first(where: { readIndex <= $0.0 })?.1,
-           formatRequired || format != downstreamFormat {
+        let format = sharedSampleMetadata.get(getReadIndex())
+        if formatRequired || format != downstreamFormat {
             downstreamFormat = format
             return (.didReadFormat(format: format),nil)
         }
@@ -400,18 +422,19 @@ private extension SampleQueue {
         return (.didReadBuffer, extras)
     }
 
-    private func setUpstreamFormat(_ format: CMFormatDescription) -> Bool {
+    private func setUpstreamFormat(_ format: Format) -> Bool {
         lock.lock(); defer { lock.unlock() }
         upstreamFormatRequired = false
-        guard format !== upstreamFormat else { return false }
+        guard format != upstreamFormat else { return false }
 
-        if !sharedSampleMetadata.isEmpty, sharedSampleMetadata.last?.1 == format {
-            upstreamFormat = sharedSampleMetadata.last?.1
+        if !sharedSampleMetadata.isEmpty, sharedSampleMetadata.getEndValue() == format {
+            upstreamFormat = sharedSampleMetadata.getEndValue()
         } else {
             upstreamFormat = format
         }
 
-        allSamplesAreSyncSamples = format.mediaType == .audio
+        // TODO: real info
+        allSamplesAreSyncSamples = format.sampleMimeType == .audioAAC
         return true
     }
 
@@ -422,18 +445,15 @@ private extension SampleQueue {
             assert(samples[previousSampleRelativeIndex].offset + samples[previousSampleRelativeIndex].size <= offset)
         }
 
-        if upstreamFormat?.mediaType == .video {
-            print("🫟 commitSample, time = \(time), IDR = \(sampleFlags.contains(.keyframe)), offset = \(offset)")
-        }
         isLastSampleQueued = sampleFlags.contains(.lastSample)
         largestQueuedTimestamp = max(largestQueuedTimestamp, time)
 
         let relativeEndIndex = getRelativeIndex(offset: length)
         samples[relativeEndIndex] = .init(offset: offset, size: size, flags: sampleFlags, time: time)
 
-        if sharedSampleMetadata.isEmpty || sharedSampleMetadata.last?.1 != upstreamFormat,
+        if sharedSampleMetadata.isEmpty || sharedSampleMetadata.getEndValue() == upstreamFormat,
            let upstreamFormat {
-            sharedSampleMetadata.append((getWriteIndex(), upstreamFormat))
+            sharedSampleMetadata.appendSpan(startKey: getWriteIndex(), value: upstreamFormat)
         }
 
         length += 1
@@ -470,7 +490,7 @@ private extension SampleQueue {
         length -= discardCount
         largestQueuedTimestamp = max(largestDiscardedTimestamp, getLargestTimestamp(length: length))
         isLastSampleQueued = discardCount == 0 && isLastSampleQueued
-        sharedSampleMetadata.removeAll(where: { $0.0 >= discardFromIndex })
+        sharedSampleMetadata.discard(from: discardFromIndex)
         if length != 0 {
             let relativeLastWriteIndex = getRelativeIndex(offset: length - 1)
             return samples[relativeLastWriteIndex].offset + samples[relativeLastWriteIndex].size
@@ -543,7 +563,7 @@ private extension SampleQueue {
         }
         readPosition -= discardCount
         readPosition = max(0, readPosition)
-        sharedSampleMetadata.removeAll(where: { absoluteFirstIndex >= $0.0 + 1 })
+        sharedSampleMetadata.discard(to: absoluteFirstIndex)
 
         if length == 0 {
             let relativeLastDiscardIndex = (relativeFirstIndex == 0 ? capacity : relativeFirstIndex) - 1
@@ -602,6 +622,6 @@ extension SampleQueue {
 
 extension SampleQueue: CustomDebugStringConvertible {
     var debugDescription: String {
-        "\(upstreamFormat!.mediaType)"
+        "\(upstreamFormat!)"
     }
 }

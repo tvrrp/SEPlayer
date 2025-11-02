@@ -5,7 +5,6 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia.CMFormatDescription
 import Foundation
 
 final class ProgressiveMediaPeriod: MediaPeriod {
@@ -256,10 +255,11 @@ final class ProgressiveMediaPeriod: MediaPeriod {
             return positionUs
         }
 
-        if (loadingFinished || loader.isLoading()),
-           seekInsideBufferUs(isAudioOrVideo: trackIsAudioVideoFlags,
-                              positionUs: position,
-                              isSameAsLastSeekPosition: isSameAsLastSeekPosition) {
+        print("❌ seek(to position = \(positionUs)")
+        if (loadingFinished || loader.isLoading())
+           && seekInsideBufferUs(isAudioOrVideo: trackIsAudioVideoFlags,
+                                 positionUs: position,
+                                 isSameAsLastSeekPosition: isSameAsLastSeekPosition) {
             return positionUs
         }
 
@@ -271,6 +271,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         if loader.isLoading() {
             sampleQueues.forEach { $0.discardToEnd() }
             loader.cancelLoading()
+            loadCondition.cancel()
         } else {
             sampleQueues.forEach { $0.reset() }
         }
@@ -285,11 +286,13 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         }
 
         let seekPoints = seekMap.getSeekPoints(for: positionUs)
-        return seekParameters.resolveSyncPosition(
+        let position = seekParameters.resolveSyncPosition(
             positionUs: positionUs,
             firstSyncUs: seekPoints.first.timeUs,
             secondSyncUs: seekPoints.second.timeUs
         )
+        print("❌ adjustedSeekPositionUs = \(position)")
+        return position
     }
 
     func isReady(track: Int) -> Bool {
@@ -379,8 +382,11 @@ final class ProgressiveMediaPeriod: MediaPeriod {
                 return
             }
 
+            let seekPoints = seekMap.getSeekPoints(for: pendingResetPositionUs)
+            print("❌ start load with seek points, pendingResetPositionUs = \(pendingResetPositionUs)")
+            print(seekPoints)
             loadable.setLoadPosition(
-                position: seekMap.getSeekPoints(for: pendingResetPositionUs).first.position,
+                position: seekPoints.first.position,
                 time: pendingResetPositionUs
             )
             sampleQueues.forEach { $0.setStartTime(pendingResetPositionUs) }
@@ -409,7 +415,7 @@ extension ProgressiveMediaPeriod: Loader.Callback {
     }
 
     func onLoadCancelled(loadable: ExtractingLoadable, onTime: Int64, loadDurationMs: Int64, released: Bool) {
-        queue.async { [self] in
+        queue.sync { [self] in
             if !released {
                 sampleQueues.forEach { $0.reset() }
                 if enabledTrackCount > 0 { callback?.continueLoadingRequested(with: self) }
@@ -448,7 +454,7 @@ extension ProgressiveMediaPeriod: ExtractorOutput {
 }
 
 extension ProgressiveMediaPeriod: SampleQueueDelegate {
-    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: CMFormatDescription) {
+    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format) {
         maybeFinishPrepare()
     }
 }
@@ -501,7 +507,8 @@ private extension ProgressiveMediaPeriod {
 
             do {
                 try! trackGroups.append(TrackGroup(id: String(index), formats: [format]))
-                let isAudioVideo = format.mediaType == .audio || format.mediaType == .video
+                // TODO: real mime type
+                let isAudioVideo = true //format.mediaType == .audio || format.mediaType == .video
                 isAudioOrVideo.append(isAudioVideo)
                 haveAudioVideoTracks = haveAudioVideoTracks || isAudioVideo
             } catch {
@@ -517,7 +524,7 @@ private extension ProgressiveMediaPeriod {
 
     private func seekInsideBufferUs(isAudioOrVideo: [Bool], positionUs: Int64, isSameAsLastSeekPosition: Bool) -> Bool {
         for (index, sampleQueue) in sampleQueues.enumerated() {
-            guard sampleQueue.getReadIndex() != 0, !isSameAsLastSeekPosition else {
+            if sampleQueue.getReadIndex() == 0 && isSameAsLastSeekPosition {
                 continue
             }
 
@@ -620,8 +627,7 @@ extension ProgressiveMediaPeriod {
         private var pendingExtractorSeek = true
         private var seekTime: Int64 = .zero
         private var didFinish: Bool = false
-        private var isCancelled: Bool = false
-        private let lock = NSLock()
+        @UnfairLocked private var isCancelled: Bool = false
 
         init(
             url: URL,
@@ -644,18 +650,18 @@ extension ProgressiveMediaPeriod {
         }
 
         func cancelLoad() {
-            lock.withLock { isCancelled = true }
+            isCancelled = true
         }
 
         func load() throws {
             assert(queue.isCurrent())
             var result: ExtractorReadResult = .continueRead
 
-            while result == .continueRead, lock.withLock { !isCancelled } {
+            while result == .continueRead, !isCancelled {
                 do {
                     let dataSpec = buildDataSpec(position: position)
                     var length = try dataSource.open(dataSpec: dataSpec)
-                    guard lock.withLock({ !isCancelled }) else { break }
+                    guard !isCancelled else { break }
 
                     try progressiveMediaExtractor.prepare(
                         dataReader: dataSource,
@@ -670,9 +676,9 @@ extension ProgressiveMediaPeriod {
                         pendingExtractorSeek = false
                     }
 
-                    while result == .continueRead, lock.withLock({ !isCancelled }) {
+                    while result == .continueRead, !isCancelled {
                         loadCondition.block()
-                        guard lock.withLock({ !isCancelled }) else { break }
+                        guard !isCancelled else { throw CancellationError() }
                         result = try progressiveMediaExtractor.read()
                         if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(),
                            currentInputPosition > position + continueLoadingCheckIntervalBytes {

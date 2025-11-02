@@ -34,7 +34,8 @@ struct UrlListScreen: View {
     weak var hostViewController: UIViewController?
 
     @State private var urls: [String] = [
-        "https://download.dolby.com/us/en/test-tones/dolby-atmos-trailer_amaze_1080.mp4",
+        Bundle.main.url(forResource: "video", withExtension: "mp4")!.absoluteString,
+        "https://v.ozone.ru/vod/video-7/01GE7KG4C15DDZTZ065V4WNAXC/asset_3.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_3.mp4",
@@ -52,6 +53,8 @@ struct UrlListScreen: View {
         "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4",
         "https://github.com/chthomos/video-media-samples/raw/refs/heads/master/big-buck-bunny-1080p-60fps-30sec.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-1/mp4/frame-counter-one-hour.mp4",
+//        "https://storage.googleapis.com/media-session/bear-opus.mp4",
+        "https://download.dolby.com/us/en/test-tones/dolby-atmos-trailer_amaze_1080.mp4",
     ]
     @State private var newUrl: String = ""
     
@@ -91,11 +94,19 @@ struct UrlListScreen: View {
                 }
                 .listStyle(.plain)
 
-                Button("Play") {
-                    openPlayer(urls: urls)
+                HStack {
+                    Button("Play") {
+                        openPlayer(urls: urls)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding()
+
+                    Button("Play Simlt") {
+                        openSiml()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding()
                 }
-                .buttonStyle(.borderedProminent)
-                .padding()
             }
             .navigationTitle("Links")
             .toolbar { EditButton() }
@@ -132,5 +143,17 @@ struct UrlListScreen: View {
         vc.videoUrls = urls.compactMap(URL.init(string:))
         vc.repeatMode = urls.count == 1 ? .one : .off
         nav.pushViewController(vc, animated: true)
+    }
+
+    private func openSiml() {
+        guard
+            let host = hostViewController,
+            let nav = host.navigationController
+        else { return }
+
+        let viewController = PlayerViewControllerSim()
+
+        viewController.repeatMode = .one
+        nav.pushViewController(viewController, animated: true)
     }
 }

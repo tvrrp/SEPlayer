@@ -9,7 +9,7 @@ import Darwin
 
 final class TimedValueQueue<Element> {
     var size: Int {
-        get { withLock { elements.count } }
+        get { unfairLock.withLock { elements.count } }
     }
 
     private var elements: [(timestamp: Int64, value: Element)] = []
@@ -19,7 +19,7 @@ final class TimedValueQueue<Element> {
     }
 
     func add(timestamp: Int64, value: Element) {
-        withLock {
+        unfairLock.withLock {
             if let last = elements.last, timestamp <= last.timestamp {
                 clear()
             }
@@ -28,19 +28,19 @@ final class TimedValueQueue<Element> {
     }
 
     func clear() {
-        withLock { elements.removeAll(keepingCapacity: true) }
+        unfairLock.withLock { elements.removeAll(keepingCapacity: true) }
     }
 
     func pollFirst() -> Element? {
-        return withLock { elements.isEmpty ? nil : elements.removeFirst().value }
+        return unfairLock.withLock { elements.isEmpty ? nil : elements.removeFirst().value }
     }
 
     func pollFloor(timestamp: Int64) -> Element? {
-        return withLock { pool(timestamp: timestamp, onlyOlder: true) }
+        return unfairLock.withLock { pool(timestamp: timestamp, onlyOlder: true) }
     }
 
     func pool(timestamp: Int64) -> Element? {
-        return withLock { pool(timestamp: timestamp, onlyOlder: false) }
+        return unfairLock.withLock { pool(timestamp: timestamp, onlyOlder: false) }
     }
 
     private func pool(timestamp: Int64, onlyOlder: Bool) -> Element? {
@@ -57,12 +57,5 @@ final class TimedValueQueue<Element> {
         return result
     }
 
-    private func withLock<T>(_ action: () throws -> T) rethrows -> T {
-        os_unfair_lock_lock(&unfairLock)
-        let value = try! action()
-        os_unfair_lock_unlock(&unfairLock)
-        return value
-    }
-
-    private var unfairLock = os_unfair_lock_s()
+    private var unfairLock = UnfairLock()
 }

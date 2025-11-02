@@ -14,6 +14,10 @@ protocol AudioSinkDelegate: AnyObject {
 
 protocol IAudioSink: AnyObject {
     var delegate: AudioSinkDelegate? { get set }
+    var timebase: CMTimebase? { get }
+    var volume: Float { get set }
+    func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void)
+    func stopRequestingMediaData()
     func getPosition() -> Int64?
     func configure(inputFormat: AudioStreamBasicDescription, channelLayout: ManagedAudioChannelLayout?) throws
     func play()
@@ -25,14 +29,28 @@ protocol IAudioSink: AnyObject {
     func hasPendingData() -> Bool
     func setPlaybackParameters(new playbackParameters: PlaybackParameters)
     func getPlaybackParameters() -> PlaybackParameters
-//    func flush()
     func flush(reuse: Bool)
     func reset()
+}
+
+extension IAudioSink {
+    var timebase: CMTimebase? { nil }
+    func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void) {}
+    func stopRequestingMediaData() {}
 }
 
 final class AudioSink: IAudioSink {
     weak var delegate: AudioSinkDelegate?
 
+    var volume: Float {
+        get { _volume }
+        set {
+            _volume = newValue
+            setVolume(new: newValue)
+        }
+    }
+
+    private var _volume: Float = 1
     private var pendingConfiguration: Configuration?
     private var configuration: Configuration!
     private var playbackParameters = PlaybackParameters.default
@@ -60,7 +78,6 @@ final class AudioSink: IAudioSink {
     private var filledBufferIndex: Int = 0
 
     private let internalQueue = Queues.audioQueue
-//    private let startCondition = NSCondition()
 
     private var startMediaTimeNeedsInit = false
     private var startMediaTimeNeedsSync = false
@@ -108,7 +125,7 @@ final class AudioSink: IAudioSink {
             }
         }
         if !didStartAudioQueue {
-//            startCondition.wait()
+            //            startCondition.wait()
             didStartAudioQueue = true
         }
         isPlaying = true
@@ -208,6 +225,10 @@ final class AudioSink: IAudioSink {
         return outputBuffer == nil
     }
 
+    private func setOutputBuffer() {
+        
+    }
+
     private func drainOutputBuffer() throws {
         guard buffersInUse[filledBufferIndex] == false, let outputBuffer else { return }
 
@@ -252,25 +273,30 @@ final class AudioSink: IAudioSink {
         return playbackParameters
     }
 
+    func getVolume() -> Float {
+        guard let audioQueue else { return 1.0 }
+        var volume: AudioQueueParameterValue = .zero
+        AudioQueueGetParameter(audioQueue, kAudioQueueParam_Volume, &volume)
+
+        return Float(volume)
+    }
+
+    func setVolume(new volume: Float) {
+        guard let audioQueue else { return }
+
+        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, volume)
+    }
+
     func pause() {
         isPlaying = false
         if let audioQueue, audioQueuePositionTracker.pause() {
-//            AudioQueuePause(audioQueue)
-            pauseAudioQueue()
+            AudioQueuePause(audioQueue)
         }
-    }
-
-    private func pauseAudioQueue() {
-        guard let audioQueue else { return }
-//        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, .zero)
-        AudioQueuePause(audioQueue)
-//        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, 1.0)
     }
 
     func flush(reuse: Bool) {
         guard let audioQueue else { return }
-//        AudioQueuePause(audioQueue)
-        pauseAudioQueue()
+        AudioQueuePause(audioQueue)
         resetSinkStateForFlush()
         var reuse = reuse
         if let pendingConfiguration {
@@ -312,6 +338,8 @@ final class AudioSink: IAudioSink {
         guard let audioQueue else { return }
 
         AudioQueueSetParameter(audioQueue, kAudioQueueParam_PlayRate, playbackParameters.playbackRate)
+        AudioQueueSetParameter(audioQueue, kAudioQueueParam_VolumeRampTime, 0.1)
+        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Volume, _volume)
 //        AudioQueueSetParameter(audioQueue, kAudioQueueParam_Pitch, playbackParameters.pitch)
         audioQueuePositionTracker.setPlaybackSpeed(new: playbackParameters.playbackRate)
     }
@@ -471,7 +499,7 @@ private extension AudioSink {
             throw AudioQueueErrors.osStatus(.init(rawValue: timePitchStatus), timePitchStatus)
         }
 
-        var timePitchAlgorithm = kAudioQueueTimePitchAlgorithm_TimeDomain
+        var timePitchAlgorithm = kAudioQueueTimePitchAlgorithm_Spectral
         let timePitchAlgorithmStatus = AudioQueueSetProperty(
             audioQueue,
             kAudioQueueProperty_TimePitchAlgorithm,

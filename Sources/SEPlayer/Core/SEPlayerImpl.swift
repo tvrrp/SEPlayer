@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
-import CoreMedia.CMSync
+import AVFoundation
 
 final class SEPlayerImpl: BasePlayer, SEPlayer {
     @MainActor public let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
@@ -33,6 +33,16 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
     var seekParameters: SeekParameters {
         get { queue.sync { _seekParameters } }
         set { setSeekParameters(newValue) }
+    }
+
+    var volume: Float {
+        get { queue.sync { internalPlayer.volume } }
+        set { queue.async { self.internalPlayer.volume = newValue } }
+    }
+
+    var isMuted: Bool {
+        get { queue.sync { internalPlayer.isMuted } }
+        set { queue.async { self.internalPlayer.isMuted = newValue } }
     }
 
     var isLoading: Bool { queue.sync { playbackInfo.isLoading } }
@@ -119,15 +129,15 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         queue: Queue,
         clock: CMClock,
         renderersFactory: RenderersFactory,
-        displayLink: DisplayLinkProvider,
         trackSelector: TrackSelector,
         loadControl: LoadControl,
         bandwidthMeter: BandwidthMeter,
         mediaSourceFactory: MediaSourceFactory,
+        audioSessionManager: IAudioSessionManager,
         useLazyPreparation: Bool = true,
         seekParameters: SeekParameters = .default,
         seekBackIncrementMs: Int64 = 10_000,
-        seekForwardIncrementMs: Int64 = 10_000,
+        seekForwardIncrementMs: Int64 = 5_000,
         maxSeekToPreviousPositionMs: Int64 = 3000,
         pauseAtTheEndOfMediaItem: Bool = false
     ) {
@@ -141,12 +151,13 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         maxSeekToPreviousPosition = maxSeekToPreviousPositionMs
         _pauseAtTheEndOfMediaItem = pauseAtTheEndOfMediaItem
 
-        let bufferableContainer = PlayerBufferableContainer(displayLink: displayLink)
+        let renderSynchronizer = AVSampleBufferRenderSynchronizer()
+        let bufferableContainer = PlayerBufferableContainer()
         self.renderers = renderersFactory.createRenderers(
             queue: queue,
             clock: clock,
-            displayLink: displayLink,
-            bufferableContainer: bufferableContainer
+            bufferableContainer: bufferableContainer,
+            renderSynchronizer: renderSynchronizer
         )
         emptyTrackSelectorResult = TrackSelectionResult(
             renderersConfig: Array(repeating: nil, count: renderers.count),
@@ -163,7 +174,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         window = Window()
         period = Period()
 
-        internalPlayer = SEPlayerImplInternal(
+        internalPlayer = try! SEPlayerImplInternal(
             queue: queue,
             renderers: renderers,
             trackSelector: trackSelector,
@@ -175,9 +186,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             seekParameters: seekParameters,
             pauseAtEndOfWindow: pauseAtTheEndOfMediaItem,
             clock: clock,
+            mediaClock: DefaultMediaClock(clock: clock),
             identifier: identifier,
             preloadConfiguration: _preloadConfiguration,
-            bufferableContainer: bufferableContainer
+            bufferableContainer: bufferableContainer,
+            audioSessionManager: audioSessionManager
         )
 
         internalPlayer.playbackInfoUpdateListener = self
@@ -1373,11 +1386,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
 }
 
 extension SEPlayerImpl {
-    @MainActor func register(_ bufferable: PlayerBufferable) {
+    func register(_ bufferable: PlayerBufferable) {
         internalPlayer.register(bufferable)
     }
 
-    @MainActor func remove(_ bufferable: PlayerBufferable) {
+    func remove(_ bufferable: PlayerBufferable) {
         internalPlayer.remove(bufferable)
     }
 }

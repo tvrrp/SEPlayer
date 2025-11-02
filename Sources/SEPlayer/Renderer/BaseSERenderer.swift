@@ -14,7 +14,7 @@ class BaseSERenderer: SERenderer {
 
     private var state: SERendererState = .disabled
     private var sampleStream: SampleStream?
-    private var formats: [CMFormatDescription] = []
+    private var formats: [Format] = []
 
     private var streamIsFinal: Bool = false
 
@@ -37,7 +37,7 @@ class BaseSERenderer: SERenderer {
     final func getState() -> SERendererState { state }
 
     final func enable(
-        formats: [CMFormatDescription],
+        formats: [Format],
         stream: SampleStream,
         position: Int64,
         joining: Bool,
@@ -62,7 +62,7 @@ class BaseSERenderer: SERenderer {
     }
 
     final func replaceStream(
-        formats: [CMFormatDescription],
+        formats: [Format],
         stream: SampleStream,
         startPosition: Int64,
         offset: Int64,
@@ -106,6 +106,7 @@ class BaseSERenderer: SERenderer {
     func isReady() -> Bool { false }
     func isEnded() -> Bool { true }
     func getMediaClock() -> MediaClock? { return nil }
+    func getTimebase() -> CMTimebase? { return nil }
     func setPlaybackSpeed(current: Float, target: Float) throws {}
     func enableRenderStartOfStream() {}
 
@@ -137,7 +138,7 @@ class BaseSERenderer: SERenderer {
     func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {}
 
     func onStreamChanged(
-        formats: [CMFormatDescription],
+        formats: [Format],
         startPosition: Int64,
         offset: Int64,
         mediaPeriodId: MediaPeriodId
@@ -150,10 +151,12 @@ class BaseSERenderer: SERenderer {
     func onReset() {}
     func onRelease() {}
     func onTimelineChanged(new timeline: Timeline) {}
+    func requestMediaDataWhenReady(on queue: any Queue, block: @escaping () -> Void) {}
+    func stopRequestingMediaData() {}
 
     final func getLastResetPosition() -> Int64 { lastResetPosition }
     final func getStreamOffset() -> Int64 { streamOffset }
-    final func getStreamFormats() -> [CMFormatDescription] { formats }
+    final func getStreamFormats() -> [Format] { formats }
     final func getClock() -> CMClock { clock }
 
     final func readSource(to buffer: DecoderInputBuffer, readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
@@ -166,7 +169,6 @@ class BaseSERenderer: SERenderer {
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
             buffer.time += streamOffset
-            print("😎 \(String(describing: self)) – readSource, time = \(buffer.time)")
             readingPosition = max(readingPosition, buffer.time)
         }
 

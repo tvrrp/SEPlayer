@@ -72,7 +72,7 @@ extension BoxParser {
         }
     }
 
-    private struct ESDescriptor {
+    struct ESDescriptor {
         let codecInfo: CMAudioFormatDescription
 
         init(esdt payload: Data) throws {
@@ -89,50 +89,109 @@ extension BoxParser {
                 )
             }.validate()
 
-            var layoutSize: UInt32 = 0
-            try payload.withUnsafeBytes { pointer in
-                return AudioFormatGetPropertyInfo(
-                    kAudioFormatProperty_ChannelLayoutFromESDS,
-                    UInt32(payload.count),
-                    pointer.baseAddress,
-                    &layoutSize
+            let audioFormatDescription = try? payload.withUnsafeBytes { dataPointer in
+                guard let baseAdress = dataPointer.baseAddress else {
+                    throw ErrorBuilder.illegalState
+                }
+
+                let audioFormatInfoSize = Int32(MemoryLayout<AudioFormatInfo>.size)
+                var audioFormatInfo = AudioFormatInfo(
+                    mASBD: description,
+                    mMagicCookie: baseAdress,
+                    mMagicCookieSize: UInt32(payload.count)
                 )
-            }.validate()
 
-            let rawPtr = UnsafeMutableRawPointer.allocate(
-                byteCount: Int(layoutSize),
-                alignment: MemoryLayout<AudioChannelLayout>.alignment
-            )
-            let channelLayoutPtr = rawPtr.bindMemory(to: AudioChannelLayout.self, capacity: 1)
+                var formatListSize: UInt32 = 0
+                try AudioFormatGetPropertyInfo(
+                    kAudioFormatProperty_FormatList,
+                    UInt32(MemoryLayout<AudioFormatInfo>.size),
+                    &audioFormatInfo,
+                    &formatListSize
+                ).validate()
 
-            try payload.withUnsafeBytes { pointer in
-                return AudioFormatGetProperty(
-                    kAudioFormatProperty_ChannelLayoutFromESDS,
-                    UInt32(payload.count),
-                    pointer.baseAddress,
-                    &layoutSize,
-                    channelLayoutPtr
-                )
-            }.validate()
+                guard formatListSize > 0 else { throw ErrorBuilder.illegalState }
 
-            let managedAudioChannelLayout: ManagedAudioChannelLayout
-            if channelLayoutPtr.pointee.mNumberChannelDescriptions == .zero {
-                managedAudioChannelLayout = ManagedAudioChannelLayout(tag: channelLayoutPtr.pointee.mChannelLayoutTag)
-                rawPtr.deallocate()
+                let elementCount = Int(formatListSize) / MemoryLayout<AudioFormatListItem>.size
+                var formatListArray = Array(repeating: AudioFormatListItem(), count: elementCount)
+
+                try withUnsafePointer(to: audioFormatInfo) { pointer in
+                    AudioFormatGetProperty(
+                        kAudioFormatProperty_FormatList,
+                        UInt32(audioFormatInfoSize),
+                        pointer,
+                        &formatListSize,
+                        &formatListArray
+                    )
+                }.validate()
+
+                guard formatListSize > 0 else { throw ErrorBuilder.illegalState }
+                let count = Int(formatListSize) / MemoryLayout<AudioFormatListItem>.size
+
+                let descriptions = try formatListArray[0..<count].map {
+                    try CMAudioFormatDescription(
+                        audioStreamBasicDescription: $0.mASBD,
+                        layout: .init(tag: $0.mChannelLayoutTag),
+                        magicCookie: payload
+                    )
+                }
+
+//                return try CMAudioFormatDescription(audioFormatDescriptionArray: descriptions)
+                return descriptions[0] // TODO: do smth
+            }
+
+            codecInfo = if let audioFormatDescription {
+                audioFormatDescription
             } else {
-                managedAudioChannelLayout = ManagedAudioChannelLayout.init(
-                    audioChannelLayoutPointer: .init(channelLayoutPtr),
-                    deallocator: { _ in
-                        rawPtr.deallocate()
-                    }
+                try CMAudioFormatDescription(
+                    audioStreamBasicDescription: description,
+                    magicCookie: payload
                 )
             }
 
-            codecInfo = try CMAudioFormatDescription(
-                audioStreamBasicDescription: description,
-                layout: managedAudioChannelLayout,
-                magicCookie: payload
-            )
+//            var layoutSize: UInt32 = 0
+//            try payload.withUnsafeBytes { pointer in
+//                return AudioFormatGetPropertyInfo(
+//                    kAudioFormatProperty_ChannelLayoutFromESDS,
+//                    UInt32(payload.count),
+//                    pointer.baseAddress,
+//                    &layoutSize
+//                )
+//            }.validate()
+//
+//            let rawPtr = UnsafeMutableRawPointer.allocate(
+//                byteCount: Int(layoutSize),
+//                alignment: MemoryLayout<AudioChannelLayout>.alignment
+//            )
+//            let channelLayoutPtr = rawPtr.bindMemory(to: AudioChannelLayout.self, capacity: 1)
+//
+//            try payload.withUnsafeBytes { pointer in
+//                return AudioFormatGetProperty(
+//                    kAudioFormatProperty_ChannelLayoutFromESDS,
+//                    UInt32(payload.count),
+//                    pointer.baseAddress,
+//                    &layoutSize,
+//                    channelLayoutPtr
+//                )
+//            }.validate()
+//
+//            let managedAudioChannelLayout: ManagedAudioChannelLayout
+//            if channelLayoutPtr.pointee.mNumberChannelDescriptions == .zero {
+//                managedAudioChannelLayout = ManagedAudioChannelLayout(tag: channelLayoutPtr.pointee.mChannelLayoutTag)
+//                rawPtr.deallocate()
+//            } else {
+//                managedAudioChannelLayout = ManagedAudioChannelLayout.init(
+//                    audioChannelLayoutPointer: .init(channelLayoutPtr),
+//                    deallocator: { _ in
+//                        rawPtr.deallocate()
+//                    }
+//                )
+//            }
+//
+//            codecInfo = try CMAudioFormatDescription(
+//                audioStreamBasicDescription: description,
+//                layout: managedAudioChannelLayout,
+//                magicCookie: payload
+//            )
         }
     }
 }

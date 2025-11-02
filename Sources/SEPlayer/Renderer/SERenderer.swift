@@ -5,16 +5,17 @@
 //  Created by Damir Yackupov on 06.04.2025.
 //
 
-import CoreMedia.CMFormatDescription
+import CoreMedia
 
-protocol SERenderer: AnyObject {
+public protocol SERenderer: AnyObject {
     var trackType: TrackType { get }
     func getCapabilities() -> RendererCapabilities
 
     func getMediaClock() -> MediaClock?
+    func getTimebase() -> CMTimebase?
     func getState() -> SERendererState
     func enable(
-        formats: [CMFormatDescription],
+        formats: [Format],
         stream: SampleStream,
         position: Int64,
         joining: Bool,
@@ -27,7 +28,7 @@ protocol SERenderer: AnyObject {
     func start() throws
 
     func replaceStream(
-        formats: [CMFormatDescription],
+        formats: [Format],
         stream: SampleStream,
         startPosition: Int64,
         offset: Int64,
@@ -50,9 +51,13 @@ protocol SERenderer: AnyObject {
     func disable()
     func reset()
     func release()
+
+    func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void)
+    func stopRequestingMediaData()
 }
 
-enum SERendererState {
+@frozen
+public enum SERendererState {
     case disabled
     case enabled
     case started

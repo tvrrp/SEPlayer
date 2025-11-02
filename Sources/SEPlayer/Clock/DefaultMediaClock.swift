@@ -5,18 +5,25 @@
 //  Created by Damir Yackupov on 01.03.2025.
 //
 
-import CoreMedia.CMSync
+import AVFoundation
 
 final class DefaultMediaClock: MediaClock {
     private let standaloneClock: StandaloneClock
+
     private var rendererClock: MediaClock?
+    private var rendererTimebase: CMTimebase?
     private var renderClockSource: SERenderer?
 
+    private var playbackParameters: PlaybackParameters = .default
     private var isUsingStandaloneClock: Bool = false
     private var standaloneClockIsStarted: Bool = false
 
-    init(clock: CMClock) {
-        standaloneClock = StandaloneClock(clock: clock)
+    init(clock: CMClock) throws {
+        standaloneClock = try StandaloneClock(clock: clock)
+    }
+
+    func getTimebase() -> CMTimebase {
+        rendererTimebase ?? standaloneClock.timebase
     }
 
     func start() {
@@ -29,8 +36,8 @@ final class DefaultMediaClock: MediaClock {
         standaloneClock.stop()
     }
 
-    func resetPosition(position: Int64) {
-        standaloneClock.resetPosition(position: position)
+    func resetPosition(positionUs: Int64) {
+        standaloneClock.resetPosition(positionUs: positionUs)
     }
 
     func onRendererEnabled(renderer: SERenderer) {
@@ -40,25 +47,32 @@ final class DefaultMediaClock: MediaClock {
             renderClockSource = renderer
             rendererMediaClock.setPlaybackParameters(new: standaloneClock.getPlaybackParameters())
         }
+
+        let rendererTimebase = renderer.getTimebase()
+        if let rendererTimebase, rendererTimebase !== self.rendererTimebase {
+            self.rendererTimebase = rendererTimebase
+        }
     }
 
     func onRendererDisabled(renderer: SERenderer) {
         if renderer === rendererClock {
             rendererClock = nil
             renderClockSource = nil
+            rendererTimebase = nil
         }
     }
 
     func syncAndGetPosition(isReadingAhead: Bool) -> Int64 {
         syncClock(isReadingAhead: isReadingAhead)
-        return getPosition()
+        return getPositionUs()
     }
 
-    func getPosition() -> Int64  {
-        return rendererClock?.getPosition() ?? standaloneClock.getPosition()
+    func getPositionUs() -> Int64  {
+        return rendererClock?.getPositionUs() ?? standaloneClock.getPositionUs()
     }
 
     func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
+        self.playbackParameters = playbackParameters
         rendererClock?.setPlaybackParameters(new: playbackParameters)
         standaloneClock.setPlaybackParameters(new: playbackParameters)
     }
@@ -77,9 +91,9 @@ final class DefaultMediaClock: MediaClock {
         }
 
         guard let rendererClock else { return }
-        let rendererClockPosition = rendererClock.getPosition()
+        let rendererClockPosition = rendererClock.getPositionUs()
         if isUsingStandaloneClock {
-            if rendererClockPosition < standaloneClock.getPosition() {
+            if rendererClockPosition < standaloneClock.getPositionUs() {
                 standaloneClock.stop()
                 return
             }
@@ -88,7 +102,8 @@ final class DefaultMediaClock: MediaClock {
                 standaloneClock.start()
             }
         }
-        standaloneClock.resetPosition(position: rendererClockPosition)
+
+        standaloneClock.resetPosition(positionUs: rendererClockPosition)
         let playbackParameters = rendererClock.getPlaybackParameters()
         if playbackParameters != standaloneClock.getPlaybackParameters() {
             standaloneClock.setPlaybackParameters(new: playbackParameters)
