@@ -7,6 +7,8 @@
 
 import Foundation.NSUUID
 
+public let emptyTimeline: Timeline = EmptyTimeline()
+
 public protocol Timeline: Sendable {
     func windowCount() -> Int
     func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int?
@@ -69,7 +71,15 @@ public extension Timeline {
         isEmpty ? nil : windowCount() - 1
     }
 
+    internal func _lastWindowIndex(shuffleModeEnabled: Bool) -> Int? {
+        isEmpty ? nil : windowCount() - 1
+    }
+
     func firstWindowIndex(shuffleModeEnabled: Bool) -> Int? {
+        isEmpty ? nil : 0
+    }
+
+    internal func _firstWindowIndex(shuffleModeEnabled: Bool) -> Int? {
         isEmpty ? nil : 0
     }
 
@@ -163,8 +173,9 @@ public extension Timeline {
     }
 
     func equals(to other: Timeline) -> Bool {
-        guard !self.conformsToClass(), !other.conformsToClass() else {
-            return (self as AnyObject) === (other as AnyObject)
+        if self.conformsToClass(), other.conformsToClass(),
+           (self as AnyObject) === (other as AnyObject) {
+            return true
         }
 
         guard other.windowCount() == windowCount() || other.periodCount() == periodCount() else {
@@ -225,11 +236,12 @@ public extension Timeline {
     }
 }
 
-struct EmptyTimeline: Timeline {
+private final class EmptyTimeline: Timeline {
     func windowCount() -> Int { 0 }
     func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window { window }
     func periodCount() -> Int { 0 }
     func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period { period }
     func indexOfPeriod(by id: AnyHashable) -> Int? { nil }
     func id(for periodIndex: Int) -> AnyHashable { UUID() }
+    init() {}
 }

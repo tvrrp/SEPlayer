@@ -42,12 +42,13 @@ final class MediaSourceList {
         shuffleOrder = DefaultShuffleOrder(length: .zero)
     }
 
-    func setMediaSource(holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) -> Timeline {
+    @discardableResult
+    func setMediaSource(holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) throws -> Timeline {
         removeMediaSourcesInternal(range: 0..<mediaSourceHolders.count)
-        return addMediaSource(index: mediaSourceHolders.count, holders: holders, shuffleOrder: shuffleOrder)
+        return try addMediaSource(index: mediaSourceHolders.count, holders: holders, shuffleOrder: shuffleOrder)
     }
 
-    func addMediaSource(index: Int, holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) -> Timeline {
+    func addMediaSource(index: Int, holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) throws -> Timeline {
         if !holders.isEmpty {
             self.shuffleOrder = shuffleOrder
             for insertionIndex in index..<index + holders.count {
@@ -67,7 +68,7 @@ final class MediaSourceList {
                 mediaSourceHolders.insert(holder, at: insertionIndex)
                 mediaSourceById[holder.id] = holder
                 if isPrepared {
-                    prepareChildSource(from: holder)
+                    try prepareChildSource(from: holder)
                     if mediaSourceByMediaPeriod.isEmpty {
                         enabledMediaSourceHolders.insert(holder)
                     } else {
@@ -88,7 +89,7 @@ final class MediaSourceList {
 
     func moveMediaSource(from currentIndex: Int, to newIndex: Int, shuffleOrder: ShuffleOrder) -> Timeline {
         moveMediaSourceRange(
-            range: Range<Int>(currentIndex...newIndex),
+            range: currentIndex..<(currentIndex + 1),
             to: newIndex,
             shuffleOrder: shuffleOrder
         )
@@ -96,21 +97,18 @@ final class MediaSourceList {
 
     func moveMediaSourceRange(range: Range<Int>, to newIndex: Int, shuffleOrder: ShuffleOrder) -> Timeline {
         self.shuffleOrder = shuffleOrder
-        if range.count == 0 || range.lowerBound == newIndex {
+        if range.isEmpty || range.lowerBound == newIndex {
             return createTimeline()
         }
 
         let startIndex = min(range.lowerBound, newIndex)
-        let newEndIndex = newIndex + (range.upperBound - range.lowerBound) - 1
+        let newEndIndex = newIndex + (range.count) - 1
         let endIndex = max(newEndIndex, range.upperBound - 1)
         var windowOffset = mediaSourceHolders[startIndex].firstWindowIndexInChild
-        if #available(iOS 18.0, *) {
-            mediaSourceHolders.moveSubranges(.init(range), to: newIndex)
-        } else {
-            let removed = mediaSourceHolders[range]
-            mediaSourceHolders.removeSubrange(range)
-            mediaSourceHolders.insert(contentsOf: removed, at: newIndex)
-        }
+
+        let removed = mediaSourceHolders[range]
+        mediaSourceHolders.removeSubrange(range)
+        mediaSourceHolders.insert(contentsOf: removed, at: newIndex)
 
         for index in startIndex...endIndex {
             let holder = mediaSourceHolders[index]
@@ -121,9 +119,9 @@ final class MediaSourceList {
         return createTimeline()
     }
 
-    func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) -> Timeline {
+    func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) throws -> Timeline {
         for index in range {
-            mediaSourceHolders[index]
+            try mediaSourceHolders[index]
                 .mediaSource
                 .updateMediaItem(new: mediaItems[index - range.lowerBound])
         }
@@ -160,7 +158,7 @@ final class MediaSourceList {
 
         self.mediaTransferListener = mediaTransferListener
         for holder in mediaSourceHolders {
-            prepareChildSource(from: holder)
+            try prepareChildSource(from: holder)
             enabledMediaSourceHolders.insert(holder)
         }
         isPrepared = true
@@ -179,7 +177,7 @@ final class MediaSourceList {
 
         enableMediaSource(holder: holder)
         holder.activeMediaPeriodIds.append(childMediaPeriodId)
-        let mediaPeriod = holder.mediaSource.createPeriod(
+        let mediaPeriod = try holder.mediaSource.createPeriod(
             id: childMediaPeriodId,
             allocator: allocator,
             startPosition: startPosition
@@ -210,7 +208,7 @@ final class MediaSourceList {
     }
 
     func createTimeline() -> Timeline {
-        guard !mediaSourceHolders.isEmpty else { return EmptyTimeline() }
+        guard !mediaSourceHolders.isEmpty else { return emptyTimeline }
 
         var windowOffset = 0
         for mediaSourceHolder in mediaSourceHolders {
@@ -292,10 +290,10 @@ private extension MediaSourceList {
 }
 
 private extension MediaSourceList {
-    func prepareChildSource(from holder: MediaSourceHolder) {
+    func prepareChildSource(from holder: MediaSourceHolder) throws {
         let mediaSource = holder.mediaSource
         childSources[holder] = MediaSourceDelegateHolder(source: mediaSource, delegate: self)
-        mediaSource.prepareSource(delegate: self, mediaTransferListener: mediaTransferListener, playerId: playerId)
+        try mediaSource.prepareSource(delegate: self, mediaTransferListener: mediaTransferListener, playerId: playerId)
     }
 
     func releaseChildSource(from holder: MediaSourceHolder) {

@@ -10,7 +10,7 @@ import AVFoundation
 final class SEPlayerImpl: BasePlayer, SEPlayer {
     @MainActor public let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
 
-    let clock: CMClock
+    let clock: SEClock
     var playbackState: PlayerState { queue.sync { playbackInfo.state } }
 
     var isPlaying: Bool { queue.sync { playbackInfo.isPlaying } }
@@ -127,7 +127,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
     init(
         identifier: UUID,
         queue: Queue,
-        clock: CMClock,
+        clock: SEClock,
         renderersFactory: RenderersFactory,
         trackSelector: TrackSelector,
         loadControl: LoadControl,
@@ -203,7 +203,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
                 playbackState: playbackInfo.timeline.isEmpty ? .ended : .buffering, playbackInfo: playbackInfo.setPlaybackError(nil)
             )
             pendingOperationAcks += 1
-            internalPlayer.prepare()
+            queue.justDispatch { self.internalPlayer.prepare() }
             updatePlaybackInfo(
                 new: playbackInfo,
                 timelineChangeReason: .sourceUpdate,
@@ -403,7 +403,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
                     contentPositionMs: contentPositionInternal(playbackInfo: playbackInfo)
                 )
             )
-            internalPlayer.moveMediaSources(range: range, to: newIndex, shuffleOrder: _shufflerOrder)
+            queue.justDispatch {
+                self.internalPlayer.moveMediaSources(
+                    range: range, to: newIndex, shuffleOrder: self._shufflerOrder
+                )
+            }
             updatePlaybackInfo(
                 new: newPlaybackInfo,
                 timelineChangeReason: .playlistChanged,
@@ -462,7 +466,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
                 )
             )
             pendingOperationAcks += 1
-            internalPlayer.setShuffleOrder(shuffleOrder)
+            queue.justDispatch { self.internalPlayer.setShuffleOrder(shuffleOrder) }
             updatePlaybackInfo(
                 new: newPlaybackInfo,
                 timelineChangeReason: .playlistChanged,
@@ -519,7 +523,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             guard let self, let mediaItemIndex, mediaItemIndex >= 0 else { return }
 
             let timeline = playbackInfo.timeline
-            guard !timeline.isEmpty, mediaItemIndex < timeline.windowCount() else {
+            if !timeline.isEmpty && mediaItemIndex >= timeline.windowCount() {
                 return
             }
 
@@ -542,11 +546,13 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
                     windowPositionMs: positionMs
                 )
             )
-            internalPlayer.seek(
-                to: Time.msToUs(timeMs: positionMs),
-                timeline: timeline,
-                windowIndex: mediaItemIndex
-            )
+            queue.justDispatch {
+                self.internalPlayer.seek(
+                    to: Time.msToUs(timeMs: positionMs),
+                    timeline: timeline,
+                    windowIndex: mediaItemIndex
+                )
+            }
             updatePlaybackInfo(
                 new: playbackInfo,
                 timelineChangeReason: .playlistChanged,
@@ -565,7 +571,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
 
             let newPlaybackInfo = playbackInfo.playbackParameters(playbackParameters)
             pendingOperationAcks += 1
-            internalPlayer.setPlaybackParameters(playbackParameters)
+            queue.justDispatch { self.internalPlayer.setPlaybackParameters(playbackParameters)}
             updatePlaybackInfo(
                 new: newPlaybackInfo,
                 timelineChangeReason: .playlistChanged,
@@ -631,7 +637,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             playbackInfo = playbackInfo.setPlaybackError(error)
         }
         pendingOperationAcks += 1
-        internalPlayer.stop()
+        queue.justDispatch { self.internalPlayer.stop() }
         updatePlaybackInfo(
             new: playbackInfo,
             timelineChangeReason: .playlistChanged,
@@ -997,12 +1003,15 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         }
 
         newPlaybackInfo = mask(playbackState: maskingPlaybackState, playbackInfo: newPlaybackInfo)
-        internalPlayer.setMediaSources(
-            holders,
-            windowIndex: startWindowIndex,
-            positionUs: Time.msToUs(timeMs: startPositionMs),
-            shuffleOrder: _shufflerOrder
-        )
+        queue.justDispatch { [self] in
+            internalPlayer.setMediaSources(
+                holders,
+                windowIndex: startWindowIndex,
+                positionUs: Time.msToUs(timeMs: startPositionMs),
+                shuffleOrder: _shufflerOrder
+            )
+        }
+
         let positionDiscontinuity = playbackInfo.periodId.periodId != newPlaybackInfo.periodId.periodId && !playbackInfo.timeline.isEmpty
         updatePlaybackInfo(
             new: newPlaybackInfo,
@@ -1059,7 +1068,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             )
         )
 
-        internalPlayer.insertMediaSources(holders, at: index, shuffleOrder: _shufflerOrder)
+        queue.justDispatch { [self] in
+            internalPlayer.insertMediaSources(holders, at: index, shuffleOrder: _shufflerOrder)
+        }
 
         return newPlaybackInfo
     }
@@ -1090,7 +1101,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             newPlaybackInfo = mask(playbackState: .ended, playbackInfo: newPlaybackInfo)
         }
 
-        internalPlayer.removeMediaSources(range: range, shuffleOrder: _shufflerOrder)
+        queue.justDispatch { [self] in
+            internalPlayer.removeMediaSources(range: range, shuffleOrder: _shufflerOrder)
+        }
         return newPlaybackInfo
     }
 
@@ -1324,11 +1337,13 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             playbackSuppressionReason: playbackSuppressionReason
         )
 
-        internalPlayer.setPlayWhenReady(
-            playWhenReady,
-            playWhenReadyChangeReason: changeReason,
-            playbackSuppressionReason: playbackSuppressionReason
-        )
+        queue.justDispatch {
+            self.internalPlayer.setPlayWhenReady(
+                playWhenReady,
+                playWhenReadyChangeReason: changeReason,
+                playbackSuppressionReason: playbackSuppressionReason
+            )
+        }
 
         updatePlaybackInfo(
             new: newPlaybackInfo,
@@ -1363,7 +1378,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
     private func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) {
         assert(queue.isCurrent())
         pendingOperationAcks += 1
-        internalPlayer.updateMediaSources(with: mediaItems, range: range)
+        queue.justDispatch { self.internalPlayer.updateMediaSources(with: mediaItems, range: range) }
         for (offset, index) in range.enumerated() {
             mediaSourceHolderSnapshots[index].timeline = TimelineWithUpdatedMediaItem(
                 timeline: mediaSourceHolderSnapshots[index].timeline,

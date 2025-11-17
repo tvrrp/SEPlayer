@@ -38,7 +38,7 @@ public final class PlayerBufferableContainer {
         bufferables.forEach { $0.stopRequestingMediaData() }
     }
 
-    func setControlTimebase(_ timebase: CMTimebase) {
+    func setControlTimebase(_ timebase: CMTimebase?) {
         self.timebase = timebase
 
         bufferables.forEach { $0.setControlTimebase(timebase) }

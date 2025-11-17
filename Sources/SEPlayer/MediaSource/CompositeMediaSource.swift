@@ -14,7 +14,7 @@ class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
     }
     private var mediaTransferListener: TransferListener?
 
-    override func prepareSourceInternal(mediaTransferListener: TransferListener?) {
+    override func prepareSourceInternal(mediaTransferListener: TransferListener?) throws {
         self.mediaTransferListener = mediaTransferListener
     }
 
@@ -41,16 +41,16 @@ class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
         childSourceId: ID,
         mediaSource: MediaSource,
         newTimeline: Timeline
-    ) {
+    ) throws {
         assertionFailure("to override")
     }
 
-    final func prepareChildSource(id: ID, mediaSource: MediaSource) {
+    final func prepareChildSource(id: ID, mediaSource: MediaSource) throws {
         guard childSources.object(forKey: id) == nil else { return }
 
-        let caller = DelegateWrapper<ID>(id: id, onInfoRefreshed: onChildSourceInfoRefreshed)
+        let caller = try DelegateWrapper<ID>(id: id, onInfoRefreshed: onChildSourceInfoRefreshed)
         childSources.setObject(MediaSourceAndListener(mediaSource: mediaSource, delegate: caller), forKey: id)
-        mediaSource.prepareSource(
+        try mediaSource.prepareSource(
             delegate: caller,
             mediaTransferListener: mediaTransferListener,
             playerId: playerId!
@@ -90,15 +90,15 @@ class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
 private extension CompositeMediaSource {
     final class DelegateWrapper<T: AnyObject>: MediaSourceDelegate {
         let id: T
-        let onInfoRefreshed: (T, MediaSource, Timeline) -> Void
+        let onInfoRefreshed: (T, MediaSource, Timeline) throws -> Void
 
-        init(id: T, onInfoRefreshed: @escaping (T, MediaSource, Timeline) -> Void) {
+        init(id: T, onInfoRefreshed: @escaping (T, MediaSource, Timeline) throws -> Void) rethrows {
             self.id = id
             self.onInfoRefreshed = onInfoRefreshed
         }
 
-        func mediaSource(_ source: MediaSource, sourceInfo refreshed: Timeline) {
-            onInfoRefreshed(id, source, refreshed)
+        func mediaSource(_ source: MediaSource, sourceInfo refreshed: Timeline) throws {
+            try onInfoRefreshed(id, source, refreshed)
         }
     }
 

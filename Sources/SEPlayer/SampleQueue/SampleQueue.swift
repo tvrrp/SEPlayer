@@ -21,7 +21,7 @@ class SampleQueue {
     private var downstreamFormat: Format?
 
     private var capacity: Int
-    private var samples: [SampleWrapper]
+    private var samples: ContiguousArray<SampleWrapper>
 
     private var length: Int = 0
     private var absoluteFirstIndex: Int = 0
@@ -51,8 +51,8 @@ class SampleQueue {
         self.queue = queue
         sampleDataQueue = SampleDataQueue(queue: queue, allocator: allocator)
         lock = NSRecursiveLock()
-        capacity = 1000
-        samples = Array(repeating: .init(), count: capacity)
+        capacity = SampleQueue.sampleCapacityIncrement
+        samples = ContiguousArray(repeating: .init(), count: capacity)
         sharedSampleMetadata = SpannedData<Format>(removeCallback: { _ in }) // TODO: fix
         startTime = .min
         largestDiscardedTimestamp = .min
@@ -167,20 +167,22 @@ class SampleQueue {
         if result == .didReadBuffer, let extras, !buffer.flags.contains(.endOfStream) {
             let peek = readFlags.contains(.peek)
             if !readFlags.contains(.omitSampleData) {
-                let data = try! buffer.dequeue()
-                if peek {
-                    try! sampleDataQueue.peekToBuffer(
-                        buffer: data,
-                        offset: extras.offset,
-                        size: extras.size
-                    )
-                } else {
-                    try! sampleDataQueue.readToBuffer(
-                        buffer: data,
-                        offset: extras.offset,
-                        size: extras.size
-                    )
+                try buffer.dequeueOutputSpan { outputSpan in
+                    if peek {
+                        try! sampleDataQueue.peekToBuffer(
+                            outputSpan: &outputSpan,
+                            offset: extras.offset,
+                            size: extras.size
+                        )
+                    } else {
+                        try! sampleDataQueue.readToBuffer(
+                            outputSpan: &outputSpan,
+                            offset: extras.offset,
+                            size: extras.size
+                        )
+                    }
                 }
+
                 buffer.size = extras.size
             }
 
@@ -190,6 +192,7 @@ class SampleQueue {
         return result
     }
 
+    @discardableResult
     final func seek(to sampleIndex: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         rewind()
@@ -201,6 +204,7 @@ class SampleQueue {
         return true
     }
 
+    @discardableResult
     final func seek(to time: Int64, allowTimeBeyondBuffer: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
         rewind()
@@ -284,6 +288,7 @@ class SampleQueue {
     func setSampleOffsetTime(_ sampleOffsetTime: Int64) {
         guard sampleOffsetTime != self.sampleOffsetUs else { return }
         self.sampleOffsetUs = sampleOffsetTime
+        invalidateUpstreamFormatAdjustment()
     }
 
     func discardSampleMetadataToRead() -> Int? {
@@ -297,11 +302,25 @@ class SampleQueue {
         guard length != 0 else { return nil }
         return discardSamples(discardCount: length)
     }
+
+    func getAdjustedUpstreamFormat(_ format: Format) -> Format {
+        var format = format
+        if sampleOffsetUs != 0, format.subsampleOffsetUs != Format.offsetSampleRelative {
+            format = format.buildUpon()
+                .setSubsampleOffsetUs(sampleOffsetUs)
+                .build()
+        }
+        return format
+    }
 }
 
 extension SampleQueue: TrackOutput {
     final func loadSampleData(input: DataReader, length: Int, allowEndOfInput: Bool) throws -> DataReaderReadResult {
         try sampleDataQueue.loadSampleData(input: input, length: length, allowEndOfInput: allowEndOfInput)
+    }
+
+    func sampleData(data: ByteBuffer, length: Int) throws {
+        try sampleDataQueue.loadSampleData(buffer: data, length: length)
     }
 
     func setFormat(_ format: Format) {
@@ -364,16 +383,6 @@ private extension SampleQueue {
         return discardCount == -1 ? nil : discardSamples(discardCount: discardCount)
     }
 
-    private func getAdjustedUpstreamFormat(_ format: Format) -> Format {
-        var format = format
-        if sampleOffsetUs != 0, format.subsampleOffsetUs != Format.offsetSampleRelative {
-            format = format.buildUpon()
-                .setSubsampleOffsetUs(sampleOffsetUs)
-                .build()
-        }
-        return format
-    }
-
     private func rewind() {
         lock.lock(); defer { lock.unlock() }
         readPosition = 0
@@ -425,7 +434,7 @@ private extension SampleQueue {
     private func setUpstreamFormat(_ format: Format) -> Bool {
         lock.lock(); defer { lock.unlock() }
         upstreamFormatRequired = false
-        guard format != upstreamFormat else { return false }
+        guard format !== upstreamFormat else { return false }
 
         if !sharedSampleMetadata.isEmpty, sharedSampleMetadata.getEndValue() == format {
             upstreamFormat = sharedSampleMetadata.getEndValue()
@@ -433,8 +442,11 @@ private extension SampleQueue {
             upstreamFormat = format
         }
 
-        // TODO: real info
-        allSamplesAreSyncSamples = format.sampleMimeType == .audioAAC
+        if let upstreamFormat {
+            let mimeType = upstreamFormat.sampleMimeType
+            allSamplesAreSyncSamples = mimeType.allSamplesAreSyncSamples(codec: upstreamFormat.codecs)
+        }
+
         return true
     }
 
@@ -451,7 +463,7 @@ private extension SampleQueue {
         let relativeEndIndex = getRelativeIndex(offset: length)
         samples[relativeEndIndex] = .init(offset: offset, size: size, flags: sampleFlags, time: time)
 
-        if sharedSampleMetadata.isEmpty || sharedSampleMetadata.getEndValue() == upstreamFormat,
+        if sharedSampleMetadata.isEmpty || sharedSampleMetadata.getEndValue() != upstreamFormat,
            let upstreamFormat {
             sharedSampleMetadata.appendSpan(startKey: getWriteIndex(), value: upstreamFormat)
         }
@@ -459,8 +471,8 @@ private extension SampleQueue {
         length += 1
 
         if length == capacity {
-            let newCapacity = capacity + 1000
-            var newArray: [SampleWrapper] = Array(repeating: .init(), count: newCapacity)
+            let newCapacity = capacity + SampleQueue.sampleCapacityIncrement
+            var newArray = ContiguousArray<SampleWrapper>(repeating: .init(), count: newCapacity)
 
             let beforeWrap = capacity - relativeFirstIndex
             let afterWrap = relativeFirstIndex
@@ -600,6 +612,8 @@ private extension SampleQueue {
 }
 
 extension SampleQueue {
+    static let sampleCapacityIncrement: Int = 1000
+
     struct SampleExtrasHolder {
         let size: Int
         let offset: Int

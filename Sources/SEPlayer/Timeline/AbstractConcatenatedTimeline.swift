@@ -242,7 +242,7 @@ extension AbstractConcatenatedTimeline {
     }
 }
 
-private struct ConcatenatedId: Hashable {
+struct ConcatenatedId: Hashable {
     let first: AnyHashable
     let second: AnyHashable
 

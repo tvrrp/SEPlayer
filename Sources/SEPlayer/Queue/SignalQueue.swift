@@ -56,6 +56,14 @@ final class SignalQueue: Queue {
         nativeQueue.setSpecific(key: QueueSpecificKey, value: specific)
     }
 
+    init(concurrentQueueName: String? = nil) {
+        nativeQueue = DispatchQueue(label: concurrentQueueName ?? "", qos: .userInteractive, attributes: [.concurrent])
+
+        specialIsMainQueue = false
+
+        nativeQueue.setSpecific(key: QueueSpecificKey, value: specific)
+    }
+
     // MARK: - Interface
 
     func isCurrent() -> Bool {

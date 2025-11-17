@@ -66,7 +66,7 @@ final class FileDataSource: DataSource {
         return .success(amount: data.count)
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
         assert(queue.isCurrent())
         guard let readFileHandle else {
             throw DataReaderError.connectionNotOpened

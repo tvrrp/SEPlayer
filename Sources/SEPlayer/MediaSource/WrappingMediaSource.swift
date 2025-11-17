@@ -11,17 +11,17 @@ class WrappingMediaSource: CompositeMediaSource<NSObject> {
     let mediaSource: MediaSource
     private static let childSourceId = NSObject()
 
-    init(queue: Queue, mediaSource: MediaSource, mediaItem: MediaItem) {
+    init(queue: Queue, mediaSource: MediaSource) {
         self.mediaSource = mediaSource
         super.init(queue: queue)
     }
 
-    override func prepareSourceInternal(mediaTransferListener: TransferListener?) {
-        super.prepareSourceInternal(mediaTransferListener: mediaTransferListener)
-        prepareSourceInternal()
+    override func prepareSourceInternal(mediaTransferListener: TransferListener?) throws {
+        try super.prepareSourceInternal(mediaTransferListener: mediaTransferListener)
+        try prepareSourceInternal()
     }
 
-    func prepareSourceInternal() { fatalError("To override") }
+    func prepareSourceInternal() throws { fatalError("To override") }
     override func getInitialTimeline() -> Timeline? { mediaSource.getInitialTimeline() }
     override var isSingleWindow: Bool { mediaSource.isSingleWindow }
 
@@ -33,22 +33,26 @@ class WrappingMediaSource: CompositeMediaSource<NSObject> {
         mediaSource.canUpdateMediaItem(new: item)
     }
 
-    override func updateMediaItem(new item: MediaItem) { mediaSource.updateMediaItem(new: item) }
+    override func updateMediaItem(new item: MediaItem) throws { try mediaSource.updateMediaItem(new: item) }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) -> any MediaPeriod {
-        mediaSource.createPeriod(id: id, allocator: allocator, startPosition: startPosition)
+    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) throws -> any MediaPeriod {
+        try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: startPosition)
     }
 
     override func release(mediaPeriod: MediaPeriod) {
         mediaSource.release(mediaPeriod: mediaPeriod)
     }
 
-    override final func onChildSourceInfoRefreshed(childSourceId: NSObject, mediaSource: MediaSource, newTimeline: Timeline) {
-        onChildSourceInfoRefreshed(newTimeline: newTimeline)
+    override final func onChildSourceInfoRefreshed(
+        childSourceId: NSObject,
+        mediaSource: MediaSource,
+        newTimeline: Timeline
+    ) throws {
+        try onChildSourceInfoRefreshed(newTimeline: newTimeline)
     }
 
-    func onChildSourceInfoRefreshed(newTimeline: Timeline) {
-        refreshSourceInfo(timeline: newTimeline)
+    func onChildSourceInfoRefreshed(newTimeline: Timeline) throws {
+        try refreshSourceInfo(timeline: newTimeline)
     }
 
     override final func getMediaPeriodIdForChildMediaPeriodId(
@@ -60,8 +64,8 @@ class WrappingMediaSource: CompositeMediaSource<NSObject> {
 
     func mediaPeriodIdForChild(mediaPeriodId: MediaPeriodId) -> MediaPeriodId { mediaPeriodId }
 
-    final func prepareChildSource() {
-        prepareChildSource(id: Self.childSourceId, mediaSource: mediaSource)
+    final func prepareChildSource() throws {
+        try prepareChildSource(id: Self.childSourceId, mediaSource: mediaSource)
     }
 
     final func enableChildSource() {

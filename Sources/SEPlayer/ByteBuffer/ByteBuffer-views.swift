@@ -38,8 +38,10 @@ public struct ByteBufferView: RandomAccessCollection, Sendable {
     }
 
     @inlinable
-    public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
-        try self._buffer.withVeryUnsafeBytes { ptr in
+    public func withUnsafeBytes<R, ErrorType: Error>(
+        _ body: (UnsafeRawBufferPointer) throws(ErrorType) -> R
+    ) throws(ErrorType) -> R {
+        try self._buffer.withVeryUnsafeBytes { (ptr: UnsafeRawBufferPointer) throws(ErrorType) -> R in
             try body(
                 UnsafeRawBufferPointer(
                     start: ptr.baseAddress!.advanced(by: self._range.lowerBound),
@@ -98,8 +100,10 @@ public struct ByteBufferView: RandomAccessCollection, Sendable {
     }
 
     @inlinable
-    public func withContiguousStorageIfAvailable<R>(_ body: (UnsafeBufferPointer<UInt8>) throws -> R) rethrows -> R? {
-        try self.withUnsafeBytes { bytes in
+    public func withContiguousStorageIfAvailable<R, ErrorType: Error>(
+        _ body: (UnsafeBufferPointer<UInt8>) throws(ErrorType) -> R
+    ) throws(ErrorType) -> R? {
+        try self.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) throws(ErrorType) -> R in
             try body(bytes.bindMemory(to: UInt8.self))
         }
     }
@@ -242,6 +246,39 @@ extension ByteBufferView: RangeReplaceableCollection {
             self._range = self._range.startIndex..<self._range.endIndex.advanced(by: additionalByteCount)
         }
     }
+
+    /// Returns the first index in which a byte satisfies the given predicate.
+    ///
+    /// - Parameter predicate: A closure that takes a byte as its argument
+    ///   and returns a Boolean value that indicates whether the passed byte
+    ///   represents a match.
+    /// - Returns: The index of the first byte for which `predicate` returns
+    ///   `true`. If no bytes in the collection satisfy the given predicate,
+    ///   returns `nil`.
+    ///
+    /// - Complexity: O(*n*), where *n* is the length of the collection.
+    @inlinable
+    public func firstIndex(where predicate: (UInt8) throws -> Bool) rethrows -> Index? {
+        try self.withUnsafeBytes { ptr in
+            try ptr.firstIndex(where: predicate).map { $0 + self._range.lowerBound }
+        }
+    }
+
+    /// Returns the index of the last byte that matches the given predicate.
+    ///
+    /// - Parameter predicate: A closure that takes a byte as its argument
+    ///   and returns a Boolean value that indicates whether the passed byte
+    ///   represents a match.
+    /// - Returns: The index of the last byte in the collection that matches
+    ///   `predicate`, or `nil` if no bytes match.
+    ///
+    /// - Complexity: O(*n*), where *n* is the length of the collection.
+    @inlinable
+    public func lastIndex(where predicate: (UInt8) throws -> Bool) rethrows -> Index? {
+        try self.withUnsafeBytes { ptr in
+            try ptr.lastIndex(where: predicate).map { $0 + self._range.lowerBound }
+        }
+    }
 }
 
 extension ByteBuffer {
@@ -253,10 +290,10 @@ extension ByteBuffer {
 
     /// Returns a view into some portion of the readable bytes of a `ByteBuffer`.
     ///
-    /// - parameters:
+    /// - Parameters:
     ///   - index: The index the view should start at
     ///   - length: The length of the view (in bytes)
-    /// - returns: A view into a portion of a `ByteBuffer` or `nil` if the requested bytes were not readable.
+    /// - Returns: A view into a portion of a `ByteBuffer` or `nil` if the requested bytes were not readable.
     @inlinable
     public func viewBytes(at index: Int, length: Int) -> ByteBufferView? {
         guard length >= 0 && index >= self.readerIndex && index <= self.writerIndex - length else {
@@ -268,7 +305,7 @@ extension ByteBuffer {
 
     /// Create a `ByteBuffer` from the given `ByteBufferView`s range.
     ///
-    /// - parameter view: The `ByteBufferView` which you want to get a `ByteBuffer` from.
+    /// - Parameter view: The `ByteBufferView` which you want to get a `ByteBuffer` from.
     @inlinable
     public init(_ view: ByteBufferView) {
         self = view._buffer.getSlice(at: view.startIndex, length: view.count)!

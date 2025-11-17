@@ -48,7 +48,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
 
     init(
         queue: Queue,
-        clock: CMClock,
+        clock: SEClock,
         bufferableContainer: PlayerBufferableContainer,
         decoderFactory: SEDecoderFactory
     ) throws {

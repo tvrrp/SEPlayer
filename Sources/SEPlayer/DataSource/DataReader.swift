@@ -7,7 +7,7 @@
 
 public protocol DataReader {
     func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult
 }
 
 public enum DataReaderReadResult {

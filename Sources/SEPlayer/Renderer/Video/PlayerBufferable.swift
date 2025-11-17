@@ -14,7 +14,7 @@ public enum PlayerBufferableAction {
 
 public protocol PlayerBufferable: AnyObject {
     var isReadyForMoreMediaData: Bool { get }
-    func setControlTimebase(_ timebase: CMTimebase)
+    func setControlTimebase(_ timebase: CMTimebase?)
     func prepare(for action: PlayerBufferableAction)
     func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void)
     func stopRequestingMediaData()

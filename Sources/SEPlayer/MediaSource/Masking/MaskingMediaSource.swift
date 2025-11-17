@@ -31,14 +31,14 @@ final class MaskingMediaSource: WrappingMediaSource {
             timeline = MaskingTimeline.placeholder(mediaItem: mediaSource.getMediaItem())
         }
 
-        super.init(queue: queue, mediaSource: mediaSource, mediaItem: mediaSource.getMediaItem())
+        super.init(queue: queue, mediaSource: mediaSource)
     }
 
     override func canUpdateMediaItem(new item: MediaItem) -> Bool {
         mediaSource.canUpdateMediaItem(new: item)
     }
 
-    override func updateMediaItem(new item: MediaItem) {
+    override func updateMediaItem(new item: MediaItem) throws {
         timeline = if hasRealTimeline {
             timeline.clone(with: TimelineWithUpdatedMediaItem(
                 timeline: timeline.timeline,
@@ -47,27 +47,27 @@ final class MaskingMediaSource: WrappingMediaSource {
         } else {
             MaskingTimeline.placeholder(mediaItem: item)
         }
-        mediaSource.updateMediaItem(new: item)
+        try mediaSource.updateMediaItem(new: item)
     }
 
-    override func prepareSourceInternal() {
+    override func prepareSourceInternal() throws {
         if !useLazyPreparation {
             hasStartedPreparing = true
-            prepareChildSource()
+            try prepareChildSource()
         }
     }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) -> any MediaPeriod {
+    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) throws -> any MediaPeriod {
         let mediaPeriod = MaskingMediaPeriod(id: id, allocator: allocator, preparePositionUs: startPosition)
         mediaPeriod.setMediaSource(mediaSource)
         if isPrepared {
             let idInSource = id.copy(with: internalPeriodId(for: id.periodId))
-            mediaPeriod.createPeriod(id: idInSource)
+            try mediaPeriod.createPeriod(id: idInSource)
         } else {
             unpreparedMaskingMediaPeriod = mediaPeriod
             if !hasStartedPreparing {
                 hasStartedPreparing = true
-                prepareChildSource()
+                try prepareChildSource()
             }
         }
 
@@ -87,7 +87,7 @@ final class MaskingMediaSource: WrappingMediaSource {
         super.releaseSourceInternal()
     }
 
-    override func onChildSourceInfoRefreshed(newTimeline: Timeline) {
+    override func onChildSourceInfoRefreshed(newTimeline: Timeline) throws {
         var idForMaskingPeriodPreparation: MediaPeriodId?
 
         if isPrepared {
@@ -144,9 +144,9 @@ final class MaskingMediaSource: WrappingMediaSource {
 
         hasRealTimeline = true
         isPrepared = true
-        refreshSourceInfo(timeline: timeline)
+        try refreshSourceInfo(timeline: timeline)
         if let idForMaskingPeriodPreparation, let unpreparedMaskingMediaPeriod {
-            unpreparedMaskingMediaPeriod.createPeriod(id: idForMaskingPeriodPreparation)
+            try unpreparedMaskingMediaPeriod.createPeriod(id: idForMaskingPeriodPreparation)
         }
     }
 

@@ -57,7 +57,7 @@ final class SEPlayerImplInternal: @unchecked Sendable {
     private let backBufferDurationUs: Int64
     private let retainBackBufferFromKeyframe: Bool
     private let mediaClock: DefaultMediaClock
-    private let clock: CMClock
+    private let clock: SEClock
     private let periodQueue: MediaPeriodQueue
     private let mediaSourceList: MediaSourceList
     private let bufferableContainer: PlayerBufferableContainer
@@ -101,7 +101,7 @@ final class SEPlayerImplInternal: @unchecked Sendable {
         shuffleModeEnabled: Bool,
         seekParameters: SeekParameters,
         pauseAtEndOfWindow: Bool,
-        clock: CMClock,
+        clock: SEClock,
         mediaClock: DefaultMediaClock,
         identifier: UUID,
         preloadConfiguration: PreloadConfiguration,
@@ -128,7 +128,7 @@ final class SEPlayerImplInternal: @unchecked Sendable {
         lastRebufferRealtimeMs = .timeUnset
         backBufferDurationUs = loadControl.getBackBufferDurationUs(playerId: identifier)
         retainBackBufferFromKeyframe = loadControl.retainBackBufferFromKeyframe(playerId: identifier)
-        lastPreloadPoolInvalidationTimeline = EmptyTimeline()
+        lastPreloadPoolInvalidationTimeline = emptyTimeline
 
         playbackInfo = PlaybackInfo.dummy(clock: clock, emptyTrackSelectorResult: emptyTrackSelectorResult)
         playbackInfoUpdate = PlaybackInfoUpdate(playbackInfo: playbackInfo)
@@ -314,6 +314,7 @@ final class SEPlayerImplInternal: @unchecked Sendable {
     }
 
     func seek(to positionUs: Int64, timeline: Timeline, windowIndex: Int) {
+        print("🫟 seek positionUs = \(positionUs), timeline = \(timeline), windowIndex = \(windowIndex)")
         assert(queue.isCurrent())
         playbackInfoUpdate.incrementPendingOperationAcks(1)
 
@@ -464,17 +465,21 @@ final class SEPlayerImplInternal: @unchecked Sendable {
         shuffleOrder: ShuffleOrder
     ) {
         assert(queue.isCurrent())
-        playbackInfoUpdate.incrementPendingOperationAcks(1)
-        if let windowIndex {
-            pendingInitialSeekPosition = SeekPosition(
-                timeline: PlaylistTimeline(mediaSourceInfoHolders: mediaSources, shuffleOrder: shuffleOrder),
-                windowIndex: windowIndex,
-                windowPositionUs: positionUs
-            )
+        do {
+            playbackInfoUpdate.incrementPendingOperationAcks(1)
+            if let windowIndex {
+                pendingInitialSeekPosition = SeekPosition(
+                    timeline: PlaylistTimeline(mediaSourceInfoHolders: mediaSources, shuffleOrder: shuffleOrder),
+                    windowIndex: windowIndex,
+                    windowPositionUs: positionUs
+                )
+            }
+            let timeline = try mediaSourceList.setMediaSource(holders: mediaSources, shuffleOrder: shuffleOrder)
+            handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+            maybeNotifyPlaybackInfoChanged()
+        } catch {
+            handleError(error: error)
         }
-        let timeline = mediaSourceList.setMediaSource(holders: mediaSources, shuffleOrder: shuffleOrder)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
-        maybeNotifyPlaybackInfoChanged()
     }
 
     func insertMediaSources(
@@ -483,14 +488,18 @@ final class SEPlayerImplInternal: @unchecked Sendable {
         shuffleOrder: ShuffleOrder
     ) {
         assert(queue.isCurrent())
-        playbackInfoUpdate.incrementPendingOperationAcks(1)
-        let timeline = mediaSourceList.addMediaSource(
-            index: index,
-            holders: mediaSources,
-            shuffleOrder: shuffleOrder
-        )
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
-        maybeNotifyPlaybackInfoChanged()
+        do {
+            playbackInfoUpdate.incrementPendingOperationAcks(1)
+            let timeline = try mediaSourceList.addMediaSource(
+                index: index,
+                holders: mediaSources,
+                shuffleOrder: shuffleOrder
+            )
+            handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+            maybeNotifyPlaybackInfoChanged()
+        } catch {
+            handleError(error: error)
+        }
     }
 
     func removeMediaSources(range: Range<Int>, shuffleOrder: ShuffleOrder) {
@@ -519,10 +528,14 @@ final class SEPlayerImplInternal: @unchecked Sendable {
 
     func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) {
         assert(queue.isCurrent())
-        playbackInfoUpdate.incrementPendingOperationAcks(1)
-        let timeline = mediaSourceList.updateMediaSources(with: mediaItems, range: range)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
-        maybeNotifyPlaybackInfoChanged()
+        do {
+            playbackInfoUpdate.incrementPendingOperationAcks(1)
+            let timeline = try mediaSourceList.updateMediaSources(with: mediaItems, range: range)
+            handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+            maybeNotifyPlaybackInfoChanged()
+        } catch {
+            handleError(error: error)
+        }
     }
 
     @discardableResult
@@ -541,9 +554,10 @@ final class SEPlayerImplInternal: @unchecked Sendable {
     }
 
     private func handleError(error: Error) {
+        fatalError()
         do {
 //            if !ignoreAudioSinkFlushError {
-                try reselectTracksInternalAndSeek()
+//                try reselectTracksInternalAndSeek()
 //                ignoreAudioSinkFlushError = false
 //            }
         } catch {
@@ -2302,6 +2316,7 @@ private extension SEPlayerImplInternal {
             }
 
             if finishedRendering, playingPeriodHolder.info.isFinal {
+                print("🫟 ENDED")
                 setState(.ended)
                 stopRenderers()
             } else if playbackInfo.state == .buffering,
@@ -2379,8 +2394,7 @@ private extension SEPlayerImplInternal {
         let wakeUpTimeIntervalMs: Int64 = if playbackInfo.state == .ready, !shouldPlayWhenReady() {
             1000 // TODO: conts
         } else {
-//            Time.usToMs(timeUs: 10_000) // TODO: conts
-            1000
+            Time.usToMs(timeUs: 10_000) // TODO: conts
         }
 
 //        if timerIsSuspended {

@@ -37,11 +37,11 @@ final class MaskingMediaPeriod: MediaPeriod {
         self.mediaSource = mediaSource
     }
 
-    func createPeriod(id: MediaPeriodId) {
+    func createPeriod(id: MediaPeriodId) throws {
         guard let mediaSource else { return }
 
         let preparePositionUs = preparePositionWithOverride(preparePositionUs: preparePositionUs)
-        mediaPeriod = mediaSource.createPeriod(id: id, allocator: allocator, startPosition: preparePositionUs)
+        mediaPeriod = try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: preparePositionUs)
         if callback != nil {
             mediaPeriod?.prepare(callback: self, on: preparePositionUs)
         }

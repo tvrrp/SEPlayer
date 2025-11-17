@@ -161,10 +161,10 @@ class PlayerViewControllerSim: UIViewController {
         try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
         try! AVAudioSession.sharedInstance().setActive(true)
 
-        playerView1.gravity = .resizeAspect
-        playerView2.gravity = .resizeAspect
-        playerView3.gravity = .resizeAspect
-        playerView4.gravity = .resizeAspect
+        playerView1.gravity = .resizeAspectFill
+        playerView2.gravity = .resizeAspectFill
+        playerView3.gravity = .resizeAspectFill
+        playerView4.gravity = .resizeAspectFill
 
 //        player.set(mediaItems: videoUrls.map { MediaItem(url: $0) })
 //        player.repeatMode = repeatMode
@@ -178,28 +178,12 @@ class PlayerViewControllerSim: UIViewController {
             URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_4.mp4")!,
         ]
         zip(players, urls).forEach { player, url in
-            player.set(mediaItems: [MediaItem(url: url)])
+            player.set(mediaItems: [MediaItem.Builder().setUrl(url).build()])
             player.repeatMode = repeatMode
 //            player.delegate.addDelegate(self)
             player.prepare()
-//            player.playWhenReady = true
+            player.playWhenReady = true
 //            player.isMuted = true
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-            self.player1.playWhenReady = true
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                self.player2.playWhenReady = true
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    self.player3.playWhenReady = true
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        self.player4.playWhenReady = true
-                    }
-                }
-            }
         }
 
         NotificationCenter.default.addObserver(self, selector: #selector(didEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)

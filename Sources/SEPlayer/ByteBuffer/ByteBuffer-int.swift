@@ -25,10 +25,10 @@ extension ByteBuffer {
 
     /// Read an integer off this `ByteBuffer`, move the reader index forward by the integer's byte size and return the result.
     ///
-    /// - parameters:
-    ///     - endianness: The endianness of the integer in this `ByteBuffer` (defaults to big endian).
-    ///     - as: the desired `FixedWidthInteger` type (optional parameter)
-    /// - returns: An integer value deserialized from this `ByteBuffer` or `nil` if there aren't enough bytes readable.
+    /// - Parameters:
+    ///   - endianness: The endianness of the integer in this `ByteBuffer` (defaults to big endian).
+    ///   - as: the desired `FixedWidthInteger` type (optional parameter)
+    /// - Returns: An integer value deserialized from this `ByteBuffer` or `nil` if there aren't enough bytes readable.
     @inlinable
     public mutating func readInteger<T: FixedWidthInteger>(endianness: Endianness = .big, as: T.Type = T.self) -> T? {
         guard let result = self.getInteger(at: self.readerIndex, endianness: endianness, as: T.self) else {
@@ -41,11 +41,11 @@ extension ByteBuffer {
     /// Get the integer at `index` from this `ByteBuffer`. Does not move the reader index.
     /// The selected bytes must be readable or else `nil` will be returned.
     ///
-    /// - parameters:
-    ///     - index: The starting index of the bytes for the integer into the `ByteBuffer`.
-    ///     - endianness: The endianness of the integer in this `ByteBuffer` (defaults to big endian).
-    ///     - as: the desired `FixedWidthInteger` type (optional parameter)
-    /// - returns: An integer value deserialized from this `ByteBuffer` or `nil` if the bytes of interest are not
+    /// - Parameters:
+    ///   - index: The starting index of the bytes for the integer into the `ByteBuffer`.
+    ///   - endianness: The endianness of the integer in this `ByteBuffer` (defaults to big endian).
+    ///   - as: the desired `FixedWidthInteger` type (optional parameter)
+    /// - Returns: An integer value deserialized from this `ByteBuffer` or `nil` if the bytes of interest are not
     ///            readable.
     @inlinable
     public func getInteger<T: FixedWidthInteger>(
@@ -67,7 +67,7 @@ extension ByteBuffer {
         return self.withUnsafeReadableBytes { ptr in
             var value: T = 0
             withUnsafeMutableBytes(of: &value) { valuePtr in
-                valuePtr.copyMemory(from: UnsafeRawBufferPointer(fastRebase: ptr[range]))
+                valuePtr.copyMemory(from: UnsafeRawBufferPointer(rebasing: ptr[range]))
             }
             return _toEndianness(value: value, endianness: endianness)
         }
@@ -75,11 +75,11 @@ extension ByteBuffer {
 
     /// Write `integer` into this `ByteBuffer`, moving the writer index forward appropriately.
     ///
-    /// - parameters:
-    ///     - integer: The integer to serialize.
-    ///     - endianness: The endianness to use, defaults to big endian.
-    ///     - as: the desired `FixedWidthInteger` type (optional parameter)
-    /// - returns: The number of bytes written.
+    /// - Parameters:
+    ///   - integer: The integer to serialize.
+    ///   - endianness: The endianness to use, defaults to big endian.
+    ///   - as: the desired `FixedWidthInteger` type (optional parameter)
+    /// - Returns: The number of bytes written.
     @discardableResult
     @inlinable
     public mutating func writeInteger<T: FixedWidthInteger>(
@@ -94,12 +94,12 @@ extension ByteBuffer {
 
     /// Write `integer` into this `ByteBuffer` starting at `index`. This does not alter the writer index.
     ///
-    /// - parameters:
-    ///     - integer: The integer to serialize.
-    ///     - index: The index of the first byte to write.
-    ///     - endianness: The endianness to use, defaults to big endian.
-    ///     - as: the desired `FixedWidthInteger` type (optional parameter)
-    /// - returns: The number of bytes written.
+    /// - Parameters:
+    ///   - integer: The integer to serialize.
+    ///   - index: The index of the first byte to write.
+    ///   - endianness: The endianness to use, defaults to big endian.
+    ///   - as: the desired `FixedWidthInteger` type (optional parameter)
+    /// - Returns: The number of bytes written.
     @discardableResult
     @inlinable
     public mutating func setInteger<T: FixedWidthInteger>(
@@ -113,9 +113,26 @@ extension ByteBuffer {
             self.setBytes(ptr, at: index)
         }
     }
+
+    /// Returns the integer at the current reader index without advancing it.
+    ///
+    /// This method is equivalent to calling `getInteger(at: readerIndex, ...)`
+    ///
+    /// - Parameters:
+    ///   - endianness: The endianness of the integer (defaults to big endian).
+    ///   - as: The desired `FixedWidthInteger` type (optional parameter).
+    /// - Returns: An integer value deserialized from this `ByteBuffer` or `nil` if the bytes are not readable.
+    @inlinable
+    public func peekInteger<T: FixedWidthInteger>(
+        endianness: Endianness = .big,
+        as: T.Type = T.self
+    ) -> T? {
+        self.getInteger(at: self.readerIndex, endianness: endianness, as: `as`)
+    }
 }
 
 extension FixedWidthInteger {
+
     /// Returns the next power of two.
     @inlinable
     func nextPowerOf2() -> Self {
@@ -134,6 +151,21 @@ extension FixedWidthInteger {
 
         return 1 << ((Self.bitWidth - 1) - self.leadingZeroBitCount)
     }
+
+    /// Initialize an integer from a byte buffer of exactly the right size.
+    /// The bytes will be read using the host system's endianness.
+    ///
+    /// - Parameters:
+    ///   - buffer: The ByteBuffer to read from
+    ///   - endianness: The endianness to use when reading the integer, defaults to the host system's endianness.
+    @inlinable
+    public init?(buffer: ByteBuffer, endianness: Endianness = .host) {
+        var buffer = buffer
+        guard let value = buffer.readInteger(endianness: endianness, as: Self.self), buffer.readableBytes == 0 else {
+            return nil
+        }
+        self = value
+    }
 }
 
 extension UInt32 {
@@ -148,7 +180,7 @@ extension UInt32 {
 
         var n = self
 
-        #if arch(arm) || arch(i386) || arch(arm64_32)
+        #if arch(arm) || arch(i386) || arch(arm64_32) || arch(wasm32)
         // on 32-bit platforms we can't make use of a whole UInt32.max (as it doesn't fit in an Int)
         let max = UInt32(Int.max)
         #else

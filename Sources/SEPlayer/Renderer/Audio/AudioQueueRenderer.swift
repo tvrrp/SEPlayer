@@ -70,7 +70,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRendere
 
     init(
         queue: Queue,
-        clock: CMClock,
+        clock: SEClock,
         audioSink: IAudioSink? = nil,
         renderSynchronizer: AVSampleBufferRenderSynchronizer,
         decoderFactory: SEDecoderFactory

@@ -103,13 +103,13 @@ private final class DefaultDataSource: DataSource {
         return try dataSource.read(to: &buffer, offset: offset, length: length)
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
         assert(loaderQueue.isCurrent())
         guard let dataSource else {
             throw DataReaderError.connectionNotOpened
         }
 
-        return try dataSource.read(allocation: allocation, offset: offset, length: length)
+        return try dataSource.read(allocation: &allocation, offset: offset, length: length)
     }
 
     private func createFileDataSource(dataSpec: DataSpec) -> DataSource {

@@ -5,10 +5,8 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
-import CoreMedia.CMSync
-
 public protocol SEPlayer: Player {
-    var clock: CMClock { get }
+    var clock: SEClock { get }
     var preloadConfiguration: PreloadConfiguration { get set }
     var seekParameters: SeekParameters { get set }
     var pauseAtTheEndOfMediaItem: Bool { get set }

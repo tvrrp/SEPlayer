@@ -65,7 +65,7 @@ public final class MulticastDelegate<T> {
         }
     }
 
-    public func invokeDelegates(_ invocation: (T) -> Void) {
+    public func invokeDelegates(_ invocation: (T) throws -> Void) rethrows {
         let observers: [AnyObject]
         if isThreadSafe {
             observers = queue.sync {
@@ -75,7 +75,7 @@ public final class MulticastDelegate<T> {
             observers = delegates.allObjects
         }
 
-        observers.forEach { invocation($0 as! T) }
+        try observers.forEach { try invocation($0 as! T) }
     }
 
     public func containsDelegate(_ delegate: T) -> Bool {

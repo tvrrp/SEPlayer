@@ -10,7 +10,7 @@ import AVFoundation
 public protocol RenderersFactory {
     func createRenderers(
         queue: Queue,
-        clock: CMClock,
+        clock: SEClock,
         bufferableContainer: PlayerBufferableContainer,
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer]
@@ -25,7 +25,7 @@ struct DefaultRenderersFactory: RenderersFactory {
 
     func createRenderers(
         queue: Queue,
-        clock: CMClock,
+        clock: SEClock,
         bufferableContainer: PlayerBufferableContainer,
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {

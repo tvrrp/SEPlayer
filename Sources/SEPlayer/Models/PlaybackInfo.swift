@@ -8,7 +8,7 @@
 import CoreMedia.CMSync
 
 struct PlaybackInfo {
-    private(set) var clock: CMClock
+    private(set) var clock: SEClock
     private(set) var timeline: Timeline
     private(set) var periodId: MediaPeriodId
     private(set) var requestedContentPositionUs: Int64
@@ -30,10 +30,10 @@ struct PlaybackInfo {
 
     var isPlaying: Bool { state == .ready && playWhenReady }
 
-    static func dummy(clock: CMClock, emptyTrackSelectorResult: TrackSelectionResult) -> PlaybackInfo {
+    static func dummy(clock: SEClock, emptyTrackSelectorResult: TrackSelectionResult) -> PlaybackInfo {
         PlaybackInfo(
             clock: clock,
-            timeline: EmptyTimeline(),
+            timeline: emptyTimeline,
             periodId: PlaybackInfo.placeholderMediaPeriodId,
             requestedContentPositionUs: .timeUnset,
             discontinuityStartPositionUs: .zero,

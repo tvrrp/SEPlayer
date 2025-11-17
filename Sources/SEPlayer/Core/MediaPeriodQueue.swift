@@ -16,7 +16,7 @@ final class MediaPeriodQueue {
 
     private var period: Period
     private var window: Window
-    private let builder: (MediaPeriodInfo, Int64) throws -> MediaPeriodHolder
+    private var builder: ((MediaPeriodInfo, Int64) throws -> MediaPeriodHolder)?
 
     private var nextWindowSequenceNumber: Int = 0
     private var repeatMode: RepeatMode = .off
@@ -28,13 +28,17 @@ final class MediaPeriodQueue {
     private var preloadPriorityList: [MediaPeriodHolder] = []
 
     init(
-        mediaPeriodBuilder: @escaping (MediaPeriodInfo, Int64) throws -> MediaPeriodHolder,
+        mediaPeriodBuilder: ((MediaPeriodInfo, Int64) throws -> MediaPeriodHolder)? = nil,
         preloadConfiguration: PreloadConfiguration = .default
     ) {
         period = Period()
         window = Window()
         builder = mediaPeriodBuilder
         self.preloadConfiguration = preloadConfiguration
+    }
+
+    func setMediaPeriodBuilder(_ builder: @escaping (MediaPeriodInfo, Int64) throws -> MediaPeriodHolder) {
+        self.builder = builder
     }
 
     func updateRepeatMode(new repeatMode: RepeatMode, timeline: Timeline) -> UpdatePeriodQueueResult {
@@ -91,7 +95,14 @@ final class MediaPeriodQueue {
             Self.initialRendererPositionOffsetUs
         }
 
-        let newPeriodHolder = try! removePreloadedMediaPeriodHolder(info: info) ?? builder(info, rendererPositionOffsetUs)
+        let newPeriodHolder = if let periodHolder = removePreloadedMediaPeriodHolder(info: info) {
+            periodHolder
+        } else if let builder {
+            try builder(info, rendererPositionOffsetUs)
+        } else {
+            throw ErrorBuilder(errorDescription: "") // TODO: real error
+        }
+
         newPeriodHolder.info = info
         newPeriodHolder.renderPositionOffset = rendererPositionOffsetUs
 
@@ -139,7 +150,11 @@ final class MediaPeriodQueue {
                 nextMediaPeriodHolder = next
             } else {
                 let rendererPositionOffsetUs = loading.renderPositionOffset + loading.info.durationUs - nextInfo.startPositionUs
-                nextMediaPeriodHolder = try! builder(nextInfo, rendererPositionOffsetUs)
+                if let periodHolder = try! builder?(nextInfo, rendererPositionOffsetUs) {
+                    nextMediaPeriodHolder = periodHolder
+                } else {
+                    throw ErrorBuilder(errorDescription: "") // TODO: real error
+                }
             }
             newPreloadPriorityList.append(nextMediaPeriodHolder)
         }

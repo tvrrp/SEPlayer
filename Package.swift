@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -7,14 +7,38 @@ let package = Package(
     name: "SEPlayer",
     platforms: [ .iOS(.v15)],
     products: [
-        .library(
-            name: "SEPlayer",
-            targets: ["SEPlayer"]
-        ),
+        .library(name: "Common", targets: ["Common"]),
+        .library(name: "SEPlayer", targets: ["SEPlayer"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-collections.git", exact: "1.3.0"),
     ],
     targets: [
         .target(
-            name: "SEPlayer",
+            name: "Common",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
         ),
+        .target(
+            name: "SEPlayer",
+            dependencies: [
+                "Common",
+                .product(name: "BasicContainers", package: "swift-collections")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .enableExperimentalFeature("Lifetimes")
+            ]
+        ),
+        .testTarget(
+            name: "SEPlayerTests",
+            dependencies: [
+                "SEPlayer",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        )
     ]
 )

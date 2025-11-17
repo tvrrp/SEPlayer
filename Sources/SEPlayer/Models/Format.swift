@@ -105,6 +105,8 @@ public extension Format {
 
 extension Format: Hashable {
     public static func == (lhs: Format, rhs: Format) -> Bool {
+        guard lhs !== rhs else { return true }
+
         return lhs.id == rhs.id &&
             lhs.label == rhs.label &&
             lhs.labels == rhs.labels &&
@@ -249,6 +251,12 @@ extension Format {
             sampleRate = format.sampleRate
             encoderDelay = format.encoderDelay
             encoderPadding = format.encoderPadding
+        }
+
+        @discardableResult
+        func setId(_ id: String) -> Builder {
+            self.id = id
+            return self
         }
 
         @discardableResult

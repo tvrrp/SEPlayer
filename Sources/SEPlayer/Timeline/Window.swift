@@ -15,8 +15,8 @@ public struct Window: Hashable {
     public let windowStartTimeMs: Int64
     public let elapsedRealtimeEpochOffsetMs: Int64
 
-    public let isSeekable: Bool
-    public let isDynamic: Bool
+    internal(set) public var isSeekable: Bool
+    internal(set) public var isDynamic: Bool
     internal(set) public var isPlaceholder: Bool
 
     public let defaultPositionUs: Int64
@@ -63,5 +63,8 @@ public struct Window: Hashable {
 
 extension Window {
     public static let singleWindowId: AnyHashable = UUID()
-    public static let placeholderMediaItem = MediaItem(url: FileManager.default.temporaryDirectory)
+    public static let placeholderMediaItem = MediaItem.Builder()
+        .setMediaId("com.SEPlayer.common.Timeline")
+        .setUrl(URL(string: "about:blank")!)
+        .build()
 }

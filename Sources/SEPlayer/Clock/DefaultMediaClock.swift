@@ -18,11 +18,11 @@ final class DefaultMediaClock: MediaClock {
     private var isUsingStandaloneClock: Bool = false
     private var standaloneClockIsStarted: Bool = false
 
-    init(clock: CMClock) throws {
+    init(clock: SEClock) throws {
         standaloneClock = try StandaloneClock(clock: clock)
     }
 
-    func getTimebase() -> CMTimebase {
+    func getTimebase() -> CMTimebase? {
         rendererTimebase ?? standaloneClock.timebase
     }
 

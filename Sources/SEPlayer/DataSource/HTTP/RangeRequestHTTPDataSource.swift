@@ -66,10 +66,10 @@ final class RangeRequestHTTPDataSource: DataSource {
         }
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
         assert(queue.isCurrent())
         guard let requestHandler, let currentDataSpec, let bytesRemaining else { throw DataReaderError.connectionNotOpened }
-        let result = try requestHandler.read(allocation: allocation, offset: offset, length: length)
+        let result = try requestHandler.read(allocation: &allocation, offset: offset, length: length)
 
         switch result {
         case let .success(amount):
@@ -83,7 +83,7 @@ final class RangeRequestHTTPDataSource: DataSource {
 
             self.currentDataSpec = newDataSpec
             try openConnection(dataSpec: newDataSpec)
-            return try read(allocation: allocation, offset: offset, length: length)
+            return try read(allocation: &allocation, offset: offset, length: length)
         }
     }
 

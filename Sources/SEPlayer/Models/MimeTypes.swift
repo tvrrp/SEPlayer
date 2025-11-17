@@ -129,4 +129,35 @@ extension MimeTypes {
     var isAudio: Bool { self.rawValue.hasPrefix("audio") }
     var isImage: Bool { self.rawValue.hasPrefix("image") }
     var isApplication: Bool { self.rawValue.hasPrefix("application") }
+
+    var trackType: TrackType {
+        if isVideo {
+            return .video
+        } else if isAudio {
+            return .audio
+        } else {
+            return .unknown
+        }
+    }
+}
+
+extension Optional where Wrapped == MimeTypes {
+    func allSamplesAreSyncSamples(codec: String?) -> Bool {
+        switch self {
+        case .audioMPEGL1,
+             .audioMPEGL2,
+             .audioRAW,
+             .audioALAW,
+             .audioMLAW,
+             .audioFLAC,
+             .audioAC3,
+             .audioEAC3,
+             .audioEAC3JOC:
+            return true
+        case .audioAAC:
+            return true // TODO: check for codec type
+        default:
+            return false
+        }
+    }
 }

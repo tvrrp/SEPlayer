@@ -10,6 +10,7 @@ import Foundation.NSURLSession
 
 public protocol IPlayerSessionLoader {
     func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask
+    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, Error>
 }
 
 public protocol PlayerSessionDelegate: AnyObject {
@@ -42,8 +43,18 @@ final class PlayerSessionLoader: IPlayerSessionLoader {
         }
     }
 
+    deinit {
+        session.invalidateAndCancel()
+    }
+
     func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask {
         impl.createTask(session, request: request, delegate: delegate)
+    }
+
+    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, any Error> {
+        let streamProvider = PlayerSessionLoaderAsyncStreamProvider()
+        let task = impl.createTask(session, request: request, delegate: streamProvider)
+        return streamProvider.createStream(with: task)
     }
 
     private static func createOperationQueue() -> OperationQueue {
@@ -79,6 +90,7 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void) {
+        print("DID RECIEVE RESPONSE")
         guard let handler = handlers[dataTask] else {
             completionHandler(.cancel); return
         }

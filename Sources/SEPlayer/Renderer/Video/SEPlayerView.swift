@@ -99,7 +99,7 @@ extension SEPlayerView: PlayerBufferable {
         }
     }
 
-    public func setControlTimebase(_ timebase: CMTimebase) {
+    public func setControlTimebase(_ timebase: CMTimebase?) {
         DispatchQueue.main.async {
             self.displayLayer.controlTimebase = timebase
         }

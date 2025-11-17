@@ -18,10 +18,10 @@ public protocol ExtractorInput: DataReader {
     func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool
 
     @discardableResult
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult
 
     @discardableResult
-    func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool
+    func readFully(allocation: inout Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool
 
     @discardableResult
     func skip(length: Int) throws -> DataReaderReadResult
@@ -54,8 +54,8 @@ extension ExtractorInput {
         try readFully(to: &buffer, offset: offset, length: length, allowEndOfInput: false)
     }
 
-    func readFully(allocation: Allocation, offset: Int, length: Int) throws {
-        try readFully(allocation: allocation, offset: offset, length: length, allowEndOfInput: false)
+    func readFully(allocation: inout Allocation, offset: Int, length: Int) throws {
+        try readFully(allocation: &allocation, offset: offset, length: length, allowEndOfInput: false)
     }
 
     func skipFully(length: Int) throws {

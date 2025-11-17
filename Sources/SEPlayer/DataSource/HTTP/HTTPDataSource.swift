@@ -113,7 +113,7 @@ final class DefautlHTTPDataSource: DataSource {
         return .success(amount: readAmount)
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
         guard length > 0 else { return .success(amount: .zero) }
         assert(queue.isCurrent())
         lock.lock()
@@ -141,7 +141,7 @@ final class DefautlHTTPDataSource: DataSource {
         }
 
         let readAmount = min(intermidateBuffer.readableBytes, length)
-        try readFully(to: allocation, offset: offset, length: readAmount)
+        try readFully(to: &allocation, offset: offset, length: readAmount)
         lock.unlock()
         return .success(amount: readAmount)
     }
@@ -153,8 +153,8 @@ final class DefautlHTTPDataSource: DataSource {
         bytesRemaining -= length
     }
 
-    private func readFully(to allocation: Allocation, offset: Int, length: Int) throws {
-        try! intermidateBuffer.readWithUnsafeReadableBytes { pointer in
+    private func readFully(to allocation: inout Allocation, offset: Int, length: Int) throws {
+        intermidateBuffer.readWithUnsafeReadableBytes { pointer in
             allocation.writeBuffer(offset: offset, lenght: length, buffer: pointer)
             return length
         }
@@ -278,7 +278,7 @@ private extension DefautlHTTPDataSource {
     }
 }
 
-private extension DefautlHTTPDataSource {
+extension DefautlHTTPDataSource {
     func contentLength(from httpResponse: HTTPURLResponse) -> Int {
         httpResponse
             .value(forHeaderKey: "Content-Length")?
@@ -292,5 +292,13 @@ private extension HTTPURLResponse {
         return allHeaderFields
             .first { $0.key.description.caseInsensitiveCompare(key) == .orderedSame }?
             .value as? String
+    }
+}
+
+extension HTTPURLResponse {
+    var contentLength: Int {
+        value(forHeaderKey: "Content-Length")?
+            .components(separatedBy: "/").last
+            .flatMap(Int.init) ?? 0
     }
 }

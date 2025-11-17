@@ -133,7 +133,7 @@ class PlayerViewController: UIViewController {
 
         playerView.gravity = .resizeAspect
 
-        player.set(mediaItems: videoUrls.map { MediaItem(url: $0) })
+        player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
         player.repeatMode = repeatMode
         player.delegate.addDelegate(self)
         player.prepare()
@@ -285,6 +285,7 @@ class PlayerViewController: UIViewController {
 
     private func createButtonConfig(imageName: String) -> UIButton.Configuration {
         var config = UIButton.Configuration.borderless()
+        try! AVAudioSession.sharedInstance().setSupportsMultichannelContent(true)
 
         config.image = UIImage(systemName: imageName)?.withTintColor(.white, renderingMode: .alwaysOriginal)
         config.buttonSize = .large

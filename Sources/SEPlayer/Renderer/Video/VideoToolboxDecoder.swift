@@ -166,6 +166,36 @@ final class VideoToolboxDecoder: SEDecoder {
         if playbackSpeed <= 1.0 { decodeFlags.insert(._1xRealTimePlayback) }
         var infoFlagsOut: VTDecodeInfoFlags = []
 
+//        Task {
+//            let response = await withCheckedContinuation(isolation: MainActor.shared) { continuation in
+//                let status = VTDecompressionSessionDecodeFrame(
+//                    decompressionSession,
+//                    sampleBuffer: sampleBuffer,
+//                    flags: decodeFlags,
+//                    infoFlagsOut: &infoFlagsOut
+//                ) { status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration in
+//                    continuation.resume(returning: VTDecoderResponce(
+//                        status: status,
+//                        infoFlags: infoFlags,
+//                        imageBuffer: imageBuffer,
+//                        presentationTimeStamp: presentationTimeStamp,
+//                        sampleIndex: index,
+//                        sampleFlags: sampleFlags,
+//                        cancellable: cancellable
+//                    ))
+//                }
+//
+//                if status != noErr {
+//                    let error = VTDSessionErrors.osStatus(.init(rawValue: status))
+//
+//                    if case let .osStatus(vTError) = error, vTError == .invalidSession {
+//                        _isDecodingSample = false
+//                        self._pendingSamples.insert((index, sampleBuffer, sampleFlags), at: 0)
+//                        try! createDecompressionSession() // TODO: fixme
+//                    }
+//                }
+//            }
+//        }
         let status = VTDecompressionSessionDecodeFrame(
             decompressionSession,
             sampleBuffer: sampleBuffer,
@@ -365,7 +395,7 @@ private struct VideoToolboxCapabilitiesResolver: RendererCapabilities {
     }
 }
 
-private final class Cancellable {
+private final class Cancellable: @unchecked Sendable {
     var isCancelled: Bool { queue.sync { _isCancelled } }
 
     private let queue: Queue

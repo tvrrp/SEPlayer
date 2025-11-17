@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.04.2025.
 //
 
+import Common
 import CoreMedia.CMSampleBuffer
 
 protocol Buffer: AnyObject {
@@ -34,7 +35,17 @@ public final class DecoderInputBuffer: Buffer {
         return data
     }
 
+    func dequeueOutputSpan(initializingWith initializer: (inout OutputRawSpan) throws -> Void) throws {
+        guard let data, data.count > 0 else {
+            throw BufferErrors.insufficientCapacity
+        }
+
+        var outputSpan = OutputRawSpan(buffer: data, initializedCount: 0)
+        try initializer(&outputSpan)
+    }
+
     func reset() {
+        flags = []
         time = 0
         size = 0
         data = nil

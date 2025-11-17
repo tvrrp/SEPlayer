@@ -5,11 +5,39 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-public final class Allocation {
+public struct Allocation: ~Copyable {
     let data: UnsafeMutableRawBufferPointer
     let capacity: Int
 
     private let _buffer: UnsafeMutableBufferPointer<UInt8>
+
+    var bytes: RawSpan {
+        @_lifetime(borrow self)
+        borrowing get {
+            _overrideLifetime(RawSpan(_unsafeBytes: data), borrowing: self)
+        }
+    }
+
+    var mutableBytes: MutableRawSpan {
+        @_lifetime(&self)
+        mutating get {
+            _overrideLifetime(MutableRawSpan(_unsafeBytes: data), mutating: &self)
+        }
+    }
+
+    var span: Span<UInt8> {
+        @_lifetime(borrow self)
+        borrowing get {
+            _overrideLifetime(Span(_unsafeElements: _buffer), borrowing: self)
+        }
+    }
+
+    var mutableSpan: MutableSpan<UInt8> {
+        @_lifetime(&self)
+        mutating get {
+            _overrideLifetime(MutableSpan(_unsafeElements: _buffer), mutating: &self)
+        }
+    }
 
     public init(capacity: Int) {
         precondition(capacity > 0)
@@ -37,8 +65,16 @@ public final class Allocation {
         }
     }
 
+    func writeWithOutputRawSpan(
+        offset: Int,
+        initializingWith initializer: (_ span: inout OutputRawSpan) throws -> Void
+    ) rethrows -> Void {
+        var span = OutputRawSpan(buffer: data, initializedCount: offset)
+        try initializer(&span)
+    }
+
     private func _setBytes(_ bytes: UnsafeRawBufferPointer, offset: Int, lenght: Int) {
-        let targetPtr = UnsafeMutableRawBufferPointer(fastRebase: data[offset..<capacity])
+        let targetPtr = UnsafeMutableRawBufferPointer(rebasing: data[offset..<capacity])
         targetPtr.copyBytes(from: bytes[0..<lenght])
     }
 

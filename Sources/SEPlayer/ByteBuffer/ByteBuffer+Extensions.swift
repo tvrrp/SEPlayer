@@ -35,8 +35,8 @@ extension ByteBuffer {
     }
 
     @discardableResult
-    mutating func readData(count: Int) throws -> Data {
-        if let data = readData(length: count) {
+    mutating func readData(count: Int, byteTransferStrategy: ByteTransferStrategy = .automatic) throws -> Data {
+        if let data = readData(length: count, byteTransferStrategy: byteTransferStrategy) {
             return data
         } else {
             throw ByteBufferError.endOfData

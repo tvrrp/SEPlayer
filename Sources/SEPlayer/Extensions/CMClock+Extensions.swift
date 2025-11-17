@@ -8,15 +8,15 @@
 import CoreMedia.CMSync
 
 extension CMClock {
-    var milliseconds: Int64 {
+    public var milliseconds: Int64 {
         time.milliseconds
     }
 
-    var microseconds: Int64 {
+    public var microseconds: Int64 {
         time.microseconds
     }
 
-    var nanoseconds: Int64 {
+    public var nanoseconds: Int64 {
         time.nanoseconds
     }
 }

@@ -16,8 +16,10 @@ enum Util {
         if index < 0 {
             index = ~index
         } else {
-            while index + 1 < array.count && array[index + 1] == value {
+            while true {
                 index += 1
+                if index < array.count && array[index] == value { continue }
+                break
             }
             if inclusive { index -= 1 }
         }
@@ -33,8 +35,10 @@ enum Util {
         if index < 0 {
             index = -(index + 2)
         } else {
-            while index > 0 && array[index - 1] == value {
+            while true {
                 index -= 1
+                if index >= 0 && array[index] == value { continue }
+                break
             }
             if inclusive { index += 1 }
         }

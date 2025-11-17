@@ -13,7 +13,7 @@ public final class SEPlayerFactory {
     private let decodersFactory: SEDecoderFactory
     private let bandwidthMeter: BandwidthMeter
     private let audioSessionManager: IAudioSessionManager
-    private let clock: CMClock
+    private let clock: SEClock
 
     public init(configuration: URLSessionConfiguration = .default) {
         let operationQueue = OperationQueue()
@@ -22,7 +22,7 @@ public final class SEPlayerFactory {
         self.sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
         self.decodersFactory = DefaultSEDecoderFactory()
         self.bandwidthMeter = DefaultBandwidthMeter()
-        self.clock = CMClockGetHostTimeClock()
+        self.clock = DefaultSEClock()
         audioSessionManager = AudioSessionManager.shared
 
         registerDefaultDecoders(factory: decodersFactory)

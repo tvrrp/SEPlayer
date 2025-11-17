@@ -8,17 +8,16 @@
 import CoreMedia.CMSync
 
 final class StandaloneClock: MediaClock {
-    let timebase: CMTimebase
-    private let clock: CMClock
+    var timebase: CMTimebase? { clock.timebase }
+    private let clock: SEClock
 
     private var playbackParameters: PlaybackParameters
     private var started: Bool = false
     private var baseElapsedUs: Int64 = 0
     private var baseUs: Int64 = 0
 
-    init(clock: CMClock) throws {
+    init(clock: SEClock) throws {
         self.clock = clock
-        timebase = try CMTimebase(sourceClock: clock)
         playbackParameters = .default
     }
 
@@ -26,8 +25,8 @@ final class StandaloneClock: MediaClock {
         guard !started else { return }
 
         do {
-            try timebase.setRate(Double(playbackParameters.playbackRate))
-            try timebase.setTime(.from(microseconds: getPositionUs()))
+            try clock.setRate(Double(playbackParameters.playbackRate))
+            try clock.setTime(.from(microseconds: getPositionUs()))
         } catch {
             print(error)
         }
@@ -42,7 +41,7 @@ final class StandaloneClock: MediaClock {
         started = false
 
         do {
-            try timebase.setRate(Double(playbackParameters.playbackRate))
+            try clock.setRate(Double(playbackParameters.playbackRate))
         } catch {
             print(error)
         }
@@ -54,8 +53,8 @@ final class StandaloneClock: MediaClock {
             baseElapsedUs = clock.microseconds
 
             do {
-                try timebase.setRate(Double(playbackParameters.playbackRate))
-                try timebase.setTime(.from(microseconds: positionUs))
+                try clock.setRate(Double(playbackParameters.playbackRate))
+                try clock.setTime(.from(microseconds: positionUs))
             } catch {
                 print(error)
             }

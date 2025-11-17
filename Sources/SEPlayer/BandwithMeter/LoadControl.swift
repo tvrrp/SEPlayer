@@ -8,6 +8,7 @@
 import Foundation.NSUUID
 
 public protocol LoadControl {
+    var queue: Queue { get }
     func onPrepared(playerId: UUID)
     func onTracksSelected(parameters: LoadControlParams, trackGroups: [TrackGroup], trackSelections: [SETrackSelection?])
     func onStopped(playerId: UUID)
@@ -34,7 +35,7 @@ public struct LoadControlParams {
 }
 
 final class DefaultLoadControl: LoadControl {
-    private let queue: Queue
+    let queue: Queue
     private let allocator: DefaultAllocator
 
     private let minBufferUs: Int64

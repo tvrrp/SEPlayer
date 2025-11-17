@@ -10,7 +10,7 @@ import CoreMedia
 class BaseSERenderer: SERenderer {
     let trackType: TrackType
     private let queue: Queue
-    private let clock: CMClock
+    private let clock: SEClock
 
     private var state: SERendererState = .disabled
     private var sampleStream: SampleStream?
@@ -23,11 +23,11 @@ class BaseSERenderer: SERenderer {
     private var streamOffset: Int64 = .zero
     private var timeline: Timeline
 
-    init(queue: Queue, trackType: TrackType, clock: CMClock) {
+    init(queue: Queue, trackType: TrackType, clock: SEClock) {
         self.queue = queue
         self.trackType = trackType
         self.clock = clock
-        timeline = EmptyTimeline()
+        timeline = emptyTimeline
     }
 
     func getCapabilities() -> RendererCapabilities {
@@ -157,7 +157,7 @@ class BaseSERenderer: SERenderer {
     final func getLastResetPosition() -> Int64 { lastResetPosition }
     final func getStreamOffset() -> Int64 { streamOffset }
     final func getStreamFormats() -> [Format] { formats }
-    final func getClock() -> CMClock { clock }
+    final func getClock() -> SEClock { clock }
 
     final func readSource(to buffer: DecoderInputBuffer, readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
         guard let sampleStream else { return .nothingRead }

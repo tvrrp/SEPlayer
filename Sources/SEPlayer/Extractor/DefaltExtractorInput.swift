@@ -72,18 +72,18 @@ final class DefaltExtractorInput: ExtractorInput {
         return bytesRead != .resultEndOfInput
     }
 
-    func read(allocation: Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
         var buffer = ByteBuffer()
         var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
         if bytesRead != 0 {
-            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
+            if !readFromBuffer(buffer, to: &allocation, offset: offset, length: bytesRead) {
                 bytesRead = 0
             }
         }
 
         if bytesRead == 0 {
             bytesRead = try readFromUpstream(
-                allocation: allocation,
+                allocation: &allocation,
                 offset: offset,
                 length: length,
                 bytesAlreadyRead: 0,
@@ -99,19 +99,19 @@ final class DefaltExtractorInput: ExtractorInput {
         }
     }
 
-    func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
+    func readFully(allocation: inout Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
         assert(queue.isCurrent())
         var buffer = ByteBuffer()
         var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
         if bytesRead != 0 {
-            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
+            if !readFromBuffer(buffer, to: &allocation, offset: offset, length: bytesRead) {
                 bytesRead = 0
             }
         }
 
         while bytesRead < length && bytesRead != .resultEndOfInput {
             bytesRead = try readFromUpstream(
-                allocation: allocation,
+                allocation: &allocation,
                 offset: offset,
                 length: length,
                 bytesAlreadyRead: bytesRead,
@@ -258,7 +258,7 @@ final class DefaltExtractorInput: ExtractorInput {
         return streamLength
     }
 
-    func set<E>(retryPosition: Int, using error: E) throws where E : Error {
+    func set<ErrorType: Error>(retryPosition: Int, using error: ErrorType) throws(ErrorType) {
         self.position = retryPosition
         throw error
     }
@@ -320,14 +320,14 @@ private extension DefaltExtractorInput {
     }
 
     private func readFromUpstream(
-        allocation: Allocation,
+        allocation: inout Allocation,
         offset: Int,
         length: Int,
         bytesAlreadyRead: Int,
         allowEndOfInput: Bool
     ) throws -> Int {
         let result = try dataReader.read(
-            allocation: allocation,
+            allocation: &allocation,
             offset: offset,
             length: length
         )
@@ -347,7 +347,7 @@ private extension DefaltExtractorInput {
 
     private func readFromBuffer(
         _ buffer: ByteBuffer,
-        to allocation: Allocation,
+        to allocation: inout Allocation,
         offset: Int,
         length: Int
     ) -> Bool {

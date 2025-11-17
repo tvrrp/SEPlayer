@@ -56,22 +56,27 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         self.mediaItem = item
     }
 
-    override func prepareSourceInternal(mediaTransferListener: (any TransferListener)?) {
+    override func prepareSourceInternal(mediaTransferListener: (any TransferListener)?) throws {
         self.mediaTransferListener = mediaTransferListener
-        notifySourceInfoRefreshed()
+        try notifySourceInfoRefreshed()
     }
 
     override func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
         startPosition: Int64
-    ) -> MediaPeriod {
+    ) throws -> MediaPeriod {
         let dataSource = dataSourceFactory.createDataSource()
         if let mediaTransferListener {
             dataSource.addTransferListener(mediaTransferListener)
         }
+
+        guard let localConfiguration = mediaItem.localConfiguration else {
+            throw ErrorBuilder.illegalState
+        }
+
         return ProgressiveMediaPeriod(
-            url: mediaItem.url,
+            url: localConfiguration.url,
             queue: queue,
             loaderQueue: loaderQueue,
             dataSource: dataSource,
@@ -102,11 +107,15 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         timelineIsSeekable = isSeekable
         timelineIsLive = isLive
 
-        notifySourceInfoRefreshed()
+        do {
+            try notifySourceInfoRefreshed()
+        } catch {
+            fatalError() // TODO: maybe throw error
+        }
         listener?.onSeekMap(source: self, seekMap: seekMap)
     }
 
-    private func notifySourceInfoRefreshed() {
+    private func notifySourceInfoRefreshed() throws {
         var timeline: Timeline = SinglePeriodTimeline(
             mediaItem: mediaItem,
             periodDurationUs: timelineDurationUs,
@@ -119,7 +128,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
             timeline = ForwardingTimelineImpl(timeline: timeline)
         }
 
-        refreshSourceInfo(timeline: timeline)
+        try refreshSourceInfo(timeline: timeline)
     }
 }
 

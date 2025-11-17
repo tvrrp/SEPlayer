@@ -11,9 +11,9 @@ struct SpannedData<Value> {
     private var keys: [Int] = []
     private var values: [Value] = []
     private var memoizedReadIndex: Int? = nil
-    private let removeCallback: RemoveCallback
+    private let removeCallback: RemoveCallback?
 
-    public init(removeCallback: @escaping RemoveCallback) {
+    public init(removeCallback: RemoveCallback? = nil) {
         self.removeCallback = removeCallback
     }
 
@@ -33,12 +33,12 @@ struct SpannedData<Value> {
     }
 
     public mutating func appendSpan(startKey: Int, value: Value) {
-        var memoizedReadIndex = memoizedReadIndex ?? .zero
+        let memoizedReadIndex = memoizedReadIndex ?? .zero
         defer { self.memoizedReadIndex = memoizedReadIndex }
 
         if let lastKey = keys.last {
             if startKey == lastKey {
-                removeCallback(values[values.endIndex - 1])
+                removeCallback?(values[values.endIndex - 1])
                 values[values.endIndex - 1] = value
                 return
             }
@@ -56,7 +56,7 @@ struct SpannedData<Value> {
         while keys.count > 1, discardToKey >= keys[1] {
             let removed = values.removeFirst()
             keys.removeFirst()
-            removeCallback(removed)
+            removeCallback?(removed)
 
             if let index = memoizedReadIndex, index > 0 {
                 memoizedReadIndex = index - 1
@@ -68,7 +68,7 @@ struct SpannedData<Value> {
         while let lastKey = keys.last, discardFromKey < lastKey {
             let removed = values.removeLast()
             keys.removeLast()
-            removeCallback(removed)
+            removeCallback?(removed)
         }
         if keys.isEmpty {
             memoizedReadIndex = nil
@@ -79,7 +79,7 @@ struct SpannedData<Value> {
 
     public mutating func clear() {
         for v in values {
-            removeCallback(v)
+            removeCallback?(v)
         }
         keys.removeAll(keepingCapacity: false)
         values.removeAll(keepingCapacity: false)

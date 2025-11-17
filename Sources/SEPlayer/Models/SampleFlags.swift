@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-public struct SampleFlags: OptionSet {
+public struct SampleFlags: OptionSet, Sendable {
     public let rawValue: UInt8
     public init(rawValue: UInt8) { self.rawValue = rawValue }
 
