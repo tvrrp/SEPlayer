@@ -6,9 +6,9 @@
 //
 
 public protocol Extractor: AnyObject {
-    func shiff(input: ExtractorInput) throws
-    func read(input: ExtractorInput) throws -> ExtractorReadResult
-    func seek(to position: Int, timeUs: Int64)
+    func shiff(input: ExtractorInput, isolation: isolated any Actor) async throws
+    func read(input: ExtractorInput, isolation: isolated any Actor) async throws -> ExtractorReadResult
+    func seek(to position: Int, timeUs: Int64, isolation: isolated any Actor)
     func release()
 }
 

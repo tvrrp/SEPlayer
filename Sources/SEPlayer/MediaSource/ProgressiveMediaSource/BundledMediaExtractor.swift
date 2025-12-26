@@ -8,20 +8,27 @@
 import Foundation.NSURLSession
 
 final class BundledMediaExtractor: ProgressiveMediaExtractor {
-    private let queue: Queue
+    private let syncActor: PlayerActor
     private let extractorsFactory: ExtractorsFactory
 
     private var extractor: Extractor?
     private var extractorInput: ExtractorInput?
 
-    init(queue: Queue, extractorsFactory: ExtractorsFactory) {
-        self.queue = queue
+    init(syncActor: PlayerActor, extractorsFactory: ExtractorsFactory) {
+        self.syncActor = syncActor
         self.extractorsFactory = extractorsFactory
     }
 
-    func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws {
-        assert(queue.isCurrent())
-        let extractorInput = DefaltExtractorInput(dataReader: dataReader, queue: queue, range: range)
+    func prepare(
+        dataReader: DataReader,
+        url: URL,
+        response: URLResponse?,
+        range: NSRange,
+        output: ExtractorOutput,
+        isolation: isolated any Actor
+    ) async throws {
+        syncActor.assertIsolated()
+        let extractorInput = DefaltExtractorInput(dataReader: dataReader, syncActor: syncActor, range: range)
         self.extractorInput = extractorInput
         guard extractor == nil else { return }
         let httpHeaders = (response as? HTTPURLResponse)?.allHeaderFields ?? [:]
@@ -32,10 +39,10 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
             extractor = extractors[0]
         } else {
             for extractor in extractors {
-                func postAction() { extractorInput.resetPeekPosition() }
+                func postAction() { extractorInput.resetPeekPosition(isolation: isolation) }
 
                 do {
-                    try extractor.shiff(input: extractorInput)
+                    try await extractor.shiff(input: extractorInput, isolation: isolation)
                     self.extractor = extractor
                     postAction()
                     break
@@ -56,29 +63,31 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
     }
 
     func release() {
-        queue.async { [self] in
-            extractor?.release()
-            extractor = nil
-            extractorInput = nil
+        Task {
+            await syncActor.run { _ in
+                extractor?.release()
+                extractor = nil
+                extractorInput = nil
+            }
         }
     }
 
-    func getCurrentInputPosition() -> Int? {
-        assert(queue.isCurrent())
-        return extractorInput?.getPosition()
+    func getCurrentInputPosition(isolation: isolated any Actor) -> Int? {
+        syncActor.assertIsolated()
+        return extractorInput?.getPosition(isolation: isolation)
     }
 
-    func seek(position: Int, time: Int64) {
-        assert(queue.isCurrent())
-        extractor?.seek(to: position, timeUs: time)
+    func seek(position: Int, time: Int64, isolation: isolated any Actor) {
+        syncActor.assertIsolated()
+        extractor?.seek(to: position, timeUs: time, isolation: isolation)
     }
 
-    func read() throws -> ExtractorReadResult {
-        assert(queue.isCurrent())
+    func read(isolation: isolated any Actor) async throws -> ExtractorReadResult {
+        syncActor.assertIsolated()
         guard let extractor, let extractorInput else {
             throw ErrorBuilder.illegalState
         }
 
-        return try extractor.read(input: extractorInput)
+        return try await extractor.read(input: extractorInput, isolation: isolation)
     }
 }

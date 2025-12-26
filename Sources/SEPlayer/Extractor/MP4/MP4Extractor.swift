@@ -39,33 +39,33 @@ final class MP4Extractor: Extractor {
         self.atomHeader = ByteBufferAllocator().buffer(capacity: MP4Box.fullHeaderSize)
     }
 
-    func shiff(input: any ExtractorInput) throws {
+    func shiff(input: any ExtractorInput, isolation: isolated any Actor) async throws {
         assert(queue.isCurrent())
-        if let result = try Sniffer().sniffUnfragmented(input: input, acceptHeic: false) {
+        if let result = try await Sniffer().sniffUnfragmented(input: input, acceptHeic: false, isolation: isolation) {
             throw result
         }
     }
 
-    func read(input: any ExtractorInput) throws -> ExtractorReadResult {
+    func read(input: any ExtractorInput, isolation: isolated any Actor) async throws -> ExtractorReadResult {
         assert(queue.isCurrent())
         while true {
             switch parserState {
             case .readingAtomHeader:
-                if try !readAtomHeader(input: input) {
+                if try await !readAtomHeader(input: input, isolation: isolation) {
                     return .endOfInput
                 }
             case .readingAtomPayload:
-                let (position, seekRequired) = try readAtomPayload(input: input)
+                let (position, seekRequired) = try await readAtomPayload(input: input, isolation: isolation)
                 if seekRequired {
                     return .seek(offset: position)
                 }
             case .readingSample:
-                return try readSample(input: input)
+                return try await readSample(input: input, isolation: isolation)
             }
         }
     }
 
-    func seek(to position: Int, timeUs: Int64) {
+    func seek(to position: Int, timeUs: Int64, isolation: isolated any Actor) {
         containerAtoms.removeAll()
         atomHeaderBytesRead = 0
         sampleTrackIndex = nil
@@ -161,10 +161,16 @@ extension MP4Extractor: SeekMap {
 }
 
 private extension MP4Extractor {
-    private func readAtomHeader(input: ExtractorInput) throws -> Bool {
+    private func readAtomHeader(input: ExtractorInput, isolation: isolated any Actor) async throws -> Bool {
         assert(queue.isCurrent())
         if atomHeaderBytesRead == 0 {
-            if try !input.readFully(to: &atomHeader, offset: 0, length: MP4Box.headerSize, allowEndOfInput: true) {
+            if try await !input.readFully(
+                to: &atomHeader,
+                offset: 0,
+                length: MP4Box.headerSize,
+                allowEndOfInput: true,
+                isolation: isolation
+            ) {
                 // TODO: processEndOfStream
                 return false
             }
@@ -177,17 +183,22 @@ private extension MP4Extractor {
 
         if atomSize == MP4Box.definesLargeSize {
             let headerBytesRemaining = MP4Box.longHeaderSize - MP4Box.headerSize
-            try input.readFully(to: &atomHeader, offset: MP4Box.headerSize, length: headerBytesRemaining)
+            try await input.readFully(
+                to: &atomHeader,
+                offset: MP4Box.headerSize,
+                length: headerBytesRemaining,
+                isolation: isolation
+            )
             atomHeaderBytesRead += headerBytesRemaining
             atomSize = try atomHeader.readInt(as: UInt64.self)
         } else if atomSize == MP4Box.extendsToEndSize {
-            var endPosition = input.getLength()
+            var endPosition = input.getLength(isolation: isolation)
             if endPosition == nil, let containerAtom = containerAtoms.first {
                 endPosition = containerAtom.endPosition
             }
 
             if let endPosition {
-                atomSize = UInt64(endPosition - input.getPosition() + atomHeaderBytesRead)
+                atomSize = UInt64(endPosition - input.getPosition(isolation: isolation) + atomHeaderBytesRead)
             }
         }
 
@@ -201,7 +212,7 @@ private extension MP4Extractor {
         }
 
         if shouldParseContainerAtom(atom: atomType) {
-            let endPosition = input.getPosition() + Int(atomSize) - atomHeaderBytesRead
+            let endPosition = input.getPosition(isolation: isolation) + Int(atomSize) - atomHeaderBytesRead
             if atomSize != atomHeaderBytesRead, atomType == MP4Box.BoxType.meta.rawValue {
                 maybeSkipRemainingMetaAtomHeaderBytes(input: input)
             }
@@ -230,14 +241,19 @@ private extension MP4Extractor {
         return true
     }
 
-    private func readAtomPayload(input: ExtractorInput) throws -> (Int, Bool) {
+    private func readAtomPayload(input: ExtractorInput, isolation: isolated any Actor) async throws -> (Int, Bool) {
         let atomPayloadSize = Int(atomSize) - atomHeaderBytesRead
-        let atomEndPosition = input.getPosition() + atomPayloadSize
+        let atomEndPosition = input.getPosition(isolation: isolation) + atomPayloadSize
         var seekRequired = false
         var position: Int = 0
 
         if var atomData {
-            try input.readFully(to: &atomData, offset: atomHeaderBytesRead, length: atomPayloadSize)
+            try await input.readFully(
+                to: &atomData,
+                offset: atomHeaderBytesRead,
+                length: atomPayloadSize,
+                isolation: isolation
+            )
             if atomType == MP4Box.BoxType.ftyp.rawValue {
                 seenFtypAtom = true
                 fileType = try processFtypAtom(atomData: &atomData)
@@ -252,9 +268,9 @@ private extension MP4Extractor {
             }
             // We don't need the data. Skip or seek, depending on how large the atom is.
             if atomPayloadSize < .reloadMinimumSeekDistance {
-                try input.skipFully(length: atomPayloadSize)
+                try await input.skipFully(length: atomPayloadSize, isolation: isolation)
             } else {
-                position = input.getPosition() + atomPayloadSize
+                position = input.getPosition(isolation: isolation) + atomPayloadSize
                 seekRequired = true
             }
         }
@@ -265,8 +281,8 @@ private extension MP4Extractor {
         return (position, seekRequired && parserState != .readingSample)
     }
 
-    func readSample(input: ExtractorInput) throws -> ExtractorReadResult {
-        let inputPosition = input.getPosition()
+    func readSample(input: ExtractorInput, isolation: isolated any Actor) async throws -> ExtractorReadResult {
+        let inputPosition = input.getPosition(isolation: isolation)
         sampleTrackIndex = sampleTrackIndex ?? nextReadSample(inputPosition: inputPosition)
 
         guard let sampleTrackIndex else { return .endOfInput }
@@ -284,10 +300,15 @@ private extension MP4Extractor {
         }
 
         // TODO: sampleTransformation
-        try input.skipFully(length: skipAmount)
+        try await input.skipFully(length: skipAmount, isolation: isolation)
         // TODO: canReadWithinGopSample
         while sampleBytesWritten < sample.size {
-            let result = try trackOutput.loadSampleData(input: input, length: sample.size - sampleBytesWritten, allowEndOfInput: false)
+            let result = try await trackOutput.loadSampleData(
+                input: input,
+                length: sample.size - sampleBytesWritten,
+                allowEndOfInput: false,
+                isolation: isolation
+            )
             switch result {
             case let .success(writtenBytes):
                 sampleBytesRead += writtenBytes

@@ -48,11 +48,6 @@ class PlayerViewControllerSim: UIViewController {
     var isSliderTouches = false
 
     init() {
-        let workQueue = playerFactory.buildQueue(name: "workQueue")
-//        player1 = playerFactory.buildPlayer(workQueue: workQueue)
-//        player2 = playerFactory.buildPlayer(workQueue: workQueue)
-//        player3 = playerFactory.buildPlayer(workQueue: workQueue)
-//        player4 = playerFactory.buildPlayer(workQueue: workQueue)
         player1 = playerFactory.buildPlayer()
         player2 = playerFactory.buildPlayer()
         player3 = playerFactory.buildPlayer()

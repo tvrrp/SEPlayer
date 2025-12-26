@@ -14,6 +14,7 @@ public protocol SEClock {
 
     var timebase: CMTimebase? { get }
 
+    func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper
     func setRate(_ rate: Double) throws
     func setTime(_ time: CMTime) throws
 }
@@ -29,6 +30,10 @@ public struct DefaultSEClock: SEClock {
     init() {
         clock = CMClockGetHostTimeClock()
         timebase = try? CMTimebase(sourceClock: clock)
+    }
+
+    public func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper {
+        DefaultHandlerWrapper(handler: Handler(queue: queue, looper: looper))
     }
 
     public func setRate(_ rate: Double) throws {

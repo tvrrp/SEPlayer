@@ -36,7 +36,7 @@ final class FakeSampleStream: SampleStream {
         sampleStreamItems.append(contentsOf: items)
     }
 
-    func writeData(startPositionUs: Int64) throws {
+    func writeData(startPositionUs: Int64, isolation: isolated any Actor) throws {
         if sampleStreamItemsWritePosition == 0 {
             sampleQueue.setStartTime(startPositionUs)
         }
@@ -67,7 +67,8 @@ final class FakeSampleStream: SampleStream {
 
                 try sampleQueue.sampleData(
                     data: sampleInfo.data,
-                    length: sampleInfo.data.readableBytes
+                    length: sampleInfo.data.readableBytes,
+                    isolation: isolation
                 )
                 sampleQueue.sampleMetadata(
                     time: sampleInfo.timeUs,
@@ -75,6 +76,8 @@ final class FakeSampleStream: SampleStream {
                     size: sampleInfo.data.readableBytes,
                     offset: 0
                 )
+            } else {
+                print()
             }
         }
         sampleStreamItemsWritePosition = sampleStreamItems.count
@@ -150,6 +153,9 @@ extension FakeSampleStream {
         }
 
         init(oneByteSample timeUs: Int64, flags: SampleFlags = []) {
+            if timeUs == 0 {
+                print()
+            }
             self.init(sampleInfo: .init(
                 data: ByteBuffer(repeating: 0, count: 1),
                 flags: flags,

@@ -5,11 +5,10 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import BasicContainers
 import Foundation
 
 public protocol AllocationNode: AnyObject {
-    func consumeAllocation() -> Allocation?
+    func getAllocation() -> Allocation?
     func next() -> AllocationNode?
 }
 
@@ -36,7 +35,7 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
     private var availableCount = 0
     private var targetBufferSize = 0
 
-    private var availableAllocations: UniqueArray<Allocation?>
+    private var availableAllocations: Array<Allocation?>
 
     init(
         trimOnReset: Bool = true,
@@ -48,8 +47,7 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
         self.lock = UnfairLock()
 
         let capacity = initialAllocationCount + .availableExtraCapacity
-        availableAllocations = UniqueArray(capacity: capacity)
-        for _ in 0..<capacity { availableAllocations.append(nil) }
+        availableAllocations = Array(repeating: nil, count: capacity)
     }
 
     func reset() {
@@ -97,7 +95,7 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         var allocationNode: AllocationNode? = allocationNode
         while let allocationNodeToClear = allocationNode {
-            availableAllocations[availableCount] = allocationNodeToClear.consumeAllocation()
+            availableAllocations[availableCount] = allocationNodeToClear.getAllocation()
             availableCount += 1
             allocatedCount -= 1
             allocationNode = allocationNodeToClear.next()
@@ -110,9 +108,8 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
         let targetAvailableCount = max(0, targetAllocationCount - allocatedCount)
         guard targetAvailableCount < availableCount else { return }
 
-        var newArray = RigidArray<Allocation?>(capacity: (targetAvailableCount..<availableCount).count)
-        for _ in targetAvailableCount..<availableCount { newArray.append(nil) }
-        availableAllocations.replaceSubrange(targetAvailableCount..<availableCount, consuming: newArray)
+        var newArray = Array<Allocation?>(repeating: nil, count: (targetAvailableCount..<availableCount).count)
+        availableAllocations.replaceSubrange(targetAvailableCount..<availableCount, with: newArray)
     }
 }
 

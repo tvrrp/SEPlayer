@@ -16,7 +16,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     var isLoading: Bool { queue.sync { loader.isLoading() && loadCondition.isOpen } }
 
     private let queue: Queue
-    private let loaderQueue: Queue
+    private let loaderSyncActor: PlayerActor
     private let url: URL
     private let dataSource: DataSource
     private weak var listener: Listener?
@@ -24,7 +24,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     private let continueLoadingCheckIntervalBytes: Int
     private let loader: Loader
     private let progressiveMediaExtractor: ProgressiveMediaExtractor
-    private let loadCondition: ConditionVariable
+    private let loadCondition: AsyncConditionVariable
 
     private var callback: (any MediaPeriodCallback)?
     private var sampleQueues: [SampleQueue] = []
@@ -56,7 +56,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     init(
         url: URL,
         queue: Queue,
-        loaderQueue: Queue,
+        loaderSyncActor: PlayerActor,
         dataSource: DataSource,
         progressiveMediaExtractor: ProgressiveMediaExtractor,
         listener: Listener,
@@ -65,11 +65,11 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     ) {
         self.url = url
         self.queue = queue
-        self.loaderQueue = loaderQueue
+        self.loaderSyncActor = loaderSyncActor
         self.dataSource = dataSource
-        self.loader = Loader(queue: loaderQueue)
+        self.loader = Loader(syncActor: loaderSyncActor)
         self.progressiveMediaExtractor = progressiveMediaExtractor
-        self.loadCondition = ConditionVariable()
+        self.loadCondition = AsyncConditionVariable()
         self.listener = listener
         self.allocator = allocator
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
@@ -80,7 +80,6 @@ final class ProgressiveMediaPeriod: MediaPeriod {
             sampleQueues.forEach { $0.preRelease() }
         }
 
-        loadCondition.cancel()
         loader.release { [weak self] in
             guard let self else { return }
             queue.async { self.onLoaderReleased() }
@@ -271,7 +270,6 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         if loader.isLoading() {
             sampleQueues.forEach { $0.discardToEnd() }
             loader.cancelLoading()
-            loadCondition.cancel()
         } else {
             sampleQueues.forEach { $0.reset() }
         }
@@ -361,7 +359,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         assert(queue.isCurrent())
         let loadable = ExtractingLoadable(
             url: url,
-            queue: loaderQueue,
+            syncActor: loaderSyncActor,
             dataSource: dataSource,
             progressiveMediaExtractor: progressiveMediaExtractor,
             extractorOutput: self,
@@ -615,11 +613,11 @@ private extension ProgressiveMediaPeriod {
 extension ProgressiveMediaPeriod {
     final class ExtractingLoadable: Loadable {
         private let url: URL
-        private let queue: Queue
+        private let syncActor: PlayerActor
         private let dataSource: DataSource
         private let progressiveMediaExtractor: ProgressiveMediaExtractor
         private let extractorOutput: ExtractorOutput
-        private let loadCondition: ConditionVariable
+        private let loadCondition: AsyncConditionVariable
         private let continueLoadingCheckIntervalBytes: Int
         private let requestContiniueLoading: () -> Void
         private var position: Int = 0
@@ -627,20 +625,19 @@ extension ProgressiveMediaPeriod {
         private var pendingExtractorSeek = true
         private var seekTime: Int64 = .zero
         private var didFinish: Bool = false
-        @UnfairLocked private var isCancelled: Bool = false
 
         init(
             url: URL,
-            queue: Queue,
+            syncActor: PlayerActor,
             dataSource: DataSource,
             progressiveMediaExtractor: ProgressiveMediaExtractor,
             extractorOutput: ExtractorOutput,
-            loadCondition: ConditionVariable,
+            loadCondition: AsyncConditionVariable,
             continueLoadingCheckIntervalBytes: Int,
             requestContiniueLoading: @escaping () -> Void
         ) {
             self.url = url
-            self.queue = queue
+            self.syncActor = syncActor
             self.dataSource = dataSource
             self.progressiveMediaExtractor = progressiveMediaExtractor
             self.extractorOutput = extractorOutput
@@ -649,38 +646,39 @@ extension ProgressiveMediaPeriod {
             self.requestContiniueLoading = requestContiniueLoading
         }
 
-        func cancelLoad() {
-            isCancelled = true
-        }
-
-        func load() throws {
-            assert(queue.isCurrent())
+        func load(isolation: isolated any Actor) async throws {
+            syncActor.assertIsolated()
             var result: ExtractorReadResult = .continueRead
 
-            while result == .continueRead, !isCancelled {
+            while result == .continueRead, !Task.isCancelled {
                 do {
                     let dataSpec = buildDataSpec(position: position)
-                    var length = try dataSource.open(dataSpec: dataSpec)
-                    guard !isCancelled else { break }
+                    var length = try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
+                    guard !Task.isCancelled else { break }
 
-                    try progressiveMediaExtractor.prepare(
+                    try await progressiveMediaExtractor.prepare(
                         dataReader: dataSource,
                         url: url,
                         response: dataSource.urlResponse,
                         range: NSRange(location: position, length: length),
-                        output: extractorOutput
+                        output: extractorOutput,
+                        isolation: isolation
                     )
 
                     if pendingExtractorSeek {
-                        progressiveMediaExtractor.seek(position: position, time: seekTime)
+                        progressiveMediaExtractor.seek(
+                            position: position,
+                            time: seekTime,
+                            isolation: isolation
+                        )
                         pendingExtractorSeek = false
                     }
 
-                    while result == .continueRead, !isCancelled {
-                        loadCondition.block()
-                        guard !isCancelled else { throw CancellationError() }
-                        result = try progressiveMediaExtractor.read()
-                        if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(),
+                    while result == .continueRead, !Task.isCancelled {
+                        try await loadCondition.wait()
+                        guard !Task.isCancelled else { throw CancellationError() }
+                        result = try await progressiveMediaExtractor.read(isolation: isolation)
+                        if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(isolation: isolation),
                            currentInputPosition > position + continueLoadingCheckIntervalBytes {
                             position = currentInputPosition
                             loadCondition.close()
@@ -688,11 +686,11 @@ extension ProgressiveMediaPeriod {
                         }
                     }
                 } catch {
-                    postLoadTask(result: &result)
+                    await postLoadTask(result: &result, isolation: isolation)
                     throw error
                 }
 
-                postLoadTask(result: &result)
+                await postLoadTask(result: &result, isolation: isolation)
             }
         }
 
@@ -702,15 +700,15 @@ extension ProgressiveMediaPeriod {
             pendingExtractorSeek = true
         }
 
-        private func postLoadTask(result: inout ExtractorReadResult) {
+        private func postLoadTask(result: inout ExtractorReadResult, isolation: isolated any Actor) async {
             if case let .seek(offset) = result {
                 position = offset
                 result = .continueRead
-            } else if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition() {
+            } else if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(isolation: isolation) {
                 position = currentInputPosition
             }
 
-            dataSource.close()
+            await dataSource.close(isolation: isolation)
         }
 
         private func buildDataSpec(position: Int) -> DataSpec {

@@ -10,23 +10,23 @@ import Foundation.NSURLSession
 public protocol DataSource: DataReader {
     var url: URL? { get }
     var urlResponse: HTTPURLResponse? { get }
-    var components: DataSourceOpaque { get }
-    @discardableResult func open(dataSpec: DataSpec) throws -> Int
-    @discardableResult func close() -> ByteBuffer?
+    nonisolated var components: DataSourceOpaque { get }
+    @discardableResult func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int
+    @discardableResult func close(isolation: isolated any Actor) async -> ByteBuffer?
 }
 
 extension DataSource {
-    func addTransferListener(_ listener: TransferListener) {
+    nonisolated func addTransferListener(_ listener: TransferListener) {
         components.transferListeners.addDelegate(listener)
     }
 
-    func transferInitializing(source: DataSource) {
+    nonisolated func transferInitializing(source: DataSource) {
         components.transferListeners.invokeDelegates {
             $0.onTransferInitializing(source: source, isNetwork: components.isNetwork)
         }
     }
 
-    func transferEnded(source: DataSource, metrics: URLSessionTaskMetrics) {
+    nonisolated func transferEnded(source: DataSource, metrics: URLSessionTaskMetrics) {
         components.transferListeners.invokeDelegates {
             $0.onTransferEnd(source: source, isNetwork: components.isNetwork, metrics: metrics)
         }

@@ -23,4 +23,6 @@ public protocol SEPlayer: Player {
     func insert(mediaSources: [MediaSource], at index: Int)
 
     func set(shuffleOrder: ShuffleOrder)
+
+    func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage
 }

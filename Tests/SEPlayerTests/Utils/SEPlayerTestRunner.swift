@@ -55,6 +55,13 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         }
 
         @discardableResult
+        func initialSeek(_ mediaItemIndex: Int, positionMs: Int64) -> Builder {
+            self.initialMediaItemIndex = mediaItemIndex
+            self.initialPositionMs = positionMs
+            return self
+        }
+
+        @discardableResult
         func setMediaSources(_ mediaSources: [MediaSource]) -> Builder {
             #expect(timeline == nil)
             #expect(!skipSettingMediaSources)
@@ -77,8 +84,19 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         }
 
         @discardableResult
+        func setUseLazyPreparation(_ useLazyPreparation: Bool) -> Builder {
+            playerFactory.setUseLazyPreparation(useLazyPreparation)
+            return self
+        }
+
+        @discardableResult
         func setPauseAtEndOfMediaItems(_ pauseAtEndOfMediaItems: Bool) -> Builder {
             self.pauseAtEndOfMediaItems = pauseAtEndOfMediaItems
+            return self
+        }
+
+        func setRenderers(_ renderers: [SERenderer]) -> Builder {
+            playerFactory.setRenderers(renderers)
             return self
         }
 
@@ -199,29 +217,36 @@ final class SEPlayerTestRunner: @unchecked Sendable {
     @discardableResult
     func start(doPrepare: Bool = true, isolation: isolated any Actor = #isolation) -> Self {
         isolation.assertIsolated()
-        Task { @MainActor in
+        Task { //@MainActor in
             do {
                 let player = try playerFactory.setQueue(queue).build()
                 self.player = player
                 if let view {
-                    view.player = player
+                    await MainActor.run { view.player = player }
                 }
                 if pauseAtEndOfMediaItems {
                     player.pauseAtTheEndOfMediaItem = true
                 }
-                collectPlayerEvents(player: player, isolation: isolation)
+                await collectPlayerEvents(player: player, isolation: isolation)
                 if let playerDelegate {
-                    player.delegate.addDelegate(playerDelegate)
+                    await player.delegate.addDelegate(playerDelegate)
                 }
                 player.play()
+
                 if let actionSchedule {
-                    try await actionSchedule.start(
-                        player: player,
-                        trackSelector: DefaultTrackSelector(),
-                        view: nil,
-                        callback: self,
-                        isolation: isolation
-                    )
+                    if #available(iOS 26, *) {
+                        Task.immediate {
+                            try await actionSchedule.start(
+                                player: player,
+                                trackSelector: DefaultTrackSelector(),
+                                view: self.view,
+                                callback: self,
+                                isolation: isolation
+                            )
+                        }
+                    } else {
+                        fatalError()
+                    }
                 }
                 if let initialMediaItemIndex {
                     player.seek(to: initialPositionMs, of: initialMediaItemIndex)
@@ -232,8 +257,9 @@ final class SEPlayerTestRunner: @unchecked Sendable {
                 if doPrepare {
                     player.prepare()
                 }
+                // TODO: Call try await value actionScheduleValue
             } catch {
-                await handleError(error: error, isolation: isolation)
+                handleError(error: error, isolation: isolation)
             }
         }
 
@@ -249,6 +275,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
             self.error = error
         }
 
+        actionSchedule?.stop()
         self.player?.release()
         if let error {
             throw error
@@ -264,9 +291,9 @@ final class SEPlayerTestRunner: @unchecked Sendable {
     }
 
     func assertTimelinesSame(timelines: Timeline...) {
-        withKnownIssue {
-            #expect(Bool(false))
-        }
+        #expect(zip(self.timelines, timelines).allSatisfy {
+            TestUtil.timelinesAreSame(lhs: $0, rhs: $1)
+        })
     }
 
     func assertTimelineChangeReasonsEqual(reasons: TimelineChangeReason...) {
@@ -308,7 +335,6 @@ final class SEPlayerTestRunner: @unchecked Sendable {
             guard let self else { return }
             do {
                 for await event in playerDelegateStream.start() {
-                    print("player event = \(event)")
                     try await handleEvent(event: event, isolation: isolation)
                 }
             } catch {
@@ -322,6 +348,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
 
         switch event {
         case let .didChangeTimeline(timeline, reason):
+            print("👹 didChangeTimeline, reason = \(reason)")
             timelineChangeReasons.append(reason)
             timelines.append(timeline)
             let currentIndex = try #require(player).currentPeriodIndex

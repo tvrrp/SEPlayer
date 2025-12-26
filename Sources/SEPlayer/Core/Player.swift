@@ -75,6 +75,7 @@ public protocol Player: AnyObject {
     func setPlaybackSpeed(new playbackSpeed: Float)
     func stop()
     func release()
+    func releaseAsync() async
 
     func mediaItem(at index: Int) -> MediaItem
 

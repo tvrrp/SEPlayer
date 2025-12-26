@@ -30,13 +30,13 @@ struct DefaultRenderersFactory: RenderersFactory {
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {
         let renderers = [
-            try? CAVideoRenderer<VideoToolboxDecoder>(
+            try? AVFVideoRenderer<VideoToolboxDecoder>(
                 queue: queue,
                 clock: clock,
                 bufferableContainer: bufferableContainer,
                 decoderFactory: decoderFactory
             ),
-            try? AudioQueueRenderer<AudioConverterDecoder>(
+            try? AVFAudioRenderer<AudioConverterDecoder>(
                 queue: queue,
                 clock: clock,
                 renderSynchronizer: renderSynchronizer,

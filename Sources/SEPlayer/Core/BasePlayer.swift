@@ -42,7 +42,7 @@ extension BasePlayer {
     public var currentMediaItem: MediaItem? {
         timeline.isEmpty ? nil : timeline.getWindow(
             windowIndex: currentMediaItemIndex,
-            window: &window
+            window: window
         ).mediaItem
     }
 
@@ -61,11 +61,11 @@ extension BasePlayer {
     }
 
     public var isCurrentMediaItemDynamic: Bool {
-        !timeline.isEmpty && timeline.getWindow(windowIndex: currentMediaItemIndex, window: &window).isDynamic
+        !timeline.isEmpty && timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).isDynamic
     }
 
     public var isCurrentMediaItemSeekable: Bool {
-        !timeline.isEmpty && timeline.getWindow(windowIndex: currentPeriodIndex ?? .zero, window: &window).isSeekable
+        !timeline.isEmpty && timeline.getWindow(windowIndex: currentPeriodIndex ?? .zero, window: window).isSeekable
     }
 
     public var contentDuration: Int64 {
@@ -74,7 +74,7 @@ extension BasePlayer {
         } else {
             return timeline.getWindow(
                 windowIndex: currentMediaItemIndex,
-                window: &window
+                window: window
             ).durationMs
         }
     }
@@ -204,7 +204,11 @@ extension BasePlayer {
     }
 
     public func mediaItem(at index: Int) -> MediaItem {
-        timeline.getWindow(windowIndex: index, window: &window).mediaItem
+        timeline.getWindow(windowIndex: index, window: window).mediaItem
+    }
+
+    public func release() {
+        Task { await releaseAsync() }
     }
 }
 

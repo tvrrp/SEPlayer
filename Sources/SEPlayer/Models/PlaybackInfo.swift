@@ -28,7 +28,53 @@ struct PlaybackInfo {
     private(set) var positionUs: Int64
     private(set) var positionUpdateTimeMs: Int64
 
+    var object = NSObject()
+
     var isPlaying: Bool { state == .ready && playWhenReady }
+
+    init(
+        clock: SEClock,
+        timeline: Timeline,
+        periodId: MediaPeriodId,
+        requestedContentPositionUs: Int64,
+        discontinuityStartPositionUs: Int64,
+        state: PlayerState,
+        playbackError: Error? = nil,
+        isLoading: Bool,
+        trackGroups: [TrackGroup],
+        trackSelectorResult: TrackSelectionResult,
+        loadingMediaPeriodId: MediaPeriodId,
+        playWhenReady: Bool,
+        playWhenReadyChangeReason: PlayWhenReadyChangeReason,
+        playbackSuppressionReason: PlaybackSuppressionReason,
+        playbackParameters: PlaybackParameters,
+        bufferedPositionUs: Int64,
+        totalBufferedDurationUs: Int64,
+        positionUs: Int64,
+        positionUpdateTimeMs: Int64,
+        object: NSObject = NSObject()
+    ) {
+        self.clock = clock
+        self.timeline = timeline
+        self.periodId = periodId
+        self.requestedContentPositionUs = requestedContentPositionUs
+        self.discontinuityStartPositionUs = discontinuityStartPositionUs
+        self.state = state
+        self.playbackError = playbackError
+        self.isLoading = isLoading
+        self.trackGroups = trackGroups
+        self.trackSelectorResult = trackSelectorResult
+        self.loadingMediaPeriodId = loadingMediaPeriodId
+        self.playWhenReady = playWhenReady
+        self.playWhenReadyChangeReason = playWhenReadyChangeReason
+        self.playbackSuppressionReason = playbackSuppressionReason
+        self.playbackParameters = playbackParameters
+        self.bufferedPositionUs = bufferedPositionUs
+        self.totalBufferedDurationUs = totalBufferedDurationUs
+        self.positionUs = positionUs
+        self.positionUpdateTimeMs = positionUpdateTimeMs
+        self.object = object
+    }
 
     static func dummy(clock: SEClock, emptyTrackSelectorResult: TrackSelectionResult) -> PlaybackInfo {
         PlaybackInfo(
@@ -56,6 +102,7 @@ struct PlaybackInfo {
 
     func positionUs(_ positionUs: Int64) -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.positionUs = positionUs
         newValue.positionUpdateTimeMs = clock.milliseconds
         return newValue
@@ -71,6 +118,7 @@ struct PlaybackInfo {
         trackSelectorResult: TrackSelectionResult
     ) -> PlaybackInfo {
         var newValue = self
+        newValue.object = NSObject()
         newValue.periodId = periodId
         newValue.positionUs = positionUs
         newValue.requestedContentPositionUs = requestedContentPositionUs
@@ -84,30 +132,35 @@ struct PlaybackInfo {
 
     func timeline(_ timeline: Timeline) -> PlaybackInfo {
         var newValue = self
+        newValue.object = NSObject()
         newValue.timeline = timeline
         return newValue
     }
 
     func playbackState(_ state: PlayerState) -> PlaybackInfo {
         var newValue = self
+        newValue.object = NSObject()
         newValue.state = state
         return newValue
     }
 
     func setPlaybackError(_ playbackError: Error?) -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.playbackError = playbackError
         return newValue
     }
 
     func isLoading(_ isLoading: Bool) -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.isLoading = isLoading
         return newValue
     }
 
     func loadingMediaPeriodId(_ loadingMediaPeriodId: MediaPeriodId) -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.loadingMediaPeriodId = loadingMediaPeriodId
         return newValue
     }
@@ -118,6 +171,7 @@ struct PlaybackInfo {
         playbackSuppressionReason: PlaybackSuppressionReason
     ) -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.playWhenReady = playWhenReady
         newValue.playWhenReadyChangeReason = playWhenReadyChangeReason
         newValue.playbackSuppressionReason = playbackSuppressionReason
@@ -126,12 +180,14 @@ struct PlaybackInfo {
 
     func playbackParameters(_ playbackParameters: PlaybackParameters) -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.playbackParameters = playbackParameters
         return newValue
     }
 
     func estimatedPosition() -> Self {
         var newValue = self
+        newValue.object = NSObject()
         newValue.positionUs = getEstimatedPositionUs()
         newValue.positionUpdateTimeMs = clock.milliseconds
         return newValue
@@ -156,25 +212,25 @@ struct PlaybackInfo {
 
 extension PlaybackInfo: Equatable {
     static func == (lhs: PlaybackInfo, rhs: PlaybackInfo) -> Bool {
-        lhs.timeline.equals(to: rhs.timeline) &&
-        lhs.periodId == rhs.periodId &&
-        lhs.requestedContentPositionUs == rhs.requestedContentPositionUs &&
-        lhs.discontinuityStartPositionUs == rhs.discontinuityStartPositionUs &&
-        lhs.state == rhs.state &&
-        lhs.playbackError != nil && rhs.playbackError == nil &&
-        lhs.playbackError == nil && rhs.playbackError != nil &&
-        lhs.isLoading == rhs.isLoading &&
-        lhs.trackGroups == rhs.trackGroups &&
-        lhs.trackSelectorResult == rhs.trackSelectorResult &&
-        lhs.loadingMediaPeriodId == rhs.loadingMediaPeriodId &&
-        lhs.playWhenReady == rhs.playWhenReady &&
-        lhs.playWhenReadyChangeReason == rhs.playWhenReadyChangeReason &&
-        lhs.playbackSuppressionReason == rhs.playbackSuppressionReason &&
-        lhs.playbackParameters == rhs.playbackParameters &&
-        lhs.bufferedPositionUs == rhs.bufferedPositionUs &&
-        lhs.totalBufferedDurationUs == rhs.totalBufferedDurationUs &&
-        lhs.positionUs == rhs.positionUs &&
-        lhs.positionUpdateTimeMs == rhs.positionUpdateTimeMs
+        return lhs.object === rhs.object
+//        return lhs.timeline.equals(to: rhs.timeline) &&
+//            lhs.periodId == rhs.periodId &&
+//            lhs.requestedContentPositionUs == rhs.requestedContentPositionUs &&
+//            lhs.discontinuityStartPositionUs == rhs.discontinuityStartPositionUs &&
+//            lhs.state == rhs.state &&
+//            lhs.playbackError == nil && rhs.playbackError == nil &&
+//            lhs.isLoading == rhs.isLoading &&
+//            lhs.trackGroups == rhs.trackGroups &&
+//            lhs.trackSelectorResult == rhs.trackSelectorResult &&
+//            lhs.loadingMediaPeriodId == rhs.loadingMediaPeriodId &&
+//            lhs.playWhenReady == rhs.playWhenReady &&
+//            lhs.playWhenReadyChangeReason == rhs.playWhenReadyChangeReason &&
+//            lhs.playbackSuppressionReason == rhs.playbackSuppressionReason &&
+//            lhs.playbackParameters == rhs.playbackParameters &&
+//            lhs.bufferedPositionUs == rhs.bufferedPositionUs &&
+//            lhs.totalBufferedDurationUs == rhs.totalBufferedDurationUs &&
+//            lhs.positionUs == rhs.positionUs //&&
+//            lhs.positionUpdateTimeMs == rhs.positionUpdateTimeMs
     }
 }
 

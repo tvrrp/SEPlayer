@@ -149,14 +149,14 @@ extension AbstractConcatenatedTimeline {
             + (timeline(by: firstChildIndex).firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) ?? .zero)
     }
 
-    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
         let childIndex = childIndexBy(windowIndex: windowIndex)
         let firstWindowIndexInChild = firstWindowIndex(by: childIndex)
         let firstPeriodIndexInChild = firstPeriodIndex(by: childIndex)
 
         timeline(by: childIndex).getWindow(
             windowIndex: windowIndex - firstWindowIndexInChild,
-            window: &window,
+            window: window,
             defaultPositionProjectionUs: defaultPositionProjectionUs
         )
 
@@ -168,25 +168,25 @@ extension AbstractConcatenatedTimeline {
         return window
     }
 
-    func periodById(_ id: AnyHashable, period: inout Period) -> Period {
+    func periodById(_ id: AnyHashable, period: Period) -> Period {
         let childId = Self.childTimelineId(from: id)
         let childPeriodId = Self.childPeriodId(from: id)
         let childIndex = childIndex(by: childId)
         let firstWindowIndexInChild = firstWindowIndex(by: childIndex)
-        timeline(by: childIndex).periodById(childPeriodId, period: &period)
+        timeline(by: childIndex).periodById(childPeriodId, period: period)
         period.windowIndex += firstWindowIndexInChild
         period.uid = id
         return period
     }
 
-    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
+    func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
         let childIndex = childIndex(by: periodIndex)
         let firstWindowIndexInChild = firstWindowIndex(by: childIndex)
         let firstPeriodIndexInChild = firstPeriodIndex(by: childIndex)
         timeline(by: childIndex)
             .getPeriod(
                 periodIndex: periodIndex - firstPeriodIndexInChild,
-                period: &period,
+                period: period,
                 setIds: setIds
             )
         period.windowIndex += firstWindowIndexInChild

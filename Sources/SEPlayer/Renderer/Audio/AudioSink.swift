@@ -77,7 +77,7 @@ final class AudioSink: IAudioSink {
     private var buffersInUse: [Bool]
     private var filledBufferIndex: Int = 0
 
-    private let internalQueue = Queues.audioQueue
+    private let internalQueue = Queues.audioDecodeQueue
 
     private var startMediaTimeNeedsInit = false
     private var startMediaTimeNeedsSync = false

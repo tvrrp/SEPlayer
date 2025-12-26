@@ -6,15 +6,6 @@
 //
 
 final class RenderersHolder {
-    var volume: Float {
-        get {
-            (primaryRenderer as? AudioRenderer)?.volume ?? .zero
-        }
-        set {
-            (primaryRenderer as? AudioRenderer)?.volume = newValue
-        }
-    }
-    
     private let primaryRenderer: SERenderer
     private let index: Int
     private let secondaryRenderer: SERenderer?
@@ -31,7 +22,7 @@ final class RenderersHolder {
         self.primaryRequiresReset = false
         self.secondaryRequiresReset = false
     }
-    
+
     func startPrewarming() {
         guard !isPrewarming else { return }
         
@@ -226,6 +217,10 @@ final class RenderersHolder {
         }
     }
 
+    func handleMessage(_ message: RendererMessage, mediaPeriod: MediaPeriodHolder) throws {
+        try rendererReading(from: mediaPeriod)?.handleMessage(message)
+    }
+
     func disable(mediaClock: DefaultMediaClock) throws {
         disableRenderer(renderer: primaryRenderer, mediaClock: mediaClock)
         if let secondaryRenderer {
@@ -333,16 +328,32 @@ final class RenderersHolder {
         secondaryRequiresReset = false
     }
 
-    func requestMediaDataWhenReady(
-        playingPeriodHolder: MediaPeriodHolder,
-        on queue: Queue,
-        block: @escaping () -> Void
-    ) {
-        guard let renderer = rendererReading(from: playingPeriodHolder) else {
-            return
-        }
+    func setVideoOutput(_ output: PlayerBufferable) throws {
+        guard trackType == .video else { return }
 
-        renderer.requestMediaDataWhenReady(on: queue, block: block)
+        if prewarmingState == .transitioningToPrimary || prewarmingState == .notPrewarmingUsingSecondary {
+            try secondaryRenderer?.handleMessage(.setVideoOutput(output))
+        } else {
+            try primaryRenderer.handleMessage(.setVideoOutput(output))
+        }
+    }
+
+    func removeVideoOutput(_ output: PlayerBufferable) throws {
+        guard trackType == .video else { return }
+        try secondaryRenderer?.handleMessage(.removeVideoOutput(output))
+        try primaryRenderer.handleMessage(.removeVideoOutput(output))
+    }
+
+    func setVolume(_ volume: Float) throws {
+        guard trackType == .audio else { return }
+        try primaryRenderer.handleMessage(.setAudioVolume(volume))
+        try secondaryRenderer?.handleMessage(.setAudioVolume(volume))
+    }
+
+    func setAudioIsMuted(_ isMuted: Bool) throws {
+        guard trackType == .audio else { return }
+        try primaryRenderer.handleMessage(.setAudioIsMuted(isMuted))
+        try secondaryRenderer?.handleMessage(.setAudioIsMuted(isMuted))
     }
 }
 
@@ -457,7 +468,7 @@ private extension RenderersHolder {
         }
 
         guard isRendererEnabled(renderer: renderer) else { return }
-        renderer.stopRequestingMediaData()
+        try? renderer.handleMessage(.stopRequestingMediaData)
         mediaClock.onRendererDisabled(renderer: renderer)
         ensureStopped(renderer: renderer)
         renderer.disable()

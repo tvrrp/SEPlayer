@@ -6,6 +6,7 @@
 //
 
 @testable import SEPlayer
+import Foundation
 
 enum ActionErrors: Error {
     case unimplemented
@@ -145,12 +146,12 @@ final class SetPlayWhenReady: Action {
 }
 
 final class WaitForPlayerDelegateState: Action {
-    private let checkForInitialState: (SEPlayer) -> Bool
+    private let checkForInitialState: (PlayerState) -> Bool
     private let validateEvent: (PlayerDelegateAsyncStream.Event) -> Bool
 
     init(
         tag: String,
-        checkForInitialState: @escaping (SEPlayer) -> Bool,
+        checkForInitialState: @escaping (PlayerState) -> Bool,
         validateEvent: @escaping (PlayerDelegateAsyncStream.Event) -> Bool
     ) {
         self.checkForInitialState = checkForInitialState
@@ -174,7 +175,7 @@ final class WaitForPlayerDelegateState: Action {
     ) async throws {
         guard let nextAction else { return }
 
-        if checkForInitialState(player) == false {
+        if checkForInitialState(player.playbackState) == false {
             let playerEventListener = await PlayerDelegateAsyncStream(delegate: player.delegate)
             for await event in playerEventListener.start() {
                 if validateEvent(event) { break }
@@ -187,5 +188,177 @@ final class WaitForPlayerDelegateState: Action {
             view: view,
             isolation: isolation
         )
+    }
+}
+
+final class PlayUntilPosition: Action {
+    private let mediaItemIndex: Int
+    private let positionMs: Int64
+
+    init(tag: String, mediaItemIndex: Int, positionMs: Int64) {
+        self.mediaItemIndex = mediaItemIndex
+        self.positionMs = positionMs
+        super.init(tag: tag, description: "PlayUntilPosition:\(mediaItemIndex):\(positionMs)")
+    }
+
+    override func doActionImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {}
+
+    override func doActionAndScheduleNextImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        nextAction: ActionNode?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {
+        let mainQueue = Queues.mainQueue
+        player
+            .createMessage { _, _ in
+                await MainActor.run { player.pause() }
+                print("❌ RUNNING PAUSE, curr = \(player.currentPosition)")
+            }
+            .setPositionMs(positionMs, mediaItemIndex: mediaItemIndex)
+            .send()
+
+        struct Box { var continuation: CheckedContinuation<Void, Never>? }
+        var box = Box(continuation: nil)
+
+        if nextAction != nil {
+            player.createMessage { _, _ in
+                box.continuation?.resume()
+            }
+            .setPositionMs(positionMs, mediaItemIndex: mediaItemIndex)
+            .setQueue(mainQueue)
+            .send()
+        }
+
+        player.play()
+        if let nextAction {
+            await withCheckedContinuation { continuation in
+                box.continuation = continuation
+            }
+            try await nextAction.schedule(player: player, trackSelector: trackSelector, view: view)
+        }
+    }
+}
+
+final class WaitForTimelineChanged: Action {
+    private let expectedTimeline: Timeline?
+    private let ignoreExpectedReason: Bool
+    private let expectedReason: TimelineChangeReason
+
+    init(tag: String) {
+        expectedTimeline = nil
+        ignoreExpectedReason = true
+        expectedReason = .playlistChanged
+        super.init(tag: tag, description: "WaitForTimelineChanged")
+    }
+
+    init(tag: String, expectedTimeline: Timeline, expectedReason: TimelineChangeReason) {
+        self.expectedTimeline = expectedTimeline
+        ignoreExpectedReason = false
+        self.expectedReason = expectedReason
+        super.init(tag: tag, description: "WaitForTimelineChanged")
+    }
+
+    override func doActionImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {}
+
+    override func doActionAndScheduleNextImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        nextAction: ActionNode?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {
+        guard let nextAction else { return }
+        let playerEventListener = await PlayerDelegateAsyncStream(delegate: player.delegate)
+
+        if let expectedTimeline,
+           TestUtil.timelinesAreSame(lhs: expectedTimeline, rhs: player.timeline) {
+            try await nextAction.schedule(player: player, trackSelector: trackSelector, view: view)
+            return
+        }
+
+        print("❌ Will start listening")
+        for await event in playerEventListener.start() {
+            print("❌ event = \(event)")
+            if case let .didChangeTimeline(timeline, reason) = event {
+                print("❌ didChangeTimeline, reason = \(reason)")
+                print("❌ \(timeline)")
+                let timelineMatches = expectedTimeline.map {
+                    TestUtil.timelinesAreSame(lhs: timeline, rhs: $0)
+                } ?? true
+
+                if timelineMatches && (ignoreExpectedReason || expectedReason == reason) {
+                    try await nextAction.schedule(player: player, trackSelector: trackSelector, view: view)
+                    return
+                }
+            }
+        }
+    }
+}
+
+final class WaitForPendingPlayerCommands: Action {
+    init(tag: String) {
+        super.init(tag: tag, description: "WaitForPendingPlayerCommands")
+    }
+
+    override func doActionImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {}
+
+    override func doActionAndScheduleNextImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        nextAction: ActionNode?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {
+        guard let nextAction else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            player
+                .createMessage { _, _ in
+                    continuation.resume()
+                }
+                .send()
+        }
+
+        try await nextAction.schedule(player: player, trackSelector: trackSelector, view: view)
+    }
+}
+
+final class ExecuteClosure: Action {
+    private let closure: ((SEPlayer) async throws -> Void)
+
+    init(
+        tag: String,
+        closure: @escaping (SEPlayer) async throws -> Void
+    ) {
+        self.closure = closure
+        super.init(tag: tag, description: "ExecuteClosure")
+    }
+
+    override func doActionImpl(
+        player: SEPlayer,
+        trackSelector: DefaultTrackSelector,
+        view: SEPlayerView?,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws {
+        try await closure(player)
     }
 }

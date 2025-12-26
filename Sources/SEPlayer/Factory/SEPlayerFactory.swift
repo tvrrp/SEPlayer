@@ -14,6 +14,8 @@ public final class SEPlayerFactory {
     private let bandwidthMeter: BandwidthMeter
     private let audioSessionManager: IAudioSessionManager
     private let clock: SEClock
+    private let workQueue: Queue
+    private let loaderQueue: Queue
 
     public init(configuration: URLSessionConfiguration = .default) {
         let operationQueue = OperationQueue()
@@ -24,6 +26,8 @@ public final class SEPlayerFactory {
         self.bandwidthMeter = DefaultBandwidthMeter()
         self.clock = DefaultSEClock()
         audioSessionManager = AudioSessionManager.shared
+        workQueue = SignalQueue(name: "com.seplayer.work.shared", qos: .userInitiated)
+        loaderQueue = SignalQueue(name: "com.seplayer.loader.shared", qos: .userInitiated)
 
         registerDefaultDecoders(factory: decodersFactory)
         Prewarmer.shared.prewarm()
@@ -36,6 +40,7 @@ public final class SEPlayerFactory {
     public func buildPlayer(
         identifier: UUID = UUID(),
         workQueue: Queue? = nil,
+        applicationQueue: Queue? = nil,
         loaderQueue: Queue? = nil,
         dataSourceFactory: DataSourceFactory? = nil,
         extractorsFactory: ExtractorsFactory? = nil,
@@ -46,14 +51,15 @@ public final class SEPlayerFactory {
         loadControl: LoadControl? = nil,
         bandwidthMeter: BandwidthMeter? = nil
     ) -> SEPlayer {
-        let workQueue = workQueue ?? SignalQueue(name: "com.seplayer.work_\(identifier)", qos: .userInitiated)
-        let loaderQueue = loaderQueue ?? SignalQueue(name: "com.seplayer.loader_\(identifier)", qos: .userInitiated)
+        let workQueue = workQueue ?? self.workQueue
+        let loaderQueue = loaderQueue ?? self.loaderQueue
 
-        let dataSourceFactory = dataSourceFactory ?? DefaultDataSourceFactory(loaderQueue: loaderQueue, networkLoader: sessionLoader)
+        let playerLoaderActor = loaderQueue.playerActor()
+        let dataSourceFactory = dataSourceFactory ?? DefaultDataSourceFactory(syncActor: playerLoaderActor, networkLoader: sessionLoader)
         let extractorsFactory = extractorsFactory ?? DefaultExtractorFactory(queue: loaderQueue)
         let mediaSourceFactory = mediaSourceFactory ?? DefaultMediaSourceFactory(
             workQueue: workQueue,
-            loaderQueue: loaderQueue,
+            loaderSyncActor: playerLoaderActor,
             dataSourceFactory: dataSourceFactory,
             extractorsFactory: extractorsFactory
         )
@@ -64,7 +70,8 @@ public final class SEPlayerFactory {
 
         return SEPlayerImpl(
             identifier: identifier,
-            queue: workQueue,
+            workQueue: workQueue,
+            applicationQueue: applicationQueue ?? Queues.mainQueue,
             clock: clock,
             renderersFactory: renderersFactory,
             trackSelector: trackSelector,
@@ -83,9 +90,5 @@ public final class SEPlayerFactory {
         factory.register(AudioConverterDecoder.self) { queue, format in
             try AudioConverterDecoder(queue: queue, format: format)
         }
-
-//        decoderFactory.register(OpusDecoder.self) { queue, format in
-//            try OpusDecoder(queue: queue, format: format)
-//        }
     }
 }

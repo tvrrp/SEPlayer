@@ -6,16 +6,28 @@
 //
 
 struct Sniffer {
-    func sniffFragmented(input: ExtractorInput) throws -> SniffFailure? {
-        try sniffInternal(input: input, fragmented: true, acceptHeic: false)
+    func sniffFragmented(
+        input: ExtractorInput,
+        isolation: isolated any Actor
+    ) async throws -> SniffFailure? {
+        try await sniffInternal(input: input, fragmented: true, acceptHeic: false, isolation: isolation)
     }
 
-    func sniffUnfragmented(input: ExtractorInput, acceptHeic: Bool) throws -> SniffFailure? {
-        try sniffInternal(input: input, fragmented: false, acceptHeic: acceptHeic)
+    func sniffUnfragmented(
+        input: ExtractorInput,
+        acceptHeic: Bool,
+        isolation: isolated any Actor
+    ) async throws -> SniffFailure? {
+        try await sniffInternal(input: input, fragmented: false, acceptHeic: acceptHeic, isolation: isolation)
     }
 
-    private func sniffInternal(input: ExtractorInput, fragmented: Bool, acceptHeic: Bool) throws -> SniffFailure? {
-        let inputLength = input.getLength()
+    private func sniffInternal(
+        input: ExtractorInput,
+        fragmented: Bool,
+        acceptHeic: Bool,
+        isolation: isolated any Actor
+    ) async throws -> SniffFailure? {
+        let inputLength = input.getLength(isolation: isolation)
         var bytesToSearch: Int = if let inputLength {
             min(inputLength, .searchLenght)
         } else {
@@ -30,18 +42,29 @@ struct Sniffer {
         while bytesSearched < bytesToSearch {
             var headerSize = MP4Box.headerSize
             buffer.clear(minimumCapacity: headerSize)
-            let success = try input.peekFully(to: &buffer, offset: 0, length: headerSize, allowEndOfInput: true)
+            let success = try await input.peekFully(
+                to: &buffer,
+                offset: 0,
+                length: headerSize,
+                allowEndOfInput: true,
+                isolation: isolation
+            )
             if !success { break }
 
             var atomSize = try UInt64(buffer.readInt(as: UInt32.self))
             let atomType = try buffer.readInt(as: UInt32.self)
             if Int(atomSize) == MP4Box.definesLargeSize {
                 headerSize = MP4Box.longHeaderSize
-                try input.peekFully(to: &buffer, offset: MP4Box.headerSize, length: MP4Box.longHeaderSize - MP4Box.headerSize)
+                try await input.peekFully(
+                    to: &buffer,
+                    offset: MP4Box.headerSize,
+                    length: MP4Box.longHeaderSize - MP4Box.headerSize,
+                    isolation: isolation
+                )
                 atomSize = try buffer.readInt(as: UInt64.self)
             } else if atomSize == MP4Box.extendsToEndSize {
-                if let fileEndPosition = input.getLength() {
-                    atomSize = UInt64(fileEndPosition - input.getPeekPosition() + headerSize)
+                if let fileEndPosition = input.getLength(isolation: isolation) {
+                    atomSize = UInt64(fileEndPosition - input.getPeekPosition(isolation: isolation) + headerSize)
                 }
             }
 
@@ -95,7 +118,7 @@ struct Sniffer {
                 }
 
                 buffer.clear(minimumCapacity: atomDataSize)
-                try input.peekFully(to: &buffer, offset: 0, length: atomDataSize)
+                try await input.peekFully(to: &buffer, offset: 0, length: atomDataSize, isolation: isolation)
                 let majorBrand = try buffer.readInt(as: UInt32.self)
                 if isCompatibleBrand(majorBrand, acceptHeic: acceptHeic) {
                     foundGoodFileType = true
@@ -122,7 +145,7 @@ struct Sniffer {
                     )
                 }
             } else if atomDataSize != 0 {
-                try input.advancePeekPosition(length: atomDataSize)
+                try await input.advancePeekPosition(length: atomDataSize, isolation: isolation)
             }
         }
 

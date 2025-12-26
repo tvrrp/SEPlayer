@@ -78,7 +78,14 @@ class SampleQueueTest {
     func capacityIncreases() throws {
         let numberOfSamplesToInput = 3 * SampleQueue.sampleCapacityIncrement + 1
         sampleQueue.setFormat(format1)
-        try sampleQueue.sampleData(data: ByteBuffer(repeating: 0, count: numberOfSamplesToInput), length: numberOfSamplesToInput)
+        try sampleQueue.sampleData(
+            data: ByteBuffer(
+                repeating: 0,
+                count: numberOfSamplesToInput
+            ),
+            length: numberOfSamplesToInput,
+            isolation: TestableSyncPlayerActor.shared
+        )
         
         for i in 0..<numberOfSamplesToInput {
             sampleQueue.sampleMetadata(
@@ -157,13 +164,13 @@ class SampleQueueTest {
     @Test
     func multipleFormatsDeduplicated() throws {
         sampleQueue.setFormat(format1)
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.sampleMetadata(time: 0, flags: .keyframe, size: allocationSize, offset: 0)
         // Writing multiple formats should not cause a format change on the read side, provided the last
         // format to be written is equal to the format of the previous sample.
         sampleQueue.setFormat(format2)
         sampleQueue.setFormat(format1Copy)
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.sampleMetadata(time: 1000, flags: .keyframe, size: allocationSize, offset: 0)
         
         try assertReadFormat(formatRequired: false, format: format1)
@@ -186,7 +193,7 @@ class SampleQueueTest {
         // The same applies if the queue is empty when the formats are written.
         sampleQueue.setFormat(format2)
         sampleQueue.setFormat(format1)
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.sampleMetadata(time: 2000, flags: .keyframe, size: allocationSize, offset: 0)
         
         // Assert the third sample is read without a format change.
@@ -201,7 +208,7 @@ class SampleQueueTest {
     
     @Test
     func readSingleSamples() throws {
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         assertAllocationCount(count: 1)
         
         // Nothing to read without sample metadata
@@ -230,7 +237,7 @@ class SampleQueueTest {
         try assertNoSamplesToRead(endFormat: format1)
         
         // Write a second sample followed by one byte that does not belong to it.
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.sampleMetadata(time: 2000, flags: [], size: allocationSize - 1, offset: 1)
         
         // If formatRequired, should read the format rather than the sample.
@@ -259,7 +266,7 @@ class SampleQueueTest {
     
     @Test
     func readSingleSampleWithLoadingFinished() throws {
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.setFormat(format1)
         sampleQueue.sampleMetadata(time: 1000, flags: .keyframe, size: allocationSize, offset: 0)
         
@@ -316,7 +323,7 @@ class SampleQueueTest {
     
     @Test
     func emptyQueueReturnsLoadingFinished() throws {
-        try sampleQueue.sampleData(data: data, length: data.readableBytes)
+        try sampleQueue.sampleData(data: data, length: data.readableBytes, isolation: TestableSyncPlayerActor.shared)
         #expect(sampleQueue.isReady(loadingFinished: false) == false)
         #expect(sampleQueue.isReady(loadingFinished: true))
     }
@@ -361,7 +368,7 @@ class SampleQueueTest {
     @Test
     func skipToEndRetainsUnassignedData() throws {
         sampleQueue.setFormat(format1)
-        try sampleQueue.sampleData(data: data, length: allocationSize)
+        try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.skip(count: sampleQueue.getSkipCount(time: .max, allowEndOfQueue: true))
         assertAllocationCount(count: 1)
         sampleQueue.discardToRead()
@@ -1284,7 +1291,7 @@ class SampleQueueTest {
         sampleFormats: [Format],
         sampleFlags: [SampleFlags]
     ) throws {
-        try sampleQueue.sampleData(data: data, length: data.readableBytes)
+        try sampleQueue.sampleData(data: data, length: data.readableBytes, isolation: TestableSyncPlayerActor.shared)
         var format: Format?
         
         for index in 0..<sampleTimestamps.count {
@@ -1303,7 +1310,7 @@ class SampleQueueTest {
     }
 
     private func writeSample(data: ByteBuffer, timestampUs: Int64, flags: SampleFlags) throws {
-        try sampleQueue.sampleData(data: data, length: data.readableBytes)
+        try sampleQueue.sampleData(data: data, length: data.readableBytes, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.sampleMetadata(time: timestampUs, flags: flags, size: data.readableBytes, offset: 0)
     }
 

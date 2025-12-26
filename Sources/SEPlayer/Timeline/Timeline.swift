@@ -16,12 +16,12 @@ public protocol Timeline: Sendable {
     func lastWindowIndex(shuffleModeEnabled: Bool) -> Int?
     func firstWindowIndex(shuffleModeEnabled: Bool) -> Int?
     @discardableResult
-    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window
     func periodCount() -> Int
     @discardableResult
-    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period
+    func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period
     @discardableResult
-    func periodById(_ id: AnyHashable, period: inout Period) -> Period
+    func periodById(_ id: AnyHashable, period: Period) -> Period
     func indexOfPeriod(by id: AnyHashable) -> Int?
     func id(for periodIndex: Int) -> AnyHashable
 }
@@ -84,26 +84,26 @@ public extension Timeline {
     }
 
     @discardableResult
-    func getWindow(windowIndex: Int, window: inout Window) -> Window {
-        getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: .zero)
+    func getWindow(windowIndex: Int, window: Window) -> Window {
+        getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: .zero)
     }
 
     func nextPeriodIndex(
         periodIndex: Int,
-        period: inout Period,
-        window: inout Window,
+        period: Period,
+        window: Window,
         repeatMode: RepeatMode,
         shuffleModeEnabled: Bool
     ) -> Int? {
-        let windowIndex = getPeriod(periodIndex: periodIndex, period: &period).windowIndex
-        if getWindow(windowIndex: windowIndex, window: &window).lastPeriodIndex == periodIndex {
+        let windowIndex = getPeriod(periodIndex: periodIndex, period: period).windowIndex
+        if getWindow(windowIndex: windowIndex, window: window).lastPeriodIndex == periodIndex {
             let nextWindowIndex = nextWindowIndex(
                 windowIndex: windowIndex,
                 repeatMode: repeatMode,
                 shuffleModeEnabled: shuffleModeEnabled
             )
             if let nextWindowIndex {
-                return getWindow(windowIndex: nextWindowIndex, window: &window).firstPeriodIndex
+                return getWindow(windowIndex: nextWindowIndex, window: window).firstPeriodIndex
             }
             return nextWindowIndex
         }
@@ -112,23 +112,23 @@ public extension Timeline {
 
     func isLastPeriod(
         periodIndex: Int,
-        period: inout Period,
-        window: inout Window,
+        period: Period,
+        window: Window,
         repeatMode: RepeatMode,
         shuffleModeEnabled: Bool
     ) -> Bool {
         nil == nextPeriodIndex(
             periodIndex: periodIndex,
-            period: &period,
-            window: &window,
+            period: period,
+            window: window,
             repeatMode: repeatMode,
             shuffleModeEnabled: shuffleModeEnabled
         )
     }
 
     func periodPositionUs(
-        window: inout Window,
-        period: inout Period,
+        window: Window,
+        period: Period,
         windowIndex: Int,
         windowPositionUs: Int64,
         defaultPositionProjectionUs: Int64 = .zero
@@ -137,18 +137,18 @@ public extension Timeline {
             assertionFailure()
             return nil
         }
-        getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
         let windowPositionUs = windowPositionUs == .timeUnset ? window.defaultPositionUs : windowPositionUs
         guard windowPositionUs != .timeUnset else { return nil }
 
         var periodIndex = window.firstPeriodIndex
-        getPeriod(periodIndex: periodIndex, period: &period)
+        getPeriod(periodIndex: periodIndex, period: period)
         while periodIndex < window.lastPeriodIndex,
               period.positionInWindowUs != windowPositionUs,
-              getPeriod(periodIndex: periodIndex + 1, period: &period).positionInWindowUs <= windowPositionUs {
+              getPeriod(periodIndex: periodIndex + 1, period: period).positionInWindowUs <= windowPositionUs {
             periodIndex += 1
         }
-        getPeriod(periodIndex: periodIndex, period: &period, setIds: true)
+        getPeriod(periodIndex: periodIndex, period: period, setIds: true)
         var periodPositionUs = windowPositionUs - period.positionInWindowUs
         if periodPositionUs != .timeUnset {
             periodPositionUs = min(periodPositionUs, period.durationUs - 1)
@@ -159,17 +159,17 @@ public extension Timeline {
     }
 
     @discardableResult
-    func periodById(_ id: AnyHashable, period: inout Period) -> Period {
-        defaultPeriodById(id, period: &period)
+    func periodById(_ id: AnyHashable, period: Period) -> Period {
+        defaultPeriodById(id, period: period)
     }
 
-    internal func defaultPeriodById(_ id: AnyHashable, period: inout Period) -> Period {
-        getPeriod(periodIndex: indexOfPeriod(by: id) ?? .zero, period: &period, setIds: true)
+    internal func defaultPeriodById(_ id: AnyHashable, period: Period) -> Period {
+        getPeriod(periodIndex: indexOfPeriod(by: id) ?? .zero, period: period, setIds: true)
     }
 
     @discardableResult
-    func getPeriod(periodIndex: Int, period: inout Period) -> Period {
-        getPeriod(periodIndex: periodIndex, period: &period, setIds: false)
+    func getPeriod(periodIndex: Int, period: Period) -> Period {
+        getPeriod(periodIndex: periodIndex, period: period, setIds: false)
     }
 
     func equals(to other: Timeline) -> Bool {
@@ -182,19 +182,19 @@ public extension Timeline {
             return false
         }
 
-        var window = Window()
-        var period = Period()
-        var otherWindow = Window()
-        var otherPeriod = Period()
+        let window = Window()
+        let period = Period()
+        let otherWindow = Window()
+        let otherPeriod = Period()
 
         for index in 0..<windowCount() {
-            if getWindow(windowIndex: index, window: &window) != other.getWindow(windowIndex: index, window: &otherWindow) {
+            if getWindow(windowIndex: index, window: window) != other.getWindow(windowIndex: index, window: otherWindow) {
                 return false
             }
         }
 
         for index in 0..<periodCount() {
-            if getPeriod(periodIndex: index, period: &period) != other.getPeriod(periodIndex: index, period: &otherPeriod) {
+            if getPeriod(periodIndex: index, period: period) != other.getPeriod(periodIndex: index, period: otherPeriod) {
                 return false
             }
         }
@@ -238,9 +238,9 @@ public extension Timeline {
 
 private final class EmptyTimeline: Timeline {
     func windowCount() -> Int { 0 }
-    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window { window }
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window { window }
     func periodCount() -> Int { 0 }
-    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period { period }
+    func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period { period }
     func indexOfPeriod(by id: AnyHashable) -> Int? { nil }
     func id(for periodIndex: Int) -> AnyHashable { UUID() }
     init() {}

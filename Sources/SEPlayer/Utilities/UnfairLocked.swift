@@ -43,4 +43,11 @@ final class UnfairLock: NSLocking {
     func unlock() {
         os_unfair_lock_unlock(unfairLock)
     }
+
+    func usingLock<R, E: Error>(_ body: () throws(E) -> R) throws(E) -> R {
+        lock()
+        let result = try body()
+        unlock()
+        return result
+    }
 }

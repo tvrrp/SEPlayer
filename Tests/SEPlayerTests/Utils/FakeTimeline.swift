@@ -59,13 +59,13 @@ struct FakeTimeline: Timeline {
         shuffleModeEnabled ? shuffleOrder.firstIndex : _firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
     }
 
-    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
         let windowDefinition = windowDefinitions[windowIndex]
         var windowDurationUs = Int64.zero
         var period = Period()
 
         for index in periodOffsets[windowIndex..<windowIndex + 1] {
-            let periodDurationUs = getPeriod(periodIndex: index, period: &period).durationUs
+            let periodDurationUs = getPeriod(periodIndex: index, period: period).durationUs
             if index == periodOffsets[windowIndex] && periodDurationUs != 0 {
                 windowDurationUs -= windowDefinition.windowOffsetInFirstPeriodUs
             }
@@ -76,20 +76,21 @@ struct FakeTimeline: Timeline {
             windowDurationUs += periodDurationUs
         }
 
-        window = Window(
+        window.set(
             id: windowDefinition.id,
             mediaItem: windowDefinition.mediaItem,
             presentationStartTimeMs: .timeUnset,
-            elapsedRealtimeEpochOffsetMs: .timeUnset,
+            windowStartTimeMs: windowDefinition.isLive ? Time.usToMs(timeUs: windowDefinition.windowStartTimeUs) : .timeUnset,
+            elapsedRealtimeEpochOffsetMs: windowDefinition.isLive ? 0 : .timeUnset,
             isSeekable: windowDefinition.isSeekable,
             isDynamic: windowDefinition.isDynamic,
-            isPlaceholder: windowDefinition.isPlaceholder,
             defaultPositionUs: windowDefinition.defaultPositionUs,
-            durationUs: windowDefinition.durationUs,
+            durationUs: windowDurationUs,
             firstPeriodIndex: periodOffsets[windowIndex],
             lastPeriodIndex: periodOffsets[windowIndex + 1] - 1,
             positionInFirstPeriodUs: windowDefinition.windowOffsetInFirstPeriodUs
         )
+        window.isPlaceholder = windowDefinition.isPlaceholder
 
         return window
     }
@@ -98,7 +99,7 @@ struct FakeTimeline: Timeline {
         periodOffsets[periodOffsets.count - 1]
     }
 
-    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
+    func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
         let windowIndex = Util.binarySearch(array: periodOffsets, value: periodIndex, inclusive: true, stayInBounds: false)
         let windowPeriodIndex = periodIndex - periodOffsets[windowIndex]
         let windowDefinition = windowDefinitions[windowIndex]
@@ -119,16 +120,15 @@ struct FakeTimeline: Timeline {
             positionInWindowUs = periodDurationUs * Int64(windowPeriodIndex)
         }
 
-        period = Period(
+        return period.set(
             id: id,
             uid: uid,
             windowIndex: windowIndex,
             durationUs: periodDurationUs,
             positionInWindowUs: positionInWindowUs,
+            // TODO: adPlaybackState: ad,
             isPlaceholder: windowDefinition.isPlaceholder
         )
-
-        return period
     }
 
     func indexOfPeriod(by id: AnyHashable) -> Int? {

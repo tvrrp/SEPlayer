@@ -10,21 +10,24 @@ import Foundation
 @testable import SEPlayer
 
 final class PlayerDelegateAsyncStream {
+    private var stream: AsyncStream<Event>!
     private var continuation: AsyncStream<Event>.Continuation?
 
     @MainActor
     init(delegate: MulticastDelegate<SEPlayerDelegate>) {
         delegate.addDelegate(self)
-    }
- 
-    func start() -> AsyncStream<Event> {
-        return AsyncStream<Event> { continuation in
+
+        stream = AsyncStream<Event> { continuation in
             self.continuation = continuation
 
             continuation.onTermination = { [weak self] _ in
                 self?.continuation = nil
             }
         }
+    }
+ 
+    func start() -> AsyncStream<Event> {
+        stream
     }
 }
 
@@ -33,15 +36,24 @@ final class CollectablePlayerDelegateAsyncStream {
 
     final class EventValidator {
         let validation: ((PlayerDelegateAsyncStream.Event) -> Bool)
-        var continuation: CheckedContinuation<Void, Never>?
+        var continuation: CheckedContinuation<Void, Error>?
 
         init(validation: @escaping (PlayerDelegateAsyncStream.Event) -> Bool) {
             self.validation = validation
         }
+
+        static func waitForState(state: PlayerState) -> EventValidator {
+            EventValidator { event in
+                if case let .didChangePlaybackState(playerState) = event {
+                    return playerState == state
+                }
+                return false
+            }
+        }
     }
 
+    let eventValidator: EventValidator
     private let playerDelegateAsyncStream: PlayerDelegateAsyncStream
-    private let eventValidator: EventValidator?
 
     @MainActor
     init(
@@ -52,15 +64,16 @@ final class CollectablePlayerDelegateAsyncStream {
         self.eventValidator = eventValidator
     }
 
-    func startCollecting(isolation: isolated (any Actor)? = #isolation) {
+    @TestableSyncPlayerActor
+    func startCollecting() {
         Task { [self] in
             for await event in playerDelegateAsyncStream.start() {
-                print("❌ EVENT = \(event)")
+                print("❌ EVENT COL = \(event)")
                 events.append(event)
 
-                if eventValidator?.validation(event) == true {
-                    eventValidator?.continuation?.resume()
-                    break
+                if eventValidator.validation(event) == true {
+                    eventValidator.continuation?.resume()
+                    return
                 }
             }
         }

@@ -31,20 +31,20 @@ public class ForwardingTimeline: Timeline, @unchecked Sendable {
     }
 
     @discardableResult
-    public func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
-        timeline.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+    public func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+        timeline.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
     }
 
     public func periodCount() -> Int { timeline.periodCount() }
 
     @discardableResult
-    public func periodById(_ id: AnyHashable, period: inout Period) -> Period {
-        defaultPeriodById(id, period: &period)
+    public func periodById(_ id: AnyHashable, period: Period) -> Period {
+        defaultPeriodById(id, period: period)
     }
 
     @discardableResult
-    public func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-        timeline.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
+    public func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+        timeline.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
     }
 
     public func indexOfPeriod(by id: AnyHashable) -> Int? {

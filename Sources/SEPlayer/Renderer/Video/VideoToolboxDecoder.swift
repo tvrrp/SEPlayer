@@ -23,6 +23,8 @@ final class VideoToolboxDecoder: SEDecoder {
     private var _isDecodingSample = false
     private var _framedBeingDecoded = 0
 
+    private var outputFormatDescription: CMFormatDescription?
+
     init(queue: Queue, format: Format) throws {
         self.queue = queue
         self.formatDescription = try format.buildFormatDescription()
@@ -100,6 +102,7 @@ final class VideoToolboxDecoder: SEDecoder {
         _framedBeingDecoded = 0
         _pendingSamples.removeAll()
         try compressedBufferPool.flush()
+        outputFormatDescription = nil
     }
 
     func release() {
@@ -162,8 +165,8 @@ final class VideoToolboxDecoder: SEDecoder {
 
         guard let decompressionSession else { return nil }
 
-        var decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
-        if playbackSpeed <= 1.0 { decodeFlags.insert(._1xRealTimePlayback) }
+        let decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
+//        if playbackSpeed <= 1.0 { decodeFlags.insert(._1xRealTimePlayback) }
         var infoFlagsOut: VTDecodeInfoFlags = []
 
 //        Task {
@@ -247,12 +250,23 @@ final class VideoToolboxDecoder: SEDecoder {
                 throw VTDSessionErrors.osStatus(.init(rawValue: response.status))
             }
 
+            let outputFormatDescription: CMFormatDescription?
+            if let format = self.outputFormatDescription {
+                outputFormatDescription = format
+            } else if let imageBuffer = response.imageBuffer {
+                outputFormatDescription = try CMFormatDescription(imageBuffer: imageBuffer)
+                self.outputFormatDescription = outputFormatDescription
+            } else {
+                outputFormatDescription = nil
+            }
+
             try compressedBufferPool.onDecodeSuccess(
                 fromCompressedIndex: response.sampleIndex,
                 decoded: VideoOutputWrapper(
                     imageBuffer: response.imageBuffer,
                     sampleFlags: response.sampleFlags,
-                    presentationTime: response.presentationTimeStamp.microseconds
+                    presentationTime: response.presentationTimeStamp.microseconds,
+                    outputFormatDescription: outputFormatDescription
                 )
             )
         } catch {
@@ -262,7 +276,7 @@ final class VideoToolboxDecoder: SEDecoder {
     }
 }
 
-extension VideoToolboxDecoder: CARendererDecoder {
+extension VideoToolboxDecoder: AVFVideoRendererDecoder {
     static func getCapabilities() -> RendererCapabilities {
         VideoToolboxCapabilitiesResolver()
     }
@@ -364,11 +378,18 @@ final class VideoOutputWrapper: CoreVideoBuffer, Comparable {
     let imageBuffer: CVImageBuffer?
     let sampleFlags: SampleFlags
     let presentationTime: Int64
+    let outputFormatDescription: CMFormatDescription?
 
-    init(imageBuffer: CVImageBuffer?, sampleFlags: SampleFlags, presentationTime: Int64) {
+    init(
+        imageBuffer: CVImageBuffer?,
+        sampleFlags: SampleFlags,
+        presentationTime: Int64,
+        outputFormatDescription: CMFormatDescription?
+    ) {
         self.imageBuffer = imageBuffer
         self.sampleFlags = sampleFlags
         self.presentationTime = presentationTime
+        self.outputFormatDescription = outputFormatDescription
     }
 
     static func < (lhs: VideoOutputWrapper, rhs: VideoOutputWrapper) -> Bool {

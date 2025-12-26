@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 19.10.2025.
 //
 
-struct DecoderCircularBuffer<Buffer> {
+final class DecoderCircularBuffer<Buffer> {
     var isInputBufferAvailable: Bool { availableInputBuffers.first != nil }
     var isOutputBufferAvailable: Bool { availableOutputBuffers.first != nil }
 
@@ -37,12 +37,12 @@ struct DecoderCircularBuffer<Buffer> {
         availableOutputBuffers = CircularBuffer<Int>(0..<capacity)
     }
 
-    mutating func dequeueInputBufferIndex() -> Int? {
+    func dequeueInputBufferIndex() -> Int? {
         precondition(!isReleased)
         return availableInputBuffers.popFirst()
     }
 
-    mutating func dequeueOutputBufferIndex() -> Int? {
+    func dequeueOutputBufferIndex() -> Int? {
         precondition(!isReleased)
         return availableOutputBuffers.popFirst()
     }
@@ -57,17 +57,20 @@ struct DecoderCircularBuffer<Buffer> {
         return decompressedBuffers[index]
     }
 
-    mutating func onInputBufferAvailable(index: Int) {
+    func onInputBufferAvailable(index: Int) {
         precondition(!isReleased)
         availableInputBuffers.append(index)
     }
 
-    mutating func onOutputBufferAvailable(index: Int) {
-        precondition(!isReleased)
-        availableOutputBuffers.append(index)
+    func onOutputBufferAvailable(index: Int) {
+        if isReleased {
+            deallocateBuffer(decompressedBuffers[index])
+        } else {
+            availableOutputBuffers.append(index)
+        }
     }
 
-    mutating func flush(releaseOutputBuffers: Bool = false) {
+    func flush(releaseOutputBuffers: Bool = false) {
         precondition(!isReleased)
         availableInputBuffers = CircularBuffer<Int>(0..<capacity)
 
@@ -76,9 +79,9 @@ struct DecoderCircularBuffer<Buffer> {
         }
     }
 
-    mutating func release() {
+    func release() {
         isReleased = true
         compressedBuffers.forEach { deallocateBuffer($0) }
-        decompressedBuffers.forEach { deallocateBuffer($0) }
+        // we delay release of decompressedBuffers before CMSampleBuffer deinit
     }
 }

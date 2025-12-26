@@ -7,7 +7,7 @@
 
 import CoreMedia
 
-protocol CARendererDecoder: SEDecoder where OutputBuffer: CoreVideoBuffer {
+protocol AVFVideoRendererDecoder: SEDecoder where OutputBuffer: CoreVideoBuffer {
     static func getCapabilities() -> RendererCapabilities
     func setPlaybackSpeed(_ speed: Float)
     func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
@@ -15,9 +15,10 @@ protocol CARendererDecoder: SEDecoder where OutputBuffer: CoreVideoBuffer {
 
 protocol CoreVideoBuffer: DecoderOutputBuffer {
     var imageBuffer: CVImageBuffer? { get }
+    var outputFormatDescription: CMFormatDescription? { get }
 }
 
-final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
+final class AVFVideoRenderer<Decoder: AVFVideoRendererDecoder>: BaseSERenderer {
     private var decoder: Decoder?
     private let queue: Queue
     private let bufferableContainer: PlayerBufferableContainer
@@ -62,16 +63,22 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
         super.init(queue: queue, trackType: .video, clock: clock)
     }
 
+    override func handleMessage(_ message: RendererMessage) throws {
+        if case let .requestMediaDataWhenReady(queue, block) = message {
+            bufferableContainer.requestMediaDataWhenReady(on: queue, block: block)
+        } else if case .stopRequestingMediaData = message {
+            bufferableContainer.stopRequestingMediaData()
+        } else if case let .setVideoOutput(output) = message {
+            bufferableContainer.register(output)
+        } else if case let .setVideoOutput(output) = message {
+            bufferableContainer.remove(output)
+        } else {
+            try super.handleMessage(message)
+        }
+    }
+
     override func getCapabilities() -> RendererCapabilities {
         Decoder.getCapabilities()
-    }
-
-    override func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void) {
-        bufferableContainer.requestMediaDataWhenReady(on: queue, block: block)
-    }
-
-    override func stopRequestingMediaData() {
-        bufferableContainer.stopRequestingMediaData()
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
@@ -342,11 +349,13 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
             return true
         }
 
+        let formatDescription = try buffer.outputFormatDescription ?? CMFormatDescription(imageBuffer: imageBuffer)
+
         let sampleBufferPresentationTime = buffer.presentationTime
         let presentationTimeStamp = CMTime.from(microseconds: sampleBufferPresentationTime)
         let sampleBuffer = try CMSampleBuffer(
             imageBuffer: imageBuffer,
-            formatDescription: CMFormatDescription(imageBuffer: imageBuffer),
+            formatDescription: formatDescription,
             sampleTiming: CMSampleTimingInfo(
                 duration: .invalid,
                 presentationTimeStamp: presentationTimeStamp,
@@ -358,7 +367,7 @@ final class CAVideoRenderer<Decoder: CARendererDecoder>: BaseSERenderer {
     }
 }
 
-private extension CAVideoRenderer {
+private extension AVFVideoRenderer {
     func resetInputBuffer() {
         inputIndex = nil
         inputBuffer.reset()
@@ -369,6 +378,7 @@ final class ImageBufferWrapper: CoreVideoBuffer {
     var imageBuffer: CVImageBuffer? { buffer.imageBuffer }
     var sampleFlags: SampleFlags  { buffer.sampleFlags }
     let presentationTime: Int64
+    var outputFormatDescription: CMFormatDescription? { buffer.outputFormatDescription }
 
     fileprivate let buffer: CoreVideoBuffer
 

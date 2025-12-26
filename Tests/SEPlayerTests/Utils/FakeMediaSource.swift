@@ -29,11 +29,11 @@ class FakeMediaSource: BaseMediaSource {
     private var transferListener: TransferListener?
     private var periodDefersOnPreparedCallback = false
 
-    convenience init(syncQueue: Queue) throws {
+    convenience init(syncQueue: Queue = playerSyncQueue) throws {
         try self.init(queue: syncQueue, timeline: FakeTimeline())
     }
 
-    convenience init(queue: Queue, timeline: Timeline?, formats: [Format] = []) throws {
+    convenience init(queue: Queue = playerSyncQueue, timeline: Timeline?, formats: [Format] = []) throws {
         try self.init(
             queue: queue,
             timeline: timeline,
@@ -70,13 +70,11 @@ class FakeMediaSource: BaseMediaSource {
     }
 
     override func getMediaItem() -> MediaItem {
-        assert(queue.isCurrent())
         guard let timeline, !timeline.isEmpty else {
-            return .fakeMediaItem
+            return Self.fakeMediaItem
         }
 
-        var newWindow = Window()
-        return timeline.getWindow(windowIndex: 0, window: &newWindow).mediaItem
+        return timeline.getWindow(windowIndex: 0, window: Window()).mediaItem
     }
 
     func setCanUpdateMediaItems(_ canUpdateMediaItems: Bool, isolation: isolated (any Actor)? = #isolation) {
@@ -119,8 +117,7 @@ class FakeMediaSource: BaseMediaSource {
         #expect(!releasedSource)
         let timeline = try #require(timeline)
         let periodIndex = try #require(timeline.indexOfPeriod(by: id.periodId))
-        var period = Period()
-        period = timeline.getPeriod(periodIndex: periodIndex, period: &period)
+        timeline.getPeriod(periodIndex: periodIndex, period: Period())
         let mediaPeriod = try createMediaPeriod(
             id: id,
             trackGroups: trackGroups,
@@ -152,6 +149,22 @@ class FakeMediaSource: BaseMediaSource {
         preparedSource = false
     }
 
+    func setNewSourceInfo(
+        newTimeline: Timeline,
+        sendManifestLoadEvents: Bool = true,
+        isolation: isolated (any Actor)? = #isolation
+    ) throws {
+        assert(queue.isCurrent())
+        #expect(preparationAllowed)
+        if preparedSource {
+            #expect(!releasedSource)
+            timeline = newTimeline
+            try! self.finishSourcePreparation(sendManifestLoadEvents: sendManifestLoadEvents)
+        } else {
+            timeline = newTimeline
+        }
+    }
+
     func createMediaPeriod(
         id: MediaPeriodId,
         trackGroups: [TrackGroup],
@@ -159,8 +172,7 @@ class FakeMediaSource: BaseMediaSource {
         transferListener: TransferListener?
     ) throws -> FakeMediaPeriod {
         let timeline = try #require(timeline)
-        var period = Period()
-        let positionInWindowUs = timeline.periodById(id.periodId, period: &period).positionInWindowUs
+        let positionInWindowUs = timeline.periodById(id.periodId, period: Period()).positionInWindowUs
         let defaultFirstSampleTimeUs = positionInWindowUs >= 0 ? 0 : -positionInWindowUs
         return try FakeMediaPeriod(
             queue: queue,
@@ -174,16 +186,17 @@ class FakeMediaSource: BaseMediaSource {
     }
 
     private func finishSourcePreparation(sendManifestLoadEvents: Bool) throws {
+        print("❌ finishSourcePreparation")
         try refreshSourceInfo(timeline: #require(timeline))
     }
 }
 
 extension FakeMediaSource {
     final class InitialTimeline: ForwardingTimeline, @unchecked Sendable {
-        override func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
-            var childWindow = timeline.getWindow(
+        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+            let childWindow = timeline.getWindow(
                 windowIndex: windowIndex,
-                window: &window,
+                window: window,
                 defaultPositionProjectionUs: defaultPositionProjectionUs
             )
             childWindow.isDynamic = true
@@ -197,7 +210,7 @@ extension FakeMediaSource {
     }
 }
 
-private extension MediaItem {
+extension FakeMediaSource {
     static let fakeMediaItem = MediaItem.Builder()
         .setMediaId("FakeMediaSource")
         .setUrl(URL(string: "http://manifest.url")!)

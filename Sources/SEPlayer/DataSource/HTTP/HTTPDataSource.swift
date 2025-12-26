@@ -7,283 +7,126 @@
 
 import Foundation.NSURLSession
 
-final class DefautlHTTPDataSource: DataSource {
+final class DefautlHTTPDataSource: DataSource, @unchecked Sendable {
+    var url: URL?
+    var urlResponse: HTTPURLResponse?
     let components: DataSourceOpaque
 
-    var url: URL? { queue.sync { _url } }
-    var urlResponse: HTTPURLResponse? { lock.withLock { _urlResponce } }
-
-    private let queue: Queue
-    private let connectTimeout: TimeInterval
-    private let readTimeout: TimeInterval
+    private let syncActor: PlayerActor
     private let networkLoader: IPlayerSessionLoader
-    private let operation: ConditionVariable
-    private let lock: NSRecursiveLock
+    private let loadHandler: HTTPDataSourceLoadHandler
 
     private var currentDataSpec: DataSpec?
     private var currentTask: URLSessionDataTask?
-    private var intermidateBuffer = ByteBuffer()
 
-    private var _url: URL?
-    private var _urlResponce: HTTPURLResponse?
-
-    private var openResult: Result<HTTPURLResponse, Error>?
-    private var loadError: Error?
-
-    private var didStart = false
-    private var isClosed = false
-    private var didFinish = false
-    private var bytesRemaining = 0
-    private var currentConnectionTimeout: TimeInterval
-    private var currentReadTimeout: TimeInterval
+    private var openTask: Task<HTTPURLResponse, Error>?
+    private var openContinuation: CheckedContinuation<HTTPURLResponse, Error>?
 
     init(
-        queue: Queue,
+        syncActor: PlayerActor,
         networkLoader: IPlayerSessionLoader,
-        components: DataSourceOpaque? = nil,
         connectTimeout: TimeInterval = 10,
         readTimeout: TimeInterval = 10
     ) {
-        self.queue = queue
-        self.components = components ?? DataSourceOpaque(isNetwork: true)
+        components = DataSourceOpaque(isNetwork: true)
+        self.syncActor = syncActor
         self.networkLoader = networkLoader
-        self.connectTimeout = 10
-        self.readTimeout = 10
-        operation = ConditionVariable()
-        lock = NSRecursiveLock()
-        currentConnectionTimeout = Date().timeIntervalSince1970
-        currentReadTimeout =  Date().timeIntervalSince1970
+        self.loadHandler = HTTPDataSourceLoadHandler(syncActor: syncActor)
     }
 
-    @discardableResult
-    func open(dataSpec: DataSpec) throws -> Int {
-        assert(queue.isCurrent())
-        operation.close()
+    func open(dataSpec: DataSpec, isolation: isolated any Actor = #isolation) async throws -> Int {
+        syncActor.assertIsolated()
+        url = dataSpec.url
         currentDataSpec = dataSpec
-        resetConnectTimeout()
-        return try createConnection(with: dataSpec)
+        return try await createConnection(with: dataSpec)
     }
 
-    @discardableResult
-    func close() -> ByteBuffer? {
-//        operation.cancel()
-        return lock.withLock {
-            isClosed = true
-            didFinish = false
-            openResult = nil
-            currentTask?.cancel()
-            currentTask = nil
-            currentDataSpec = nil
-            let buffer = intermidateBuffer
-            intermidateBuffer.clear()
-            return buffer
-        }
+    func close(isolation: isolated any Actor = #isolation) async -> ByteBuffer? {
+        syncActor.assertIsolated()
+        currentTask?.cancel()
+        currentTask = nil
+        openTask?.cancel()
+        currentTask = nil
+        currentDataSpec = nil
+        return await loadHandler.returnAvailable()
     }
 
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
-        guard length > 0 else { return .success(amount: .zero) }
-        assert(queue.isCurrent())
-        lock.lock()
-
-        guard bytesRemaining > 0 else {
-            lock.unlock()
-            return .endOfInput
-        }
-
-        if let loadError {
-            throw loadError
-        }
-
-        if intermidateBuffer.readableBytes <= 0 {
-            lock.unlock()
-            operation.close()
-            operation.block(timeout: readTimeout)
-            lock.lock()
-
-            if didFinish {
-                bytesRemaining = 0
-                lock.unlock()
-                return .endOfInput
-            }
-        }
-
-        let readAmount = min(intermidateBuffer.readableBytes, length)
-        try readFully(to: &buffer, offset: offset, length: readAmount)
-        lock.unlock()
-        return .success(amount: readAmount)
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor = #isolation) async throws -> DataReaderReadResult {
+        try await loadHandler.read(to: &buffer, offset: offset, length: length)
     }
 
-    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
-        guard length > 0 else { return .success(amount: .zero) }
-        assert(queue.isCurrent())
-        lock.lock()
-
-        guard bytesRemaining > 0 else {
-            lock.unlock()
-            return .endOfInput
-        }
-
-        if let loadError {
-            throw loadError
-        }
-
-        if intermidateBuffer.readableBytes <= 0 {
-            lock.unlock()
-            operation.close()
-            operation.block(timeout: readTimeout)
-            lock.lock()
-
-            if didFinish {
-                bytesRemaining = 0
-                lock.unlock()
-                return .endOfInput
-            }
-        }
-
-        let readAmount = min(intermidateBuffer.readableBytes, length)
-        try readFully(to: &allocation, offset: offset, length: readAmount)
-        lock.unlock()
-        return .success(amount: readAmount)
-    }
-
-    private func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int) throws {
-        let data = try! intermidateBuffer.readData(count: length)
-        buffer.moveWriterIndex(to: offset)
-        buffer.writeBytes(data)
-        bytesRemaining -= length
-    }
-
-    private func readFully(to allocation: inout Allocation, offset: Int, length: Int) throws {
-        intermidateBuffer.readWithUnsafeReadableBytes { pointer in
-            allocation.writeBuffer(offset: offset, lenght: length, buffer: pointer)
-            return length
-        }
-        bytesRemaining -= length
-    }
-}
-
-extension DefautlHTTPDataSource: PlayerSessionDelegate {
-    private func createConnection(with dataSpec: DataSpec) throws -> Int {
-        assert(queue.isCurrent())
-        let request = dataSpec.createURLRequest()
-        lock.withLock {
-            didFinish = false
-            isClosed = false
-            intermidateBuffer.clear()
-            intermidateBuffer.reserveCapacity(dataSpec.length)
-        }
-
-        let task = networkLoader.createTask(request: request, delegate: self)
-        task.resume()
-        self.currentTask = task
-        transferInitializing(source: self)
-
-        let connectionOpened = blockUntilConnectTimeout()
-        guard let openResult, connectionOpened else { throw DataReaderError.connectionNotOpened }
-
-        switch openResult {
-        case let .success(urlResponce):
-            let contentLength = contentLength(from: urlResponce)
-            lock.withLock {
-                bytesRemaining = if let currentDataSpec, currentDataSpec.length > 0 {
-                    currentDataSpec.length
-                } else {
-                    contentLength
-                }
-                didStart = true
-            }
-            return contentLength
-        case let .failure(error):
-            throw error
-        }
-    }
-
-    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask) -> URLSession.ResponseDisposition {
-        assert(!queue.isCurrent())
-        guard lock.withLock({ !isClosed && currentTask == task }) else {
-            return .cancel
-        }
-        guard let urlResponce = response as? HTTPURLResponse else {
-            lock.withLock {
-                openResult = .failure(DataReaderError.wrongURLResponce)
-                isClosed = true
-                operation.close()
-            }
-            return .cancel
-        }
-
-        lock.withLock {
-            didStart = true
-            openResult = .success(urlResponce)
-            self._urlResponce = urlResponce
-        }
-
-        operation.open()
-        return .allow
-    }
-
-    func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
-        assert(!queue.isCurrent())
-        guard lock.withLock({ !isClosed && currentTask == task }) else {
-            return
-        }
-        lock.lock()
-        intermidateBuffer.writeBytes(buffer)
-        lock.unlock()
-        operation.open()
-    }
-
-    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask) {
-        assert(!queue.isCurrent())
-        transferEnded(source: self, metrics: metrics)
-    }
-
-    func didFinishTask(_ task: URLSessionTask, error: (any Error)?) {
-        assert(!queue.isCurrent())
-
-        lock.withLock {
-            guard !isClosed && currentTask == task else { return }
-
-            if let error {
-                if openResult == nil {
-                    openResult = .failure(error)
-                } else {
-                    loadError = error
-                }
-            }
-            isClosed = true
-            currentTask = nil
-
-            operation.open()
-        }
-    }
-}
-
-private extension DefautlHTTPDataSource {
-    private func blockUntilConnectTimeout() -> Bool {
-        assert(queue.isCurrent())
-        var now = Date().timeIntervalSince1970
-        var opened = false
-
-        while !opened, now < currentConnectionTimeout {
-            opened = operation.block(timeout: currentConnectionTimeout - now + 5)
-            now = Date().timeIntervalSince1970
-        }
-
-        return opened
-    }
-
-    private func resetConnectTimeout() {
-        currentConnectionTimeout = Date().addingTimeInterval(connectTimeout).timeIntervalSince1970
+    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor = #isolation) async throws -> DataReaderReadResult {
+        try await loadHandler.read(allocation: allocation, offset: offset, length: length)
     }
 }
 
 extension DefautlHTTPDataSource {
-    func contentLength(from httpResponse: HTTPURLResponse) -> Int {
-        httpResponse
-            .value(forHeaderKey: "Content-Length")?
-            .components(separatedBy: "/").last
-            .flatMap(Int.init) ?? 0
+    private func createConnection(
+        with dataSpec: DataSpec,
+        isolation: isolated any Actor = #isolation
+    ) async throws -> Int {
+        syncActor.assertIsolated()
+        let request = dataSpec.createURLRequest()
+        await loadHandler.willOpenConnection(with: dataSpec.length)
+
+        let task = networkLoader.createTask(request: request, delegate: self)
+        self.currentTask = task
+
+        let openTask = Task<HTTPURLResponse, Error> {
+            defer { openContinuation = nil }
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation(isolation: syncActor) { continuation in
+                    self.openContinuation = continuation
+                    task.resume()
+                }
+            } onCancel: {
+                Task { await syncActor.run { _ in
+                    openContinuation?.resume(throwing: CancellationError())
+                }}
+            }
+        }
+        self.openTask = openTask
+
+        let urlResponse = try await openTask.value
+        self.openTask = nil
+        await loadHandler.didOpenConnection(with: urlResponse.contentLength)
+        self.urlResponse = urlResponse
+        return urlResponse.contentLength
+    }
+}
+
+extension DefautlHTTPDataSource: PlayerSessionDelegate {
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask) -> URLSession.ResponseDisposition {
+        guard let response = response as? HTTPURLResponse else {
+            Task { await syncActor.run { _ in
+                openContinuation?.resume(throwing: DataReaderError.wrongURLResponce)
+            }}
+            return .cancel
+        }
+
+        Task { await syncActor.run { _ in openContinuation?.resume(returning: response) } }
+
+        return .allow
+    }
+
+    func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
+        Task { await loadHandler.consumeData(data: buffer) }
+    }
+
+    func didFinishTask(_ task: URLSessionTask, error: (any Error)?) {
+        if let error, (error as NSError).code == NSURLErrorCancelled {
+            Task {
+                await syncActor.run { _ in openContinuation?.resume(throwing: CancellationError()) }
+                await loadHandler.didCloseConnection(with: CancellationError())
+            }
+            return
+        }
+
+        Task { await loadHandler.didCloseConnection(with: error) }
+    }
+
+    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask) {
+        transferEnded(source: self, metrics: metrics)
     }
 }
 

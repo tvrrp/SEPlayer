@@ -13,18 +13,18 @@ public protocol DataSourceFactory {
 
 public struct DefaultDataSourceFactory: DataSourceFactory {
     private let segmentLength: Int?
-    private let loaderQueue: Queue
+    private let syncActor: PlayerActor
     private let networkLoader: IPlayerSessionLoader
     private let baseDataSource: DataSource?
 
     public init(
         segmentLength: Int? = nil,
-        loaderQueue: Queue,
+        syncActor: PlayerActor,
         networkLoader: IPlayerSessionLoader,
         baseDataSource: DataSource? = nil
     ) {
         self.segmentLength = segmentLength
-        self.loaderQueue = loaderQueue
+        self.syncActor = syncActor
         self.networkLoader = networkLoader
         self.baseDataSource = baseDataSource
     }
@@ -32,10 +32,10 @@ public struct DefaultDataSourceFactory: DataSourceFactory {
     public func createDataSource() -> DataSource {
         DefaultDataSource(
             segmentLength: segmentLength,
-            loaderQueue: loaderQueue,
+            syncActor: syncActor,
             networkLoader: networkLoader,
             baseDataSource: baseDataSource ?? RangeRequestHTTPDataSource(
-                queue: loaderQueue,
+                syncActor: syncActor,
                 networkLoader: networkLoader
             )
         )
@@ -48,7 +48,7 @@ private final class DefaultDataSource: DataSource {
     var urlResponse: HTTPURLResponse? { dataSource?.urlResponse }
 
     private let segmentLength: Int?
-    private let loaderQueue: Queue
+    private let syncActor: PlayerActor
     private let networkLoader: IPlayerSessionLoader
     private let baseDataSource: DataSource
     private let fakeComponents: DataSourceOpaque
@@ -59,19 +59,19 @@ private final class DefaultDataSource: DataSource {
 
     init(
         segmentLength: Int?,
-        loaderQueue: Queue,
+        syncActor: PlayerActor,
         networkLoader: IPlayerSessionLoader,
         baseDataSource: DataSource
     ) {
         self.segmentLength = segmentLength
-        self.loaderQueue = loaderQueue
+        self.syncActor = syncActor
         self.networkLoader = networkLoader
         self.baseDataSource = baseDataSource
         self.fakeComponents = DataSourceOpaque(isNetwork: false)
     }
 
-    func open(dataSpec: DataSpec) throws -> Int {
-        assert(loaderQueue.isCurrent())
+    func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
+        syncActor.assertIsolated()
 
         guard dataSource == nil else { throw Error.wrongState }
 
@@ -84,38 +84,38 @@ private final class DefaultDataSource: DataSource {
         }
 
         self.dataSource = dataSource
-        return try dataSource.open(dataSpec: dataSpec)
+        return try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
     }
 
-    func close() -> ByteBuffer? {
-        assert(loaderQueue.isCurrent())
+    func close(isolation: isolated any Actor) async -> ByteBuffer? {
+        syncActor.assertIsolated()
         let copyDataSource = dataSource
         dataSource = nil
-        return copyDataSource?.close()
+        return await copyDataSource?.close(isolation: isolation)
     }
 
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(loaderQueue.isCurrent())
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         guard let dataSource else {
             throw DataReaderError.connectionNotOpened
         }
 
-        return try dataSource.read(to: &buffer, offset: offset, length: length)
+        return try await dataSource.read(to: &buffer, offset: offset, length: length, isolation: isolation)
     }
 
-    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(loaderQueue.isCurrent())
+    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         guard let dataSource else {
             throw DataReaderError.connectionNotOpened
         }
 
-        return try dataSource.read(allocation: &allocation, offset: offset, length: length)
+        return try await dataSource.read(allocation: allocation, offset: offset, length: length, isolation: isolation)
     }
 
     private func createFileDataSource(dataSpec: DataSpec) -> DataSource {
         if let fileDataSource { return fileDataSource }
 
-        let fileDataSource = FileDataSource(queue: loaderQueue)
+        let fileDataSource = FileDataSource(syncActor: syncActor)
         self.fileDataSource = fileDataSource
         return fileDataSource
     }

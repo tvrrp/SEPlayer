@@ -8,7 +8,7 @@
 import AudioToolbox
 import CoreMedia.CMBlockBuffer
 
-final class AudioConverterDecoder: AQDecoder {
+final class AudioConverterDecoder: AVFAudioRendererDecoder {
     private let queue: Queue
     private var sourceFormat: AudioStreamBasicDescription
     private var sourceChannelLayout: ManagedAudioChannelLayout?
@@ -247,9 +247,9 @@ final class AudioConverterDecoder: AQDecoder {
             if itemsCount > 0 {
                 let blockBuffer = try CMBlockBuffer(
                     buffer: .init(start: bufferList[0].mData, count: size),
-                    deallocator: { [weak self] (_, _) in
-                        self?.queue.async {
-                            self?.decoderCircularBuffer.onOutputBufferAvailable(index: outputIndex)
+                    deallocator: { [queue, decoderCircularBuffer] (_, _) in
+                        queue.async {
+                            decoderCircularBuffer.onOutputBufferAvailable(index: outputIndex)
                         }
                     }
                 )
@@ -350,5 +350,6 @@ private struct BufferWrapper {
 
 private extension Int {
     static let highWaterMark = 60
+//    static let highWaterMark = 40000
     static let defaultInputBufferSize: Int = 10 * 1024
 }

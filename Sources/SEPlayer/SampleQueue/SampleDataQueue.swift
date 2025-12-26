@@ -10,14 +10,14 @@ import string_h
 final class SampleDataQueue {
     private let queue: Queue
     private let allocator: Allocator
-    
+
     private let allocationLength: Int
     private var firstAllocationNode: SampleAllocationNode
     private var readAllocationNode: SampleAllocationNode
     private var writeAllocationNode: SampleAllocationNode
-    
+
     private var totalBytesWritten: Int = 0
-    
+
     init(queue: Queue, allocator: Allocator) {
         self.queue = queue
         self.allocator = allocator
@@ -47,7 +47,7 @@ final class SampleDataQueue {
         if totalBytesWritten == 0 || totalBytesWritten == firstAllocationNode.startPosition {
             clearAllocationNodes(fromNode: firstAllocationNode)
             firstAllocationNode = SampleAllocationNode(
-                startPosition: totalBytesWritten,
+                startPosition: self.totalBytesWritten,
                 allocationLength: allocationLength
             )
             readAllocationNode = firstAllocationNode
@@ -85,22 +85,22 @@ final class SampleDataQueue {
         readAllocationNode = firstAllocationNode
     }
 
-    func readToBuffer(outputSpan: inout OutputRawSpan, offset: Int, size: Int) throws {
+    func readToBuffer(target: UnsafeMutableRawBufferPointer, offset: Int, size: Int) throws {
         assert(queue.isCurrent())
-        readAllocationNode = try! readData(
+        readAllocationNode = try readData(
             allocationNode: readAllocationNode,
             absolutePosition: offset,
-            target: &outputSpan,
+            target: target,
             size: size
         )
     }
 
-    func peekToBuffer(outputSpan: inout OutputRawSpan, offset: Int, size: Int) throws {
+    func peekToBuffer(target: UnsafeMutableRawBufferPointer, offset: Int, size: Int) throws {
         assert(queue.isCurrent())
         try! readData(
             allocationNode: readAllocationNode,
             absolutePosition: offset,
-            target: &outputSpan,
+            target: target,
             size: size
         )
     }
@@ -110,7 +110,9 @@ final class SampleDataQueue {
         guard let absolutePosition else { return }
 
         while absolutePosition >= firstAllocationNode.endPosition {
-            if let allocation = firstAllocationNode.consumeAllocation() {
+            // Advance firstAllocationNode to the specified absolute position. Also clear nodes that are
+            // advanced past, and return their underlying allocations to the allocator.
+            if let allocation = firstAllocationNode.getAllocation() {
                 allocator.release(allocation: allocation)
             } else {
                 assertionFailure()
@@ -128,19 +130,21 @@ final class SampleDataQueue {
         }
     }
 
-    func getTotalBytesWritten() -> Int {
-        return totalBytesWritten
-    }
+    func getTotalBytesWritten() -> Int { totalBytesWritten }
 
-    func loadSampleData(input: DataReader, length: Int, allowEndOfInput: Bool) throws -> DataReaderReadResult {
+    func loadSampleData(
+        input: DataReader,
+        length: Int,
+        allowEndOfInput: Bool,
+        isolation: isolated any Actor
+    ) async throws -> DataReaderReadResult {
         let readLenght = preAppend(length: length)
-        let result = try! writeAllocationNode.unpackAllocation { allocation in
-            try input.read(
-                allocation: &allocation,
-                offset: writeAllocationNode.translateOffset(absolutePosition: totalBytesWritten),
-                length: readLenght
-            )
-        }
+        let result = try await input.read(
+            allocation: writeAllocationNode.allocation!,
+            offset: writeAllocationNode.translateOffset(absolutePosition: totalBytesWritten),
+            length: readLenght,
+            isolation: isolation
+        )
 
         switch result {
         case let .success(bytesAppended):
@@ -155,26 +159,24 @@ final class SampleDataQueue {
         }
     }
 
-    func loadSampleData(buffer: ByteBuffer, length: Int) throws {
+    func loadSampleData(buffer: ByteBuffer, length: Int, isolation: isolated any Actor) throws {
         var length = length
         var buffer = buffer
 
         while length > 0 {
             let bytesAppended = preAppend(length: length)
             let bytes = try buffer.readData(count: bytesAppended)
-            try writeAllocationNode.unpackAllocation {
-                $0.writeBytes(
-                    offset: writeAllocationNode.translateOffset(absolutePosition: totalBytesWritten),
-                    lenght: bytesAppended,
-                    buffer: bytes
-                )
-            }
+            writeAllocationNode.allocation!.writeBytes(
+                offset: writeAllocationNode.translateOffset(absolutePosition: totalBytesWritten),
+                lenght: bytesAppended,
+                buffer: bytes
+            )
             length -= bytesAppended
             postAppend(length: bytesAppended)
         }
     }
 
-    private func clearAllocationNodes(fromNode: consuming SampleAllocationNode) {
+    private func clearAllocationNodes(fromNode: SampleAllocationNode) {
         assert(queue.isCurrent())
         guard fromNode.allocation != nil else { return }
         allocator.release(allocationNode: fromNode)
@@ -197,7 +199,7 @@ final class SampleDataQueue {
 
     private func postAppend(length: Int) {
         totalBytesWritten += length
-        if totalBytesWritten >= writeAllocationNode.endPosition {
+        if totalBytesWritten == writeAllocationNode.endPosition {
             if let next = writeAllocationNode.nextNode {
                 writeAllocationNode = next
             } else {
@@ -210,25 +212,28 @@ final class SampleDataQueue {
     private func readData(
         allocationNode: SampleAllocationNode,
         absolutePosition: Int,
-        target outputSpan: inout OutputRawSpan,
+        target: UnsafeMutableRawBufferPointer,
         size: Int
     ) throws -> SampleAllocationNode {
         assert(queue.isCurrent())
         var node = getNodeContainingPosition(allocationNode: allocationNode, absolutePosition: absolutePosition)
         var remaining = size
         var absolutePosition = absolutePosition
+        var bufferOffset = 0
 
         while remaining > 0 {
             let toCopy = min(remaining, node.endPosition - absolutePosition)
             let nodeOffset = node.translateOffset(absolutePosition: absolutePosition)
-            try node.unpackAllocation { allocation in
-                let rawSpan = allocation.bytes.extracting(droppingFirst: nodeOffset)
-                for i in 0..<toCopy {
-                    outputSpan.append(rawSpan.unsafeLoad(fromByteOffset: i, as: UInt8.self))
-                }
-            }
+            let nodeBuffer = node.allocation!.data
+            let nodeRange = nodeOffset..<(nodeOffset + toCopy)
+
+            let pasteBuffer = UnsafeMutableRawBufferPointer(rebasing: target[bufferOffset..<target.count])
+            let copyBuffer = UnsafeMutableRawBufferPointer(rebasing: nodeBuffer[nodeRange])
+            pasteBuffer.copyBytes(from: copyBuffer)
+
             remaining -= toCopy
             absolutePosition += toCopy
+            bufferOffset += toCopy
 
             if absolutePosition == node.endPosition, let next = node.nextNode {
                 node = next
@@ -257,8 +262,8 @@ final class SampleDataQueue {
 }
 
 private final class SampleAllocationNode: AllocationNode {
-    var startPosition: Int
-    var endPosition: Int
+    private(set) var startPosition: Int
+    private(set) var endPosition: Int
 
     var allocation: Allocation?
     var nextNode: SampleAllocationNode?
@@ -268,24 +273,14 @@ private final class SampleAllocationNode: AllocationNode {
         self.endPosition = startPosition + allocationLength
     }
 
-    @discardableResult
-    func unpackAllocation<T>(_ closure: (inout Allocation) throws -> T) throws -> T {
-        guard var allocation = allocation.take() else {
-            throw ErrorBuilder.illegalState
-        }
-        let result = try closure(&allocation)
-        self.allocation = consume allocation
-        return result
-    }
-
     func reset(startPosition: Int, allocationLength: Int) {
         precondition(allocation == nil)
         self.startPosition = startPosition
         endPosition = startPosition + allocationLength
     }
 
-    func initialize(allocation: consuming Allocation, next: SampleAllocationNode) {
-        self.allocation = consume allocation
+    func initialize(allocation: Allocation, next: SampleAllocationNode) {
+        self.allocation = allocation
         self.nextNode = next
     }
 
@@ -295,24 +290,22 @@ private final class SampleAllocationNode: AllocationNode {
 
     @discardableResult
     func clear() -> SampleAllocationNode? {
+        allocation = nil
         let temp = nextNode
         nextNode = nil
         return temp
     }
 
-    func consumeAllocation() -> Allocation? {
-        return allocation.take()
+    func getAllocation() -> Allocation? {
+        precondition(allocation != nil)
+        return allocation
     }
 
     func next() -> AllocationNode? {
-        guard let nextNode else { return nil }
-
-        do {
-            try nextNode.unpackAllocation { _ in }
-        } catch {
+        if let nextNode, nextNode.allocation != nil {
+            return nextNode
+        } else {
             return nil
         }
-
-        return nextNode
     }
 }

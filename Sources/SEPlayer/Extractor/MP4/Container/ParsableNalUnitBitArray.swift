@@ -123,10 +123,12 @@ struct ParsableNalUnitBitArray {
         return !hitLimit && canReadBits(zeros * 2 + 1)
     }
 
+    @discardableResult
     mutating func readUnsignedExpGolombCodedInt() throws -> Int {
         try! readExpGolombCodeNum()
     }
 
+    @discardableResult
     mutating func readSignedExpGolombCodedInt() throws -> Int {
         let num = try! readExpGolombCodeNum()
         return (num % 2 == 0 ? -1 : 1) * ((num + 1) / 2)

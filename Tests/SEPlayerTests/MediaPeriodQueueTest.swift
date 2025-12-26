@@ -56,7 +56,7 @@ class MediaPeriodQueueTest {
             mediaPeriodHolderFactoryRendererPositionOffsets.add(rendererPositionOffsetUs)
 
             return try MediaPeriodHolder(
-                queue: playerConcurrentQueue,
+                queue: playerSyncQueue,
                 rendererCapabilities: rendererCapabilities,
                 rendererPositionOffsetUs: rendererPositionOffsetUs,
                 trackSelector: trackSelector,

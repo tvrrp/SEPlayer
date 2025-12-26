@@ -151,9 +151,56 @@ struct UrlListScreen: View {
             let nav = host.navigationController
         else { return }
 
-        let viewController = PlayerViewControllerSim()
+//        let viewController = PlayerViewControllerSim()
+//
+//        viewController.repeatMode = .one
+//        nav.pushViewController(viewController, animated: true)
+        let vc1 = PlayerViewController()
+        let vc2 = PlayerViewController()
+        let vc3 = PlayerViewController()
+        let vc4 = PlayerViewController()
 
-        viewController.repeatMode = .one
-        nav.pushViewController(viewController, animated: true)
+        vc1.repeatMode = .one
+        vc2.repeatMode = .one
+        vc3.repeatMode = .one
+        vc4.repeatMode = .one
+
+        vc1.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4")!]
+        vc2.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4")!]
+        vc3.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_3.mp4")!]
+        vc4.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_4.mp4")!]
+
+        let container = ContnainerVC(vcs: [vc1, vc2, vc3, vc4])
+        nav.pushViewController(container, animated: true)
+    }
+}
+
+private final class ContnainerVC: UIViewController {
+    private let vcs: [UIViewController]
+
+    init(vcs: [UIViewController]) {
+        self.vcs = vcs
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        vcs.forEach {
+            view.addSubview($0.view)
+            $0.didMove(toParent: self)
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        let width = view.bounds.width / 2
+        let height = view.bounds.height / 2
+        vcs[0].view.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        vcs[1].view.frame = CGRect(x: width, y: 0, width: width, height: height)
+        vcs[2].view.frame = CGRect(x: 0, y: height, width: width, height: height)
+        vcs[3].view.frame = CGRect(x: width, y: height, width: width, height: height)
     }
 }

@@ -7,7 +7,7 @@
 
 import AVFoundation
 
-protocol AQDecoder: SEDecoder where OutputBuffer: AQOutputBuffer {
+protocol AVFAudioRendererDecoder: SEDecoder where OutputBuffer: AQOutputBuffer {
     static func getCapabilities() -> RendererCapabilities
     func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
 }
@@ -16,11 +16,7 @@ protocol AQOutputBuffer: DecoderOutputBuffer {
     var audioBuffer: CMSampleBuffer? { get }
 }
 
-protocol AudioRenderer: SERenderer {
-    var volume: Float { get set }
-}
-
-final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRenderer {
+final class AVFAudioRenderer<Decoder: AVFAudioRendererDecoder>: BaseSERenderer {
     var volume: Float {
         get { audioSink.volume }
         set { audioSink.volume = newValue }
@@ -37,6 +33,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRendere
     private var inputIndex: Int?
     private var inputBuffer: DecoderInputBuffer
     private var outputBuffer: AQOutputBuffer?
+    private var outputFormatDescription: CMFormatDescription?
 
     private var decoderReinitializationState: DecoderReinitializationState = .none
     private var decoderReceivedBuffers = false
@@ -87,20 +84,26 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRendere
         self.audioSink.delegate = self
     }
 
+    override func handleMessage(_ message: RendererMessage) throws {
+        if case let .requestMediaDataWhenReady(queue, block) = message {
+            audioSink.requestMediaDataWhenReady(on: queue, block: block)
+        } else if case .stopRequestingMediaData = message {
+            audioSink.stopRequestingMediaData()
+        } else if case let .setAudioVolume(volume) = message {
+            audioSink.volume = volume
+        } else if case let .setAudioIsMuted(isMuted) = message {
+            // TODO: audioSink.isMuted = isMuted
+        } else {
+            try super.handleMessage(message)
+        }
+    }
+
     override func getMediaClock() -> MediaClock? { self }
 
     override func getTimebase() -> CMTimebase? { audioSink.timebase }
 
     override func getCapabilities() -> any RendererCapabilities {
         Decoder.getCapabilities()
-    }
-
-    override func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void) {
-        audioSink.requestMediaDataWhenReady(on: queue, block: block)
-    }
-
-    override func stopRequestingMediaData() {
-        audioSink.stopRequestingMediaData()
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
@@ -250,6 +253,7 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRendere
 
     func onInputFormatChanged(format: Format) throws {
         waitingForFirstSampleInFormat = true
+        outputFormatDescription = nil
         let oldFormat = inputFormat
         inputFormat = format
 
@@ -405,13 +409,13 @@ final class AudioQueueRenderer<Decoder: AQDecoder>: BaseSERenderer, AudioRendere
     }
 }
 
-extension AudioQueueRenderer: AudioSinkDelegate {
+extension AVFAudioRenderer: AudioSinkDelegate {
     func onPositionDiscontinuity() {
         allowPositionDiscontinuity = true
     }
 }
 
-extension AudioQueueRenderer: MediaClock {
+extension AVFAudioRenderer: MediaClock {
     func getPositionUs() -> Int64 {
         updateCurrentPosition()
         return currentPosition
@@ -434,7 +438,7 @@ extension AudioQueueRenderer: MediaClock {
     }
 }
 
-extension AudioQueueRenderer {
+extension AVFAudioRenderer {
     func resetInputBuffer() {
         inputIndex = nil
         inputBuffer.reset()

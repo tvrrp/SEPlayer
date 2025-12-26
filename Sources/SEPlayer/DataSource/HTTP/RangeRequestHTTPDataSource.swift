@@ -12,43 +12,43 @@ final class RangeRequestHTTPDataSource: DataSource {
     var urlResponse: HTTPURLResponse? { requestHandler?.urlResponse }
 
     let components: DataSourceOpaque
-    private let queue: Queue
+    private let syncActor: PlayerActor
     private let networkLoader: IPlayerSessionLoader
     private let defaultSegmentLenght: Int
 
-    private var requestHandler: DataSource?
+    private var requestHandler: DefautlHTTPDataSource?
     private var originalDataSpec: DataSpec?
     private var currentDataSpec: DataSpec?
     private var currentReadOffset: Int = 0
     private var bytesRemaining: Int?
 
-    init(queue: Queue, networkLoader: IPlayerSessionLoader, segmentLenght: Int? = nil) {
-        self.queue = queue
+    init(syncActor: PlayerActor, networkLoader: IPlayerSessionLoader, segmentLenght: Int? = nil) {
+        self.syncActor = syncActor
         self.components = DataSourceOpaque(isNetwork: true)
         self.networkLoader = networkLoader
         self.defaultSegmentLenght = segmentLenght ?? .defaultSegmentLenght
     }
 
     @discardableResult
-    func open(dataSpec: DataSpec) throws -> Int {
-        assert(queue.isCurrent())
+    func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
+        syncActor.assertIsolated()
         self.originalDataSpec = dataSpec
         let currentDataSpec = dataSpec.length(defaultSegmentLenght)
         self.currentDataSpec = currentDataSpec
-        return try openConnection(dataSpec: currentDataSpec)
+        return try await openConnection(dataSpec: currentDataSpec, isolation: isolation)
     }
 
-    func close() -> ByteBuffer? {
-        assert(queue.isCurrent())
-        let result = requestHandler?.close()
+    func close(isolation: isolated any Actor) async -> ByteBuffer? {
+        syncActor.assertIsolated()
+        let result = await requestHandler?.close()
         requestHandler = nil
         return result
     }
 
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         guard let requestHandler, let currentDataSpec, let bytesRemaining else { throw DataReaderError.connectionNotOpened }
-        let result = try requestHandler.read(to: &buffer, offset: offset, length: length)
+        let result = try await requestHandler.read(to: &buffer, offset: offset, length: length)
 
         switch result {
         case let .success(amount):
@@ -61,15 +61,15 @@ final class RangeRequestHTTPDataSource: DataSource {
                 .length(min(bytesRemaining, max(length, .defaultSegmentLenght)))
 
             self.currentDataSpec = newDataSpec
-            try requestHandler.open(dataSpec: newDataSpec)
-            return try read(to: &buffer, offset: offset, length: length)
+            try await requestHandler.open(dataSpec: newDataSpec)
+            return try await read(to: &buffer, offset: offset, length: length, isolation: isolation)
         }
     }
 
-    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         guard let requestHandler, let currentDataSpec, let bytesRemaining else { throw DataReaderError.connectionNotOpened }
-        let result = try requestHandler.read(allocation: &allocation, offset: offset, length: length)
+        let result = try await requestHandler.read(allocation: allocation, offset: offset, length: length)
 
         switch result {
         case let .success(amount):
@@ -82,22 +82,19 @@ final class RangeRequestHTTPDataSource: DataSource {
                 .length(min(bytesRemaining, max(length, .defaultSegmentLenght)))
 
             self.currentDataSpec = newDataSpec
-            try openConnection(dataSpec: newDataSpec)
-            return try read(allocation: &allocation, offset: offset, length: length)
+            try await openConnection(dataSpec: newDataSpec, isolation: isolation)
+            return try await read(allocation: allocation, offset: offset, length: length, isolation: isolation)
         }
     }
 
-    private func openConnection(dataSpec: DataSpec) throws -> Int {
+    private func openConnection(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
         let requestHandler = DefautlHTTPDataSource(
-            queue: queue, networkLoader: networkLoader, components: components
+            syncActor: syncActor, networkLoader: networkLoader
         )
         self.requestHandler = requestHandler
-        let result = try requestHandler.open(dataSpec: dataSpec)
+        let result = try await requestHandler.open(dataSpec: dataSpec, isolation: isolation)
         guard let urlResponse else { throw DataReaderError.wrongURLResponce }
         bytesRemaining = contentLength(from: urlResponse) - dataSpec.offset
-        if bytesRemaining == 0 {
-            print()
-        }
         return result
     }
 }

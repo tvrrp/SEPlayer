@@ -34,6 +34,8 @@ class BaseSERenderer: SERenderer {
         EmptyRendererCapabilities()
     }
 
+    func handleMessage(_ message: RendererMessage) throws {}
+
     final func getState() -> SERendererState { state }
 
     final func enable(
@@ -151,8 +153,6 @@ class BaseSERenderer: SERenderer {
     func onReset() {}
     func onRelease() {}
     func onTimelineChanged(new timeline: Timeline) {}
-    func requestMediaDataWhenReady(on queue: any Queue, block: @escaping () -> Void) {}
-    func stopRequestingMediaData() {}
 
     final func getLastResetPosition() -> Int64 { lastResetPosition }
     final func getStreamOffset() -> Int64 { streamOffset }

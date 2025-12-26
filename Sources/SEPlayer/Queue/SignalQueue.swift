@@ -8,6 +8,7 @@
 import Foundation
 
 private let QueueSpecificKey = DispatchSpecificKey<NSObject>()
+private let ActorSpecificKey = DispatchSpecificKey<ActorWeakWrapper>()
 
 private let globalMainQueue = SignalQueue(queue: DispatchQueue.main, specialIsMainQueue: true)
 private let globalDefaultQueue = SignalQueue(queue: DispatchQueue.global(qos: .default), specialIsMainQueue: false)
@@ -56,14 +57,6 @@ final class SignalQueue: Queue {
         nativeQueue.setSpecific(key: QueueSpecificKey, value: specific)
     }
 
-    init(concurrentQueueName: String? = nil) {
-        nativeQueue = DispatchQueue(label: concurrentQueueName ?? "", qos: .userInteractive, attributes: [.concurrent])
-
-        specialIsMainQueue = false
-
-        nativeQueue.setSpecific(key: QueueSpecificKey, value: specific)
-    }
-
     // MARK: - Interface
 
     func isCurrent() -> Bool {
@@ -76,12 +69,26 @@ final class SignalQueue: Queue {
         }
     }
 
+    func playerActor() -> PlayerActor {
+        if let playerActor = nativeQueue.getSpecific(key: ActorSpecificKey)?.playerActor {
+            return playerActor
+        } else {
+            let playerActor = PlayerActor(executor: .init(queue: self))
+            nativeQueue.setSpecific(key: ActorSpecificKey, value: .init(playerActor))
+            return playerActor
+        }
+    }
+
     func async(_ f: @escaping () -> Void) {
         if isCurrent() {
             f()
         } else {
             nativeQueue.async(execute: f)
         }
+    }
+
+    func execute(_ f: @escaping () async -> Void) {
+        Task { await executeInternally(f, isolation: playerActor()) }
     }
 
     func sync<T>(_ f: () -> T) -> T {
@@ -111,5 +118,18 @@ final class SignalQueue: Queue {
     func after(_ delay: Double, _ f: @escaping () -> Void) {
         let time = DispatchTime.now() + delay
         nativeQueue.asyncAfter(deadline: time, execute: f)
+    }
+
+    private func executeInternally(_ f: @escaping () async -> Void, isolation: isolated PlayerActor) async {
+        assert(isCurrent())
+        await f()
+    }
+}
+
+private final class ActorWeakWrapper {
+    weak var playerActor: PlayerActor?
+
+    init(_ playerActor: PlayerActor) {
+        self.playerActor = playerActor
     }
 }

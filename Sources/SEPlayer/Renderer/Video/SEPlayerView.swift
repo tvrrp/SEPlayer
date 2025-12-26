@@ -53,6 +53,7 @@ public final class SEPlayerView: UIView {
 
     public init() {
         super.init(frame: .zero)
+        displayLayer.preventsDisplaySleepDuringVideoPlayback = true
 
         if #available(iOS 17.0, *) {
             erasedSampleBufferRenderer = displayLayer.sampleBufferRenderer
@@ -78,10 +79,8 @@ extension SEPlayerView: PlayerBufferable {
         if #available(iOS 17.0, *) {
             sampleBufferRenderer.requestMediaDataWhenReady(on: queue.queue, using: block)
         } else {
-            DispatchQueue.main.async {
-                self.displayLayer.requestMediaDataWhenReady(on: queue.queue) { [weak self] in
-                    guard let self else { return }
-
+            DispatchQueue.main.async { [self] in
+                displayLayer.requestMediaDataWhenReady(on: queue.queue) {
                     lock.withLock { self.oldIsReadyForMoreMediaData = true }
                     block()
                 }
@@ -125,7 +124,15 @@ extension SEPlayerView: PlayerBufferable {
         } else {
             DispatchQueue.main.async { [self] in
                 displayLayer.enqueue(buffer)
-                lock.withLock { oldIsReadyForMoreMediaData = displayLayer.isReadyForMoreMediaData }
+                let isReadyForMoreMediaData = displayLayer.isReadyForMoreMediaData
+                lock.withLock { oldIsReadyForMoreMediaData = isReadyForMoreMediaData }
+
+                if !isReadyForMoreMediaData {
+                    displayLayer.requestMediaDataWhenReady(on: .main) {
+                        displayLayer.stopRequestingMediaData()
+                        lock.withLock { oldIsReadyForMoreMediaData = true }
+                    }
+                }
             }
         }
 

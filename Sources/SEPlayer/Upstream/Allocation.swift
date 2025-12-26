@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-public struct Allocation: ~Copyable {
+public final class Allocation {
     let data: UnsafeMutableRawBufferPointer
     let capacity: Int
 
@@ -18,12 +18,12 @@ public struct Allocation: ~Copyable {
         }
     }
 
-    var mutableBytes: MutableRawSpan {
-        @_lifetime(&self)
-        mutating get {
-            _overrideLifetime(MutableRawSpan(_unsafeBytes: data), mutating: &self)
-        }
-    }
+//    var mutableBytes: MutableRawSpan {
+//        @_lifetime(self)
+//        get {
+//            _overrideLifetime(MutableRawSpan(_unsafeBytes: data), mutating: self)
+//        }
+//    }
 
     var span: Span<UInt8> {
         @_lifetime(borrow self)
@@ -32,12 +32,12 @@ public struct Allocation: ~Copyable {
         }
     }
 
-    var mutableSpan: MutableSpan<UInt8> {
-        @_lifetime(&self)
-        mutating get {
-            _overrideLifetime(MutableSpan(_unsafeElements: _buffer), mutating: &self)
-        }
-    }
+//    var mutableSpan: MutableSpan<UInt8> {
+//        @_lifetime(self)
+//        get {
+//            _overrideLifetime(MutableSpan(_unsafeElements: _buffer), mutating: self)
+//        }
+//    }
 
     public init(capacity: Int) {
         precondition(capacity > 0)

@@ -11,16 +11,23 @@ public protocol MediaSourceFactory {
 
 struct DefaultMediaSourceFactory: MediaSourceFactory {
     let workQueue: Queue
-    let loaderQueue: Queue
+    let loaderSyncActor: PlayerActor
     let dataSourceFactory: DataSourceFactory
     let extractorsFactory: ExtractorsFactory
 
+    init(workQueue: Queue, loaderSyncActor: PlayerActor, dataSourceFactory: DataSourceFactory, extractorsFactory: ExtractorsFactory) {
+        self.workQueue = workQueue
+        self.loaderSyncActor = loaderSyncActor
+        self.dataSourceFactory = dataSourceFactory
+        self.extractorsFactory = extractorsFactory
+    }
+
     func createMediaSource(mediaItem: MediaItem) -> MediaSource {
-        assert(workQueue.isCurrent())
+        // TODO: assert(workQueue.isCurrent())
 
         return ProgressiveMediaSource(
             queue: workQueue,
-            loaderQueue: loaderQueue,
+            loaderSyncActor: loaderSyncActor,
             mediaItem: mediaItem,
             dataSourceFactory: dataSourceFactory,
             extractorsFactory: extractorsFactory

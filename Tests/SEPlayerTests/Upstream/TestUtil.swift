@@ -55,8 +55,8 @@ private extension TestUtil {
             delegate.firstWindowIndex(shuffleModeEnabled: false)
         }
 
-        func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
-            delegate.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+            delegate.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
             window.id = 0
             return window
         }
@@ -65,8 +65,8 @@ private extension TestUtil {
             delegate.periodCount()
         }
 
-        func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-            delegate.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
+        func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+            delegate.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
             period.uid = 0
             return period
         }

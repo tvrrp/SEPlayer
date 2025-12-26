@@ -440,24 +440,19 @@ struct MediaSourceListTest {
         )
 
         #expect({
-            var window = Window()
-            return timeline.getWindow(windowIndex: 0, window: &window).mediaItem == unaffectedMediaItem
+            timeline.getWindow(windowIndex: 0, window: Window()).mediaItem == unaffectedMediaItem
         }())
         #expect({
-            var window = Window()
-            return timeline.getWindow(windowIndex: 1, window: &window).mediaItem == updatedItem1
+            timeline.getWindow(windowIndex: 1, window: Window()).mediaItem == updatedItem1
         }())
         #expect({
-            var window = Window()
-            return timeline.getWindow(windowIndex: 1, window: &window).isPlaceholder == false
+            timeline.getWindow(windowIndex: 1, window: Window()).isPlaceholder == false
         }())
         #expect({
-            var window = Window()
-            return timeline.getWindow(windowIndex: 2, window: &window).mediaItem == updatedItem2
+            timeline.getWindow(windowIndex: 2, window: Window()).mediaItem == updatedItem2
         }())
         #expect({
-            var window = Window()
-            return timeline.getWindow(windowIndex: 2, window: &window).isPlaceholder == true
+            timeline.getWindow(windowIndex: 2, window: Window()).isPlaceholder == true
         }())
     }
 

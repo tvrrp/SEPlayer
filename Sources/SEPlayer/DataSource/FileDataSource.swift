@@ -12,18 +12,18 @@ final class FileDataSource: DataSource {
     let urlResponse: HTTPURLResponse? = nil
 
     let components: DataSourceOpaque
-    private let queue: Queue
+    private let syncActor: PlayerActor
 
     private var readFileHandle: FileHandle?
     private var availableBytes: Int = .zero
 
-    init(queue: Queue) {
+    init(syncActor: PlayerActor) {
         self.components = DataSourceOpaque(isNetwork: false)
-        self.queue = queue
+        self.syncActor = syncActor
     }
 
-    func open(dataSpec: DataSpec) throws -> Int {
-        assert(queue.isCurrent())
+    func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
+        syncActor.assertIsolated()
         let fileUrl = dataSpec.url
 
         guard let size = try fileUrl.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
@@ -45,14 +45,14 @@ final class FileDataSource: DataSource {
         return size
     }
 
-    func close() -> ByteBuffer? {
-        assert(queue.isCurrent())
+    func close(isolation: isolated any Actor) async -> ByteBuffer? {
+        syncActor.assertIsolated()
         availableBytes = .zero
         return nil
     }
 
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         guard let readFileHandle else {
             throw DataReaderError.connectionNotOpened
         }
@@ -66,8 +66,8 @@ final class FileDataSource: DataSource {
         return .success(amount: data.count)
     }
 
-    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         guard let readFileHandle else {
             throw DataReaderError.connectionNotOpened
         }

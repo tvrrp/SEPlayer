@@ -8,7 +8,9 @@
 import Dispatch
 
 enum Queues {
-    static let loaderQueue: Queue = SignalQueue(name: "com.SEPlayer.loader", qos: .userInitiated)
+    static let loaderQueue: Queue = SignalQueue(name: "com.seplayer.loader.shared", qos: .userInitiated)
     static let mainQueue: Queue = SignalQueue.mainQueue()
-    static let audioQueue: Queue = SignalQueue(name: "com.SEPlayer.audioQueue", qos: .userInitiated)
+    static let audioDecodeQueue: Queue = SignalQueue(name: "com.seplayer.audioDecodeQueue.shared", qos: .userInitiated)
+    static let videoDecodeQueue: Queue = SignalQueue(name: "com.seplayer.videoDecodeQueue.shared", qos: .userInitiated)
+    static let eventQueue: Queue = SignalQueue(name: "com.seplayer.eventQueue.shared", qos: .userInitiated)
 }

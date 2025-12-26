@@ -26,6 +26,11 @@ final class TestAudioSink: IAudioSink {
         set { audioRenderer.volume = newValue }
     }
 
+    var isMuted: Bool {
+        get { audioRenderer.isMuted }
+        set { audioRenderer.isMuted = newValue }
+    }
+
     private let queue: Queue
     private let renderSynchronizer: AVSampleBufferRenderSynchronizer
     private let audioRenderer: AVSampleBufferAudioRenderer
@@ -39,6 +44,8 @@ final class TestAudioSink: IAudioSink {
     private var blockQueue: Queue?
     private var pendingFlushError: Error?
 
+    private var observer: NSKeyValueObservation
+
     init(
         queue: Queue,
         renderSynchronizer: AVSampleBufferRenderSynchronizer
@@ -50,6 +57,10 @@ final class TestAudioSink: IAudioSink {
         renderSynchronizer.addRenderer(audioRenderer)
         renderSynchronizer.delaysRateChangeUntilHasSufficientMediaData = false
 
+        observer = audioRenderer.observe(\.hasSufficientMediaDataForReliablePlaybackStart) { _, value in
+            print("🎶 NEW VALUE = \(value.newValue)")
+        }
+
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(didRecieve), name: .AVSampleBufferAudioRendererWasFlushedAutomatically, object: nil)
         center.addObserver(self, selector: #selector(didRecieve), name: .AVSampleBufferAudioRendererOutputConfigurationDidChange, object: nil)
@@ -59,10 +70,10 @@ final class TestAudioSink: IAudioSink {
         blockWork = block
         blockQueue = queue
 
-        audioRenderer.requestMediaDataWhenReady(on: self.queue.queue) { [weak self] in
-            let blockWork = self?.blockWork
+        audioRenderer.requestMediaDataWhenReady(on: self.queue.queue) {
+            let blockWork = self.blockWork
 
-            self?.blockQueue?.async { blockWork?() }
+            self.blockQueue?.async { blockWork?() }
         }
     }
 
@@ -154,10 +165,12 @@ final class TestAudioSink: IAudioSink {
     @objc private func didRecieve(notification: NSNotification) {
         queue.async { [self] in
             delegate?.onPositionDiscontinuity()
-            pendingFlushError = ErrorBuilder(errorDescription: "")
+            pendingFlushError = AudioSinkTestError()
 
             let blockWork = blockWork
             blockQueue?.async { blockWork }
         }
     }
 }
+
+struct AudioSinkTestError: Error {}

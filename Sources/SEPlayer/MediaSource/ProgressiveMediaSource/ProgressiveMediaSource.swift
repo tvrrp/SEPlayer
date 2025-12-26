@@ -13,7 +13,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     weak var listener: Listener?
 
     private let queue: Queue
-    private let loaderQueue: Queue
+    private let loaderSyncActor: PlayerActor
     private var mediaItem: MediaItem
     private let dataSourceFactory: DataSourceFactory
     private let extractorsFactory: ExtractorsFactory
@@ -28,14 +28,14 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     init(
         queue: Queue,
-        loaderQueue: Queue,
+        loaderSyncActor: PlayerActor,
         mediaItem: MediaItem,
         dataSourceFactory: DataSourceFactory,
         extractorsFactory: ExtractorsFactory,
         continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
     ) {
         self.queue = queue
-        self.loaderQueue = loaderQueue
+        self.loaderSyncActor = loaderSyncActor
         self.mediaItem = mediaItem
         self.dataSourceFactory = dataSourceFactory
         self.extractorsFactory = extractorsFactory
@@ -78,9 +78,12 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         return ProgressiveMediaPeriod(
             url: localConfiguration.url,
             queue: queue,
-            loaderQueue: loaderQueue,
+            loaderSyncActor: loaderSyncActor,
             dataSource: dataSource,
-            progressiveMediaExtractor: BundledMediaExtractor(queue: loaderQueue, extractorsFactory: extractorsFactory),
+            progressiveMediaExtractor: BundledMediaExtractor(
+                syncActor: loaderSyncActor,
+                extractorsFactory: extractorsFactory
+            ),
             listener: self,
             allocator: allocator,
             continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
@@ -134,14 +137,14 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
 private extension ProgressiveMediaSource {
     final class ForwardingTimelineImpl: ForwardingTimeline, @unchecked Sendable {
-        override func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
-            super.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+            super.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
             window.isPlaceholder = true
             return window
         }
 
-        override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-            super.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
+        override func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+            super.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
             period.isPlaceholder = true
             return period
         }

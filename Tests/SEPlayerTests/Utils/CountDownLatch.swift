@@ -5,8 +5,11 @@
 //  Created by Damir Yackupov on 05.11.2025.
 //
 
+import Testing
+
+struct TimeoutError: Swift.Error {}
+
 final class CountDownLatch {
-    struct TimeoutError: Swift.Error {}
 
     var count: Int
     var timeoutTask: Task<Void, Error>?
@@ -16,6 +19,7 @@ final class CountDownLatch {
     }
 
     func awaitResult(timeoutMs: UInt64, isolation: isolated (any Actor)? = #isolation) async throws {
+        guard count > 0 else { return } 
         let timeoutTask = Task {
             try Task.checkCancellation()
             try await Task.sleep(milliseconds: timeoutMs)
@@ -43,5 +47,25 @@ final class CountDownLatch {
         if count <= 0 {
             timeoutTask?.cancel()
         }
+    }
+}
+
+final class TimeoutChecker {
+    private var task: Task<Void, Never>?
+
+    func start(timeoutMs: UInt64, onTimeout: @escaping (Error) -> Void) {
+        task = Task {
+            do {
+                try await Task.sleep(milliseconds: timeoutMs)
+                try Task.checkCancellation()
+                onTimeout(TimeoutError())
+            } catch {
+                return
+            }
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
     }
 }

@@ -21,8 +21,10 @@ public protocol Queue: AnyObject {
     // MARK: - Interface
 
     func isCurrent() -> Bool
+    func playerActor() -> PlayerActor
 
     func async(_ f: @escaping () -> Void)
+    func execute(_ f: @escaping () async -> Void)
 
     func sync<T>(_ f: () -> T) -> T
     func sync<T>(_ f: () throws -> T) rethrows -> T

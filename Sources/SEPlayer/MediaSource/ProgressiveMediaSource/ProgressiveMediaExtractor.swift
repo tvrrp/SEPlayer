@@ -8,9 +8,16 @@
 import Foundation.NSURLSession
 
 protocol ProgressiveMediaExtractor {
-    func prepare(dataReader: DataReader, url: URL, response: URLResponse?, range: NSRange, output: ExtractorOutput) throws
+    func prepare(
+        dataReader: DataReader,
+        url: URL,
+        response: URLResponse?,
+        range: NSRange,
+        output: ExtractorOutput,
+        isolation: isolated any Actor
+    ) async throws
     func release()
-    func getCurrentInputPosition() -> Int?
-    func seek(position: Int, time: Int64)
-    func read() throws -> ExtractorReadResult
+    func getCurrentInputPosition(isolation: isolated any Actor) -> Int?
+    func seek(position: Int, time: Int64, isolation: isolated any Actor)
+    func read(isolation: isolated any Actor) async throws -> ExtractorReadResult
 }

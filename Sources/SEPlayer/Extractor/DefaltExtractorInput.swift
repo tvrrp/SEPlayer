@@ -17,9 +17,9 @@ final class DefaltExtractorInput: ExtractorInput {
     private var peekBufferPosition: Int
     private var peekBufferLength: Int
 
-    let queue: Queue
+    let syncActor: PlayerActor
 
-    init(dataReader: DataReader, queue: Queue, range: NSRange? = nil) {
+    init(dataReader: DataReader, syncActor: PlayerActor, range: NSRange? = nil) {
         self.dataReader = dataReader
         self.position = range?.location ?? 0
         self.streamLength = range?.length
@@ -29,20 +29,21 @@ final class DefaltExtractorInput: ExtractorInput {
         self.peekBuffer = allocator.buffer(capacity: .peekBufferSize)
         self.peekBufferPosition = 0
         self.peekBufferLength = 0
-        self.queue = queue
+        self.syncActor = syncActor
     }
 
     @discardableResult
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
         if bytesRead == 0 {
-            bytesRead = try readFromUpstream(
+            bytesRead = try await readFromUpstream(
                 buffer: &buffer,
                 offset: offset,
                 length: length,
                 bytesAlreadyRead: 0,
-                allowEndOfInput: true
+                allowEndOfInput: true,
+                isolation: isolation
             )
         }
         commit(bytes: bytesRead)
@@ -54,17 +55,18 @@ final class DefaltExtractorInput: ExtractorInput {
         }
     }
 
-    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
-        assert(queue.isCurrent())
+    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
+        syncActor.assertIsolated()
         var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
 
         while bytesRead < length && bytesRead != .resultEndOfInput {
-            bytesRead = try readFromUpstream(
+            bytesRead = try await readFromUpstream(
                 buffer: &buffer,
                 offset: offset,
                 length: length,
                 bytesAlreadyRead: bytesRead,
-                allowEndOfInput: allowEndOfInput
+                allowEndOfInput: allowEndOfInput,
+                isolation: isolation
             )
         }
 
@@ -72,22 +74,23 @@ final class DefaltExtractorInput: ExtractorInput {
         return bytesRead != .resultEndOfInput
     }
 
-    func read(allocation: inout Allocation, offset: Int, length: Int) throws -> DataReaderReadResult {
+    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
         var buffer = ByteBuffer()
         var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
         if bytesRead != 0 {
-            if !readFromBuffer(buffer, to: &allocation, offset: offset, length: bytesRead) {
+            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
                 bytesRead = 0
             }
         }
 
         if bytesRead == 0 {
-            bytesRead = try readFromUpstream(
-                allocation: &allocation,
+            bytesRead = try await readFromUpstream(
+                allocation: allocation,
                 offset: offset,
                 length: length,
                 bytesAlreadyRead: 0,
-                allowEndOfInput: true
+                allowEndOfInput: true,
+                isolation: isolation
             )
         }
         commit(bytes: bytesRead)
@@ -99,23 +102,24 @@ final class DefaltExtractorInput: ExtractorInput {
         }
     }
 
-    func readFully(allocation: inout Allocation, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
-        assert(queue.isCurrent())
+    func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
+        syncActor.assertIsolated()
         var buffer = ByteBuffer()
         var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
         if bytesRead != 0 {
-            if !readFromBuffer(buffer, to: &allocation, offset: offset, length: bytesRead) {
+            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
                 bytesRead = 0
             }
         }
 
         while bytesRead < length && bytesRead != .resultEndOfInput {
-            bytesRead = try readFromUpstream(
-                allocation: &allocation,
+            bytesRead = try await readFromUpstream(
+                allocation: allocation,
                 offset: offset,
                 length: length,
                 bytesAlreadyRead: bytesRead,
-                allowEndOfInput: allowEndOfInput
+                allowEndOfInput: allowEndOfInput,
+                isolation: isolation
             )
         }
 
@@ -123,16 +127,17 @@ final class DefaltExtractorInput: ExtractorInput {
         return bytesRead != .resultEndOfInput
     }
 
-    func skip(length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func skip(length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         var bytesSkipped = skipFromPeekBuffer(length: length)
         if bytesSkipped == 0 {
-            bytesSkipped = try readFromUpstream(
+            bytesSkipped = try await readFromUpstream(
                 buffer: &scratchBuffer,
                 offset: .zero,
                 length: min(length, peekBuffer.capacity),
                 bytesAlreadyRead: .zero,
-                allowEndOfInput: true
+                allowEndOfInput: true,
+                isolation: isolation
             )
         }
 
@@ -144,18 +149,19 @@ final class DefaltExtractorInput: ExtractorInput {
         }
     }
 
-    func skipFully(length: Int, allowEndOfInput: Bool) throws -> Bool {
-        assert(queue.isCurrent())
+    func skipFully(length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
+        syncActor.assertIsolated()
         var bytesSkipped = skipFromPeekBuffer(length: length)
 
         while bytesSkipped < length && bytesSkipped != .resultEndOfInput {
             let minLenght = min(length, bytesSkipped + scratchBuffer.capacity)
-            bytesSkipped = try readFromUpstream(
+            bytesSkipped = try await readFromUpstream(
                 buffer: &scratchBuffer,
                 offset: -bytesSkipped,
                 length: minLenght,
                 bytesAlreadyRead: bytesSkipped,
-                allowEndOfInput: allowEndOfInput
+                allowEndOfInput: allowEndOfInput,
+                isolation: isolation
             )
         }
 
@@ -163,18 +169,19 @@ final class DefaltExtractorInput: ExtractorInput {
         return bytesSkipped != .resultEndOfInput
     }
 
-    func peek(to buffer: inout ByteBuffer, offset: Int, length: Int) throws -> DataReaderReadResult {
-        assert(queue.isCurrent())
+    func peek(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
+        syncActor.assertIsolated()
         let peekBufferRemainingBytes = peekBufferLength - peekBufferPosition
         var bytesPeeked: Int = 0
 
         if peekBufferRemainingBytes == 0 {
-            bytesPeeked = try readFromUpstream(
+            bytesPeeked = try await readFromUpstream(
                 buffer: &peekBuffer,
                 offset: peekBufferPosition,
                 length: length,
                 bytesAlreadyRead: .zero,
-                allowEndOfInput: true
+                allowEndOfInput: true,
+                isolation: isolation
             )
 
             if bytesPeeked == .resultEndOfInput {
@@ -199,8 +206,8 @@ final class DefaltExtractorInput: ExtractorInput {
         return .success(amount: bytesPeeked)
     }
 
-    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool) throws -> Bool {
-        if try !advancePeekPosition(length: length, allowEndOfInput: allowEndOfInput) {
+    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
+        if try await !advancePeekPosition(length: length, allowEndOfInput: allowEndOfInput, isolation: isolation) {
             return false
         }
 
@@ -214,16 +221,17 @@ final class DefaltExtractorInput: ExtractorInput {
         return true
     }
 
-    func advancePeekPosition(length: Int, allowEndOfInput: Bool) throws -> Bool {
-        assert(queue.isCurrent())
+    func advancePeekPosition(length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
+        syncActor.assertIsolated()
         var bytesPeeked = peekBufferLength - peekBufferPosition
         while bytesPeeked < length {
-            bytesPeeked = try readFromUpstream(
+            bytesPeeked = try await readFromUpstream(
                 buffer: &peekBuffer,
                 offset: peekBufferPosition,
                 length: length,
                 bytesAlreadyRead: bytesPeeked,
-                allowEndOfInput: allowEndOfInput
+                allowEndOfInput: allowEndOfInput,
+                isolation: isolation
             )
 
             if bytesPeeked == .resultEndOfInput {
@@ -237,28 +245,28 @@ final class DefaltExtractorInput: ExtractorInput {
         return true
     }
 
-    func resetPeekPosition() {
-        assert(queue.isCurrent())
+    func resetPeekPosition(isolation: isolated any Actor) {
+        syncActor.assertIsolated()
         peekBufferPosition = 0
         peekBuffer.moveReaderIndex(to: .zero)
     }
 
-    func getPeekPosition() -> Int {
-        assert(queue.isCurrent())
+    func getPeekPosition(isolation: isolated any Actor) -> Int {
+        syncActor.assertIsolated()
         return position + peekBufferPosition
     }
 
-    func getPosition() -> Int {
-        assert(queue.isCurrent())
+    func getPosition(isolation: isolated any Actor) -> Int {
+        syncActor.assertIsolated()
         return position
     }
 
-    func getLength() -> Int? {
-        assert(queue.isCurrent())
+    func getLength(isolation: isolated any Actor) -> Int? {
+        syncActor.assertIsolated()
         return streamLength
     }
 
-    func set<ErrorType: Error>(retryPosition: Int, using error: ErrorType) throws(ErrorType) {
+    func set<ErrorType: Error>(retryPosition: Int, using error: ErrorType, isolation: isolated any Actor) throws(ErrorType) {
         self.position = retryPosition
         throw error
     }
@@ -297,12 +305,14 @@ private extension DefaltExtractorInput {
         offset: Int,
         length: Int,
         bytesAlreadyRead: Int,
-        allowEndOfInput: Bool
-    ) throws -> Int {
-        let result = try dataReader.read(
+        allowEndOfInput: Bool,
+        isolation: isolated any Actor
+    ) async throws -> Int {
+        let result = try await dataReader.read(
             to: &buffer,
             offset: offset + bytesAlreadyRead,
-            length: length - bytesAlreadyRead
+            length: length - bytesAlreadyRead,
+            isolation: isolation
         )
 
         switch result {
@@ -320,16 +330,18 @@ private extension DefaltExtractorInput {
     }
 
     private func readFromUpstream(
-        allocation: inout Allocation,
+        allocation: Allocation,
         offset: Int,
         length: Int,
         bytesAlreadyRead: Int,
-        allowEndOfInput: Bool
-    ) throws -> Int {
-        let result = try dataReader.read(
-            allocation: &allocation,
+        allowEndOfInput: Bool,
+        isolation: isolated any Actor
+    ) async throws -> Int {
+        let result = try await dataReader.read(
+            allocation: allocation,
             offset: offset,
-            length: length
+            length: length,
+            isolation: isolation
         )
 
         switch result {
@@ -347,7 +359,7 @@ private extension DefaltExtractorInput {
 
     private func readFromBuffer(
         _ buffer: ByteBuffer,
-        to allocation: inout Allocation,
+        to allocation: Allocation,
         offset: Int,
         length: Int
     ) -> Bool {

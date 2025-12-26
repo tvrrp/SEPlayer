@@ -134,7 +134,7 @@ class PlayerViewController: UIViewController {
         playerView.gravity = .resizeAspect
 
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
-        player.repeatMode = repeatMode
+        player.repeatMode = .off
         player.delegate.addDelegate(self)
         player.prepare()
         player.playWhenReady = true
@@ -278,7 +278,7 @@ class PlayerViewController: UIViewController {
     }
 
     private func handleTimer() {
-        let position = player.contentPosition
+        let position = player.currentPosition
         currentTimeLabel.text = "\(player.bufferedPosition)|\(position)"
         seekSlider.setValue(Float(position), animated: false)
     }

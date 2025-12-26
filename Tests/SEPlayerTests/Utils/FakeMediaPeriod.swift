@@ -207,11 +207,15 @@ final class FakeMediaPeriod: MediaPeriod {
         return getBufferedPositionUs()
     }
 
+    @TestableSyncPlayerActor
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool {
-        assert(queue.isCurrent()); assert(prepared)
+        assert(queue.isCurrent())
         var progressMade = false
         for sampleStream in sampleStreams.allObjects {
-            try! sampleStream.writeData(startPositionUs: loadingInfo.playbackPosition)
+            try! sampleStream.writeData(
+                startPositionUs: loadingInfo.playbackPosition,
+                isolation: TestableSyncPlayerActor.shared
+            )
             progressMade = true
         }
         return progressMade

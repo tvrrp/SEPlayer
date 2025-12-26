@@ -78,3 +78,40 @@ final class ConditionVariable {
         return isOpen
     }
 }
+
+final class AsyncConditionVariable {
+    @UnfairLocked var isOpen = false
+    @UnfairLocked var waitingContinuation: CheckedContinuation<Void, Error>?
+
+    @discardableResult
+    func open() -> Bool {
+        guard !isOpen else { return false }
+
+        isOpen = true
+        waitingContinuation?.resume()
+        waitingContinuation = nil
+
+        return true
+    }
+
+    @discardableResult
+    func close() -> Bool {
+        let wasOpen = isOpen
+        isOpen = false
+
+        return wasOpen
+    }
+
+    func wait() async throws {
+        try await withTaskCancellationHandler {
+            while !isOpen {
+                try await withCheckedThrowingContinuation { continuation in
+                    waitingContinuation = continuation
+                }
+            }
+        } onCancel: {
+            waitingContinuation?.resume(throwing: CancellationError())
+            waitingContinuation = nil
+        }
+    }
+}

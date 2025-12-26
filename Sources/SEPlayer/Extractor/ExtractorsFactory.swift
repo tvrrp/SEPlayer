@@ -22,7 +22,7 @@ public struct DefaultExtractorFactory: ExtractorsFactory {
     public func createExtractors(output: ExtractorOutput, url: URL?, httpHeaders: [AnyHashable : Any]) -> [Extractor] {
         [
             MP4Extractor(queue: queue, extractorOutput: output),
-            FragmentedMp4Extractor(queue: queue, extractorOutput: output)
+//            FragmentedMp4Extractor(queue: queue, extractorOutput: output)
         ]
     }
 }

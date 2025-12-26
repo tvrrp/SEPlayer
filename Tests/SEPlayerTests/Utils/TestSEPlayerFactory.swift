@@ -118,6 +118,7 @@ final class TestSEPlayerFactory {
 
     func build() throws -> SEPlayer {
         let queue = try #require(queue, "No work queue is specified")
+        let loaderQueue = SignalQueue(name: "test.seplayer.loader")
         #expect(loadControl.queue === queue, "Different queues on load control and builder")
 
         if renderersFactory == nil {
@@ -127,9 +128,11 @@ final class TestSEPlayerFactory {
             ])
         }
 
+        let loaderSyncActor = PlayerActor(executor: .init(queue: loaderQueue))
         return try SEPlayerImpl(
             identifier: UUID(),
-            queue: queue,
+            workQueue: queue,
+            applicationQueue: queue,
             clock: clock,
             renderersFactory: #require(renderersFactory),
             trackSelector: trackSelector,
@@ -137,9 +140,9 @@ final class TestSEPlayerFactory {
             bandwidthMeter: bandwidthMeter,
             mediaSourceFactory: mediaSourceFactory ?? DefaultMediaSourceFactory(
                 workQueue: queue,
-                loaderQueue: queue,
+                loaderSyncActor: loaderSyncActor,
                 dataSourceFactory: DefaultDataSourceFactory(
-                    loaderQueue: queue,
+                    syncActor: loaderSyncActor,
                     networkLoader: MockPlayerSessionLoader()
                 ),
                 extractorsFactory: DefaultExtractorFactory(queue: queue)

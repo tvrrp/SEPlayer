@@ -76,7 +76,7 @@ enum NalUnitUtil {
                 try data.readSignedExpGolombCodedInt() // offset_for_top_to_bottom_field
                 let numRefFramesInPicOrderCntCycle = try data.readUnsignedExpGolombCodedInt()
 
-                for index in 0..<numRefFramesInPicOrderCntCycle {
+                for _ in 0..<numRefFramesInPicOrderCntCycle {
                     try data.readUnsignedExpGolombCodedInt() // offset_for_ref_frame[i]
                 }
             }
@@ -221,7 +221,7 @@ enum NalUnitUtil {
             var lastScale = 8
             var nextScale = 8
 
-            for index in 0..<size {
+            for _ in 0..<size {
                 if nextScale != 0 {
                     let deltaScale = try bitArray.readSignedExpGolombCodedInt()
                     nextScale = (lastScale + deltaScale + 256) % 256

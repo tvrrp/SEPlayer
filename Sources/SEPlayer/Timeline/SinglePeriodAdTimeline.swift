@@ -13,11 +13,19 @@ public final class SinglePeriodAdTimeline: ForwardingTimeline, @unchecked Sendab
         super.init(timeline: contentTimeline)
     }
 
-    public override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-        timeline.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
+    public override func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+        timeline.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
         let durationUs = period.durationUs == .timeUnset ? adPlaybackState.contentDurationUs : period.durationUs
-        period.adPlaybackState = adPlaybackState
-        period.durationUs = durationUs
+        period.set(
+            id: period.id,
+            uid: period.uid,
+            windowIndex: period.windowIndex,
+            durationUs: durationUs,
+            positionInWindowUs: period.positionInWindowUs,
+            adPlaybackState: adPlaybackState,
+            isPlaceholder: period.isPlaceholder
+        )
+
         return period
     }
 }

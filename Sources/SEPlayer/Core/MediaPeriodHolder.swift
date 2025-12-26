@@ -66,11 +66,11 @@ final class MediaPeriodHolder {
     func toRendererTime(periodTime: Int64) -> Int64 {
         periodTime + renderPositionOffset
     }
-    
+
     func toPeriodTime(rendererTime: Int64) -> Int64 {
-        rendererTime - renderPositionOffset
+        return rendererTime - renderPositionOffset
     }
-    
+
     func getStartPositionRendererTime() -> Int64 {
         info.startPositionUs + renderPositionOffset
     }

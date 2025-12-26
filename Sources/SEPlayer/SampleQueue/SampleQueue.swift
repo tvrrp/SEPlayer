@@ -167,21 +167,23 @@ class SampleQueue {
         if result == .didReadBuffer, let extras, !buffer.flags.contains(.endOfStream) {
             let peek = readFlags.contains(.peek)
             if !readFlags.contains(.omitSampleData) {
-                try buffer.dequeueOutputSpan { outputSpan in
-                    if peek {
-                        try! sampleDataQueue.peekToBuffer(
-                            outputSpan: &outputSpan,
-                            offset: extras.offset,
-                            size: extras.size
-                        )
-                    } else {
-                        try! sampleDataQueue.readToBuffer(
-                            outputSpan: &outputSpan,
-                            offset: extras.offset,
-                            size: extras.size
-                        )
-                    }
+                let target = try buffer.dequeue()
+                if peek {
+                    try! sampleDataQueue.peekToBuffer(
+                        target: target,
+                        offset: extras.offset,
+                        size: extras.size
+                    )
+                } else {
+                    try! sampleDataQueue.readToBuffer(
+                        target: target,
+                        offset: extras.offset,
+                        size: extras.size
+                    )
                 }
+//                try buffer.dequeueOutputSpan { outputSpan in
+//                    
+//                }
 
                 buffer.size = extras.size
             }
@@ -315,12 +317,22 @@ class SampleQueue {
 }
 
 extension SampleQueue: TrackOutput {
-    final func loadSampleData(input: DataReader, length: Int, allowEndOfInput: Bool) throws -> DataReaderReadResult {
-        try sampleDataQueue.loadSampleData(input: input, length: length, allowEndOfInput: allowEndOfInput)
+    final func loadSampleData(
+        input: DataReader,
+        length: Int,
+        allowEndOfInput: Bool,
+        isolation: isolated any Actor
+    ) async throws -> DataReaderReadResult {
+        try await sampleDataQueue.loadSampleData(
+            input: input,
+            length: length,
+            allowEndOfInput: allowEndOfInput,
+            isolation: isolation
+        )
     }
 
-    func sampleData(data: ByteBuffer, length: Int) throws {
-        try sampleDataQueue.loadSampleData(buffer: data, length: length)
+    func sampleData(data: ByteBuffer, length: Int, isolation: isolated any Actor) throws {
+        try sampleDataQueue.loadSampleData(buffer: data, length: length, isolation: isolation)
     }
 
     func setFormat(_ format: Format) {

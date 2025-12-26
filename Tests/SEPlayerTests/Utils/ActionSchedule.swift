@@ -15,6 +15,7 @@ final class ActionSchedule {
 
     private let rootNode: ActionNode
     private let callbackNode: CallbackAction
+    private var task: Task<Void, Error>?
 
     fileprivate init(rootNode: ActionNode, callbackNode: CallbackAction) {
         self.rootNode = rootNode
@@ -29,12 +30,23 @@ final class ActionSchedule {
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
         callbackNode.callback = callback
-        try await rootNode.schedule(
-            player: player,
-            trackSelector: trackSelector,
-            view: view,
-            isolation: isolation
-        )
+        do {
+            try await rootNode.schedule(
+                player: player,
+                trackSelector: trackSelector,
+                view: view,
+                isolation: isolation
+            )
+        } catch {
+            if (error as? CancellationError) == nil {
+                throw error
+            }
+            print("🇨🇦 DID CANCEL!!!!")
+        }
+    }
+
+    func stop() {
+        task?.cancel()
     }
 
     final class Builder {
@@ -75,7 +87,7 @@ final class ActionSchedule {
             apply(Seek(tag: tag, positionMs: positionMs)).apply(
                 WaitForPlayerDelegateState(
                     tag: tag,
-                    checkForInitialState: { $0.playbackState == .ready },
+                    checkForInitialState: { $0 == .ready },
                     validateEvent: { event in
                         if case let .didChangePlaybackState(state) = event {
                             return state == .ready
@@ -92,8 +104,18 @@ final class ActionSchedule {
         }
 
         @discardableResult
+        func waitForPendingPlayerCommands() -> Builder {
+            apply(WaitForPendingPlayerCommands(tag: tag))
+        }
+
+        @discardableResult
         func play() -> Builder {
             apply(SetPlayWhenReady(tag: tag, playWhenReady: true))
+        }
+
+        @discardableResult
+        func playUntilPosition(mediaItemIndex: Int, positionMs: Int64) -> Builder {
+            apply(PlayUntilPosition(tag: tag, mediaItemIndex: mediaItemIndex, positionMs: positionMs))
         }
 
         @discardableResult
@@ -105,14 +127,36 @@ final class ActionSchedule {
         func waitForPlaybackState(_ state: PlayerState) -> Builder {
             apply(WaitForPlayerDelegateState(
                 tag: tag,
-                checkForInitialState: { $0.playbackState == .ready },
+                checkForInitialState: { $0 == state },
                 validateEvent: {
+                    print("🧚 event = \($0)")
                     if case let .didChangePlaybackState(state) = $0 {
-                        return state == .ready
+                        return state == state
                     }
                     return false
                 }
             ))
+        }
+
+        @discardableResult
+        func waitForTimelineChanged(
+            expectedTimeline: Timeline? = nil,
+            expectedReason: TimelineChangeReason? = nil
+        ) -> Builder {
+            if let expectedTimeline, let expectedReason {
+                apply(WaitForTimelineChanged(
+                    tag: tag,
+                    expectedTimeline: expectedTimeline,
+                    expectedReason: expectedReason
+                ))
+            } else {
+                apply(WaitForTimelineChanged(tag: tag))
+            }
+        }
+
+        @discardableResult
+        func executeClosure(_ closure: @escaping (SEPlayer) async throws -> Void) throws -> Builder {
+            apply(ExecuteClosure(tag: tag, closure: closure))
         }
 
         func build() -> ActionSchedule {
@@ -162,10 +206,11 @@ final class ActionNode {
         self.view = view
 
         if delayMs == 0 {
-            try await run(isolation: isolation)
+            try await self.run(isolation: isolation)
+            await Task.yield()
         } else {
             try await Task.sleep(milliseconds: delayMs)
-            try await run(isolation: isolation)
+            try await self.run(isolation: isolation)
         }
     }
 

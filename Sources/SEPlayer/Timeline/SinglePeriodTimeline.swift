@@ -49,7 +49,7 @@ struct SinglePeriodTimeline: Timeline {
 
     func windowCount() -> Int { 1 }
 
-    func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
         var windowDefaultStartPositionUs = windowDefaultStartPositionUs
 
         if isDynamic, !suppressPositionProjection, defaultPositionProjectionUs != 0 {
@@ -63,7 +63,7 @@ struct SinglePeriodTimeline: Timeline {
             }
         }
 
-        window = Window(
+        return window.set(
             id: Window.singleWindowId,
             mediaItem: mediaItem,
             presentationStartTimeMs: presentationStartTimeMs,
@@ -71,30 +71,24 @@ struct SinglePeriodTimeline: Timeline {
             elapsedRealtimeEpochOffsetMs: elapsedRealtimeEpochOffsetMs,
             isSeekable: isSeekable,
             isDynamic: isDynamic,
-            isPlaceholder: window.isPlaceholder,
             defaultPositionUs: windowDefaultStartPositionUs,
             durationUs: windowDurationUs,
             firstPeriodIndex: 0,
             lastPeriodIndex: 0,
             positionInFirstPeriodUs: windowPositionInPeriodUs
         )
-
-        return window
     }
 
     func periodCount() -> Int { 1 }
 
-    func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-        period = Period(
+    func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+        period.set(
             id: nil,
             uid: setIds ? Self.uuid : nil,
             windowIndex: 0,
             durationUs: periodDurationUs,
-            positionInWindowUs: -windowPositionInPeriodUs,
-            isPlaceholder: false
+            positionInWindowUs: -windowPositionInPeriodUs
         )
-
-        return period
     }
 
     func indexOfPeriod(by id: AnyHashable) -> Int? {

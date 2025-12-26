@@ -9,6 +9,7 @@ import CoreMedia
 
 public protocol SERenderer: AnyObject {
     var trackType: TrackType { get }
+    func handleMessage(_ message: RendererMessage) throws
     func getCapabilities() -> RendererCapabilities
 
     func getMediaClock() -> MediaClock?
@@ -51,9 +52,6 @@ public protocol SERenderer: AnyObject {
     func disable()
     func reset()
     func release()
-
-    func requestMediaDataWhenReady(on queue: Queue, block: @escaping () -> Void)
-    func stopRequestingMediaData()
 }
 
 @frozen

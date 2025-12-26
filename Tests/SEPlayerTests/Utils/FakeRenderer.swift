@@ -62,6 +62,7 @@ class FakeRenderer: BaseSERenderer {
             if !hasPendingBuffer {
                 resetBuffer()
                 let result = try readSource(to: buffer)
+                print("🌈 RENDERER READ RESULT = \(result)")
                 switch result {
                 case let .didReadFormat(format):
                     guard format.sampleMimeType?.trackType == trackType else {
@@ -77,6 +78,7 @@ class FakeRenderer: BaseSERenderer {
                     }
                     hasPendingBuffer = true
                 case .nothingRead:
+                    nrCount += 1
                     return
                 }
             } else {
@@ -91,6 +93,8 @@ class FakeRenderer: BaseSERenderer {
             }
         }
     }
+
+    private var nrCount = 0
 
     override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
         enabledCount += 1

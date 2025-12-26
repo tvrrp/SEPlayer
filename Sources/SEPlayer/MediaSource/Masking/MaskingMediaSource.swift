@@ -108,23 +108,23 @@ final class MaskingMediaSource: WrappingMediaSource {
                 )
             }
         } else {
-            newTimeline.getWindow(windowIndex: 0, window: &window)
+            newTimeline.getWindow(windowIndex: 0, window: window)
             var windowStartPositionUs = window.defaultPositionUs
             let windowId = window.id
 
             if let unpreparedMaskingMediaPeriod {
                 let periodPreparePositionUs = unpreparedMaskingMediaPeriod.preparePositionUs
-                timeline.periodById(unpreparedMaskingMediaPeriod.id.periodId, period: &period)
+                timeline.periodById(unpreparedMaskingMediaPeriod.id.periodId, period: period)
                 let windowPreparePositionUs = period.positionInWindowUs + periodPreparePositionUs
-                let oldWindowDefaultPositionUs = timeline.getWindow(windowIndex: 0, window: &window).defaultPositionUs
+                let oldWindowDefaultPositionUs = timeline.getWindow(windowIndex: 0, window: window).defaultPositionUs
                 if windowPreparePositionUs != oldWindowDefaultPositionUs {
                     windowStartPositionUs = windowPreparePositionUs
                 }
             }
 
             guard let (periodId, periodPositionUs) = newTimeline.periodPositionUs(
-                window: &window,
-                period: &period,
+                window: window,
+                period: period,
                 windowIndex: 0,
                 windowPositionUs: windowStartPositionUs
             ) else { return }
@@ -180,7 +180,7 @@ final class MaskingMediaSource: WrappingMediaSource {
             return false
         }
 
-        let periodDurationUs = timeline.getPeriod(periodIndex: maskingPeriodIndex, period: &period).durationUs
+        let periodDurationUs = timeline.getPeriod(periodIndex: maskingPeriodIndex, period: period).durationUs
         if periodDurationUs != .timeUnset, preparePositionOverrideUs >= periodDurationUs {
             preparePositionOverrideUs = max(0, periodDurationUs - 1)
         }
@@ -213,16 +213,16 @@ extension MaskingMediaSource {
             )
         }
 
-        override func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
-            timeline.getWindow(windowIndex: windowIndex, window: &window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+            timeline.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
             if window.id == replacedInternalWindowId {
                 window.id = Window.singleWindowId
             }
             return window
         }
 
-        override func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-            timeline.getPeriod(periodIndex: periodIndex, period: &period, setIds: setIds)
+        override func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+            timeline.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
             if period.uid == replacedInternalPeriodId, setIds {
                 period.uid = Self.maskingExternalPeriodId
             }
@@ -274,34 +274,35 @@ extension MaskingMediaSource {
 
         func windowCount() -> Int { 1 }
 
-        func getWindow(windowIndex: Int, window: inout Window, defaultPositionProjectionUs: Int64) -> Window {
-            window = Window(
+        func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+            window.set(
                 id: Window.singleWindowId,
                 mediaItem: mediaItem,
                 presentationStartTimeMs: .timeUnset,
                 windowStartTimeMs: .timeUnset,
                 elapsedRealtimeEpochOffsetMs: .timeUnset,
                 isSeekable: false,
-                isDynamic: false,
-                isPlaceholder: true,
-                defaultPositionUs: .zero,
+                isDynamic: true,
+                defaultPositionUs: 0,
                 durationUs: .timeUnset,
                 firstPeriodIndex: 0,
                 lastPeriodIndex: 0,
                 positionInFirstPeriodUs: 0
             )
+            window.isPlaceholder = true
             return window
         }
 
         func periodCount() -> Int { 1 }
 
-        func getPeriod(periodIndex: Int, period: inout Period, setIds: Bool) -> Period {
-            period = Period(
+        func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
+            period.set(
                 id: setIds ? 0 : nil,
                 uid: setIds ? MaskingTimeline.maskingExternalPeriodId : nil,
                 windowIndex: 0,
                 durationUs: .timeUnset,
                 positionInWindowUs: 0,
+                adPlaybackState: .none,
                 isPlaceholder: true
             )
             return period
