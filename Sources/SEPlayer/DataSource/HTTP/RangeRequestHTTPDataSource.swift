@@ -87,6 +87,7 @@ final class RangeRequestHTTPDataSource: DataSource {
         }
     }
 
+    @discardableResult
     private func openConnection(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
         let requestHandler = DefautlHTTPDataSource(
             syncActor: syncActor, networkLoader: networkLoader

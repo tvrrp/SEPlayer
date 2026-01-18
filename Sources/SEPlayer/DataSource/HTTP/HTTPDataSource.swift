@@ -34,6 +34,7 @@ final class DefautlHTTPDataSource: DataSource, @unchecked Sendable {
         self.loadHandler = HTTPDataSourceLoadHandler(syncActor: syncActor)
     }
 
+    @discardableResult
     func open(dataSpec: DataSpec, isolation: isolated any Actor = #isolation) async throws -> Int {
         syncActor.assertIsolated()
         url = dataSpec.url

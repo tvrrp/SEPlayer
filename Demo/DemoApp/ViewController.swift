@@ -7,6 +7,7 @@
 
 import UIKit
 import SwiftUI
+import SEPlayer
 
 final class ViewController: UIViewController {
     override func viewDidLoad() {
@@ -34,8 +35,6 @@ struct UrlListScreen: View {
     weak var hostViewController: UIViewController?
 
     @State private var urls: [String] = [
-        Bundle.main.url(forResource: "video", withExtension: "mp4")!.absoluteString,
-        "https://v.ozone.ru/vod/video-7/01GE7KG4C15DDZTZ065V4WNAXC/asset_3.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_3.mp4",
@@ -57,12 +56,34 @@ struct UrlListScreen: View {
         "https://download.dolby.com/us/en/test-tones/dolby-atmos-trailer_amaze_1080.mp4",
     ]
     @State private var newUrl: String = ""
+    @State private var seekParameters: PlayerSeekParameters = .default
+
+    enum PlayerSeekParameters: String, CaseIterable, Hashable {
+        case `default`
+        case exact
+        case closestSync
+        case previousSync
+        case nextSync
+
+        var seekParameters: SeekParameters {
+            switch self {
+            case .default:
+                SeekParameters.default
+            case .exact:
+                SeekParameters.exact
+            case .closestSync:
+                SeekParameters.closestSync
+            case .previousSync:
+                SeekParameters.previousSync
+            case .nextSync:
+                SeekParameters.nextSync
+            }
+        }
+    }
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                
-
                 HStack {
                     TextField("Enter URL", text: $newUrl)
                         .textFieldStyle(.roundedBorder)
@@ -79,6 +100,13 @@ struct UrlListScreen: View {
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
+
+                Picker("SeekParameters", selection: $seekParameters) {
+                    ForEach(PlayerSeekParameters.allCases, id: \.self) {
+                        Text($0.rawValue)
+                    }
+                }
+                .pickerStyle(.automatic)
 
                 List {
                     ForEach(urls, id: \.self) { url in
@@ -141,6 +169,7 @@ struct UrlListScreen: View {
         else { return }
 
         vc.videoUrls = urls.compactMap(URL.init(string:))
+        vc.seekParameters = seekParameters.seekParameters
         vc.repeatMode = urls.count == 1 ? .one : .off
         nav.pushViewController(vc, animated: true)
     }

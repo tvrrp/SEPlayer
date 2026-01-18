@@ -2,354 +2,248 @@
 //  AudioConverterDecoder.swift
 //  SEPlayer
 //
-//  Created by Damir Yackupov on 24.04.2025.
+//  Created by Damir Yackupov on 03.01.2026.
 //
 
-import AudioToolbox
-import CoreMedia.CMBlockBuffer
+import AVFoundation
 
-final class AudioConverterDecoder: AVFAudioRendererDecoder {
-    private let queue: Queue
-    private var sourceFormat: AudioStreamBasicDescription
-    private var sourceChannelLayout: ManagedAudioChannelLayout?
-    private var destinationFormat: AudioStreamBasicDescription
-    private let destinationFormatDescription: CMFormatDescription
-    private let decompressedSamplesQueue: TypedCMBufferQueue<AudioSampleWrapper>
-    private var audioConverter: AudioConverterRef?
+final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoderOutputBuffer, ACDecoderError> {
+    private let audioConverter: AVAudioConverter
+    private let inputFormat: AVAudioFormat
+    private let outputFormat: AVAudioFormat
+    private let decompressedBuffer: AVAudioPCMBuffer
+    private let maximumPacketSize: Int
+    private let memoryPool: CMMemoryPool
 
-    private var decoderCircularBuffer: DecoderCircularBuffer<BufferWrapper>
-    private var lastOutputBuffer: Int = .zero
-
-    init(queue: Queue, format: Format) throws {
-        let formatDescription = try format.buildFormatDescription()
-        guard let sourceFormat = formatDescription.audioStreamBasicDescription else { fatalError() }
-        self.queue = queue
-        self.sourceFormat = sourceFormat
-        self.sourceChannelLayout = formatDescription.audioChannelLayout
-        destinationFormat = AudioStreamBasicDescription(
-            format: .pcmFloat32,
-            sampleRate: sourceFormat.mSampleRate,
-            numOfChannels: sourceFormat.mChannelsPerFrame
-        )
-        let sourceChannelLayout: ManagedAudioChannelLayout? = if let audioLayout = formatDescription.audioChannelLayout {
-            ManagedAudioChannelLayout(tag: audioLayout.tag)
+    init(
+        decodeQueue: Queue = Queues.sharedDecodeQueue,
+        format: Format,
+        highWaterMark: Int = 30,
+    ) throws {
+        inputFormat = try AVAudioFormat(cmAudioFormatDescription: format.buildFormatDescription())
+        let outputFormat = if let channelLayout = inputFormat.channelLayout {
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: inputFormat.sampleRate,
+                interleaved: inputFormat.isInterleaved,
+                channelLayout: channelLayout
+            )
         } else {
-            nil
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: inputFormat.sampleRate,
+                channels: inputFormat.channelCount,
+                interleaved: inputFormat.isInterleaved
+            )
+        }
+        guard let outputFormat else { throw ACDecoderError.formatNotSupported }
+        self.outputFormat = outputFormat
+
+        guard let audioConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            throw ACDecoderError.formatNotSupported
         }
 
-        destinationFormatDescription = try CMAudioFormatDescription(
-            audioStreamBasicDescription: destinationFormat,
-            layout: nil//sourceChannelLayout
-        )
-        decompressedSamplesQueue = try TypedCMBufferQueue<AudioSampleWrapper>(capacity: .highWaterMark) { rhs, lhs in
-            guard rhs.presentationTime != lhs.presentationTime else { return .compareEqualTo }
-
-            return rhs.presentationTime > lhs.presentationTime ? .compareGreaterThan : .compareLessThan
+        self.audioConverter = audioConverter
+        guard let decompressedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: 4096) else {
+            throw ACDecoderError.failedToCreateAudioBuffer
         }
+        self.decompressedBuffer = decompressedBuffer
 
-        var size = if format.maxInputSize > 0 {
-            format.maxInputSize
+        maximumPacketSize = format.maxInputSize > 0 ? format.maxInputSize : .defaultInputBufferSize
+        memoryPool = CMMemoryPoolCreate(options: nil)
+        super.init(decodeQueue: decodeQueue, inputBuffersCount: highWaterMark, outputBuffersCount: highWaterMark)
+        try setInitialInputBufferSize(maximumPacketSize)
+    }
+
+    static func formatSupported(_ formatDescription: CMFormatDescription) -> Bool {
+        let inputFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        let outputFormat = if let channelLayout = inputFormat.channelLayout {
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: inputFormat.sampleRate,
+                interleaved: inputFormat.isInterleaved,
+                channelLayout: channelLayout
+            )
         } else {
-            Int(sourceFormat.mFramesPerPacket * sourceFormat.mChannelsPerFrame * 10)
-        }
-        size = size > 0 ? size : .defaultInputBufferSize
-
-        let individualBufferSize = Int(destinationFormat.mBytesPerPacket * destinationFormat.mChannelsPerFrame * 1024) * 10
-
-        decoderCircularBuffer = .init(
-            capacity: .highWaterMark,
-            inputBufferSize: size,
-            outputBufferSize: individualBufferSize,
-            allocateBuffer: { bufferSize in
-                let bufferList = AudioBufferList.allocate(maximumBuffers: 1)
-                let buffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: bufferSize)
-                bufferList[0].mData = UnsafeMutableRawPointer(buffer.baseAddress)
-                return .init(size: individualBufferSize, bufferList: bufferList)
-            },
-            deallocateBuffer: {
-                $0.bufferList.deallocateAllBuffers()
-            }
-        )
-
-        try createAudioConverter()
-    }
-
-    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
-        guard let oldAudioFormat = try? oldFormat?.buildFormatDescription().audioStreamBasicDescription,
-              let newAudioFormat = try? newFormat.buildFormatDescription().audioStreamBasicDescription else {
-            return false
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: inputFormat.sampleRate,
+                channels: inputFormat.channelCount,
+                interleaved: inputFormat.isInterleaved
+            )
         }
 
-        return oldAudioFormat == newAudioFormat
+        guard let outputFormat else { return false }
+        return AVAudioConverter(from: inputFormat, to: outputFormat) != nil
     }
 
-    static func getCapabilities() -> RendererCapabilities {
-        AudioConverterRendererCapabilities()
+    override func createInputBuffer() -> ACDecoderInputBuffer {
+        ACDecoderInputBuffer(format: inputFormat, packetCapacity: 1, maximumPacketSize: maximumPacketSize)
     }
 
-    func dequeueInputBufferIndex() -> Int? {
-        assert(queue.isCurrent())
-        guard decoderCircularBuffer.isInputBufferAvailable, decoderCircularBuffer.isOutputBufferAvailable,
-              let inputIndex = decoderCircularBuffer.dequeueInputBufferIndex(),
-              let outputIndex = decoderCircularBuffer.dequeueOutputBufferIndex() else {
-            return nil
-        }
-        lastOutputBuffer = outputIndex
-
-        return inputIndex
-    }
-
-    func dequeueInputBuffer(for index: Int) -> UnsafeMutableRawBufferPointer {
-        assert(queue.isCurrent())
-        let inputBuffer = decoderCircularBuffer.getInputBuffer(index: index)
-        return UnsafeMutableRawBufferPointer(start: inputBuffer.bufferList[0].mData, count: inputBuffer.size)
-    }
-
-    func queueInputBuffer(for index: Int, inputBuffer: DecoderInputBuffer) throws {
-        assert(queue.isCurrent())
-        decodeSample(index: index, outputIndex: lastOutputBuffer, inputBuffer: inputBuffer)
-    }
-
-    func dequeueOutputBuffer() -> AudioSampleWrapper? {
-        assert(queue.isCurrent())
-        return decompressedSamplesQueue.dequeue()
-    }
-
-    func flush() throws {
-        assert(queue.isCurrent())
-        if let audioConverter {
-            AudioConverterReset(audioConverter)
-        }
-        try decompressedSamplesQueue.reset()
-        decoderCircularBuffer.flush()
-        lastOutputBuffer = 0
-    }
-
-    func release() {
-        assert(queue.isCurrent())
-        if let audioConverter {
-            AudioConverterDispose(audioConverter)
-            self.audioConverter = nil
-        }
-
-        decoderCircularBuffer.release()
-    }
-
-    private func createAudioConverter() throws {
-        assert(queue.isCurrent())
-        let status = AudioConverterNew(&sourceFormat, &destinationFormat, &audioConverter)
-
-        if status != noErr {
-            throw AudioConverterErrors.osStatus(.init(rawValue: status))
+    override func createOutputBuffer() -> ACDecoderOutputBuffer {
+        ACDecoderOutputBuffer { [unowned self] buffer in
+            releaseOutputBuffer(buffer as! ACDecoderOutputBuffer)
         }
     }
 
-    private func decodeSample(index: Int, outputIndex: Int, inputBuffer: DecoderInputBuffer) {
-        assert(queue.isCurrent())
-
-        if inputBuffer.flags.contains(.endOfStream) {
-            handleSample(index: index, outputIndex: outputIndex, itemsCount: .zero, size: .zero, pts: .zero, sampleFlags: inputBuffer.flags)
-            return
+    override func createDecodeError(_ error: any Error) -> ACDecoderError {
+        guard let error = error as? ACDecoderError else {
+            return .unknown(error)
         }
-        guard let audioConverter else { return }
 
-        let outputBuffer = decoderCircularBuffer.getOutputBuffer(index: outputIndex)
-        let outputBufferList = outputBuffer.bufferList
-        outputBufferList[0].mNumberChannels = destinationFormat.mChannelsPerFrame
-        outputBufferList[0].mDataByteSize = UInt32(outputBuffer.size)
-        var ioOutputDataPackets: UInt32 = UInt32(outputBuffer.size)
+        return error
+    }
 
+    override func decode(
+        inputBuffer: ACDecoderInputBuffer,
+        outputBuffer: ACDecoderOutputBuffer,
+        reset: Bool,
+        isolation: isolated PlayerActor = #isolation
+    ) async throws(ACDecoderError) {
         do {
-            let inputAudioBufferList = decoderCircularBuffer.getInputBuffer(index: index).bufferList
-            inputAudioBufferList[0].mDataByteSize = UInt32(inputBuffer.size)
-            inputAudioBufferList[0].mNumberChannels = sourceFormat.mChannelsPerFrame
+            var error: NSError?
+            var needToProvideData = true
 
-            let packetDescriptionRef = UnsafeMutableBufferPointer<AudioStreamPacketDescription>.allocate(capacity: 1)
-            packetDescriptionRef[0] = AudioStreamPacketDescription(
-                mStartOffset: 0,
-                mVariableFramesInPacket: 0,
-                mDataByteSize: UInt32(inputBuffer.size)
-            )
-            defer { packetDescriptionRef.deallocate() }
+            struct UncheckedSendable<T>: @unchecked Sendable { let value: T }
+            let boxed = UncheckedSendable(value: inputBuffer) // audioConverter.convert will synchronously execute closure
+            audioConverter.convert(to: decompressedBuffer, error: &error) { _, status in
+                guard needToProvideData else {
+                    status.pointee = .noDataNow
+                    return nil
+                }
 
-            var dataObject = DataObject(bufferList: inputAudioBufferList, packetDescription: packetDescriptionRef)
+                if boxed.value.flags.contains(.endOfStream) {
+                    status.pointee = .endOfStream
+                    return nil
+                }
 
-            let result = withUnsafeMutablePointer(to: &dataObject) { dataObjectRef in
-                AudioConverterFillComplexBuffer(
-                    audioConverter,
-                    converterComplexBufferCallback,
-                    dataObjectRef,
-                    &ioOutputDataPackets,
-                    outputBufferList.unsafeMutablePointer,
-                    nil
-                )
+                needToProvideData = false
+                status.pointee = .haveData
+                return boxed.value.audioBuffer
             }
 
-            if result != noErr && result != AudioConverterErrors.Status.custom_noMoreData.rawValue {
-                throw AudioConverterErrors.osStatus(.init(rawValue: result))
-            }
+            if let error { throw error }
 
-            handleSample(
-                index: index,
-                outputIndex: outputIndex,
-                itemsCount: Int(ioOutputDataPackets),
-                size: Int(outputBufferList[0].mDataByteSize),
-                pts: CMTime.from(microseconds: inputBuffer.time),
-                sampleFlags: inputBuffer.flags
-            )
-        } catch {
-            handleSample(
-                index: index,
-                outputIndex: outputIndex,
-                itemsCount: .zero,
-                size: .zero,
-                pts: .zero,
-                sampleFlags: inputBuffer.flags
-            )
-        }
-
-        decoderCircularBuffer.onInputBufferAvailable(index: index)
-    }
-
-    var converterComplexBufferCallback: @convention(c) (
-        _ converter: AudioConverterRef,
-        _ dataPacketsCount: UnsafeMutablePointer<UInt32>,
-        _ ioData: UnsafeMutablePointer<AudioBufferList>,
-        _ outDataPacketDescription: UnsafeMutablePointer<UnsafeMutablePointer<AudioStreamPacketDescription>?>?,
-        _ userData: UnsafeMutableRawPointer?
-    ) -> OSStatus = { converter, dataPacketsCount, ioData, outDataPktDesc, userData in
-        guard let dataObject = userData?.assumingMemoryBound(to: DataObject.self) else {
-            return AudioConverterErrors.Status.custom_nilDataObjectPointer.rawValue
-        }
-
-        let ioDataPointer = UnsafeMutableAudioBufferListPointer(ioData)
-        guard !dataObject.pointee.didReadData else {
-            dataPacketsCount.pointee = 0
-            ioDataPointer[0].mDataByteSize = 0
-            return AudioConverterErrors.Status.custom_noMoreData.rawValue
-        }
-
-        outDataPktDesc?.pointee = dataObject.pointee.packetDescription.baseAddress
-        ioDataPointer[0].mData = dataObject.pointee.bufferList[0].mData
-        ioDataPointer[0].mDataByteSize = dataObject.pointee.bufferList[0].mDataByteSize
-        ioDataPointer[0].mNumberChannels = dataObject.pointee.bufferList[0].mNumberChannels
-
-        dataObject.pointee.didReadData = true
-        dataPacketsCount.pointee = 1
-        return noErr
-    }
-
-    func handleSample(index: Int, outputIndex: Int, itemsCount: Int, size: Int, pts: CMTime, sampleFlags: SampleFlags) {
-        do {
-            let sampleBuffer: CMSampleBuffer
-            let bufferList = decoderCircularBuffer.getOutputBuffer(index: outputIndex).bufferList
-
-            if itemsCount > 0 {
-                let blockBuffer = try CMBlockBuffer(
-                    buffer: .init(start: bufferList[0].mData, count: size),
-                    deallocator: { [queue, decoderCircularBuffer] (_, _) in
-                        queue.async {
-                            decoderCircularBuffer.onOutputBufferAvailable(index: outputIndex)
-                        }
-                    }
-                )
-
-                sampleBuffer = try CMSampleBuffer(
-                    dataBuffer: blockBuffer,
-                    formatDescription: destinationFormatDescription,
-                    numSamples: CMItemCount(itemsCount),
-                    presentationTimeStamp: .zero,
-                    packetDescriptions: []
-                )
-            } else if sampleFlags.contains(.endOfStream) {
-                decoderCircularBuffer.onOutputBufferAvailable(index: outputIndex)
-                sampleBuffer = try CMSampleBuffer(
-                    dataBuffer: nil,
-                    formatDescription: destinationFormatDescription,
-                    numSamples: itemsCount,
-                    sampleTimings: [],
-                    sampleSizes: []
-                )
-            } else {
-                decoderCircularBuffer.onOutputBufferAvailable(index: outputIndex)
+            guard decompressedBuffer.frameLength > 0 else {
+                outputBuffer.shouldBeSkipped = true
                 return
             }
 
-            try decompressedSamplesQueue.enqueue(.init(
-                sampleFlags: sampleFlags,
-                presentationTime: pts.microseconds,
-                audioBuffer: sampleBuffer,
-                outputBufferIndex: outputIndex
-            ))
+            let sampleBuffer = try CMSampleBuffer(
+                dataBuffer: nil,
+                dataReady: false,
+                formatDescription: outputFormat.formatDescription,
+                numSamples: CMItemCount(decompressedBuffer.frameLength),
+                presentationTimeStamp: .from(microseconds: inputBuffer.timeUs),
+                packetDescriptions: [],
+                makeDataReadyHandler: { _ in return noErr }
+            )
+
+            try sampleBuffer.setDataBuffer(
+                fromAudioBufferList: decompressedBuffer.audioBufferList,
+                blockBufferMemoryAllocator: CMMemoryPoolGetAllocator(memoryPool),
+                flags: []
+            )
+
+            outputBuffer.initBuffer(timeUs: inputBuffer.timeUs, sampleBuffer: sampleBuffer)
         } catch {
-            decoderCircularBuffer.onOutputBufferAvailable(index: outputIndex)
+            SELogger.error(.renderer, "ACDecoder unexpected error = \(error)")
+
+            if let error = error as? ACDecoderError {
+                throw error
+            } else {
+                throw .unknown(error)
+            }
         }
     }
 }
 
-extension AudioConverterDecoder {
-    private struct DataObject {
-        let bufferList: UnsafeMutableAudioBufferListPointer
-        let packetDescription: UnsafeMutableBufferPointer<AudioStreamPacketDescription>
-        var didReadData: Bool = false
-        var error: Error?
-    }
+enum ACDecoderError: Error {
+    case unknown(Error)
+    case formatNotSupported
+    case failedToCreateAudioBuffer
+    case missingData
 }
 
-struct AudioConverterRendererCapabilities: RendererCapabilities {
-    let trackType: TrackType = .audio
-
-    func supportsFormat(_ format: Format) -> Bool {
-        guard let formatDescription = try? format.buildFormatDescription(),
-              formatDescription.mediaType == .audio,
-              var description = formatDescription.audioStreamBasicDescription else {
-            return false
-        }
-
-        var destinationFormat = AudioStreamBasicDescription(
-            format: .pcmInt16,
-            sampleRate: description.mSampleRate,
-            numOfChannels: description.mChannelsPerFrame
-        )
-
-        var converter: AudioConverterRef?
-        let status = AudioConverterNew(&description, &destinationFormat, &converter)
-
-        if status == noErr, let converter {
-            AudioConverterDispose(converter)
-            return true
-        } else {
-            return false
-        }
-    }
-}
-
-final class AudioSampleWrapper: AQOutputBuffer {
-    let sampleFlags: SampleFlags
-    let presentationTime: Int64
-    let audioBuffer: CMSampleBuffer?
-    let outputBufferIndex: Int
+final class ACDecoderInputBuffer: DecoderInputBuffer {
+    var audioBuffer: AVAudioCompressedBuffer
 
     init(
-        sampleFlags: SampleFlags,
-        presentationTime: Int64,
-        audioBuffer: CMSampleBuffer? = nil,
-        outputBufferIndex: Int
+        format: AVAudioFormat,
+        packetCapacity: Int = 1,
+        maximumPacketSize: Int = 0,
+        bufferReplacementMode: DecoderInputBuffer.BufferReplacementMode = .enabled,
+        paddingSize: Int = 0
     ) {
-        self.sampleFlags = sampleFlags
-        self.presentationTime = presentationTime
-        self.audioBuffer = audioBuffer
-        self.outputBufferIndex = outputBufferIndex
+        let maximumPacketSize = if format.streamDescription.pointee.mBytesPerPacket > 0 {
+            max(Int(format.streamDescription.pointee.mBytesPerPacket), maximumPacketSize)
+        } else if maximumPacketSize > 0 {
+            maximumPacketSize
+        } else {
+            Int.defaultInputBufferSize
+        }
+
+        audioBuffer = AVAudioCompressedBuffer(
+            format: format,
+            packetCapacity: AVAudioPacketCount(packetCapacity),
+            maximumPacketSize: maximumPacketSize
+        )
+
+        super.init(bufferReplacementMode: bufferReplacementMode, paddingSize: paddingSize)
+    }
+
+    override func commitWrite(amount: Int) {
+        audioBuffer.byteLength = UInt32(amount)
+        audioBuffer.packetCount = 1
+        audioBuffer.packetDescriptions?.pointee = .init(
+            mStartOffset: 0,
+            mVariableFramesInPacket: 0,
+            mDataByteSize: audioBuffer.byteLength
+        )
+    }
+
+    override func getData() throws -> UnsafeMutableRawBufferPointer? {
+        UnsafeMutableRawBufferPointer(
+            start: audioBuffer.data,
+            count: audioBuffer.maximumPacketSize
+        )
+    }
+
+    override func clear() {
+        super.clear()
+        audioBuffer.byteLength = 0
+        audioBuffer.packetCount = 0
+        audioBuffer.packetDescriptions?.pointee = .init()
+    }
+
+    override func createReplacementBuffer(requiredCapacity: Int) throws {
+        guard bufferReplacementMode == .enabled else {
+            throw BufferErrors.allocationFailed
+        }
+
+        audioBuffer = AVAudioCompressedBuffer(
+            format: audioBuffer.format,
+            packetCapacity: audioBuffer.packetCapacity,
+            maximumPacketSize: requiredCapacity
+        )
     }
 }
 
-private struct BufferWrapper {
-    let size: Int
-    let bufferList: UnsafeMutableAudioBufferListPointer
+final class ACDecoderOutputBuffer: SimpleDecoderOutputBuffer {
+    var sampleBuffer: CMSampleBuffer?
+
+    func initBuffer(timeUs: Int64, sampleBuffer: CMSampleBuffer) {
+        self.timeUs = timeUs
+        self.sampleBuffer = sampleBuffer
+    }
+
+    override func release() {
+        sampleBuffer = nil
+        super.release()
+    }
 }
 
 private extension Int {
-    static let highWaterMark = 60
-//    static let highWaterMark = 40000
     static let defaultInputBufferSize: Int = 10 * 1024
 }

@@ -297,6 +297,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
     }
 
     func assertTimelineChangeReasonsEqual(reasons: TimelineChangeReason...) {
+        print()
         #expect(timelineChangeReasons.count == reasons.count)
         #expect(zip(timelineChangeReasons, reasons).allSatisfy { $0 == $1 })
     }

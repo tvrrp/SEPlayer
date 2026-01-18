@@ -433,7 +433,6 @@ final class MessageQueue: @unchecked Sendable {
                     m.pointee.next = nil
                     m.pointee.inUse = true
                     lock.unlock()
-//                    print("🏙️ Current time = \(now), message time = \(m.pointee.whenNs), kind = \(m.pointee.what)")
                     return m
                 }
             } else {

@@ -22,7 +22,7 @@ extension BoxParser {
             out: inout StsdData2,
             entryIndex: Int
         ) throws -> Bool {
-            return false // TODO: remove
+//            return false // TODO: remove
             parent.moveReaderIndex(to: position)
             var formatDescriptionOut: CMAudioFormatDescription?
 

@@ -7,30 +7,36 @@
 
 import AVFoundation
 
-protocol VideoSampleBufferRendererDelegate: AnyObject {
-    func renderer(_ renderer: VideoSampleBufferRenderer, didFailedRenderingWith error: Error?)
+public protocol VideoSampleBufferRendererDelegate: AnyObject {
+    nonisolated var isolation: any Actor { get }
+    func renderer(_ renderer: VideoSampleBufferRenderer, didFailedRenderingWith error: Error?, isolation: isolated any Actor)
 }
 
-protocol VideoSampleBufferRenderer: VideoSampleBufferRendererPerformance {
-    var delegate: VideoSampleBufferRendererDelegate? { get set }
-    var timebase: CMTimebase { get }
+public protocol VideoSampleBufferRenderer: VideoSampleBufferRendererPerformance, Sendable {
+    nonisolated var delegate: VideoSampleBufferRendererDelegate? { get set }
     var isReadyForMoreMediaData: Bool { get }
     var hasSufficientMediaDataForReliablePlaybackStart: Bool { get }
 
+    func setControlTimebase(_ timebase: CMTimebase?)
     func enqueue(_ sampleBuffer: CMSampleBuffer)
     func flush()
     func flush(removeImage: Bool)
     @available(iOS 17.0, *)
-    func flush(removeImage: Bool) async
+    func flushAsync(removeImage: Bool) async
     @available(iOS 17.0, *)
     func flush(removeImage: Bool, completion: @escaping () -> Void)
     func requestMediaDataWhenReady(on queue: DispatchQueue, using block: @escaping @Sendable () -> Void)
     func stopRequestingMediaData()
 }
 
-protocol VideoSampleBufferRendererPerformance: AnyObject {
-    @available(iOS 17.4, *)
-    var presentationTimeExpectation: AVSampleBufferVideoRenderer.PresentationTimeExpectation { get set }
+public enum PresentationTimeExpectation {
+    case none
+    case monotonicallyIncreasing
+    case minimumUpcoming(CMTime)
+}
+
+public protocol VideoSampleBufferRendererPerformance: AnyObject {
+    func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation)
 }
 
 private final class WeakBox {
@@ -43,6 +49,7 @@ private enum AssocKeys {
 }
 
 extension AVSampleBufferDisplayLayer {
+    @MainActor
     func createRenderer() -> VideoSampleBufferRenderer {
         if let box = objc_getAssociatedObject(self, &AssocKeys.service),
            let service = (box as? WeakBox)?.value {
@@ -50,7 +57,7 @@ extension AVSampleBufferDisplayLayer {
         }
 
         let service: VideoSampleBufferRenderer = if #available(iOS 17, *) {
-            AVSBVideoRenderer(renderer: self.sampleBufferRenderer)
+            AVSBVideoRenderer(renderer: self.sampleBufferRenderer, layer: self)
         } else {
             AVSBDLVideoRenderer(layer: self)
         }
@@ -59,11 +66,36 @@ extension AVSampleBufferDisplayLayer {
         objc_setAssociatedObject(self, &AssocKeys.service, weakBox, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         return service
     }
+
+    @MainActor
+    func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
+//        TODO: think about this
+//        switch expectation {
+//        case let .minimumUpcoming(time):
+//            let selector = Selector("expectMinimumUpcomingSampleBufferPresentationTime:")
+//            if responds(to: selector) {
+//                perform(selector, with: time)
+//            }
+//        case .monotonicallyIncreasing:
+//            let selector = Selector("expectMonotonicallyIncreasingUpcomingSampleBufferPresentationTimes")
+//            if responds(to: selector) {
+//                perform(selector)
+//            }
+//        case .none:
+//            let selector = Selector("resetUpcomingSampleBufferPresentationTimeExpectations")
+//            if responds(to: selector) {
+//                perform(selector)
+//            }
+//        }
+    }
 }
 
 @available(iOS 17.0, *)
 final class AVSBVideoRenderer: VideoSampleBufferRenderer {
-    weak var delegate: VideoSampleBufferRendererDelegate?
+    nonisolated var delegate: VideoSampleBufferRendererDelegate? {
+        get { lock.withLock { _delegate } }
+        set { lock.withLock { _delegate = newValue } }
+    }
 
     var timebase: CMTimebase { renderer.timebase }
     var isReadyForMoreMediaData: Bool { renderer.isReadyForMoreMediaData }
@@ -71,23 +103,51 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
         renderer.hasSufficientMediaDataForReliablePlaybackStart
     }
 
-    @available(iOS 17.4, *)
-    var presentationTimeExpectation: AVSampleBufferVideoRenderer.PresentationTimeExpectation {
-        get { .none }
-        set { renderer.presentationTimeExpectation = newValue }
-    }
+    private let lock = UnfairLock()
+    @MainActor private let layer: AVSampleBufferDisplayLayer
+    private nonisolated(unsafe) let renderer: AVSampleBufferVideoRenderer
+    private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
+    private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
 
-    private let renderer: AVSampleBufferVideoRenderer
-    private var observer: NSKeyValueObservation?
-
-    init(renderer: AVSampleBufferVideoRenderer) {
+    @MainActor
+    init(renderer: AVSampleBufferVideoRenderer, layer: AVSampleBufferDisplayLayer) {
         self.renderer = renderer
+        self.layer = layer
 
         observer = renderer.observe(\.status) { [weak self] renderer, _ in
             guard let self else { return }
-            if renderer.status == .failed {
-                delegate?.renderer(self, didFailedRenderingWith: renderer.error)
+            if renderer.status == .failed, let delegate {
+                Task {
+                    await delegate.renderer(self, didFailedRenderingWith: renderer.error, isolation: delegate.isolation)
+                }
             }
+        }
+    }
+
+    deinit {
+        observer?.invalidate()
+    }
+
+    func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
+        if #available(iOS 17.4, *) {
+            switch expectation {
+            case .none:
+                renderer.presentationTimeExpectation = .none
+            case .monotonicallyIncreasing:
+                renderer.presentationTimeExpectation = .monotonicallyIncreasing
+            case let .minimumUpcoming(time):
+                renderer.presentationTimeExpectation = .minimumUpcoming(time)
+            }
+        } else {
+            DispatchQueue.main.async {
+                self.layer.setPresentationTimeExpectation(expectation)
+            }
+        }
+    }
+
+    func setControlTimebase(_ timebase: CMTimebase?) {
+        DispatchQueue.main.async {
+            self.layer.controlTimebase = timebase
         }
     }
 
@@ -103,7 +163,7 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
         renderer.flush(removingDisplayedImage: removeImage)
     }
 
-    func flush(removeImage: Bool) async {
+    func flushAsync(removeImage: Bool) async {
         await renderer.flush(removingDisplayedImage: removeImage)
     }
 
@@ -121,90 +181,150 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
 }
 
 final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
-    weak var delegate: VideoSampleBufferRendererDelegate?
+    nonisolated var delegate: VideoSampleBufferRendererDelegate? {
+        get { lock.withLock { _delegate } }
+        set { lock.withLock { _delegate = newValue } }
+    }
 
-    var timebase: CMTimebase {
-        queue.sync { layer.timebase }
+    var timebase: CMTimebase? {
+        get { nil }
+        set { DispatchQueue.main.async { self.layer.controlTimebase = newValue } }
     }
 
     var isReadyForMoreMediaData: Bool {
-        queue.sync { layer.isReadyForMoreMediaData }
+        lock.withLock { _isReadyForMoreMediaData }
     }
 
     var hasSufficientMediaDataForReliablePlaybackStart: Bool {
-        queue.sync { layer.hasSufficientMediaDataForReliablePlaybackStart }
+        DispatchQueue.main.sync { self.layer.hasSufficientMediaDataForReliablePlaybackStart }
     }
 
-    @available(iOS 17.4, *)
-    var presentationTimeExpectation: AVSampleBufferVideoRenderer.PresentationTimeExpectation {
-        get {
-            assertionFailure("iOS 17 must use AVSBVideoRenderer")
-            return .none
-        }
-        set {
-            assertionFailure("iOS 17 must use AVSBVideoRenderer")
-        }
-    }
+    @MainActor private let layer: AVSampleBufferDisplayLayer
+    private let lock = UnfairLock()
 
-    private let layer: AVSampleBufferDisplayLayer
-    private let queue = DispatchQueue.main
-    private var observer: NSKeyValueObservation?
+    private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
+    private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
+    private nonisolated(unsafe) var _isReadyForMoreMediaData = true // guarded by lock
+    @MainActor private var requestMediaDataInfo: (DispatchQueue, () -> Void)?
 
+    @MainActor
     init(layer: AVSampleBufferDisplayLayer) {
         self.layer = layer
 
-        queue.async { [self] in
+        DispatchQueue.main.async { [self] in
             observer = layer.observe(\.status) { [weak self] layer, _ in
                 guard let self else { return }
-                if layer.status == .failed {
-                    delegate?.renderer(self, didFailedRenderingWith: layer.error)
+                if layer.status == .failed, let delegate {
+                    let error = layer.error
+
+                    Task {
+                        await delegate.renderer(self, didFailedRenderingWith: error, isolation: delegate.isolation)
+                    }
                 }
             }
+
+            registerForReadyNotifications()
+        }
+    }
+
+    deinit {
+        observer?.invalidate()
+    }
+
+    func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
+        DispatchQueue.main.async { self.layer.setPresentationTimeExpectation(expectation) }
+    }
+
+    func setControlTimebase(_ timebase: CMTimebase?) {
+        DispatchQueue.main.async {
+            self.layer.controlTimebase = timebase
         }
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        queue.async {
-            self.layer.enqueue(sampleBuffer)
+        DispatchQueue.main.async { [self] in
+            layer.enqueue(sampleBuffer)
+            let isReadyForMoreMediaData = layer.isReadyForMoreMediaData
+            lock.withLock { _isReadyForMoreMediaData = isReadyForMoreMediaData }
+
+            if !isReadyForMoreMediaData {
+                registerForReadyNotifications()
+            }
         }
     }
 
     func flush() {
-        queue.async {
+        DispatchQueue.main.async {
             self.layer.flush()
+            self.setPresentationTimeExpectation(.none)
         }
     }
 
     func flush(removeImage: Bool) {
-        queue.async {
+        DispatchQueue.main.async { [self] in
+            if removeImage {
+                layer.flushAndRemoveImage()
+            } else {
+                layer.flush()
+            }
+
+            setPresentationTimeExpectation(.none)
+        }
+    }
+
+    @available(iOS 17.0, *)
+    func flushAsync(removeImage: Bool) async {
+        await MainActor.run {
+            if removeImage {
+                layer.flushAndRemoveImage()
+            } else {
+                layer.flush()
+            }
+
+            setPresentationTimeExpectation(.none)
+        }
+    }
+
+    @available(iOS 17.0, *)
+    func flush(removeImage: Bool, completion: @escaping () -> Void) {
+        Task { @MainActor in
             if removeImage {
                 self.layer.flushAndRemoveImage()
             } else {
                 self.layer.flush()
             }
+
+            completion()
+            setPresentationTimeExpectation(.none)
         }
     }
 
-    @available(iOS 17.0, *)
-    func flush(removeImage: Bool) async {
-        assertionFailure("iOS 17 must use AVSBVideoRenderer")
-    }
-
-    @available(iOS 17.0, *)
-    func flush(removeImage: Bool, completion: @escaping () -> Void) {
-        assertionFailure("iOS 17 must use AVSBVideoRenderer")
-        completion()
-    }
-
     func requestMediaDataWhenReady(on queue: DispatchQueue, using block: @escaping () -> Void) {
-        queue.async {
-            self.layer.requestMediaDataWhenReady(on: queue, using: block)
+        DispatchQueue.main.async {
+            self.requestMediaDataInfo = (queue, block)
         }
     }
 
     func stopRequestingMediaData() {
-        queue.async {
-            self.layer.stopRequestingMediaData()
+        DispatchQueue.main.async { self.requestMediaDataInfo = nil }
+    }
+
+    @MainActor
+    private func registerForReadyNotifications() {
+        layer.requestMediaDataWhenReady(on: .main) { [weak self] in
+            guard let self else { return }
+
+            MainActor.assumeIsolated {
+                self.layer.stopRequestingMediaData()
+
+                self.lock.withLock {
+                    self._isReadyForMoreMediaData = self.layer.isReadyForMoreMediaData
+                }
+
+                if let (queue, block) = self.requestMediaDataInfo {
+                    queue.async { block() }
+                }
+            }
         }
     }
 }

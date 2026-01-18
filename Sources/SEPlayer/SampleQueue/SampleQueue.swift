@@ -167,6 +167,8 @@ class SampleQueue {
         if result == .didReadBuffer, let extras, !buffer.flags.contains(.endOfStream) {
             let peek = readFlags.contains(.peek)
             if !readFlags.contains(.omitSampleData) {
+                // TODO: move to sampleDataQueue
+                try buffer.ensureSpaceForWrite(extras.size)
                 let target = try buffer.dequeue()
                 if peek {
                     try! sampleDataQueue.peekToBuffer(
@@ -181,11 +183,8 @@ class SampleQueue {
                         size: extras.size
                     )
                 }
-//                try buffer.dequeueOutputSpan { outputSpan in
-//                    
-//                }
 
-                buffer.size = extras.size
+                buffer.commitWrite(amount: extras.size)
             }
 
             if !peek { readPosition += 1 }
@@ -410,7 +409,7 @@ private extension SampleQueue {
         if !hasNextSample() {
             if loadingFinished || isLastSampleQueued {
                 buffer.flags = .endOfStream
-                buffer.time = .endOfSource
+                buffer.timeUs = .endOfSource
                 return (.didReadBuffer, nil)
             } else if let upstreamFormat, (formatRequired || upstreamFormat != downstreamFormat) {
                 downstreamFormat = upstreamFormat
@@ -434,7 +433,7 @@ private extension SampleQueue {
         }
 
         buffer.size = sampleInfo.size
-        buffer.time = sampleInfo.time
+        buffer.timeUs = sampleInfo.time
         let extras = SampleExtrasHolder(
             size: sampleInfo.size,
             offset: sampleInfo.offset

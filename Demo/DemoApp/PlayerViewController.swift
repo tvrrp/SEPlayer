@@ -11,7 +11,9 @@ import SEPlayer
 import MediaPlayer
 
 class PlayerViewController: UIViewController {
-    let player: Player
+    var seekParameters: SeekParameters = .default
+
+    let player: SEPlayer
 
     let playerView = SEPlayerView()
 
@@ -134,7 +136,10 @@ class PlayerViewController: UIViewController {
         playerView.gravity = .resizeAspect
 
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
-        player.repeatMode = .off
+        if videoUrls.count == 1 {
+            player.repeatMode = .one
+        }
+        player.seekParameters = seekParameters
         player.delegate.addDelegate(self)
         player.prepare()
         player.playWhenReady = true

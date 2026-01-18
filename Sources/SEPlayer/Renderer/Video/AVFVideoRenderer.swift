@@ -1,320 +1,411 @@
 //
-//  CARenderer.swift
+//  AVFVideoRenderer.swift
 //  SEPlayer
 //
-//  Created by Damir Yackupov on 23.04.2025.
+//  Created by Damir Yackupov on 09.01.2026.
 //
 
-import CoreMedia
+import AVFoundation
+import VideoToolbox
 
-protocol AVFVideoRendererDecoder: SEDecoder where OutputBuffer: CoreVideoBuffer {
-    static func getCapabilities() -> RendererCapabilities
-    func setPlaybackSpeed(_ speed: Float)
-    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
-}
-
-protocol CoreVideoBuffer: DecoderOutputBuffer {
-    var imageBuffer: CVImageBuffer? { get }
-    var outputFormatDescription: CMFormatDescription? { get }
-}
-
-final class AVFVideoRenderer<Decoder: AVFVideoRendererDecoder>: BaseSERenderer {
-    private var decoder: Decoder?
+final class AVFVideoRenderer: BaseSERenderer {
     private let queue: Queue
-    private let bufferableContainer: PlayerBufferableContainer
-    private let decoderFactory: SEDecoderFactory
-
+    private let formatQueue: TimedValueQueue<Format>
+    private let renderersStorage: VideoSampleBufferRenderersStorage
+    private let allowedJoiningTimeMs: Int64
+    private let maxDroppedFramesToNotify: Int
     private let flagsOnlyBuffer: DecoderInputBuffer
+
     private var inputFormat: Format?
-
-    private var inputIndex: Int?
-    private var inputBuffer: DecoderInputBuffer
-    private var outputBuffer: CoreVideoBuffer?
-
-    private var decoderReinitializationState: DecoderReinitializationState = .none
-    private var decoderReceivedBuffers: Bool = false
-
-    private var initialPosition: Int64?
+    private var outputFormat: Format?
+    private var outputFormatDescription: CMFormatDescription?
+    private var decoder: VTDecoder?
+    private var inputBuffer: DecoderInputBuffer?
+    private var outputBuffer: VTDecoderOutputBuffer?
+    private var decoderReinitializationState = DecoderReinitializationState.none
+    private var decoderReceivedBuffers = false
+    private var firstFrameState: FirstFrameState = .notRenderedOnlyAllowedIfStarted
+    private var initialPositionUs = Int64.zero
+    private var joiningDeadlineMs: Int64
     private var waitingForFirstSampleInFormat = false
-
     private var inputStreamEnded = false
     private var outputStreamEnded = false
 
+    private var droppedFrameAccumulationStartTimeMs = Int64.zero
+    private var droppedFrames = 0
+    private var consecutiveDroppedFrameCount = 0
     private var buffersInCodecCount = 0
-    private var lastRenderTime: Int64 = 0
-
-    private var playbackSpeed: Float = 1.0
-    private var startPosition: Int64?
-    private var lastFrameReleaseTime: Int64 = .zero
+    private var lastRenderTimeUs = Int64.zero
+    private var minimumEnqueuedPresentationTime = Int64.timeUnset
+    private var requestMediaDataInfo: (Queue, () -> Void)?
 
     init(
         queue: Queue,
         clock: SEClock,
-        bufferableContainer: PlayerBufferableContainer,
-        decoderFactory: SEDecoderFactory
-    ) throws {
+        allowedJoiningTimeMs: Int64,
+        maxDroppedFramesToNotify: Int
+    ) {
         self.queue = queue
-        self.bufferableContainer = bufferableContainer
-        self.decoderFactory = decoderFactory
-
-        flagsOnlyBuffer = DecoderInputBuffer()
-        inputBuffer = DecoderInputBuffer()
+        formatQueue = .init()
+        renderersStorage = .init(queue: queue)
+        self.allowedJoiningTimeMs = allowedJoiningTimeMs
+        self.maxDroppedFramesToNotify = maxDroppedFramesToNotify
+        flagsOnlyBuffer = .noDataBuffer()
+        joiningDeadlineMs = .timeUnset
 
         super.init(queue: queue, trackType: .video, clock: clock)
     }
 
-    override func handleMessage(_ message: RendererMessage) throws {
-        if case let .requestMediaDataWhenReady(queue, block) = message {
-            bufferableContainer.requestMediaDataWhenReady(on: queue, block: block)
-        } else if case .stopRequestingMediaData = message {
-            bufferableContainer.stopRequestingMediaData()
-        } else if case let .setVideoOutput(output) = message {
-            bufferableContainer.register(output)
-        } else if case let .setVideoOutput(output) = message {
-            bufferableContainer.remove(output)
-        } else {
-            try super.handleMessage(message)
-        }
-    }
-
     override func getCapabilities() -> RendererCapabilities {
-        Decoder.getCapabilities()
+        self
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
         guard !outputStreamEnded else { return }
 
         if inputFormat == nil {
-            let result = try! readSource(to: flagsOnlyBuffer, readFlags: .requireFormat)
-            switch result {
-            case let .didReadFormat(format):
-                try! onInputFormatChanged(format: format)
-            case .didReadBuffer:
-                guard flagsOnlyBuffer.flags.contains(.endOfStream) else {
-                    fatalError() // TODO: throw error
-                }
+            flagsOnlyBuffer.clear()
+            let result = try readSource(to: flagsOnlyBuffer, readFlags: .requireFormat)
+
+            if case let .didReadFormat(format) = result {
+                try onInputFormatChanged(format)
+            } else if case .didReadBuffer = result {
+                assert(flagsOnlyBuffer.flags.contains(.endOfStream))
                 inputStreamEnded = true
                 outputStreamEnded = true
                 return
-            case .nothingRead:
+            } else {
                 return
             }
         }
 
-        try! maybeInitDecoder()
+        try maybeInitDecoder()
 
-        if decoder != nil {
-            while try! drainOutputBuffer(position: position, elapsedRealtime: elapsedRealtime) {}
-            while try! feedInputBuffer() {}
+        if let decoder {
+            while try drainOutputBuffer(positionUs: position, elapsedRealtimeUs: elapsedRealtime) {}
+            while try feedInputBuffer() {}
         }
     }
 
-    override func isEnded() -> Bool { outputStreamEnded }
-
-    override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
-        try! super.onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
-//        bufferableContainer.prepare(action: .reset) // TODO: think
-    }
-
-    override func onStreamChanged(
-        formats: [Format],
-        startPosition: Int64,
-        offset: Int64,
-        mediaPeriodId: MediaPeriodId
-    ) throws {
-        try! super.onStreamChanged(
-            formats: formats,
-            startPosition: startPosition,
-            offset: offset,
-            mediaPeriodId: mediaPeriodId
-        )
-        if self.startPosition == nil {
-            self.startPosition = startPosition
-        }
-
-        onProcessedStreamChange()
-    }
-
-    private func onProcessedStreamChange() {
-//        videoFrameReleaseControl.processedStreamChanged()
-    }
-
-    private func updatePeriodDuration() {
-        // TODO:
-    }
-
-    override func onPositionReset(position: Int64, joining: Bool) throws {
-        try! super.onPositionReset(position: position, joining: joining)
-        inputStreamEnded = false
-        outputStreamEnded = false
-        initialPosition = nil
-        if decoder != nil {
-            try! flushDecoder()
-        }
-
-//        videoFrameReleaseControl.reset()
-//        if joining {
-//            videoFrameReleaseControl.join(renderNextFrameImmediately: false)
-//        }
+    override func isEnded() -> Bool {
+        outputStreamEnded
     }
 
     override func isReady() -> Bool {
-        let rendererOtherwiseReady = inputFormat != nil && (isSourceReady() || outputBuffer != nil)
-        if rendererOtherwiseReady, decoder == nil {
+        if inputFormat != nil, (isSourceReady() || outputBuffer != nil),
+           (firstFrameState == .rendered || !renderersStorage.hasOutput) {
+            joiningDeadlineMs = .timeUnset
+            // Ready. If we were joining then we've now joined, so clear the joining deadline.
             return true
+        } else if joiningDeadlineMs == .timeUnset {
+            // Not joining.
+            return false
+        } else if getClock().milliseconds < joiningDeadlineMs {
+            // Joining and still within the joining deadline.
+            return true
+        } else {
+            // The joining deadline has been exceeded. Give up and clear the deadline.
+            joiningDeadlineMs = .timeUnset
+            return false
+        }
+    }
+
+    override func handleMessage(_ message: RendererMessage) throws {
+        switch message {
+        case let .setVideoOutput(renderer):
+            let didHasRenderers = renderersStorage.hasOutput
+            renderersStorage.addRenderer(renderer)
+            if !didHasRenderers {
+                onOutputChanged()
+            }
+        case let .removeVideoOutput(renderer):
+            renderersStorage.removeRenderer(renderer)
+            if !renderersStorage.hasOutput {
+                onOutputRemoved()
+            }
+        case let .setControlTimebase(timebase):
+            renderersStorage.setControlTimebase(timebase)
+        case let .requestMediaDataWhenReady(queue, block):
+            requestMediaDataInfo = (queue, block)
+            renderersStorage.requestMediaDataWhenReady(on: queue.queue) { [unowned self] in
+                renderersStorage.stopRequestingMediaData()
+                block()
+            }
+        case .stopRequestingMediaData:
+            requestMediaDataInfo = nil
+            renderersStorage.stopRequestingMediaData()
+        default:
+            try super.handleMessage(message)
+        }
+    }
+
+    override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
+        // TODO: decoder counters
+        firstFrameState = mayRenderStartOfStream ? .notRendered : .notRenderedOnlyAllowedIfStarted
+    }
+
+    override func enableRenderStartOfStream() {
+        if firstFrameState == .notRenderedOnlyAllowedIfStarted {
+            firstFrameState = .notRendered
+        }
+    }
+
+    override func onPositionReset(position: Int64, joining: Bool) throws {
+        inputStreamEnded = false
+        outputStreamEnded = false
+        lowerFirstFrameState(.notRendered)
+        initialPositionUs = .timeUnset
+        consecutiveDroppedFrameCount = 0
+        if decoder != nil {
+            try flushDecoder()
+        }
+        renderersStorage.flush()
+        minimumEnqueuedPresentationTime = position
+
+        if joining {
+            setJoiningDeadlineMs()
+        } else {
+            joiningDeadlineMs = .timeUnset
         }
 
-        return true
-        // TODO: return videoFrameReleaseControl.isReady(rendererOtherwiseReady: rendererOtherwiseReady)
+        formatQueue.clear()
     }
 
     override func onStarted() throws {
-        try! super.onStarted()
-        lastRenderTime = getClock().microseconds
-        bufferableContainer.start()
+        droppedFrames = 0
+        droppedFrameAccumulationStartTimeMs = getClock().milliseconds
+        lastRenderTimeUs = getClock().microseconds
     }
 
     override func onStopped() {
-        bufferableContainer.stop()
-        super.onStopped()
+        joiningDeadlineMs = .timeUnset
+        // TODO: maybeNotifyDroppedFrames()
     }
 
     override func onDisabled() {
         inputFormat = nil
+        // TODO: reportedVideoSize = nil
+        lowerFirstFrameState(.notRenderedOnlyAllowedIfStarted)
+        renderersStorage.flush(removeImage: true)
         releaseDecoder()
-        bufferableContainer.end()
-        super.onDisabled()
     }
 
-    override func onReset() {
-        super.onReset()
-        startPosition = nil
-    }
-
-    private func flushDecoder() throws {
+    func flushDecoder() throws {
+        renderersStorage.flush()
         buffersInCodecCount = 0
-        bufferableContainer.flush()
         if decoderReinitializationState != .none {
             releaseDecoder()
-            try! maybeInitDecoder()
+            try maybeInitDecoder()
         } else {
-            resetInputBuffer()
+            inputBuffer = nil
+            outputBuffer?.release()
             outputBuffer = nil
-            try! decoder?.flush()
+            decoder?.flush()
+            decoder?.setOutputStartTimeUs(getLastResetPosition())
             decoderReceivedBuffers = false
         }
     }
 
-    private func releaseDecoder() {
-        resetInputBuffer()
+    func releaseDecoder() {
+        inputBuffer = nil
         outputBuffer = nil
         decoderReinitializationState = .none
         decoderReceivedBuffers = false
         buffersInCodecCount = 0
-        bufferableContainer.flush()
-//        bufferableContainer.prepare(action: .reset) // TODO: think about that
-
-        if let decoder {
-            decoder.release()
-            self.decoder = nil
-        }
+        decoder?.release()
+        decoder = nil
     }
 
-    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
-        decoder?.canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) ?? false
-    }
-
-    func maybeInitDecoder() throws {
-        guard decoder == nil, let inputFormat else { return }
-        let decoder = try! createDecoder(format: inputFormat)
-        self.decoder = decoder
-    }
-
-    func createDecoder(format: Format) throws -> Decoder {
-        let decoder = try! decoderFactory.create(type: Decoder.self, queue: queue, format: format)
-        decoder.setPlaybackSpeed(playbackSpeed)
-        return decoder
-    }
-
-    func onInputFormatChanged(format: Format) throws {
+    func onInputFormatChanged(_ newFormat: Format) throws {
         waitingForFirstSampleInFormat = true
         let oldFormat = inputFormat
-        inputFormat = format
+        inputFormat = newFormat
+        outputFormatDescription = nil
 
         if decoder == nil {
-            try! maybeInitDecoder()
+            try maybeInitDecoder()
             return
         }
 
-        let reuseResult = canReuseDecoder(oldFormat: oldFormat, newFormat: format)
-        if !reuseResult {
+        if !canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) {
             if decoderReceivedBuffers {
                 decoderReinitializationState = .signalEndOfStream
             } else {
                 releaseDecoder()
-                try! maybeInitDecoder()
+                try maybeInitDecoder()
             }
         }
     }
 
-    override func setPlaybackSpeed(current: Float, target: Float) throws {
-        try! super.setPlaybackSpeed(current: current, target: target)
-        self.playbackSpeed = current
-        decoder?.setPlaybackSpeed(current)
+    private func onProcessedOutputBuffer(presentationTimeUs: Int64) { buffersInCodecCount -= 1 }
+
+    private func shouldDropOutputBuffer(earlyUs: Int64, elapsedRealtimeUs: Int64) -> Bool {
+        isBufferLate(earlyUs: earlyUs)
     }
 
-    func feedInputBuffer() throws -> Bool {
-        guard let decoder, decoderReinitializationState != .waitEndOfStream, !inputStreamEnded else {
+    private func shouldDropBuffersToKeyframe(earlyUs: Int64, elapsedRealtimeUs: Int64) -> Bool {
+        isBufferVeryLate(earlyUs: earlyUs)
+    }
+
+    private func skipOutputBuffer(_ outputBuffer: VTDecoderOutputBuffer) {
+        // TODO: decoder counters
+        outputBuffer.release()
+    }
+
+    private func dropOutputBuffer(_ outputBuffer: VTDecoderOutputBuffer) {
+        // TODO: decoder counters
+        outputBuffer.release()
+    }
+
+    private func maybeDropBuffersToKeyframe(positionUs: Int64) throws -> Bool {
+        let droppedSourceBufferCount = skipSource(position: positionUs)
+        if droppedSourceBufferCount == 0 {
             return false
         }
 
-        if inputIndex == nil {
-            inputIndex = decoder.dequeueInputBufferIndex()
-            guard let inputIndex else { return false }
+        // TODO: decoderCounters
+        // We dropped some buffers to catch up, so update the decoder counters and flush the decoder,
+        // which releases all pending buffers buffers including the current output buffer.
+        updateDroppedBufferCounters(
+            droppedInputBufferCount: droppedSourceBufferCount,
+            droppedDecoderBufferCount: buffersInCodecCount
+        )
 
-            inputBuffer.enqueue(buffer: decoder.dequeueInputBuffer(for: inputIndex))
+        try flushDecoder()
+        return true
+    }
+
+    private func updateDroppedBufferCounters(
+        droppedInputBufferCount: Int,
+        droppedDecoderBufferCount: Int
+    ) {
+        // TODO: decoderCounters
+    }
+
+    private func createDecoder(format: Format) throws -> VTDecoder {
+        return try VTDecoder(format: format)
+    }
+
+    private func renderOutputBuffer(outputBuffer: VTDecoderOutputBuffer, presentationTimeUs: Int64) throws {
+        lastRenderTimeUs = getClock().microseconds
+        if presentationTimeUs < getLastResetPosition() {
+            outputBuffer.release(); return
         }
 
-        guard let inputIndex else { return false }
+        guard let pixelBuffer = outputBuffer.pixelBuffer else {
+            dropOutputBuffer(outputBuffer); return
+        }
+
+//        if outputFormatDescription == nil {
+//            let formatDescription = try! CMFormatDescription(imageBuffer: pixelBuffer)
+//            self.outputFormatDescription = formatDescription
+//        }
+//
+//        guard let outputFormatDescription else { return }
+        let outputFormatDescription = try CMFormatDescription(imageBuffer: pixelBuffer)
+
+        let sampleBuffer = try CMSampleBuffer(
+            imageBuffer: pixelBuffer,
+            formatDescription: outputFormatDescription,
+            sampleTiming: .init(
+                duration: .invalid,
+                presentationTimeStamp: .from(microseconds: presentationTimeUs),
+                decodeTimeStamp: .invalid
+            )
+        )
+
+        renderersStorage.enqueue(sampleBuffer)
+        outputBuffer.release()
+        consecutiveDroppedFrameCount = 0
+        maybeNotifyRenderedFirstFrame()
+
+        if !renderersStorage.isReadyForMoreMediaData, let (queue, block) = requestMediaDataInfo {
+            try handleMessage(.requestMediaDataWhenReady(queue: queue, block: block))
+        }
+    }
+
+    private func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
+        decoder?.canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) ?? false
+    }
+
+    private func maybeInitDecoder() throws {
+        guard decoder == nil, let inputFormat else { return }
+
+        decoder = try createDecoder(format: inputFormat)
+        decoder?.setOutputStartTimeUs(getLastResetPosition())
+    }
+
+    private func feedInputBuffer() throws -> Bool {
+        guard let decoder,
+              decoderReinitializationState != .waitEndOfStream,
+              !inputStreamEnded else {
+            // We need to reinitialize the decoder or the input stream has ended.
+            return false
+        }
+
+        if inputBuffer == nil {
+            inputBuffer = try decoder.dequeueInputBuffer()
+        }
+
+        guard let inputBuffer else { return false }
 
         if decoderReinitializationState == .signalEndOfStream {
             inputBuffer.flags.insert(.endOfStream)
-            try! decoder.queueInputBuffer(for: inputIndex, inputBuffer: inputBuffer)
-            resetInputBuffer()
+            try decoder.queueInputBuffer(inputBuffer)
+            self.inputBuffer = nil
             decoderReinitializationState = .waitEndOfStream
             return false
         }
 
-        switch try! readSource(to: inputBuffer) {
+        switch try readSource(to: inputBuffer) {
+        case .nothingRead:
+            return false
         case let .didReadFormat(format):
-            try! onInputFormatChanged(format: format)
+            try onInputFormatChanged(format)
             return true
         case .didReadBuffer:
             if inputBuffer.flags.contains(.endOfStream) {
                 inputStreamEnded = true
-                try! decoder.queueInputBuffer(for: inputIndex, inputBuffer: inputBuffer)
-                resetInputBuffer()
+                try decoder.queueInputBuffer(inputBuffer)
+                self.inputBuffer = nil
                 return false
             }
-//            if waitingForFirstSampleInFormat, let inputFormat {
-//                formatQueue.add(timestamp: inputBuffer.time, value: inputFormat)
-//                waitingForFirstSampleInFormat = false
-//            }
-            try! decoder.queueInputBuffer(for: inputIndex, inputBuffer: inputBuffer)
+
+            if waitingForFirstSampleInFormat {
+                formatQueue.add(timestamp: inputBuffer.timeUs, value: inputFormat!) // TODO: make error
+                waitingForFirstSampleInFormat = false
+            }
+
+            inputBuffer.format = inputFormat
+            try decoder.queueInputBuffer(inputBuffer)
+
+            if minimumEnqueuedPresentationTime != .timeUnset {
+                minimumEnqueuedPresentationTime = min(minimumEnqueuedPresentationTime, inputBuffer.timeUs)
+                renderersStorage.setPresentationTimeExpectation(
+                    .minimumUpcoming(.from(microseconds: inputBuffer.timeUs))
+                )
+            } else {
+                minimumEnqueuedPresentationTime = inputBuffer.timeUs
+            }
+
             buffersInCodecCount += 1
             decoderReceivedBuffers = true
-            resetInputBuffer()
+            // TODO: decoder counters
+            self.inputBuffer = nil
             return true
-        case .nothingRead:
-            return false
         }
     }
 
-    private func drainOutputBuffer(position: Int64, elapsedRealtime: Int64) throws -> Bool {
-        outputBuffer = if let outputBuffer = self.outputBuffer {
-            outputBuffer
-        } else {
-            decoder?.dequeueOutputBuffer()
+    private func drainOutputBuffer(positionUs: Int64, elapsedRealtimeUs: Int64) throws -> Bool {
+        if outputBuffer == nil {
+            guard let decoder else { return false }
+            outputBuffer = try decoder.dequeueOutputBuffer()
+            if outputBuffer == nil {
+                return false
+            }
+
+            // TODO: decoder counters
+            buffersInCodecCount -= outputBuffer?.skippedOutputBufferCount ?? 0
         }
 
         guard let outputBuffer else { return false }
@@ -322,8 +413,9 @@ final class AVFVideoRenderer<Decoder: AVFVideoRendererDecoder>: BaseSERenderer {
         if outputBuffer.sampleFlags.contains(.endOfStream) {
             if decoderReinitializationState == .waitEndOfStream {
                 releaseDecoder()
-                try! maybeInitDecoder()
+                try maybeInitDecoder()
             } else {
+                outputBuffer.release()
                 self.outputBuffer = nil
                 outputStreamEnded = true
             }
@@ -331,59 +423,173 @@ final class AVFVideoRenderer<Decoder: AVFVideoRendererDecoder>: BaseSERenderer {
             return false
         }
 
-        if try processOutputBuffer(buffer: outputBuffer, position: position, elapsedRealtime: elapsedRealtime) {
+        let bufferTime = outputBuffer.timeUs
+        let processedOutputBuffer = try processOutputBuffer(outputBuffer, positionUs: positionUs, elapsedRealtimeUs: elapsedRealtimeUs)
+        if processedOutputBuffer {
+            onProcessedOutputBuffer(presentationTimeUs: bufferTime)
             self.outputBuffer = nil
+        }
+
+        return processedOutputBuffer
+    }
+
+    private func processOutputBuffer(
+        _ outputBuffer: VTDecoderOutputBuffer,
+        positionUs: Int64,
+        elapsedRealtimeUs: Int64
+    ) throws -> Bool {
+        if initialPositionUs == .timeUnset {
+            initialPositionUs = positionUs
+        }
+
+        let bufferTimeUs = outputBuffer.timeUs
+        let earlyUs = bufferTimeUs - positionUs
+
+        if !renderersStorage.hasOutput {
+            // Skip frames in sync with playback, so we'll be at the right frame if the mode changes.
+            if isBufferLate(earlyUs: earlyUs) {
+                skipOutputBuffer(outputBuffer)
+                return true
+            }
+
+            return false
+        }
+
+        let format = formatQueue.pollFloor(timestamp: bufferTimeUs)
+        if format != nil {
+            outputFormat = format
+        } else {
+            // After a stream change or after the initial start, there should be an input format change
+            // which we've not found. Check the Format queue in case the corresponding presentation
+            // timestamp is greater than bufferTimeUs
+            outputFormat = formatQueue.pollFirst()
+        }
+
+        let presentationTimeUs = bufferTimeUs //- getStreamOffset()
+        if try! shouldForceRender(earlyUs: earlyUs) {
+            try! renderOutputBuffer(outputBuffer: outputBuffer, presentationTimeUs: presentationTimeUs)
+            return true
+        }
+
+        let isStarted = getState() == .started
+        if !isStarted || positionUs == initialPositionUs {
+            return false
+        }
+
+        // TODO: Treat dropped buffers as skipped while we are joining an ongoing playback.
+        if shouldDropBuffersToKeyframe(earlyUs: earlyUs, elapsedRealtimeUs: elapsedRealtimeUs),
+           try! maybeDropBuffersToKeyframe(positionUs: positionUs) {
+            return false
+        } else if shouldDropOutputBuffer(earlyUs: earlyUs, elapsedRealtimeUs: elapsedRealtimeUs) {
+            dropOutputBuffer(outputBuffer)
+            return true
+        }
+
+        if earlyUs < 30000 {
+            try! renderOutputBuffer(outputBuffer: outputBuffer, presentationTimeUs: presentationTimeUs)
             return true
         }
 
         return false
     }
 
-    func processOutputBuffer(buffer: CoreVideoBuffer, position: Int64, elapsedRealtime: Int64) throws -> Bool {
-        let isDecodeOnlyFrame = buffer.presentationTime < getLastResetPosition()
-        guard !isDecodeOnlyFrame else {
+    private func shouldForceRender(earlyUs: Int64) throws -> Bool {
+        let isStarted = getState() == .started
+        switch firstFrameState {
+        case .notRenderedOnlyAllowedIfStarted:
+            return isStarted
+        case .notRendered:
             return true
+        case .rendered:
+            return renderersStorage.isReadyForMoreMediaData && isStarted
+        default:
+            throw ErrorBuilder(errorDescription: "Wrong State")
+        }
+    }
+
+    private func onOutputChanged() {
+        // TODO: maybeRenotifyVideoSizeChanged()
+        // We haven't rendered to the new output yet.
+        lowerFirstFrameState(.notRendered)
+        if getState() == .started {
+            setJoiningDeadlineMs()
+        }
+    }
+
+    private func onOutputRemoved() {
+        lowerFirstFrameState(.notRendered)
+    }
+
+    private func onOutputReset() {
+        // TODO: maybeRenotifyVideoSizeChanged()
+        // TODO: maybeRenotifyRenderedFirstFrame()
+    }
+
+    private func setJoiningDeadlineMs() {
+        joiningDeadlineMs = if allowedJoiningTimeMs > 0 {
+            getClock().milliseconds + allowedJoiningTimeMs
+        } else {
+            .timeUnset
+        }
+    }
+
+    private func lowerFirstFrameState(_ firstFrameState: FirstFrameState) {
+        self.firstFrameState = min(self.firstFrameState, firstFrameState)
+    }
+
+    private func maybeNotifyRenderedFirstFrame() {
+        if firstFrameState != .rendered {
+            firstFrameState = .rendered
+            // TODO: notify
+        }
+    }
+
+    private func isBufferLate(earlyUs: Int64) -> Bool {
+        // Class a buffer as late if it should have been presented more than 30 ms ago.
+        return earlyUs < -30000
+    }
+
+    private func isBufferVeryLate(earlyUs: Int64) -> Bool {
+        // Class a buffer as very late if it should have been presented more than 500 ms ago.
+        return earlyUs < -500000
+    }
+}
+
+extension AVFVideoRenderer: VideoSampleBufferRendererDelegate {
+    nonisolated var isolation: any Actor {
+        queue.playerActor()
+    }
+
+    func renderer(_ renderer: VideoSampleBufferRenderer, didFailedRenderingWith error: Error?, isolation: isolated any Actor) {
+        assert(queue.isCurrent())
+    }
+}
+
+extension AVFVideoRenderer: RendererCapabilities {
+    func supportsFormat(_ format: Format) -> Bool {
+        guard let formatDescription = try? format.buildFormatDescription(),
+              formatDescription.mediaType == .video else {
+            return false
         }
 
-        guard let imageBuffer = buffer.imageBuffer else {
+        switch formatDescription.mediaSubType.rawValue {
+        case kCMVideoCodecType_H264:
             return true
+        case kCMVideoCodecType_HEVC, kCMVideoCodecType_HEVCWithAlpha:
+            return true
+        case kCMVideoCodecType_VP9, kCMVideoCodecType_AV1:
+            return VTIsHardwareDecodeSupported(formatDescription.mediaSubType.rawValue)
+        default:
+            return false
         }
-
-        let formatDescription = try buffer.outputFormatDescription ?? CMFormatDescription(imageBuffer: imageBuffer)
-
-        let sampleBufferPresentationTime = buffer.presentationTime
-        let presentationTimeStamp = CMTime.from(microseconds: sampleBufferPresentationTime)
-        let sampleBuffer = try CMSampleBuffer(
-            imageBuffer: imageBuffer,
-            formatDescription: formatDescription,
-            sampleTiming: CMSampleTimingInfo(
-                duration: .invalid,
-                presentationTimeStamp: presentationTimeStamp,
-                decodeTimeStamp: .invalid
-            )
-        )
-
-        return bufferableContainer.enqueue(sampleBuffer, format: inputFormat)
     }
 }
 
 private extension AVFVideoRenderer {
-    func resetInputBuffer() {
-        inputIndex = nil
-        inputBuffer.reset()
-    }
-}
-
-final class ImageBufferWrapper: CoreVideoBuffer {
-    var imageBuffer: CVImageBuffer? { buffer.imageBuffer }
-    var sampleFlags: SampleFlags  { buffer.sampleFlags }
-    let presentationTime: Int64
-    var outputFormatDescription: CMFormatDescription? { buffer.outputFormatDescription }
-
-    fileprivate let buffer: CoreVideoBuffer
-
-    init(buffer: CoreVideoBuffer, presentationTime: Int64) {
-        self.buffer = buffer
-        self.presentationTime = presentationTime
+    enum FirstFrameState: Comparable {
+        case notRenderedOnlyAllowedIfStarted
+        case notRendered
+        case notRenderedAfterStreamChange
+        case rendered
     }
 }

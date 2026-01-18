@@ -114,7 +114,7 @@ final class FakeSampleStream: SampleStream {
             downstreamFormat = format
         case .didReadBuffer:
             if !readFlags.contains(.omitSampleData) {
-                maybeNotifyDownstreamFormat(timeUs: buffer.time)
+                maybeNotifyDownstreamFormat(timeUs: buffer.timeUs)
             }
         default:
             break

@@ -59,7 +59,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     private let clock: SEClock
     private let periodQueue: MediaPeriodQueue
     private let mediaSourceList: MediaSourceList
-    private let bufferableContainer: PlayerBufferableContainer
     private let audioSessionManager: IAudioSessionManager
     private let hasSecondaryRenderers: Bool
 
@@ -107,7 +106,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         mediaClock: DefaultMediaClock,
         identifier: UUID,
         preloadConfiguration: PreloadConfiguration,
-        bufferableContainer: PlayerBufferableContainer,
         audioSessionManager: IAudioSessionManager
     ) throws {
         self.queue = queue
@@ -123,7 +121,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         self.pauseAtEndOfWindow = pauseAtEndOfWindow
         self.clock = clock
         self.mediaClock = mediaClock
-        self.bufferableContainer = bufferableContainer
         self.preloadConfiguration = preloadConfiguration
         self.audioSessionManager = audioSessionManager
 
@@ -369,10 +366,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             case .noMessage:
                 return false
             }
-        } catch is AudioSinkTestError {
-            handler.sendMessageAtFrontOfQueue(
-                handler.obtainMessage(what: SEPlayerMessageImpl.attemptRendererErrorRecovery)
-            )
         } catch {
             print(error)
             fatalError()
@@ -588,7 +581,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             periodQueue.reevaluateBuffer(rendererPositionUs: rendererPositionUs)
         } else {
             if playbackInfo.state == .ready {
-                bufferableContainer.setControlTimebase(mediaClock.getTimebase())
+                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
                 mediaClock.start()
                 try! startRenderers()
                 handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
@@ -740,17 +733,10 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         // TODO: notifyTrackSelectionRebuffer
     }
 
-//    var previousTime = DispatchTime.now()
-
     private func doSomeWork() throws {
         assert(queue.isCurrent())
         let currentTime = DispatchTime.now()
         handler.removeMessages(SEPlayerMessageImpl.doSomeWork)
-
-//        if case let .nanoseconds(time) = previousTime.distance(to: currentTime) {
-//            print("🫟 passed = \(Double(time) / 1_000_000_000)")
-//        }
-//        previousTime = currentTime
 
         try updatePeriods()
 
@@ -828,7 +814,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                     isRebuffering: false,
                     resetLastRebufferRealtimeMs: false
                 )
-                bufferableContainer.setControlTimebase(mediaClock.getTimebase())
+                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
                 mediaClock.start()
                 try startRenderers()
             }
@@ -1138,14 +1124,14 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         self.seekParameters = seekParameters
     }
 
-    private func setVideoOutputInternal(_ output: PlayerBufferable) throws {
+    private func setVideoOutputInternal(_ output: VideoSampleBufferRenderer) throws {
         try renderers.forEach { try $0.setVideoOutput(output) }
         if [.ready, .buffering].contains(playbackInfo.state) {
             handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
         }
     }
 
-    private func removeVideoOutputInternal(_ output: PlayerBufferable) throws {
+    private func removeVideoOutputInternal(_ output: VideoSampleBufferRenderer) throws {
         try renderers.forEach { try $0.removeVideoOutput(output) }
         if [.ready, .buffering].contains(playbackInfo.state) {
             handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
@@ -2140,7 +2126,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     private func hasReadingPeriodFinishedReading() -> Bool {
         guard let reading = periodQueue.reading,
               reading.isPrepared else { return false }
-        
+
         return renderers.allSatisfy { $0.hasFinishedReading(from: reading) }
     }
 
@@ -2421,8 +2407,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         )
 
 //        try renderer.handleMessage(
-//            .requestMediaDataWhenReady(queue: Queues.eventQueue, block: { [self] in
+//            .requestMediaDataWhenReady(queue: queue, block: { [self] in
 //                print("❤️ DATA REQUEST, from renderer = \(renderer.trackType)")
+////                handler.sendMessageAtFrontOfQueue(handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork))
 //                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
 //            }),
 //            mediaPeriod: periodHolder
@@ -2941,12 +2928,12 @@ extension SEPlayerImplInternal: AudioSessionObserver {
 }
 
 extension SEPlayerImplInternal {
-    func register(_ bufferable: PlayerBufferable) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setVideoOutput(bufferable)).pointee.sendToTarget()
+    func setVideoOutput(_ output: VideoSampleBufferRenderer) {
+        handler.obtainMessage(what: SEPlayerMessageImpl.setVideoOutput(output)).pointee.sendToTarget()
     }
 
-    func remove(_ bufferable: PlayerBufferable) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.removeVideoOutput(bufferable)).pointee.sendToTarget()
+    func removeVideoOutput(_ output: VideoSampleBufferRenderer) {
+        handler.obtainMessage(what: SEPlayerMessageImpl.removeVideoOutput(output)).pointee.sendToTarget()
     }
 }
 

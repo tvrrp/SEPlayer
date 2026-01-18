@@ -5,11 +5,13 @@
 //  Created by Damir Yackupov on 25.05.2025.
 //
 
+import CoreMedia
+
 final class RenderersHolder {
-    private let primaryRenderer: SERenderer
+    let primaryRenderer: SERenderer
     private let index: Int
-    private let secondaryRenderer: SERenderer?
-    
+    let secondaryRenderer: SERenderer?
+
     private var prewarmingState: RendererPrewarmingState
     private var primaryRequiresReset: Bool
     private var secondaryRequiresReset: Bool
@@ -328,7 +330,21 @@ final class RenderersHolder {
         secondaryRequiresReset = false
     }
 
-    func setVideoOutput(_ output: PlayerBufferable) throws {
+    func setControlTimebase(_ timebase: CMTimebase?) throws {
+        guard let timebase else {
+            try primaryRenderer.handleMessage(.setControlTimebase(timebase))
+            try secondaryRenderer?.handleMessage(.setControlTimebase(timebase))
+            return
+        }
+
+        if prewarmingState == .transitioningToPrimary || prewarmingState == .notPrewarmingUsingSecondary {
+            try secondaryRenderer?.handleMessage(.setControlTimebase(timebase))
+        } else {
+            try primaryRenderer.handleMessage(.setControlTimebase(timebase))
+        }
+    }
+
+    func setVideoOutput(_ output: VideoSampleBufferRenderer) throws {
         guard trackType == .video else { return }
 
         if prewarmingState == .transitioningToPrimary || prewarmingState == .notPrewarmingUsingSecondary {
@@ -338,7 +354,7 @@ final class RenderersHolder {
         }
     }
 
-    func removeVideoOutput(_ output: PlayerBufferable) throws {
+    func removeVideoOutput(_ output: VideoSampleBufferRenderer) throws {
         guard trackType == .video else { return }
         try secondaryRenderer?.handleMessage(.removeVideoOutput(output))
         try primaryRenderer.handleMessage(.removeVideoOutput(output))

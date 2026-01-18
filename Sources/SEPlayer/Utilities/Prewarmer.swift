@@ -43,12 +43,13 @@ final class Prewarmer {
                 return
             }
 
-            let format = Format.Builder()
+            let format = try? Format.Builder()
                 .setInitializationData(PrewarmerAudioInitializationData(formatDescription: codecInfo))
                 .build()
+                .buildFormatDescription()
 
-            let capabilities = AudioConverterDecoder.getCapabilities()
-            _ = capabilities.supportsFormat(format)
+            guard let format else { return }
+            _ = AudioConverterDecoder.formatSupported(format)
         }
     }
 

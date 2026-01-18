@@ -90,7 +90,6 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void) {
-        print("DID RECIEVE RESPONSE")
         guard let handler = handlers[dataTask] else {
             completionHandler(.cancel); return
         }

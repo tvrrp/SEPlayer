@@ -10,7 +10,6 @@ import Foundation
 
 public final class SEPlayerFactory {
     private let sessionLoader: IPlayerSessionLoader
-    private let decodersFactory: SEDecoderFactory
     private let bandwidthMeter: BandwidthMeter
     private let audioSessionManager: IAudioSessionManager
     private let clock: SEClock
@@ -22,14 +21,12 @@ public final class SEPlayerFactory {
         operationQueue.underlyingQueue = Queues.loaderQueue.queue
         operationQueue.maxConcurrentOperationCount = 1
         self.sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
-        self.decodersFactory = DefaultSEDecoderFactory()
         self.bandwidthMeter = DefaultBandwidthMeter()
         self.clock = DefaultSEClock()
         audioSessionManager = AudioSessionManager.shared
         workQueue = SignalQueue(name: "com.seplayer.work.shared", qos: .userInitiated)
         loaderQueue = SignalQueue(name: "com.seplayer.loader.shared", qos: .userInitiated)
 
-        registerDefaultDecoders(factory: decodersFactory)
         Prewarmer.shared.prewarm()
     }
 
@@ -45,7 +42,6 @@ public final class SEPlayerFactory {
         dataSourceFactory: DataSourceFactory? = nil,
         extractorsFactory: ExtractorsFactory? = nil,
         mediaSourceFactory: MediaSourceFactory? = nil,
-        decodersFactory: SEDecoderFactory? = nil,
         renderersFactory: RenderersFactory? = nil,
         trackSelector: TrackSelector? = nil,
         loadControl: LoadControl? = nil,
@@ -63,8 +59,8 @@ public final class SEPlayerFactory {
             dataSourceFactory: dataSourceFactory,
             extractorsFactory: extractorsFactory
         )
-        let decodersFactory = decodersFactory ?? self.decodersFactory
-        let renderersFactory = renderersFactory ?? DefaultRenderersFactory(decoderFactory: decodersFactory)
+
+        let renderersFactory = renderersFactory ?? DefaultRenderersFactory()
         let trackSelector = trackSelector ?? DefaultTrackSelector()
         let loadControl = loadControl ?? DefaultLoadControl(queue: workQueue)
 
@@ -80,15 +76,5 @@ public final class SEPlayerFactory {
             mediaSourceFactory: mediaSourceFactory,
             audioSessionManager: audioSessionManager
         )
-    }
-
-    public func registerDefaultDecoders(factory: SEDecoderFactory) {
-        factory.register(VideoToolboxDecoder.self) { queue, format in
-            try VideoToolboxDecoder(queue: queue, format: format)
-        }
-
-        factory.register(AudioConverterDecoder.self) { queue, format in
-            try AudioConverterDecoder(queue: queue, format: format)
-        }
     }
 }

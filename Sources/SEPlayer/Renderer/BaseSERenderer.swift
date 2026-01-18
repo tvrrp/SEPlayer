@@ -162,14 +162,14 @@ class BaseSERenderer: SERenderer {
     final func readSource(to buffer: DecoderInputBuffer, readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
         guard let sampleStream else { return .nothingRead }
 
-        let result = try! sampleStream.readData(to: buffer, readFlags: readFlags)
+        let result = try sampleStream.readData(to: buffer, readFlags: readFlags)
         if case .didReadBuffer = result {
             if buffer.flags.contains(.endOfStream) {
                 readingPosition = .endOfSource
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
-            buffer.time += streamOffset
-            readingPosition = max(readingPosition, buffer.time)
+            buffer.timeUs += streamOffset
+            readingPosition = max(readingPosition, buffer.timeUs)
         }
 
         return result

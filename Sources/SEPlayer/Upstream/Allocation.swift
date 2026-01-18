@@ -78,8 +78,16 @@ public final class Allocation {
         targetPtr.copyBytes(from: bytes[0..<lenght])
     }
 
-    private func setSlowPath<Bytes: Sequence>(bytes: Bytes, at index: Int, lenght: Int) where Bytes.Element == UInt8 {
-        fatalError() // TODO: fix
+    private func setSlowPath<Bytes: Sequence>(bytes: Bytes, at offset: Int, lenght: Int) where Bytes.Element == UInt8 {
+        // TODO: real fix
+        var outIndex = 0
+        let base = data.baseAddress!.assumingMemoryBound(to: UInt8.self).advanced(by: offset)
+
+        for b in bytes {
+            if outIndex == lenght { break }
+            base[outIndex] = b
+            outIndex += 1
+        }
     }
 
     deinit {

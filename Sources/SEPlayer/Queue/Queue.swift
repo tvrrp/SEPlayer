@@ -7,7 +7,7 @@
 
 import Dispatch
 
-public protocol Queue: AnyObject {
+public protocol Queue: AnyObject, Sendable {
     // MARK: - Static
 
     static func mainQueue() -> Queue

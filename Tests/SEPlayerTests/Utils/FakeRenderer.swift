@@ -27,10 +27,7 @@ class FakeRenderer: BaseSERenderer {
     private(set) var formatsRead = [Format]()
 
     override init(queue: Queue = playerSyncQueue, trackType: TrackType, clock: SEClock) {
-        buffer = DecoderInputBuffer()
-        buffer.enqueue(buffer: UnsafeMutableRawBufferPointer(
-            UnsafeMutableBufferPointer<UInt8>.allocate(capacity: 1024 * 32)
-        ))
+        buffer = DecoderInputBuffer(bufferReplacementMode: .enabled)
         lastSamplePositionUs = .min
         super.init(queue: queue, trackType: trackType, clock: clock)
     }
@@ -60,7 +57,7 @@ class FakeRenderer: BaseSERenderer {
         playbackPositionUs = position
         while true {
             if !hasPendingBuffer {
-                resetBuffer()
+                buffer.clear()
                 let result = try readSource(to: buffer)
                 print("🌈 RENDERER READ RESULT = \(result)")
                 switch result {
@@ -82,12 +79,12 @@ class FakeRenderer: BaseSERenderer {
                     return
                 }
             } else {
-                guard try shouldProcessBuffer(bufferTimeUs: buffer.time, playbackPositionUs: position) else {
+                guard try shouldProcessBuffer(bufferTimeUs: buffer.timeUs, playbackPositionUs: position) else {
                     return
                 }
 
-                print("🏙️ render fake buffer. time = \(buffer.time)")
-                lastSamplePositionUs = buffer.time
+                print("🏙️ render fake buffer. time = \(buffer.timeUs)")
+                lastSamplePositionUs = buffer.timeUs
                 sampleBufferReadCount += 1
                 hasPendingBuffer = false
             }
@@ -120,17 +117,6 @@ class FakeRenderer: BaseSERenderer {
 
     override func onRelease() {
         isReleased = true
-    }
-
-    private func resetBuffer() {
-        if let buffer = try? buffer.dequeue() {
-            buffer.deallocate()
-        }
-        buffer.reset()
-
-        buffer.enqueue(buffer: UnsafeMutableRawBufferPointer(
-            UnsafeMutableBufferPointer<UInt8>.allocate(capacity: 1024 * 32)
-        ))
     }
 }
 

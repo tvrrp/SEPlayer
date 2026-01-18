@@ -12,56 +12,76 @@ protocol Buffer: AnyObject {
     var flags: SampleFlags { get }
 }
 
-public final class DecoderInputBuffer: Buffer {
+public class DecoderInputBuffer: Buffer {
+    enum BufferReplacementMode {
+        case disabled
+        case enabled
+    }
+
     var flags = SampleFlags()
-    var time: Int64 = 0
+    var format: Format?
+    var timeUs: Int64 = 0
     var size: Int = 0
-    var isReady: Bool { data != nil }
 
-    private var data: UnsafeMutableRawBufferPointer?
+    let bufferReplacementMode: BufferReplacementMode
+    private let paddingSize: Int
+    private var buffer: UnsafeMutableRawBufferPointer?
 
-    init() {}
-
-    func enqueue(buffer: UnsafeMutableRawBufferPointer) {
-        precondition(!buffer.isEmpty)
-        self.data = buffer
+    static func noDataBuffer() -> DecoderInputBuffer {
+        DecoderInputBuffer(bufferReplacementMode: .disabled)
     }
 
-    func dequeue() throws -> UnsafeMutableRawBufferPointer {
-        guard let data, data.count > 0 else {
+    init(bufferReplacementMode: BufferReplacementMode, paddingSize: Int = 0) {
+        self.bufferReplacementMode = bufferReplacementMode
+        self.paddingSize = paddingSize
+    }
+
+    final func dequeue() throws -> UnsafeMutableRawBufferPointer {
+        guard let buffer = try getData(), buffer.count > 0 else {
             throw BufferErrors.insufficientCapacity
         }
 
-        return data
+        return buffer
     }
 
-    func dequeueOutputSpan(initializingWith initializer: (inout OutputRawSpan) throws -> Void) throws {
-        guard let data, data.count > 0 else {
-            throw BufferErrors.insufficientCapacity
+    final func ensureSpaceForWrite(_ size: Int) throws {
+        let size = size + paddingSize
+        if try getData() == nil {
+            try createReplacementBuffer(requiredCapacity: size)
+            return
         }
 
-        var outputSpan = OutputRawSpan(buffer: data, initializedCount: 0)
-        try initializer(&outputSpan)
+        guard let buffer = try getData() else { return }
+        guard buffer.count < size else { return }
+
+        try createReplacementBuffer(requiredCapacity: size)
     }
 
-    func reset() {
+    func commitWrite(amount: Int) { size = amount }
+    func getData() throws -> UnsafeMutableRawBufferPointer? { buffer }
+
+    func clear() {
         flags = []
-        time = 0
+        timeUs = .zero
         size = 0
-        data = nil
+    }
+
+    func createReplacementBuffer(requiredCapacity: Int) throws {
+        guard bufferReplacementMode == .enabled else {
+            throw BufferErrors.allocationFailed
+        }
+
+        if let buffer {
+            buffer.deallocate()
+        }
+
+        let buffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: requiredCapacity)
+        buffer.initialize(repeating: .zero)
+        self.buffer = UnsafeMutableRawBufferPointer(buffer)
     }
 
     enum BufferErrors: Error {
         case insufficientCapacity
-    }
-}
-
-extension DecoderInputBuffer {
-    var sampleTimings: CMSampleTimingInfo {
-        CMSampleTimingInfo(
-            duration: .zero,
-            presentationTimeStamp: CMTime.from(microseconds: time),
-            decodeTimeStamp: .zero
-        )
+        case allocationFailed
     }
 }

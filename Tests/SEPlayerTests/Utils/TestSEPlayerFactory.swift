@@ -162,7 +162,6 @@ private struct MockRenderersFactory: RenderersFactory {
     func createRenderers(
         queue: any Queue,
         clock: SEClock,
-        bufferableContainer: PlayerBufferableContainer,
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {
         renderers

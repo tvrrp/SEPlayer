@@ -138,7 +138,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         audioSessionManager: IAudioSessionManager,
         useLazyPreparation: Bool = true,
         seekParameters: SeekParameters = .default,
-        seekBackIncrementMs: Int64 = 10_000,
+        seekBackIncrementMs: Int64 = 5_000,
         seekForwardIncrementMs: Int64 = 5_000,
         maxSeekToPreviousPositionMs: Int64 = 3000,
         pauseAtTheEndOfMediaItem: Bool = false
@@ -155,11 +155,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         _pauseAtTheEndOfMediaItem = pauseAtTheEndOfMediaItem
 
         let renderSynchronizer = AVSampleBufferRenderSynchronizer()
-        let bufferableContainer = PlayerBufferableContainer()
         self.renderers = renderersFactory.createRenderers(
-            queue: queue,
+            queue: workQueue,
             clock: clock,
-            bufferableContainer: bufferableContainer,
             renderSynchronizer: renderSynchronizer
         )
         emptyTrackSelectorResult = TrackSelectionResult(
@@ -178,7 +176,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         period = Period()
 
         internalPlayer = try! SEPlayerImplInternal(
-            queue: queue,
+            queue: workQueue,
             renderers: renderers,
             trackSelector: trackSelector,
             emptyTrackSelectorResult: emptyTrackSelectorResult,
@@ -192,7 +190,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             mediaClock: DefaultMediaClock(clock: clock),
             identifier: identifier,
             preloadConfiguration: _preloadConfiguration,
-            bufferableContainer: bufferableContainer,
             audioSessionManager: audioSessionManager
         )
 
@@ -1419,12 +1416,12 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
 }
 
 extension SEPlayerImpl {
-    func register(_ bufferable: PlayerBufferable) {
-        internalPlayer.register(bufferable)
+    func setVideoOutput(_ output: VideoSampleBufferRenderer) {
+        internalPlayer.setVideoOutput(output)
     }
 
-    func remove(_ bufferable: PlayerBufferable) {
-        internalPlayer.remove(bufferable)
+    func removeVideoOutput(_ output: VideoSampleBufferRenderer) {
+        internalPlayer.removeVideoOutput(output)
     }
 }
 

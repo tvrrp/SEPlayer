@@ -7,6 +7,8 @@
 
 import Foundation
 
+var ProgressiveMediaPeriodCounter: Int = 0
+
 final class ProgressiveMediaPeriod: MediaPeriod {
     protocol Listener: AnyObject {
         func sourceInfoRefreshed(durationUs: Int64, seekMap: SeekMap, isLive: Bool)
@@ -53,6 +55,8 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     private var loadingFinished: Bool = false
     private var didRelease: Bool = false
 
+    let id: String
+
     init(
         url: URL,
         queue: Queue,
@@ -73,6 +77,9 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         self.listener = listener
         self.allocator = allocator
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
+        
+        id = "ProgressiveMediaPeriod \(ProgressiveMediaPeriodCounter)"
+        ProgressiveMediaPeriodCounter += 1
     }
 
     func release() {
@@ -254,7 +261,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
             return positionUs
         }
 
-        print("❌ seek(to position = \(positionUs)")
+        print("🥵 seek(to position = \(positionUs)")
         if (loadingFinished || loader.isLoading())
            && seekInsideBufferUs(isAudioOrVideo: trackIsAudioVideoFlags,
                                  positionUs: position,
@@ -381,8 +388,6 @@ final class ProgressiveMediaPeriod: MediaPeriod {
             }
 
             let seekPoints = seekMap.getSeekPoints(for: pendingResetPositionUs)
-            print("❌ start load with seek points, pendingResetPositionUs = \(pendingResetPositionUs)")
-            print(seekPoints)
             loadable.setLoadPosition(
                 position: seekPoints.first.position,
                 time: pendingResetPositionUs
@@ -558,7 +563,7 @@ private extension ProgressiveMediaPeriod {
 
     private func assertPrepared() {
         assert(isPrepared)
-//        assert(!trackState.tracks.isEmpty)
+        assert(!trackState.tracks.isEmpty)
         assert(seekMap != nil)
     }
 }
@@ -587,7 +592,7 @@ private extension ProgressiveMediaPeriod {
         }
 
         func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult {
-            try! readDataClosure(track, buffer, readFlags)
+            try readDataClosure(track, buffer, readFlags)
         }
 
         func skipData(position time: Int64) -> Int {

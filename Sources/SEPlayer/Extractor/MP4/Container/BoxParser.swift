@@ -29,14 +29,14 @@ struct BoxParser {
                     isQuickTime: isQuickTime
                 ) else { return nil }
 
-                let stbl = try! atom.getContainerBoxOfType(type: .mdia)
+                let stbl = try atom.getContainerBoxOfType(type: .mdia)
                     .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
                     .getContainerBoxOfType(type: .minf)
                     .checkNotNil(BoxParserErrors.missingBox(type: .minf))
                     .getContainerBoxOfType(type: .stbl)
                     .checkNotNil(BoxParserErrors.missingBox(type: .stbl))
 
-                return try! parseStbl(track: &track, stblBox: stbl, gaplessInfoHolder: &gaplessInfoHolder)
+                return try parseStbl(track: &track, stblBox: stbl, gaplessInfoHolder: &gaplessInfoHolder)
             }
     }
 
@@ -243,8 +243,8 @@ struct BoxParser {
             return
         }
 
-        var initializationData: Format.InitializationData?
-        var maxNumReorderSamples = Format.noValue
+        var initializationData: (any Format.InitializationData)?
+        let maxNumReorderSamples = Format.noValue
 
         while childPosition - position < size {
             parent.moveReaderIndex(to: childPosition)
@@ -372,7 +372,7 @@ struct BoxParser {
         // TODO: enca
 
         var mimeType: MimeTypes?
-        var initializationData: Format.InitializationData?
+        var initializationData: (any Format.InitializationData)?
 
         while childPosition - position < size {
             parent.moveReaderIndex(to: childPosition)

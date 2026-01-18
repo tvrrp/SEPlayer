@@ -14,7 +14,7 @@ private let globalMainQueue = SignalQueue(queue: DispatchQueue.main, specialIsMa
 private let globalDefaultQueue = SignalQueue(queue: DispatchQueue.global(qos: .default), specialIsMainQueue: false)
 private let globalBackgroundQueue = SignalQueue(queue: DispatchQueue.global(qos: .background), specialIsMainQueue: false)
 
-final class SignalQueue: Queue {
+final class SignalQueue: Queue, Sendable {
     // MARK: - Class
 
     static func mainQueue() -> Queue {
@@ -34,7 +34,7 @@ final class SignalQueue: Queue {
     var queue: DispatchQueue { nativeQueue }
 
     private let nativeQueue: DispatchQueue
-    private let specific = NSObject()
+    private nonisolated(unsafe) let specific = NSObject()
     private let specialIsMainQueue: Bool
 
     // MARK: - Init

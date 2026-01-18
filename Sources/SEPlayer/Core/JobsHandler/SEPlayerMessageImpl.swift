@@ -16,8 +16,8 @@ enum SEPlayerMessageImpl: MessageKind {
     case seekTo(_ timeline: Timeline, _ windowIndex: Int, _ positionUs: Int64)
     case setPlaybackParameters(_ playbackParameters: PlaybackParameters)
     case setSeekParameters(_ seekParameters: SeekParameters)
-    case setVideoOutput(_ output: PlayerBufferable)
-    case removeVideoOutput(_ output: PlayerBufferable)
+    case setVideoOutput(_ output: VideoSampleBufferRenderer)
+    case removeVideoOutput(_ output: VideoSampleBufferRenderer)
     case stop
     case release(_ continuation: CheckedContinuation<Void, Never>)
     case periodPrepared(_ mediaPeriod: any MediaPeriod)

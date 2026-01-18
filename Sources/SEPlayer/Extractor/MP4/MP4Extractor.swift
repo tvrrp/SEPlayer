@@ -291,7 +291,6 @@ private extension MP4Extractor {
         let trackOutput = track.trackOutput
         let sampleIndex = track.sampleIndex
         let sample = track.sampleTable.samples[sampleIndex]
-//        print("Will read, inputPosition = \(inputPosition), offset = \(sample.offset), track = \(track.track.type)")
 
         let skipAmount = sample.offset - inputPosition
 

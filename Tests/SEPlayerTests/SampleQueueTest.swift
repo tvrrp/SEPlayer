@@ -68,10 +68,7 @@ class SampleQueueTest {
     init() {
         allocator = DefaultAllocator(trimOnReset: false, individualAllocationSize: allocationSize)
         sampleQueue = SampleQueue(queue: playerSyncQueue, allocator: allocator)
-        inputBuffer = DecoderInputBuffer()
-        inputBuffer.enqueue(buffer: UnsafeMutableRawBufferPointer(
-            UnsafeMutableBufferPointer<UInt8>.allocate(capacity: dataCapacity)
-        ))
+        inputBuffer = DecoderInputBuffer(bufferReplacementMode: .enabled)
     }
 
     @Test
@@ -1458,7 +1455,7 @@ class SampleQueueTest {
         length: Int
     ) throws {
         // Check that peek whilst omitting data yields the expected values.
-        let flagsOnlyBuffer = DecoderInputBuffer()
+        let flagsOnlyBuffer = DecoderInputBuffer.noDataBuffer()
         var result = try sampleQueue.read(
             buffer: flagsOnlyBuffer,
             readFlags: [.omitSampleData, .peek],
@@ -1493,7 +1490,7 @@ class SampleQueueTest {
         length: Int
     ) throws {
         // Check that peek whilst omitting data yields the expected values.
-        let flagsOnlyBuffer = DecoderInputBuffer()
+        let flagsOnlyBuffer = DecoderInputBuffer.noDataBuffer()
         var result = try sampleQueue.read(
             buffer: flagsOnlyBuffer,
             readFlags: [.omitSampleData, .peek],
@@ -1520,7 +1517,7 @@ class SampleQueueTest {
         isLastSample: Bool
     ) {
         #expect(result == .didReadBuffer)
-        #expect(inputBuffer.time == timeUs)
+        #expect(inputBuffer.timeUs == timeUs)
         #expect(inputBuffer.flags.contains(.keyframe) == isKeyFrame)
         #expect(inputBuffer.flags.contains(.lastSample) == isLastSample)
     }
@@ -1561,14 +1558,7 @@ class SampleQueueTest {
     }
 
     func clearInputBuffer() {
-        let buffer = UnsafeMutableRawBufferPointer(
-            UnsafeMutableBufferPointer<UInt8>.allocate(capacity: dataCapacity)
-        )
-        if let oldBuffer = try? inputBuffer.dequeue() {
-            oldBuffer.deallocate()
-        }
-        inputBuffer.reset()
-        inputBuffer.enqueue(buffer: buffer)
+        inputBuffer.clear()
     }
 
     private func adjustFormat(format: Format?, sampleOffsetUs: Int64) -> Format? {

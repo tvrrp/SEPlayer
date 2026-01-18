@@ -150,7 +150,7 @@ public extension Timeline {
         }
         getPeriod(periodIndex: periodIndex, period: period, setIds: true)
         var periodPositionUs = windowPositionUs - period.positionInWindowUs
-        if periodPositionUs != .timeUnset {
+        if period.durationUs != .timeUnset {
             periodPositionUs = min(periodPositionUs, period.durationUs - 1)
         }
         periodPositionUs = max(0, periodPositionUs)

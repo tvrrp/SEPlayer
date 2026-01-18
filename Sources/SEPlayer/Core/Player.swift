@@ -79,8 +79,8 @@ public protocol Player: AnyObject {
 
     func mediaItem(at index: Int) -> MediaItem
 
-    func register(_ bufferable: PlayerBufferable)
-    func remove(_ bufferable: PlayerBufferable)
+    func setVideoOutput(_ output: VideoSampleBufferRenderer)
+    func removeVideoOutput(_ output: VideoSampleBufferRenderer)
 }
 
 @frozen public enum PlayerState: Equatable {

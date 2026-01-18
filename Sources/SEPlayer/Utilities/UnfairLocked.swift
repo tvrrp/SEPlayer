@@ -22,7 +22,7 @@ final class UnfairLocked<Value> {
     }
 }
 
-final class UnfairLock: NSLocking {
+final class UnfairLock: NSLocking, @unchecked Sendable {
     private let unfairLock: UnsafeMutablePointer<os_unfair_lock> = {
         let pointer = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
         pointer.initialize(to: os_unfair_lock())
@@ -43,7 +43,9 @@ final class UnfairLock: NSLocking {
     func unlock() {
         os_unfair_lock_unlock(unfairLock)
     }
+}
 
+extension NSLocking {
     func usingLock<R, E: Error>(_ body: () throws(E) -> R) throws(E) -> R {
         lock()
         let result = try body()

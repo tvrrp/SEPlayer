@@ -11,37 +11,28 @@ public protocol RenderersFactory {
     func createRenderers(
         queue: Queue,
         clock: SEClock,
-        bufferableContainer: PlayerBufferableContainer,
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer]
 }
 
 struct DefaultRenderersFactory: RenderersFactory {
-    private let decoderFactory: SEDecoderFactory
-
-    init(decoderFactory: SEDecoderFactory) {
-        self.decoderFactory = decoderFactory
-    }
-
     func createRenderers(
         queue: Queue,
         clock: SEClock,
-        bufferableContainer: PlayerBufferableContainer,
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {
         let renderers = [
-            try? AVFVideoRenderer<VideoToolboxDecoder>(
+            AVFVideoRenderer(
                 queue: queue,
                 clock: clock,
-                bufferableContainer: bufferableContainer,
-                decoderFactory: decoderFactory
+                allowedJoiningTimeMs: .zero,
+                maxDroppedFramesToNotify: .zero
             ),
-            try? AVFAudioRenderer<AudioConverterDecoder>(
+            AVFAudioRenderer(
                 queue: queue,
-                clock: clock,
                 renderSynchronizer: renderSynchronizer,
-                decoderFactory: decoderFactory,
-            ),
+                clock: clock
+            )
         ].compactMap { $0 }
 
         return renderers

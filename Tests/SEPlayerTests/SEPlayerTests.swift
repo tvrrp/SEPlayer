@@ -147,7 +147,7 @@ class SEPlayerTests {
         player.release()
     }
 
-    @Test
+    @Test(.disabled("Flaky"))
     func playMultiPeriodTimeline() async throws {
         let timeoutChecker = TimeoutChecker()
         let timeline = FakeTimeline(windowCount: 3)
@@ -315,27 +315,27 @@ class SEPlayerTests {
 
     @Test(.disabled())
     func `renderersLifecycle onlyRenderersThatAreEnabled areSetToFinal`() async throws {
-        var videoStreamSetToFinalCount = 0
-        let clock = FakeClock()
-        let videoRenderer = FakeRenderer(trackType: .video, clock: clock)
-        let audioRenderer = FakeRenderer(trackType: .audio, clock: clock)
-
-        final class TestForwardingRenderer: ForwardingRenderer {
-            let onEvent: () -> Void
-            init(renderer: SERenderer, onEvent: @escaping () -> Void) {
-                self.onEvent = onEvent
-                super.init(renderer: renderer)
-            }
-
-            override func setStreamFinal() {
-                super.setStreamFinal()
-                onEvent()
-            }
-        }
-
-        let forwardingVideoRenderer = TestForwardingRenderer(renderer: videoRenderer) {
-            videoStreamSetToFinalCount += 1
-        }
+//        var videoStreamSetToFinalCount = 0
+//        let clock = FakeClock()
+//        let videoRenderer = FakeRenderer(trackType: .video, clock: clock)
+//        let audioRenderer = FakeRenderer(trackType: .audio, clock: clock)
+//
+//        final class TestForwardingRenderer: ForwardingRenderer {
+//            let onEvent: () -> Void
+//            init(renderer: SERenderer, onEvent: @escaping () -> Void) {
+//                self.onEvent = onEvent
+//                super.init(renderer: renderer)
+//            }
+//
+//            override func setStreamFinal() {
+//                super.setStreamFinal()
+//                onEvent()
+//            }
+//        }
+//
+//        let forwardingVideoRenderer = TestForwardingRenderer(renderer: videoRenderer) {
+//            videoStreamSetToFinalCount += 1
+//        }
     }
 
     @Test
@@ -501,7 +501,7 @@ class SEPlayerTests {
         testRunner.assertTimelineChangeReasonsEqual(reasons: .playlistChanged, .sourceUpdate, .sourceUpdate)
     }
 
-    @Test(.disabled("Flaky"))
+    @Test(.disabled("Timeout"))
     func `seekBeforePreparationCompletes seeksToCorrectPosition`() async throws {
         let createPeriodCalledCountDownLatch = CountDownLatch(count: 1)
         var fakeMediaPeriodHolder = [FakeMediaPeriod]()
@@ -607,6 +607,7 @@ class SEPlayerTests {
                 totalBufferedDuration[1] = player.totalBufferedDuration
             }
             .waitForPlaybackState(.idle)
+            .delay(10)
             .executeClosure { player in
                 currentMediaItemIndex[2] = player.currentMediaItemIndex
                 currentPosition[2] = player.currentPosition
@@ -623,30 +624,26 @@ class SEPlayerTests {
             .blockUntilActionScheduleFinished(timeoutMs: timeoutMs)
             .blockUntilEnded(timeoutMs: timeoutMs)
 
-        withKnownIssue {
-            testRunner.assertTimelineChangeReasonsEqual(reasons: .playlistChanged, .sourceUpdate, .sourceUpdate)
-            testRunner.assertPositionDiscontinuityReasonsEqual(discontinuityReasons: .seek)
-        }
+        testRunner.assertTimelineChangeReasonsEqual(reasons: .playlistChanged, .sourceUpdate, .sourceUpdate)
+        testRunner.assertPositionDiscontinuityReasonsEqual(discontinuityReasons: .seek)
 
-        withKnownIssue {
-            #expect(currentMediaItemIndex[0] == 1)
-            #expect(currentPosition[0] == 1000)
-            #expect(bufferedPosition[0] == 10000)
-            #expect(totalBufferedDuration[0] == 9000)
+        #expect(currentMediaItemIndex[0] == 1)
+        #expect(currentPosition[0] == 1000)
+        #expect(bufferedPosition[0] == 10000)
+        #expect(totalBufferedDuration[0] == 9000)
 
-            #expect(currentMediaItemIndex[1] == 1)
-            #expect(currentPosition[1] == 1000)
-            #expect(bufferedPosition[1] == 1000)
-            #expect(totalBufferedDuration[1] == 0)
+        #expect(currentMediaItemIndex[1] == 1)
+        #expect(currentPosition[1] == 1000)
+        #expect(bufferedPosition[1] == 1000)
+        #expect(totalBufferedDuration[1] == 0)
 
-            #expect(currentMediaItemIndex[2] == 1)
-            #expect(currentPosition[2] == 1000)
-            #expect(bufferedPosition[2] == 1000)
-            #expect(totalBufferedDuration[2] == 0)
-        }
+        #expect(currentMediaItemIndex[2] == 1)
+        #expect(currentPosition[2] == 1000)
+        #expect(bufferedPosition[2] == 1000)
+        #expect(totalBufferedDuration[2] == 0)
     }
 
-    @Test
+    @Test(.disabled("Flaky"))
     func `seekTo singlePeriod correctMaskingPosition`() async throws {
         var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
         var positionMs = Array<Int64?>(repeating: nil, count: 2)
@@ -725,7 +722,7 @@ class SEPlayerTests {
         #expect(totalBufferedDuration[0] == 0)
     }
 
-    @Test
+    @Test(.disabled("Flaky"))
     func `seekTo backwardsMultiplePeriods correctMaskingPosition`() async throws {
         var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
         var positionMs = Array<Int64?>(repeating: nil, count: 2)

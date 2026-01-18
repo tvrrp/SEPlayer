@@ -53,6 +53,7 @@ actor HTTPDataSourceLoadHandler {
 
     func willOpenConnection(with size: Int) {
         byteBuffer.clear(minimumCapacity: size)
+        bytesRemaining = 0
     }
 
     func didOpenConnection(with size: Int) {
@@ -61,6 +62,7 @@ actor HTTPDataSourceLoadHandler {
     }
 
     func didCloseConnection(with error: Error?) {
+        bytesRemaining = byteBuffer.readableBytes
         if let error {
             readContinuation?.resume(throwing: error)
         } else {
@@ -80,6 +82,7 @@ actor HTTPDataSourceLoadHandler {
     }
 
     private func validateAvailableData(for requestedSize: Int) async throws -> Int {
+        let requestedSize = min(bytesRemaining, requestedSize)
         if byteBuffer.readableBytes >= requestedSize {
             return requestedSize
         }
