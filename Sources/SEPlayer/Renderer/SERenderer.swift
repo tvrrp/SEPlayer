@@ -13,7 +13,7 @@ public protocol SERenderer: AnyObject {
     func getCapabilities() -> RendererCapabilities
 
     func getMediaClock() -> MediaClock?
-    func getTimebase() -> CMTimebase?
+    func getTimebase() -> TimebaseSource?
     func getState() -> SERendererState
     func enable(
         formats: [Format],

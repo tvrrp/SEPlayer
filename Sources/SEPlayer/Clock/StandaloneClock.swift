@@ -8,7 +8,7 @@
 import CoreMedia.CMSync
 
 final class StandaloneClock: MediaClock {
-    var timebase: CMTimebase? { clock.timebase }
+    var timebase: TimebaseSource? { clock.timebase }
     private let clock: SEClock
 
     private var playbackParameters: PlaybackParameters

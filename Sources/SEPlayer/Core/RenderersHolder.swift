@@ -330,7 +330,7 @@ final class RenderersHolder {
         secondaryRequiresReset = false
     }
 
-    func setControlTimebase(_ timebase: CMTimebase?) throws {
+    func setControlTimebase(_ timebase: TimebaseSource?) throws {
         guard let timebase else {
             try primaryRenderer.handleMessage(.setControlTimebase(timebase))
             try secondaryRenderer?.handleMessage(.setControlTimebase(timebase))

@@ -45,7 +45,6 @@ class PlayerViewControllerSim: UIViewController {
     let feedback = UIImpactFeedbackGenerator()
 
     var timer: Timer?
-    var isSliderTouches = false
 
     init() {
         player1 = playerFactory.buildPlayer()
@@ -220,28 +219,17 @@ class PlayerViewControllerSim: UIViewController {
     }
 
     @objc private func sliderTouchDown(_ sender: UISlider) {
-//        print("🤬 sliderTouchDown")
         timer?.invalidate()
-//        playWhenReadyBeforeSlider = player.playWhenReady
-//        player.pause()
-        isSliderTouches = true
     }
 
     @objc private func sliderTouchUp(_ sender: UISlider) {
         let newTime = Int64(sender.value)
-//        player.seek(to: newTime)
-//        player.playWhenReady = playWhenReadyBeforeSlider
-        isSliderTouches = false
+        player.seek(to: newTime)
         updateTime()
     }
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
-//        currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
-
-        if isSliderTouches {
-            let newTime = Int64(sender.value)
-//            player.seek(to: newTime)
-        }
+        currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
     }
 
     @objc private func volumeSliderDidChange(_ sender: UISlider) {

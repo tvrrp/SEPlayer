@@ -108,7 +108,7 @@ class BaseSERenderer: SERenderer {
     func isReady() -> Bool { false }
     func isEnded() -> Bool { true }
     func getMediaClock() -> MediaClock? { return nil }
-    func getTimebase() -> CMTimebase? { return nil }
+    func getTimebase() -> TimebaseSource? { return nil }
     func setPlaybackSpeed(current: Float, target: Float) throws {}
     func enableRenderStartOfStream() {}
 

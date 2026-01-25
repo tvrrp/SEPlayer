@@ -11,7 +11,7 @@ final class DefaultMediaClock: MediaClock {
     private let standaloneClock: StandaloneClock
 
     private var rendererClock: MediaClock?
-    private var rendererTimebase: CMTimebase?
+    private var rendererTimebase: TimebaseSource?
     private var renderClockSource: SERenderer?
 
     private var playbackParameters: PlaybackParameters = .default
@@ -22,7 +22,7 @@ final class DefaultMediaClock: MediaClock {
         standaloneClock = try StandaloneClock(clock: clock)
     }
 
-    func getTimebase() -> CMTimebase? {
+    func getTimebase() -> TimebaseSource? {
         rendererTimebase ?? standaloneClock.timebase
     }
 
@@ -49,7 +49,7 @@ final class DefaultMediaClock: MediaClock {
         }
 
         let rendererTimebase = renderer.getTimebase()
-        if let rendererTimebase, rendererTimebase !== self.rendererTimebase {
+        if let rendererTimebase, rendererTimebase != self.rendererTimebase {
             self.rendererTimebase = rendererTimebase
         }
     }

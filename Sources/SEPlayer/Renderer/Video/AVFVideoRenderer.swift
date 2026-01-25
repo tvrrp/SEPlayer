@@ -567,21 +567,7 @@ extension AVFVideoRenderer: VideoSampleBufferRendererDelegate {
 
 extension AVFVideoRenderer: RendererCapabilities {
     func supportsFormat(_ format: Format) -> Bool {
-        guard let formatDescription = try? format.buildFormatDescription(),
-              formatDescription.mediaType == .video else {
-            return false
-        }
-
-        switch formatDescription.mediaSubType.rawValue {
-        case kCMVideoCodecType_H264:
-            return true
-        case kCMVideoCodecType_HEVC, kCMVideoCodecType_HEVCWithAlpha:
-            return true
-        case kCMVideoCodecType_VP9, kCMVideoCodecType_AV1:
-            return VTIsHardwareDecodeSupported(formatDescription.mediaSubType.rawValue)
-        default:
-            return false
-        }
+        VTDecoder.supportsFormat(format)
     }
 }
 

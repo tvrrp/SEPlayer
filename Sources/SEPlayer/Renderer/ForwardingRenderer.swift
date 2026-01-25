@@ -28,7 +28,7 @@ public class ForwardingRenderer: SERenderer {
         renderer.getMediaClock()
     }
 
-    public func getTimebase() -> CMTimebase? {
+    public func getTimebase() -> TimebaseSource? {
         renderer.getTimebase()
     }
 

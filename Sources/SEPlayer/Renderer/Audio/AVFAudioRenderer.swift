@@ -68,6 +68,10 @@ final class AVFAudioRenderer: BaseSERenderer {
         renderSynchronizer.addRenderer(audioRenderer)
     }
 
+    override func getTimebase() -> TimebaseSource? {
+        .renderSynchronizer(renderSynchronizer)
+    }
+
     override func getMediaClock() -> MediaClock? { self }
     override func getCapabilities() -> RendererCapabilities { self }
 

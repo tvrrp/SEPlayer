@@ -24,7 +24,6 @@ let package = Package(
             name: "SEPlayer",
             dependencies: [
                 "Common",
-                .product(name: "BasicContainers", package: "swift-collections")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

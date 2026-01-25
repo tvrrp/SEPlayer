@@ -18,7 +18,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
     init(
         decodeQueue: Queue = Queues.sharedDecodeQueue,
         format: Format,
-        highWaterMark: Int = 30,
+        highWaterMark: Int = 60,
     ) throws {
         inputFormat = try AVAudioFormat(cmAudioFormatDescription: format.buildFormatDescription())
         let outputFormat = if let channelLayout = inputFormat.channelLayout {

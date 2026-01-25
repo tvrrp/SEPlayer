@@ -368,7 +368,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             }
         } catch {
             print(error)
-            fatalError()
+            handler.sendMessageAtFrontOfQueue(
+                handler.obtainMessage(
+                    what: SEPlayerMessageImpl.attemptRendererErrorRecovery
+                )
+            )
+//            fatalError("\(error)")
         }
 
         maybeNotifyPlaybackInfoChanged()
@@ -2408,9 +2413,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
 //        try renderer.handleMessage(
 //            .requestMediaDataWhenReady(queue: queue, block: { [self] in
-//                print("❤️ DATA REQUEST, from renderer = \(renderer.trackType)")
-////                handler.sendMessageAtFrontOfQueue(handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork))
-//                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+////                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
 //            }),
 //            mediaPeriod: periodHolder
 //        )

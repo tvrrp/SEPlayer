@@ -17,7 +17,7 @@ public protocol VideoSampleBufferRenderer: VideoSampleBufferRendererPerformance,
     var isReadyForMoreMediaData: Bool { get }
     var hasSufficientMediaDataForReliablePlaybackStart: Bool { get }
 
-    func setControlTimebase(_ timebase: CMTimebase?)
+    func setControlTimebase(_ timebase: TimebaseSource?)
     func enqueue(_ sampleBuffer: CMSampleBuffer)
     func flush()
     func flush(removeImage: Bool)
@@ -108,6 +108,7 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     private nonisolated(unsafe) let renderer: AVSampleBufferVideoRenderer
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
+    private nonisolated(unsafe) weak var previosRenderSynchronizer: AVSampleBufferRenderSynchronizer?
 
     @MainActor
     init(renderer: AVSampleBufferVideoRenderer, layer: AVSampleBufferDisplayLayer) {
@@ -145,9 +146,24 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
         }
     }
 
-    func setControlTimebase(_ timebase: CMTimebase?) {
-        DispatchQueue.main.async {
-            self.layer.controlTimebase = timebase
+    func setControlTimebase(_ timebase: TimebaseSource?) {
+        if let previosRenderSynchronizer = lock.withLock { previosRenderSynchronizer } {
+            previosRenderSynchronizer.removeRenderer(renderer, at: .zero)
+            lock.withLock { self.previosRenderSynchronizer = nil }
+        }
+
+        switch timebase {
+        case let .cmTimebase(timebase):
+            DispatchQueue.main.async {
+                self.layer.controlTimebase = timebase
+            }
+        case let .renderSynchronizer(renderSynchronizer):
+            lock.withLock { previosRenderSynchronizer = renderSynchronizer }
+            renderSynchronizer.addRenderer(renderer)
+        case nil:
+            DispatchQueue.main.async {
+                self.layer.controlTimebase = nil
+            }
         }
     }
 
@@ -205,6 +221,7 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
     private nonisolated(unsafe) var _isReadyForMoreMediaData = true // guarded by lock
+    @MainActor private weak var previosRenderSynchronizer: AVSampleBufferRenderSynchronizer?
     @MainActor private var requestMediaDataInfo: (DispatchQueue, () -> Void)?
 
     @MainActor
@@ -235,9 +252,22 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
         DispatchQueue.main.async { self.layer.setPresentationTimeExpectation(expectation) }
     }
 
-    func setControlTimebase(_ timebase: CMTimebase?) {
-        DispatchQueue.main.async {
-            self.layer.controlTimebase = timebase
+    func setControlTimebase(_ timebase: TimebaseSource?) {
+        DispatchQueue.main.async { [self] in
+            if let previosRenderSynchronizer {
+                previosRenderSynchronizer.removeRenderer(layer, at: .zero)
+                self.previosRenderSynchronizer = nil
+            }
+
+            switch timebase {
+            case let .cmTimebase(timebase):
+                layer.controlTimebase = timebase
+            case let .renderSynchronizer(renderSynchronizer):
+                previosRenderSynchronizer = renderSynchronizer
+                renderSynchronizer.addRenderer(layer)
+            case nil:
+                layer.controlTimebase = nil
+            }
         }
     }
 

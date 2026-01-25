@@ -1,8 +1,16 @@
-.DS_Store
-/.build
-/Packages
-xcuserdata/
-DerivedData/
-.swiftpm/configuration/registries.json
-.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-.netrc
+*~
+
+Package.resolved
+
+# Dot files/directories (opt-in only)
+/.*
+!/.gitignore
+
+# Top-level entries (opt-in only)
+# First ignore all, then whitelist specific folders and files
+/*
+!/Sources/
+!/Tests/
+!/Demo/
+!/Package.swift
+!/README.md

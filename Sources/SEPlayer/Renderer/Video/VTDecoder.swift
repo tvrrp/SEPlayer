@@ -29,6 +29,31 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
         try createDecoder(format: format)
     }
 
+    static func supportsFormat(_ format: Format) -> Bool {
+        guard let formatDescription = try? format.buildFormatDescription(),
+              formatDescription.mediaType == .video else {
+            return false
+        }
+        return true
+
+        var decompressionSession: VTDecompressionSession?
+        let status = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: formatDescription,
+            decoderSpecification: nil,
+            imageBufferAttributes: nil,
+            outputCallback: nil,
+            decompressionSessionOut: &decompressionSession
+        )
+
+        let didCreateDecoder = decompressionSession != nil
+        if let decompressionSession {
+            VTDecompressionSessionInvalidate(decompressionSession)
+        }
+
+        return status != noErr && didCreateDecoder
+    }
+
     override func setPlaybackSpeed(_ speed: Float) {
         playbackSpeed = speed
     }

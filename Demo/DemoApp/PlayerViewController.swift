@@ -21,6 +21,8 @@ class PlayerViewController: UIViewController {
     var repeatMode: RepeatMode = .off
     let volumeView = UISlider()
 
+    let controlsContainerView = UIView()
+    var controlsContainerViewIsHidden = false
     let backwardsButton = UIButton(type: .system)
     let forwardsButton = UIButton(type: .system)
     let seekBackwardsButton = UIButton(type: .system)
@@ -54,6 +56,7 @@ class PlayerViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerView.frame = view.bounds
+        controlsContainerView.frame = view.bounds
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -73,11 +76,12 @@ class PlayerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.insertSubview(playerView, at: 0)
-        view.addSubview(currentTimeLabel)
-        view.addSubview(durationLabel)
-        view.addSubview(seekSlider)
-        view.addSubview(volumeView)
-        view.addSubview(muteButton)
+        view.addSubview(controlsContainerView)
+        controlsContainerView.addSubview(currentTimeLabel)
+        controlsContainerView.addSubview(durationLabel)
+        controlsContainerView.addSubview(seekSlider)
+//        controlsContainerView.addSubview(volumeView)
+//        controlsContainerView.addSubview(muteButton)
 
         currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -126,6 +130,12 @@ class PlayerViewController: UIViewController {
         seekSlider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
 
         volumeView.addTarget(self, action: #selector(volumeSliderDidChange), for: .valueChanged)
+
+        if #available(iOS 26, *) {
+            seekSlider.sliderStyle = .thumbless
+            volumeView.sliderStyle = .thumbless
+        }
+
         view.addGestureRecognizer(speedGestureRecogniser)
         speedGestureRecogniser.minimumPressDuration = 0.3
         speedGestureRecogniser.addTarget(self, action: #selector(handleLongPress))
@@ -138,6 +148,8 @@ class PlayerViewController: UIViewController {
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
         if videoUrls.count == 1 {
             player.repeatMode = .one
+            backwardsButton.isHidden = true
+            forwardsButton.isHidden = true
         }
         player.seekParameters = seekParameters
         player.delegate.addDelegate(self)
@@ -157,15 +169,18 @@ class PlayerViewController: UIViewController {
         buttonStackView.addArrangedSubview(seekForwardsButton)
         buttonStackView.addArrangedSubview(forwardsButton)
 
-        view.addSubview(buttonStackView)
+        controlsContainerView.addSubview(buttonStackView)
+
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(hideControls))
+        view.addGestureRecognizer(tapGesture)
 
         NSLayoutConstraint.activate([
-            volumeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            volumeView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-
-            muteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            muteButton.leadingAnchor.constraint(equalTo: volumeView.trailingAnchor, constant: 16),
-            muteButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+//            volumeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+//            volumeView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+//
+//            muteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+//            muteButton.leadingAnchor.constraint(equalTo: volumeView.trailingAnchor, constant: 16),
+//            muteButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
 
             buttonStackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             buttonStackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -180,6 +195,25 @@ class PlayerViewController: UIViewController {
             durationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             durationLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
         ])
+    }
+
+    @objc private func hideControls() {
+        controlsContainerViewIsHidden.toggle()
+
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState]) { [self] in
+            if controlsContainerViewIsHidden {
+                controlsContainerView.alpha = 0
+                navigationController?.navigationBar.alpha = 0
+            } else {
+                controlsContainerView.alpha = 1
+                navigationController?.navigationBar.alpha = 1
+                controlsContainerView.isHidden = false
+            }
+        } completion: { [weak self] didFinish in
+            if let self, didFinish {
+                controlsContainerView.isHidden = controlsContainerViewIsHidden
+            }
+        }
     }
 
     @objc private func sliderTouchDown(_ sender: UISlider) {
@@ -198,6 +232,7 @@ class PlayerViewController: UIViewController {
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
         currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
+//        player.seek(to: Int64(sender.value))
     }
 
     @objc private func volumeSliderDidChange(_ sender: UISlider) {
@@ -289,8 +324,11 @@ class PlayerViewController: UIViewController {
     }
 
     private func createButtonConfig(imageName: String) -> UIButton.Configuration {
-        var config = UIButton.Configuration.borderless()
-        try! AVAudioSession.sharedInstance().setSupportsMultichannelContent(true)
+        var config = if #available(iOS 26, *) {
+            UIButton.Configuration.clearGlass()
+        } else {
+            UIButton.Configuration.borderless()
+        }
 
         config.image = UIImage(systemName: imageName)?.withTintColor(.white, renderingMode: .alwaysOriginal)
         config.buttonSize = .large

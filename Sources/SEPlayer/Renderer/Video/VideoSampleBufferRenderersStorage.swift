@@ -48,7 +48,7 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
         renderers.forEach { $0.setPresentationTimeExpectation(expectation) }
     }
 
-    func setControlTimebase(_ timebase: CMTimebase?) {
+    func setControlTimebase(_ timebase: TimebaseSource?) {
         assert(queue.isCurrent())
         renderers.forEach { $0.setControlTimebase(timebase) }
     }
