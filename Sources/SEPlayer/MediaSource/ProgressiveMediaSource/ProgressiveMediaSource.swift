@@ -13,7 +13,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     weak var listener: Listener?
 
     private let queue: Queue
-    private let loaderSyncActor: PlayerActor
+    private let loaderQueue: Queue
     private var mediaItem: MediaItem
     private let dataSourceFactory: DataSourceFactory
     private let extractorsFactory: ExtractorsFactory
@@ -28,14 +28,14 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     init(
         queue: Queue,
-        loaderSyncActor: PlayerActor,
+        loaderQueue: Queue,
         mediaItem: MediaItem,
         dataSourceFactory: DataSourceFactory,
         extractorsFactory: ExtractorsFactory,
         continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
     ) {
         self.queue = queue
-        self.loaderSyncActor = loaderSyncActor
+        self.loaderQueue = loaderQueue
         self.mediaItem = mediaItem
         self.dataSourceFactory = dataSourceFactory
         self.extractorsFactory = extractorsFactory
@@ -78,10 +78,10 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         return ProgressiveMediaPeriod(
             url: localConfiguration.url,
             queue: queue,
-            loaderSyncActor: loaderSyncActor,
+            loadQueue: loaderQueue,
             dataSource: dataSource,
             progressiveMediaExtractor: BundledMediaExtractor(
-                syncActor: loaderSyncActor,
+                syncActor: loaderQueue.playerActor(),
                 extractorsFactory: extractorsFactory
             ),
             listener: self,

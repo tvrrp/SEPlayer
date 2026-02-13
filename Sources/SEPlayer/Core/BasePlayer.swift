@@ -127,7 +127,7 @@ extension BasePlayer {
     }
 
     public func clearMediaItems() {
-        removeMediaItems(at: Range(0...Int.max))
+        removeMediaItems(at: Range(0...Int.max - 1))
     }
 
     public func play() {

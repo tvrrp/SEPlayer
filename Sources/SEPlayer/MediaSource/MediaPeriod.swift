@@ -9,6 +9,7 @@ public protocol MediaPeriod: SequenceableLoader, AnyObject {
     var trackGroups: [TrackGroup] { get }
 
     func prepare(callback: any MediaPeriodCallback, on time: Int64)
+    func maybeThrowPrepareError() throws
     func discardBuffer(to position: Int64, toKeyframe: Bool)
     func readDiscontinuity() -> Int64
     func seek(to position: Int64) -> Int64

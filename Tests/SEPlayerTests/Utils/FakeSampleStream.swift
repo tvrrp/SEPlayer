@@ -101,6 +101,10 @@ final class FakeSampleStream: SampleStream {
         sampleQueue.isReady(loadingFinished: loadingFinished)
     }
 
+    func maybeThrowError() throws {
+        try sampleQueue.maybeThrowError()
+    }
+
     func discardTo(positionUs: Int64, toKeyframe: Bool) {
         sampleQueue.discard(to: positionUs, to: toKeyframe, stopAtReadPosition: true)
     }

@@ -22,7 +22,11 @@ final class CountDownLatch {
         guard count > 0 else { return } 
         let timeoutTask = Task {
             try Task.checkCancellation()
-            try await Task.sleep(milliseconds: timeoutMs)
+            if #available(iOS 16, *) {
+                try await Task.sleep(for: .milliseconds(timeoutMs))
+            } else {
+                try await Task.sleep(for: .milliseconds(Int(timeoutMs)), leeway: .zero)
+            }
             try Task.checkCancellation()
             return
         }
@@ -56,7 +60,12 @@ final class TimeoutChecker {
     func start(timeoutMs: UInt64, onTimeout: @escaping (Error) -> Void) {
         task = Task {
             do {
-                try await Task.sleep(milliseconds: timeoutMs)
+                try Task.checkCancellation()
+                if #available(iOS 16, *) {
+                    try await Task.sleep(for: .milliseconds(timeoutMs))
+                } else {
+                    try await Task.sleep(for: .milliseconds(Int(timeoutMs)), leeway: .zero)
+                }
                 try Task.checkCancellation()
                 onTimeout(TimeoutError())
             } catch {

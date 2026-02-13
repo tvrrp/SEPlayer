@@ -21,7 +21,7 @@ public actor PlayerActor {
 }
 
 public final class PlayerExecutor: SerialExecutor {
-    private nonisolated let queue: Queue
+    nonisolated let queue: Queue
     public init(queue: Queue) { self.queue = queue }
 
     public func enqueue(_ job: UnownedJob) {
@@ -30,5 +30,11 @@ public final class PlayerExecutor: SerialExecutor {
 
     public func asUnownedSerialExecutor() -> UnownedSerialExecutor {
         UnownedSerialExecutor(ordinary: self)
+    }
+
+    public func checkIsolated() {
+        if queue.isCurrent() == false {
+            fatalError("Unexpected isolation context, expected to be executing on PlayerExecutor")
+        }
     }
 }

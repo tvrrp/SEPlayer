@@ -285,7 +285,9 @@ private extension MP4Extractor {
         let inputPosition = input.getPosition(isolation: isolation)
         sampleTrackIndex = sampleTrackIndex ?? nextReadSample(inputPosition: inputPosition)
 
-        guard let sampleTrackIndex else { return .endOfInput }
+        guard let sampleTrackIndex else {
+            return .endOfInput
+        }
 
         let track = tracks[sampleTrackIndex]
         let trackOutput = track.trackOutput
@@ -314,7 +316,8 @@ private extension MP4Extractor {
                 sampleBytesWritten += writtenBytes
             case .endOfInput:
                 // TODO: throw error
-                fatalError()
+//                fatalError()
+                throw ErrorBuilder(errorDescription: "end of file")
             }
         }
 

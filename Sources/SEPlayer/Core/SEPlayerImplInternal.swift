@@ -6,7 +6,6 @@
 //
 
 import CoreMedia.CMSync
-import UIKit
 
 protocol SEPlayerImplInternalDelegate: AnyObject {
     func onPlaybackInfoUpdate(playbackInfoUpdate: SEPlayerImplInternal.PlaybackInfoUpdate)
@@ -367,13 +366,16 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 return false
             }
         } catch {
+            print("❌❌❌❌ ERROR")
             print(error)
-            handler.sendMessageAtFrontOfQueue(
-                handler.obtainMessage(
-                    what: SEPlayerMessageImpl.attemptRendererErrorRecovery
-                )
-            )
+//            handler.sendMessageAtFrontOfQueue(
+//                handler.obtainMessage(
+//                    what: SEPlayerMessageImpl.attemptRendererErrorRecovery
+//                )
+//            )
 //            fatalError("\(error)")
+            stopInternal(forceResetRenderers: true, acknowledgeStop: false)
+            playbackInfo = playbackInfo.setPlaybackError(error)
         }
 
         maybeNotifyPlaybackInfoChanged()
@@ -501,6 +503,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         operationAck: Bool,
         playWhenReadyChangeReason: PlayWhenReadyChangeReason,
     ) throws {
+        print("🫟 setPlayWhenReadyInternal, time = \(clock.microseconds)")
         playbackInfoUpdate.incrementPendingOperationAcks(operationAck ? 1 : 0)
         try updatePlayWhenReadyWithAudioFocus(
             playWhenReady,
@@ -562,6 +565,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         reason: PlayWhenReadyChangeReason,
         playbackSuppressionReason: PlaybackSuppressionReason
     ) throws {
+        print("🫟 updatePlayWhenReadyWithAudioFocus, time = \(clock.microseconds)")
         let playWhenReady = playWhenReady && playerCommand != .doNotPlay
         let playWhenReadyChangeReason = updatePlayWhenReadyChangeReason(playerCommand: playerCommand, playWhenReadyChangeReason: reason)
         let playbackSuppressionReason = updatePlaybackSuppressionReason(playerCommand: playerCommand, playbackSuppressionReason: playbackSuppressionReason)
@@ -665,6 +669,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     }
 
     private func startRenderers() throws {
+        print("🫟 startRenderers(), time = \(clock.microseconds)")
         guard let playingPeriodHolder = periodQueue.playing else {
             return
         }
@@ -673,14 +678,16 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             if !trackSelectorResult.isRendererEnabled(for: index) {
                 continue
             }
-            
+
             try! renderers[index].start()
         }
+        print()
     }
 
     private func stopRenderers() {
         mediaClock.stop()
         renderers.forEach { $0.stop() }
+        print()
     }
 
     private func attemptRendererErrorRecovery() throws {
@@ -785,7 +792,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 }
             }
         } else {
-            // TODO: playingPeriodHolder.mediaPeriod.maybeThrowPrepareError
+            try playingPeriodHolder.mediaPeriod.maybeThrowPrepareError()
         }
 
         let playingPeriodDurationUs = playingPeriodHolder.info.durationUs
@@ -2124,8 +2131,16 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
               let playingPeriodHolder = periodQueue.playing,
               let nextPlayingPeriodHolder = playingPeriodHolder.next else { return false }
 
-        return rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime()
+        let result = rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime()
             && nextPlayingPeriodHolder.allRenderersInCorrectState
+
+        if rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime() {
+            print()
+        }
+        print("👠 should adavnce = \(result), pos = \(rendererPositionUs), next = \(nextPlayingPeriodHolder.getStartPositionRendererTime())")
+        print()
+        print()
+        return result
     }
 
     private func hasReadingPeriodFinishedReading() -> Bool {

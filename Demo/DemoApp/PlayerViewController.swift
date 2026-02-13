@@ -159,9 +159,9 @@ class PlayerViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(didEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
 
         buttonStackView.axis = .horizontal
-        buttonStackView.alignment = .center
-        buttonStackView.distribution = .equalSpacing
-        buttonStackView.spacing = 24
+        buttonStackView.alignment = .fill
+        buttonStackView.distribution = .fill
+//        buttonStackView.spacing = 0
 
         buttonStackView.addArrangedSubview(backwardsButton)
         buttonStackView.addArrangedSubview(seekBackwardsButton)
@@ -204,7 +204,9 @@ class PlayerViewController: UIViewController {
             if controlsContainerViewIsHidden {
                 controlsContainerView.alpha = 0
                 navigationController?.navigationBar.alpha = 0
+                timer?.invalidate()
             } else {
+                updateTime()
                 controlsContainerView.alpha = 1
                 navigationController?.navigationBar.alpha = 1
                 controlsContainerView.isHidden = false
@@ -232,7 +234,7 @@ class PlayerViewController: UIViewController {
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
         currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
-//        player.seek(to: Int64(sender.value))
+        player.seek(to: Int64(sender.value))
     }
 
     @objc private func volumeSliderDidChange(_ sender: UISlider) {
@@ -331,12 +333,20 @@ class PlayerViewController: UIViewController {
         }
 
         config.image = UIImage(systemName: imageName)?.withTintColor(.white, renderingMode: .alwaysOriginal)
-        config.buttonSize = .large
+//        config.buttonSize = .small
         return config
     }
 }
 
 extension PlayerViewController: SEPlayerDelegate {
+    func player(_ player: any Player, onPlayerError error: any Error) {
+        print("❌❌❌ onPlayerError = \(error)")
+//        player.clearMediaItems()
+//        player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
+        player.prepare()
+//        player.play()
+    }
+
     func player(_ player: any Player, didChangePlaybackState state: PlayerState) {
         if state == .ready {
             seekSlider.isUserInteractionEnabled = true

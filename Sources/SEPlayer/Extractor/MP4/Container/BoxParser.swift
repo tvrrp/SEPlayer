@@ -508,10 +508,10 @@ extension BoxParser {
 
             let a  = try int32()
             let b  = try int32()
-            let u  = try int32() // usually 0
+            let _  = try int32() // usually 0
             let c  = try int32()
             let d  = try int32()
-            let v  = try int32() // usually 0
+            let _  = try int32() // usually 0
             let tx = try int32()
             let ty = try int32()
             let w  = try int32() // usually 1<<30 (i.e. 1.0)
@@ -522,7 +522,7 @@ extension BoxParser {
             let dF = fx16(d)
             let txF = fx16(tx)
             let tyF = fx16(ty)
-            let _wF = fx30(w) // generally 1.0; not used below
+            let _ = fx30(w) // generally 1.0; not used below
 
             // 4×4 CATransform3D (same as CATransform3DMakeAffineTransform(affine))
             var t = CATransform3DIdentity
@@ -537,7 +537,7 @@ extension BoxParser {
             // Derive rotation in degrees from the 2×2 submatrix.
             // Normalize by scale to be robust if a/c include scale.
             let scaleX = sqrt(aF*aF + cF*cF)
-            let scaleY = sqrt(bF*bF + dF*dF)
+            let _ = sqrt(bF*bF + dF*dF)
             let na = scaleX > 0 ? aF/scaleX : aF
             let nb = scaleX > 0 ? bF/scaleX : bF
             let angle = atan2(nb, na) // radians

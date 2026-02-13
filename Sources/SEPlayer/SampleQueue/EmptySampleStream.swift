@@ -7,6 +7,7 @@
 
 final class EmptySampleStream: SampleStream {
     func isReady() -> Bool { true }
+    func maybeThrowError() throws {}
 
     func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult {
         buffer.flags.insert(.endOfStream)

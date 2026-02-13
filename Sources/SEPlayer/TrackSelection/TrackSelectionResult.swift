@@ -25,7 +25,7 @@ public struct TrackSelectionResult: Equatable {
     }
 
     func isRendererEnabled(for index: Int) -> Bool {
-        renderersConfig[index] != nil
+        selections[index] != nil
     }
 }
 

@@ -47,11 +47,11 @@ struct UrlListScreen: View {
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_10.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_11.mp4",
         "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
-        "https://html5demos.com/assets/dizzy.mp4",
+//        "https://html5demos.com/assets/dizzy.mp4",
         "https://streams.videolan.org/streams/mp4/GHOST_IN_THE_SHELL_V5_DOLBY%20-%203.m4v",
         "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4",
         "https://github.com/chthomos/video-media-samples/raw/refs/heads/master/big-buck-bunny-1080p-60fps-30sec.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-1/mp4/frame-counter-one-hour.mp4",
+//        "https://storage.googleapis.com/exoplayer-test-media-1/mp4/frame-counter-one-hour.mp4",
 //        "https://storage.googleapis.com/media-session/bear-opus.mp4",
         "https://download.dolby.com/us/en/test-tones/dolby-atmos-trailer_amaze_1080.mp4",
     ]
@@ -180,26 +180,20 @@ struct UrlListScreen: View {
             let nav = host.navigationController
         else { return }
 
-//        let viewController = PlayerViewControllerSim()
-//
-//        viewController.repeatMode = .one
-//        nav.pushViewController(viewController, animated: true)
-        let vc1 = PlayerViewController()
-        let vc2 = PlayerViewController()
-        let vc3 = PlayerViewController()
-        let vc4 = PlayerViewController()
+        let vcs = [
+            PlayerViewController(),
+            PlayerViewController(),
+            PlayerViewController(),
+            PlayerViewController()
+        ]
 
-        vc1.repeatMode = .one
-        vc2.repeatMode = .one
-        vc3.repeatMode = .one
-        vc4.repeatMode = .one
+        for vc in vcs {
+            vc.repeatMode = .all
+            vc.seekParameters = seekParameters.seekParameters
+            vc.videoUrls = urls.map { URL(string: $0)! }
+        }
 
-        vc1.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4")!]
-        vc2.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4")!]
-        vc3.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_3.mp4")!]
-        vc4.videoUrls = [URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_4.mp4")!]
-
-        let container = ContnainerVC(vcs: [vc1, vc2, vc3, vc4])
+        let container = ContnainerVC(vcs: vcs)
         nav.pushViewController(container, animated: true)
     }
 }

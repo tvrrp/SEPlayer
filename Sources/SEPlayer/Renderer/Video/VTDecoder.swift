@@ -19,7 +19,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
         initialInputBufferSize: Int? = nil
     ) throws {
         self.format = format
-        super.init(decodeQueue: decodeQueue, inputBuffersCount: highWaterMark, outputBuffersCount: highWaterMark)
+        try super.init(decodeQueue: decodeQueue, inputBuffersCount: highWaterMark, outputBuffersCount: highWaterMark)
 
         let initialInputBufferSize = format.maxInputSize > 0 ? format.maxInputSize : initialInputBufferSize
         if let initialInputBufferSize {
@@ -34,7 +34,6 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
               formatDescription.mediaType == .video else {
             return false
         }
-        return true
 
         var decompressionSession: VTDecompressionSession?
         let status = VTDecompressionSessionCreate(
@@ -51,7 +50,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
             VTDecompressionSessionInvalidate(decompressionSession)
         }
 
-        return status != noErr && didCreateDecoder
+        return status == noErr && didCreateDecoder
     }
 
     override func setPlaybackSpeed(_ speed: Float) {

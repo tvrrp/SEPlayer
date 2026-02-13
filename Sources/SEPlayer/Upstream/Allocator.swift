@@ -16,7 +16,7 @@ public protocol Allocator: AnyObject, Sendable {
     var totalBytesAllocated: Int { get }
     var individualAllocationSize: Int { get }
     func allocate() -> Allocation
-    func release(allocation: consuming Allocation)
+    func release(allocation: Allocation)
     func release(allocationNode: AllocationNode)
     func trim()
 }
@@ -84,9 +84,9 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
         return allocation
     }
 
-    func release(allocation: consuming Allocation) {
+    func release(allocation: Allocation) {
         lock.lock(); defer { lock.unlock() }
-        availableAllocations[availableCount] = consume allocation
+        availableAllocations[availableCount] = allocation
         availableCount += 1
         allocatedCount -= 1
     }
@@ -108,8 +108,9 @@ final class DefaultAllocator: Allocator, @unchecked Sendable {
         let targetAvailableCount = max(0, targetAllocationCount - allocatedCount)
         guard targetAvailableCount < availableCount else { return }
 
-        var newArray = Array<Allocation?>(repeating: nil, count: (targetAvailableCount..<availableCount).count)
+        let newArray = Array<Allocation?>(repeating: nil, count: (targetAvailableCount..<availableCount).count)
         availableAllocations.replaceSubrange(targetAvailableCount..<availableCount, with: newArray)
+        availableCount = targetAvailableCount
     }
 }
 

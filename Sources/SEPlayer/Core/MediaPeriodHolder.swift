@@ -135,6 +135,7 @@ final class MediaPeriodHolder {
         return selectorResult
     }
 
+    @discardableResult
     func applyTrackSelection(
         trackSelectorResult: TrackSelectionResult,
         positionUs: Int64,

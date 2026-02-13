@@ -29,6 +29,10 @@ import Foundation
 //}
 
 class MediaSourceMock: MediaSource {
+    func maybeThrowSourceInfoRefreshError() throws {
+        // TODO:
+    }
+    
     let isSingleWindow = true
     var methodInvocationStorage = [String: Int]()
 
@@ -65,6 +69,10 @@ class MediaSourceMock: MediaSource {
 }
 
 class MediaPeriodMock: MediaPeriod {
+    func maybeThrowPrepareError() throws {
+        // TODO: 
+    }
+    
     let trackGroups = [TrackGroup]()
     let isLoading: Bool = false
 

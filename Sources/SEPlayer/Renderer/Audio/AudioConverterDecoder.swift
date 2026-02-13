@@ -51,7 +51,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
 
         maximumPacketSize = format.maxInputSize > 0 ? format.maxInputSize : .defaultInputBufferSize
         memoryPool = CMMemoryPoolCreate(options: nil)
-        super.init(decodeQueue: decodeQueue, inputBuffersCount: highWaterMark, outputBuffersCount: highWaterMark)
+        try super.init(decodeQueue: decodeQueue, inputBuffersCount: highWaterMark, outputBuffersCount: highWaterMark)
         try setInitialInputBufferSize(maximumPacketSize)
     }
 
@@ -102,6 +102,8 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
         isolation: isolated PlayerActor = #isolation
     ) async throws(ACDecoderError) {
         do {
+            if reset { audioConverter.reset() }
+
             var error: NSError?
             var needToProvideData = true
 

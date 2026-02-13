@@ -83,7 +83,7 @@ final class TypedCMBufferQueue<T: CMBuffer> {
 
     init(
         capacity: CMItemCount = 120,
-        compareHandler: @escaping (_ rhs: T, _ lhs: T) -> CFComparisonResult,
+        compareHandler: @escaping (_ lhs: T, _ rhs: T) -> CFComparisonResult,
         ptsHandler: ((T) -> CMTime)? = nil
     ) throws {
         self.capacity = capacity

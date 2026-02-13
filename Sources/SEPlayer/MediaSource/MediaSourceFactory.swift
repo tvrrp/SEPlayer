@@ -11,13 +11,13 @@ public protocol MediaSourceFactory {
 
 struct DefaultMediaSourceFactory: MediaSourceFactory {
     let workQueue: Queue
-    let loaderSyncActor: PlayerActor
+    let loaderQueue: Queue
     let dataSourceFactory: DataSourceFactory
     let extractorsFactory: ExtractorsFactory
 
-    init(workQueue: Queue, loaderSyncActor: PlayerActor, dataSourceFactory: DataSourceFactory, extractorsFactory: ExtractorsFactory) {
+    init(workQueue: Queue, loaderQueue: Queue, dataSourceFactory: DataSourceFactory, extractorsFactory: ExtractorsFactory) {
         self.workQueue = workQueue
-        self.loaderSyncActor = loaderSyncActor
+        self.loaderQueue = loaderQueue
         self.dataSourceFactory = dataSourceFactory
         self.extractorsFactory = extractorsFactory
     }
@@ -27,7 +27,7 @@ struct DefaultMediaSourceFactory: MediaSourceFactory {
 
         return ProgressiveMediaSource(
             queue: workQueue,
-            loaderSyncActor: loaderSyncActor,
+            loaderQueue: loaderQueue,
             mediaItem: mediaItem,
             dataSourceFactory: dataSourceFactory,
             extractorsFactory: extractorsFactory

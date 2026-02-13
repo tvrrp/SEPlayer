@@ -209,7 +209,12 @@ final class ActionNode {
             try await self.run(isolation: isolation)
             await Task.yield()
         } else {
-            try await Task.sleep(milliseconds: delayMs)
+            if #available(iOS 16, *) {
+                try await Task.sleep(for: .milliseconds(delayMs))
+            } else {
+                try await Task.sleep(for: .milliseconds(Int(delayMs)), leeway: .zero)
+            }
+
             try await self.run(isolation: isolation)
         }
     }
@@ -224,7 +229,12 @@ final class ActionNode {
         )
 
         if let repeatIntervalMs {
-            try await Task.sleep(milliseconds: repeatIntervalMs)
+            if #available(iOS 16, *) {
+                try await Task.sleep(for: .milliseconds(repeatIntervalMs))
+            } else {
+                try await Task.sleep(for: .milliseconds(Int(repeatIntervalMs)), leeway: .zero)
+            }
+
             try await action.doActionAndScheduleNext(
                 player: try #require(player),
                 trackSelector: try #require(trackSelector),

@@ -10,7 +10,7 @@ import Testing
 @testable import SEPlayer
 
 final class FakeClock: SEClock {
-    let timebase: CMTimebase? = nil
+    let timebase: TimebaseSource? = nil
 
     var milliseconds: Int64 {
         lock.withLock { bootTimeMs + timeSinceBootMs }

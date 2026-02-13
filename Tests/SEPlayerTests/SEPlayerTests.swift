@@ -172,7 +172,7 @@ class SEPlayerTests {
         ))
         player.prepare()
         player.play()
-        timeoutChecker.start(timeoutMs: timeoutMs * 100) {
+        timeoutChecker.start(timeoutMs: timeoutMs) {
             eventValidator.continuation?.resume(throwing: $0)
         }
         try await withCheckedThrowingContinuation { continuation in

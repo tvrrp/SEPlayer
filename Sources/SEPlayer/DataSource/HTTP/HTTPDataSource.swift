@@ -12,7 +12,7 @@ final class DefautlHTTPDataSource: DataSource, @unchecked Sendable {
     var urlResponse: HTTPURLResponse?
     let components: DataSourceOpaque
 
-    private let syncActor: PlayerActor
+    let syncActor: PlayerActor
     private let networkLoader: IPlayerSessionLoader
     private let loadHandler: HTTPDataSourceLoadHandler
 
@@ -74,16 +74,9 @@ extension DefautlHTTPDataSource {
         self.currentTask = task
 
         let openTask = Task<HTTPURLResponse, Error> {
-            defer { openContinuation = nil }
-            return try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation(isolation: syncActor) { continuation in
-                    self.openContinuation = continuation
-                    task.resume()
-                }
-            } onCancel: {
-                Task { await syncActor.run { _ in
-                    openContinuation?.resume(throwing: CancellationError())
-                }}
+            try await withCheckedThrowingContinuation(isolation: syncActor) { continuation in
+                self.openContinuation = continuation
+                task.resume()
             }
         }
         self.openTask = openTask
@@ -97,36 +90,52 @@ extension DefautlHTTPDataSource {
 }
 
 extension DefautlHTTPDataSource: PlayerSessionDelegate {
-    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask) -> URLSession.ResponseDisposition {
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, isolation: isolated PlayerActor) async -> URLSession.ResponseDisposition {
         guard let response = response as? HTTPURLResponse else {
-            Task { await syncActor.run { _ in
-                openContinuation?.resume(throwing: DataReaderError.wrongURLResponce)
-            }}
+            openContinuation?.resume(throwing: DataReaderError.wrongURLResponse)
+            openContinuation = nil
             return .cancel
         }
 
-        Task { await syncActor.run { _ in openContinuation?.resume(returning: response) } }
+        let responseCode = response.statusCode
+        if responseCode < 200 || responseCode > 299 {
+            // TODO: check for 416 out of range code
+            openContinuation?.resume(throwing: DataReaderError.wrongResponseStatusCode)
+            openContinuation = nil
+            return .cancel
+        }
+
+        openContinuation?.resume(returning: response)
+        openContinuation = nil
 
         return .allow
     }
 
     func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
-        Task { await loadHandler.consumeData(data: buffer) }
+        syncActor.executor.queue.async {
+            self.loadHandler.assumeIsolated { handler in
+                handler.consumeData(data: buffer)
+            }
+        }
     }
 
-    func didFinishTask(_ task: URLSessionTask, error: (any Error)?) {
+    func didFinishTask(_ task: URLSessionTask, error: Error?, isolation: isolated PlayerActor) async {
         if let error, (error as NSError).code == NSURLErrorCancelled {
-            Task {
-                await syncActor.run { _ in openContinuation?.resume(throwing: CancellationError()) }
-                await loadHandler.didCloseConnection(with: CancellationError())
-            }
+            openContinuation?.resume(throwing: CancellationError())
+            openContinuation = nil
+            await loadHandler.didCloseConnection(with: CancellationError())
             return
         }
 
-        Task { await loadHandler.didCloseConnection(with: error) }
+        if let error {
+            openContinuation?.resume(throwing: error)
+            openContinuation = nil
+        }
+
+        await loadHandler.didCloseConnection(with: error)
     }
 
-    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask) {
+    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask, isolation: isolated PlayerActor) async {
         transferEnded(source: self, metrics: metrics)
     }
 }

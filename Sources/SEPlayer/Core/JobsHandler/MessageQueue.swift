@@ -275,6 +275,7 @@ final class MessageQueue: @unchecked Sendable {
     }
 
     private let lock = UnfairLock()
+    private let timerQueue = DispatchQueue(label: "com.seplayer.timer", qos: .userInitiated)
 
     private var messages: UnsafeMutablePointer<Message>?
     private var lastMessage: UnsafeMutablePointer<Message>?
@@ -283,10 +284,13 @@ final class MessageQueue: @unchecked Sendable {
     private var quiting = false
     private var blocked = false
     private var awaitingContinuation: CheckedContinuation<Void, Error>?
+    private var awaitingTimerTask: Task<Void, Error>?
 
     deinit {
         awaitingContinuation?.resume(throwing: CancellationError())
         awaitingContinuation = nil
+        awaitingTimerTask?.cancel()
+        awaitingTimerTask = nil
     }
 
     var isIdle: Bool {
@@ -359,9 +363,25 @@ final class MessageQueue: @unchecked Sendable {
         if needWake {
             awaitingContinuation?.resume()
             awaitingContinuation = nil
+            awaitingTimerTask?.cancel()
+            awaitingTimerTask = nil
         }
 
         return true
+    }
+
+    func hasMessages(handler: Handler, what: MessageKind) -> Bool {
+        lock.withLock {
+            var p = messages
+            while let previous = p {
+                if previous.pointee.target === handler, previous.pointee.what.isEqual(to: what) {
+                    return true
+                }
+                p = previous.pointee.next
+            }
+
+            return false
+        }
     }
 
     func removeMessages(handler: Handler, what: MessageKind) {
@@ -485,6 +505,8 @@ final class MessageQueue: @unchecked Sendable {
 
             awaitingContinuation?.resume()
             awaitingContinuation = nil
+            awaitingTimerTask?.cancel()
+            awaitingTimerTask = nil
         }
     }
 
@@ -534,11 +556,28 @@ final class MessageQueue: @unchecked Sendable {
         } else if timeoutNs == 0 {
             return
         } else {
-            let now = DispatchTime.now()
-            let deadline = now.advanced(by: .nanoseconds(Int(timeoutNs)))
-            try await Task.sleep(
-                nanoseconds: deadline.uptimeNanoseconds - now.uptimeNanoseconds
-            )
+            let timerTask = Task {
+                let now = DispatchTime.now()
+                let deadline = now.advanced(by: .nanoseconds(Int(timeoutNs)))
+
+                do {
+                    if #available(iOS 16, *) {
+                        try await Task.sleep(
+                            for: .nanoseconds(deadline.uptimeNanoseconds - now.uptimeNanoseconds),
+                            tolerance: .nanoseconds(0),
+                            clock: .continuous
+                        )
+                    } else {
+                        try await Task.sleep(for: now.distance(to: deadline), queue: timerQueue)
+                    }
+                } catch {
+                    if error is CancellationError { return }
+                    throw error
+                }
+            }
+
+            lock.withLock { awaitingTimerTask = timerTask }
+            try await timerTask.value
         }
     }
 }

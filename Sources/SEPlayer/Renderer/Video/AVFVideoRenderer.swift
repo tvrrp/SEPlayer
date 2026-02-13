@@ -36,7 +36,6 @@ final class AVFVideoRenderer: BaseSERenderer {
     private var consecutiveDroppedFrameCount = 0
     private var buffersInCodecCount = 0
     private var lastRenderTimeUs = Int64.zero
-    private var minimumEnqueuedPresentationTime = Int64.timeUnset
     private var requestMediaDataInfo: (Queue, () -> Void)?
 
     init(
@@ -81,7 +80,7 @@ final class AVFVideoRenderer: BaseSERenderer {
 
         try maybeInitDecoder()
 
-        if let decoder {
+        if decoder != nil {
             while try drainOutputBuffer(positionUs: position, elapsedRealtimeUs: elapsedRealtime) {}
             while try feedInputBuffer() {}
         }
@@ -160,7 +159,6 @@ final class AVFVideoRenderer: BaseSERenderer {
             try flushDecoder()
         }
         renderersStorage.flush()
-        minimumEnqueuedPresentationTime = position
 
         if joining {
             setJoiningDeadlineMs()
@@ -296,14 +294,7 @@ final class AVFVideoRenderer: BaseSERenderer {
             dropOutputBuffer(outputBuffer); return
         }
 
-//        if outputFormatDescription == nil {
-//            let formatDescription = try! CMFormatDescription(imageBuffer: pixelBuffer)
-//            self.outputFormatDescription = formatDescription
-//        }
-//
-//        guard let outputFormatDescription else { return }
         let outputFormatDescription = try CMFormatDescription(imageBuffer: pixelBuffer)
-
         let sampleBuffer = try CMSampleBuffer(
             imageBuffer: pixelBuffer,
             formatDescription: outputFormatDescription,
@@ -379,14 +370,12 @@ final class AVFVideoRenderer: BaseSERenderer {
             inputBuffer.format = inputFormat
             try decoder.queueInputBuffer(inputBuffer)
 
-            if minimumEnqueuedPresentationTime != .timeUnset {
-                minimumEnqueuedPresentationTime = min(minimumEnqueuedPresentationTime, inputBuffer.timeUs)
-                renderersStorage.setPresentationTimeExpectation(
-                    .minimumUpcoming(.from(microseconds: inputBuffer.timeUs))
-                )
-            } else {
-                minimumEnqueuedPresentationTime = inputBuffer.timeUs
-            }
+            // TODO: Not working properly
+//            if let minimumUpcomingPts = decoder.firstPresentationTimeStamp {
+//                renderersStorage.setPresentationTimeExpectation(
+//                    .minimumUpcoming(minimumUpcomingPts)
+//                )
+//            }
 
             buffersInCodecCount += 1
             decoderReceivedBuffers = true

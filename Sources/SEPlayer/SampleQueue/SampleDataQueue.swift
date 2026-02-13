@@ -154,8 +154,9 @@ final class SampleDataQueue {
             if allowEndOfInput {
                 return .endOfInput
             }
+            throw ErrorBuilder(errorDescription: "end of file")
             // TODO: throw error
-            fatalError()
+//            fatalError()
         }
     }
 

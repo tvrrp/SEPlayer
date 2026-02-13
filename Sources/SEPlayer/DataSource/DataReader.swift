@@ -28,5 +28,6 @@ public enum DataReaderReadResult {
 public enum DataReaderError: Error {
     case endOfInput
     case connectionNotOpened
-    case wrongURLResponce
+    case wrongURLResponse
+    case wrongResponseStatusCode
 }

@@ -15,6 +15,7 @@ public protocol MediaSource: AnyObject {
     func canUpdateMediaItem(new item: MediaItem) -> Bool
     func updateMediaItem(new item: MediaItem) throws
     func prepareSource(delegate: MediaSourceDelegate, mediaTransferListener: TransferListener?, playerId: UUID) throws
+    func maybeThrowSourceInfoRefreshError() throws
     func enable(delegate: MediaSourceDelegate)
     func createPeriod(
         id: MediaPeriodId,
@@ -104,6 +105,8 @@ class BaseMediaSource: MediaSource {
             try delegate.mediaSource(self, sourceInfo: _timeline)
         }
     }
+
+    func maybeThrowSourceInfoRefreshError() throws {}
 
     final func enable(delegate: MediaSourceDelegate) {
         assert(queue.isCurrent())

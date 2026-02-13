@@ -115,6 +115,8 @@ class SampleQueue {
         discardToEnd()
     }
 
+    func maybeThrowError() throws {}
+
     final func getFirstIndex() -> Int {
         return absoluteFirstIndex
     }

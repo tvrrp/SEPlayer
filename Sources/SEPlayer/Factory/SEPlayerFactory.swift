@@ -55,7 +55,7 @@ public final class SEPlayerFactory {
         let extractorsFactory = extractorsFactory ?? DefaultExtractorFactory(queue: loaderQueue)
         let mediaSourceFactory = mediaSourceFactory ?? DefaultMediaSourceFactory(
             workQueue: workQueue,
-            loaderSyncActor: playerLoaderActor,
+            loaderQueue: loaderQueue,
             dataSourceFactory: dataSourceFactory,
             extractorsFactory: extractorsFactory
         )

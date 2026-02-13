@@ -5,19 +5,24 @@
 //  Created by Damir Yackupov on 18.01.2026.
 //
 
-import Foundation
+import CoreMedia
 
 class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E: Error>: Decoder {
     typealias InputBuffer = I
     typealias OutputBuffer = O
     typealias DecoderError = E
 
+    var firstPresentationTimeStamp: CMTime? {
+        let time = queuedOutputBuffers.firstPresentationTimeStamp
+        return time.isValid ? time : nil
+    }
+
     private let decodeQueue: Queue
     private let decodeActor: PlayerActor
-    private let lock: NSRecursiveLock
+    private let lock: UnfairLock
 
     private var queuedInputBuffers: [I]
-    private var queuedOutputBuffers: [O]
+    private var queuedOutputBuffers: TypedCMBufferQueue<O>
 
     private var availableInputBuffers: [I]
     private var availableOutputBuffers: [O]
@@ -39,13 +44,20 @@ class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E: Erro
         decodeQueue: Queue,
         inputBuffersCount: Int,
         outputBuffersCount: Int
-    ) {
+    ) throws {
         self.decodeQueue = decodeQueue
         self.decodeActor = decodeQueue.playerActor()
-        lock = NSRecursiveLock()
+        lock = UnfairLock()
         outputStartTimeUs = .timeUnset
         queuedInputBuffers = []
-        queuedOutputBuffers = []
+        queuedOutputBuffers = try .init(
+            capacity: outputBuffersCount,
+            compareHandler: { lhs, rhs in
+                guard lhs.timeUs != rhs.timeUs else { return .compareEqualTo }
+                return lhs.timeUs > rhs.timeUs ? .compareGreaterThan : .compareLessThan
+            },
+            ptsHandler: { .from(microseconds: $0.timeUs) }
+        )
 
         availableInputBuffers = []
         availableInputBufferCount = inputBuffersCount
@@ -103,8 +115,7 @@ class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E: Erro
     func dequeueOutputBuffer() throws(E) -> O? {
         try lock.usingLock { () throws(E) in
             try maybeThrowError()
-            guard !queuedOutputBuffers.isEmpty else { return nil }
-            return queuedOutputBuffers.removeFirst()
+            return queuedOutputBuffers.dequeue()
         }
     }
 
@@ -126,9 +137,10 @@ class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E: Erro
 
             queuedInputBuffers.forEach { releaseInputBufferInternal($0) }
             queuedInputBuffers.removeAll(keepingCapacity: true)
+        }
 
-            queuedOutputBuffers.forEach { $0.release() }
-            queuedOutputBuffers.removeAll(keepingCapacity: true)
+        while let buffer = queuedOutputBuffers.dequeue() {
+            buffer.release()
         }
     }
 
@@ -158,29 +170,29 @@ class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E: Erro
     }
 
     private func decode(isolated: isolated PlayerActor = #isolation) async -> Bool {
-        var inputBuffer: I
-        var outputBuffer: O
+        var inputBuffer: I?
+        var outputBuffer: O?
         var resetDecoder = false
 
-        lock.lock()
-        while !released, !canDecodeBuffer() {
+        while lock.withLock({ !released && !canDecodeBuffer() }) {
             await withCheckedContinuation { continuation in
-                decodeContinuation = continuation
-                lock.unlock()
+                lock.withLock { decodeContinuation = continuation }
             }
-            lock.lock()
         }
 
-        if released {
+        if lock.withLock({ released }) {
             return false
         }
 
-        inputBuffer = queuedInputBuffers.removeFirst()
-        availableOutputBufferCount -= 1
-        outputBuffer = availableOutputBuffers[availableOutputBufferCount]
-        resetDecoder = flushed
-        flushed = false
-        lock.unlock()
+        lock.withLock {
+            inputBuffer = queuedInputBuffers.removeFirst()
+            availableOutputBufferCount -= 1
+            outputBuffer = availableOutputBuffers[availableOutputBufferCount]
+            resetDecoder = flushed
+            flushed = false
+        }
+
+        guard let inputBuffer, let outputBuffer else { return false }
 
         if inputBuffer.flags.contains(.endOfStream) {
             outputBuffer.sampleFlags.insert(.endOfStream)
@@ -206,19 +218,24 @@ class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E: Erro
             }
         }
 
-        lock.withLock {
-            if resetDecoder {
-                outputBuffer.release()
-            } else if outputBuffer.shouldBeSkipped {
-                skippedOutputBufferCount += 1
-                outputBuffer.release()
-            } else {
-                outputBuffer.skippedOutputBufferCount = skippedOutputBufferCount
-                skippedOutputBufferCount = 0
-                queuedOutputBuffers.append(outputBuffer)
+        if resetDecoder {
+            outputBuffer.release()
+        } else if outputBuffer.shouldBeSkipped {
+            lock.withLock { skippedOutputBufferCount += 1 }
+            outputBuffer.release()
+        } else {
+            outputBuffer.skippedOutputBufferCount = skippedOutputBufferCount
+            lock.withLock { skippedOutputBufferCount = 0 }
+
+            do {
+                try queuedOutputBuffers.enqueue(outputBuffer)
+            } catch {
+                lock.withLock { decodeError = createDecodeError(error) }
+                return false
             }
-            releaseInputBufferInternal(inputBuffer)
         }
+
+        lock.withLock { releaseInputBufferInternal(inputBuffer) }
 
         return true
     }

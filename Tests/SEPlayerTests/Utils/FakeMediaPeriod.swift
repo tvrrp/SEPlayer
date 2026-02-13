@@ -10,6 +10,10 @@ import Testing
 @testable import SEPlayer
 
 final class FakeMediaPeriod: MediaPeriod {
+    func maybeThrowPrepareError() throws {
+        // TODO: 
+    }
+    
     var trackGroups: [TrackGroup]
     let isLoading: Bool = false
 

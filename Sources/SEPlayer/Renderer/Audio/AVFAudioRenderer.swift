@@ -68,6 +68,10 @@ final class AVFAudioRenderer: BaseSERenderer {
         renderSynchronizer.addRenderer(audioRenderer)
     }
 
+    deinit {
+        renderSynchronizer.removeRenderer(audioRenderer, at: .zero)
+    }
+
     override func getTimebase() -> TimebaseSource? {
         .renderSynchronizer(renderSynchronizer)
     }
@@ -104,7 +108,7 @@ final class AVFAudioRenderer: BaseSERenderer {
 
         try maybeInitDecoder()
 
-        guard let decoder else { return }
+        guard decoder != nil else { return }
 
         do {
             while try drainOutputBuffer() {}
@@ -419,7 +423,7 @@ final class AVFAudioRenderer: BaseSERenderer {
         waitingForEndOfStream = true
 
         timeObserver = renderSynchronizer.addBoundaryTimeObserver(
-            forTimes: [NSValue(time: CMTime.from(microseconds: lastBufferInStreamPresentationTimeUs + diffTest))],
+            forTimes: [NSValue(time: CMTime.from(microseconds: lastBufferInStreamPresentationTimeUs))],
             queue: queue.queue
         ) { [weak self] in
             guard let self else { return }

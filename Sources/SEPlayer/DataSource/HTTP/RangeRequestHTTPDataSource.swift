@@ -94,7 +94,7 @@ final class RangeRequestHTTPDataSource: DataSource {
         )
         self.requestHandler = requestHandler
         let result = try await requestHandler.open(dataSpec: dataSpec, isolation: isolation)
-        guard let urlResponse else { throw DataReaderError.wrongURLResponce }
+        guard let urlResponse else { throw DataReaderError.wrongURLResponse }
         bytesRemaining = contentLength(from: urlResponse) - dataSpec.offset
         return result
     }

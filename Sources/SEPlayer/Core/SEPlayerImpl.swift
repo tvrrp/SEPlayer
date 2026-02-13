@@ -1238,13 +1238,17 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
         currentWindowIndexInternal: Int?,
         contentPositionMs: Int64
     ) -> (id: AnyHashable, periodPositionUs: Int64)? {
-        guard !oldTimeline.isEmpty || !newTimeline.isEmpty, let currentWindowIndexInternal else {
+        if oldTimeline.isEmpty || newTimeline.isEmpty {
             let isCleared = !oldTimeline.isEmpty && newTimeline.isEmpty
             return maskWindowPositionMsOrGetPeriodPositionUs(
                 timeline: newTimeline,
                 windowIndex: isCleared ? nil : currentWindowIndexInternal,
                 windowPositionMs: isCleared ? .timeUnset : contentPositionMs
             )
+        }
+
+        guard let currentWindowIndexInternal else {
+            return nil
         }
 
         guard let (oldPeriodId, oldPeriodPositionUs) = oldTimeline.periodPositionUs(

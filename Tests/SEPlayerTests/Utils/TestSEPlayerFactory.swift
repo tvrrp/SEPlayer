@@ -140,7 +140,7 @@ final class TestSEPlayerFactory {
             bandwidthMeter: bandwidthMeter,
             mediaSourceFactory: mediaSourceFactory ?? DefaultMediaSourceFactory(
                 workQueue: queue,
-                loaderSyncActor: loaderSyncActor,
+                loaderQueue: loaderQueue,
                 dataSourceFactory: DefaultDataSourceFactory(
                     syncActor: loaderSyncActor,
                     networkLoader: MockPlayerSessionLoader()
@@ -173,7 +173,7 @@ private struct MockPlayerSessionLoader: IPlayerSessionLoader {
         URLSession.shared.dataTask(with: request)
     }
 
-    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, Error> {
-        return AsyncThrowingStream<PlayerSessionLoaderEvent, Error> { $0.finish() }
-    }
+//    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, Error> {
+//        return AsyncThrowingStream<PlayerSessionLoaderEvent, Error> { $0.finish() }
+//    }
 }

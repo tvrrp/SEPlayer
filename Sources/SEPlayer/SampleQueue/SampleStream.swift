@@ -7,6 +7,7 @@
 
 public protocol SampleStream: AnyObject {
     func isReady() -> Bool
+    func maybeThrowError() throws
     func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult
     func skipData(position: Int64) -> Int
 }

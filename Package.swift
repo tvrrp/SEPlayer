@@ -10,9 +10,7 @@ let package = Package(
         .library(name: "Common", targets: ["Common"]),
         .library(name: "SEPlayer", targets: ["SEPlayer"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/apple/swift-collections.git", exact: "1.3.0"),
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "Common",

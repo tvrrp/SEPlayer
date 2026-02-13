@@ -7,7 +7,7 @@
 
 import AVFoundation
 
-public enum TimebaseSource: Equatable {
+@frozen public enum TimebaseSource: Equatable {
     case cmTimebase(CMTimebase)
     case renderSynchronizer(AVSampleBufferRenderSynchronizer)
 

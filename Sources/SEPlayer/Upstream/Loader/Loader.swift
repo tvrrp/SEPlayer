@@ -5,65 +5,132 @@
 //  Created by Damir Yackupov on 12.05.2025.
 //
 
-import Foundation
+import CoreMedia
 
-protocol Loadable {
+public protocol Loadable {
     func load(isolation: isolated any Actor) async throws
 }
 
-final class Loader {
-    private let syncActor: PlayerActor
-    @UnfairLocked private var currentTask: Task<Void, Error>?
-    private var releaseCompletion: (() -> Void)?
+public final class Loader {
+    private let workQueue: Queue
+    private let loadQueue: Queue
+    private let clock: CMClock
+    private var currentTask: AnyLoadTask?
+    private var fatalError: Error?
 
-    init(syncActor: PlayerActor) {
-        self.syncActor = syncActor
+    public init(
+        workQueue: Queue,
+        loadQueue: Queue,
+        clock: CMClock = CMClockGetHostTimeClock()
+    ) {
+        self.workQueue = workQueue
+        self.loadQueue = loadQueue
+        self.clock = clock
     }
 
-    func startLoading<T: Loadable>(loadable: T, callback: any Callback<T>, defaultMinRetryCount: Int) {
-        let currentTask = Task<Void, Error> {
-            try await loadable.load(isolation: syncActor)
-        }
-        self.currentTask = currentTask
-
-        Task {
-            await syncActor.run { _ in
-                do {
-                    try await currentTask.value
-                    callback.onLoadCompleted(loadable: loadable, onTime: .zero, loadDurationMs: .zero)
-                } catch is CancellationError {
-                    callback.onLoadCancelled(loadable: loadable, onTime: .zero, loadDurationMs: .zero, released: false)
-                } catch {
-                    callback.onLoadError(loadable: loadable, onTime: .zero, loadDurationMs: .zero, error: error, errorCount: 1)
-                }
-
-                self.currentTask = nil
-                releaseCompletion?()
-                releaseCompletion = nil
-            }
-        }
+    public func hasFatalError() -> Bool {
+        fatalError != nil
     }
 
-    func isLoading() -> Bool {
+    public func clearFatalError() {
+        fatalError = nil
+    }
+
+    @discardableResult
+    public func startLoading<T: Loadable>(
+        loadable: T,
+        callback: any Callback<T>,
+        defaultMinRetryCount: Int
+    ) -> Int64 {
+        assert(currentTask == nil)
+        fatalError = nil
+        let startTimeMs = clock.milliseconds
+        let loadTask = LoadTask(
+            workQueue: workQueue,
+            loadQueue: loadQueue,
+            clock: clock,
+            loadable: loadable,
+            loadCallback: callback,
+            defaultMinRetryCount: defaultMinRetryCount,
+            startTimeMs: startTimeMs
+        )
+        loadTask.loadDelegate = self
+        loadTask.start(delayMillis: 0)
+        return startTimeMs
+    }
+
+    public func isLoading() -> Bool {
         currentTask != nil
     }
 
-    func cancelLoading() {
-        currentTask?.cancel()
+    public func cancelLoading() {
+        currentTask?.cancel(released: false)
     }
 
-    func release(completion: (() -> Void)? = nil) {
-        currentTask?.cancel()
-        releaseCompletion = completion
+    public func release(completion: (() -> Void)? = nil) {
+        currentTask?.cancel(released: true)
+        loadQueue.async {
+            self.workQueue.sync { completion?() }
+        }
+    }
+
+    public func maybeThrowError(minRetryCount: Int? = nil) throws {
+        if let fatalError {
+            throw fatalError
+        } else if let currentTask {
+            try currentTask.maybeThrowError(
+                minRetryCount: minRetryCount ?? currentTask.defaultMinRetryCount
+            )
+        }
     }
 }
 
-extension Loader {
+public extension Loader {
     struct LoadErrorAction {
         let type: RetryAction
         let retryDelayMillis: Int64
 
         var isRetry: Bool { type == .retry || type == .retryResetErrorCount }
+
+        static var retry: LoadErrorAction {
+            LoadErrorAction.createRetryAction(
+                resetErrorCount: false,
+                retryDelayMillis: .timeUnset
+            )
+        }
+
+        static var retryResetErrorCount: LoadErrorAction {
+            LoadErrorAction.createRetryAction(
+                resetErrorCount: true,
+                retryDelayMillis: .timeUnset
+            )
+        }
+
+        static var dontRetry: LoadErrorAction {
+            LoadErrorAction(
+                type: .dontRetry,
+                retryDelayMillis: .timeUnset
+            )
+        }
+
+        static var dontRetryFatal: LoadErrorAction {
+            LoadErrorAction(
+                type: .dontRetryFatal,
+                retryDelayMillis: .timeUnset
+            )
+        }
+
+        public init(type: RetryAction, retryDelayMillis: Int64) {
+            self.type = type
+            self.retryDelayMillis = retryDelayMillis
+        }
+
+        public static func createRetryAction(resetErrorCount: Bool, retryDelayMillis: Int64) -> LoadErrorAction {
+            LoadErrorAction(
+                type: resetErrorCount ? .retryResetErrorCount : .retry,
+                retryDelayMillis: retryDelayMillis
+            )
+        }
     }
 
     enum RetryAction {
@@ -74,14 +141,256 @@ extension Loader {
     }
 }
 
-extension Loader {
+public extension Loader {
     protocol Callback<T>: AnyObject where T: Loadable {
         associatedtype T
 
         func onLoadStarted(loadable: T, onTime: Int64, loadDurationMs: Int64, retryCount: Int)
         func onLoadCompleted(loadable: T, onTime: Int64, loadDurationMs: Int64)
         func onLoadCancelled(loadable: T, onTime: Int64, loadDurationMs: Int64, released: Bool)
-        @discardableResult
         func onLoadError(loadable: T, onTime: Int64, loadDurationMs: Int64, error: Error, errorCount: Int) -> Loader.LoadErrorAction
+    }
+
+    enum RetryType {
+        case retry
+        case retryAndResetErrorCount
+        case dontRetry
+        case dontRetryFatal
+    }
+
+    struct LoaderErrorAction {
+        let type: RetryType
+        let retryDelayMillis: Int64
+
+        var isRetry: Bool {
+            type == .retry || type == .retryAndResetErrorCount
+        }
+    }
+}
+
+extension Loader: LoadDelegate {
+    fileprivate func didStartTask(_ task: any AnyLoadTask) {
+        currentTask = task
+    }
+
+    func loadFinished() {
+        currentTask = nil
+    }
+
+    func loadFatalError(error: any Error) {
+        fatalError = error
+    }
+}
+
+private protocol AnyLoadTask {
+    var defaultMinRetryCount: Int { get }
+    func cancel(released: Bool)
+    func maybeThrowError(minRetryCount: Int) throws
+}
+
+private protocol LoadDelegate: AnyObject {
+    func didStartTask(_ task: AnyLoadTask)
+    func loadFinished()
+    func loadFatalError(error: Error)
+}
+
+private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
+    weak var loadDelegate: LoadDelegate?
+    let defaultMinRetryCount: Int
+
+    private let clock: CMClock
+    private let lock: UnfairLock
+    private let syncActor: PlayerActor
+    private let loadable: T
+    private let startTimeMs: Int64
+    private weak var loadCallback: (any Loader.Callback<T>)?
+
+    private var currentTask: Task<Void, Never>?
+    private var currentError: Error?
+    private var errorCount = Int.zero
+    private var canceled = false
+    private var released = false
+
+    init(
+        workQueue: Queue,
+        loadQueue: Queue,
+        clock: CMClock,
+        loadable: T,
+        loadCallback: any Loader.Callback<T>,
+        defaultMinRetryCount: Int,
+        startTimeMs: Int64
+    ) {
+        self.syncActor = loadQueue.playerActor()
+        self.clock = clock
+        self.loadable = loadable
+        self.loadCallback = loadCallback
+        self.defaultMinRetryCount = defaultMinRetryCount
+        self.startTimeMs = startTimeMs
+        lock = UnfairLock()
+
+        super.init(queue: workQueue, looper: Looper.myLooper(for: workQueue))
+    }
+
+    func maybeThrowError(minRetryCount: Int) throws {
+        if let currentError, errorCount > minRetryCount {
+            throw currentError
+        }
+    }
+
+    func start(delayMillis: Int64) {
+        loadDelegate?.didStartTask(self)
+        if delayMillis > 0 {
+            sendEmptyMessageDelayed(LoadMessageKind.start, delayMs: Int(delayMillis))
+        } else {
+            execute()
+        }
+    }
+
+    func cancel(released: Bool) {
+        lock.withLock { self.released = released }
+        currentError = nil
+        if hasMessage(LoadMessageKind.start) {
+            canceled = true
+            removeMessages(LoadMessageKind.start)
+            if !released {
+                sendEmptyMessage(LoadMessageKind.finish)
+            }
+        } else {
+            lock.withLock { canceled = true }
+            currentTask?.cancel()
+        }
+
+        if released {
+            loadDelegate?.loadFinished()
+            let nowMs = clock.milliseconds
+            loadCallback?.onLoadCancelled(
+                loadable: loadable,
+                onTime: nowMs,
+                loadDurationMs: nowMs - startTimeMs,
+                released: true
+            )
+        }
+    }
+
+    func run(isolation: isolated PlayerActor) async {
+        do {
+            if lock.withLock({ canceled == false }) {
+                try await loadable.load(isolation: isolation)
+            }
+        } catch {
+            if !Task.isCancelled {
+                if lock.withLock({ released == false }) {
+                    Message.sendToTarget(obtainMessage(what: LoadMessageKind.ioError(error)))
+                }
+
+                return
+            }
+        }
+
+        if lock.withLock({ self.released == false }) {
+            sendEmptyMessage(LoadMessageKind.finish)
+        }
+    }
+
+    override func handleMessage(msg: UnsafeMutablePointer<Message>) {
+        guard lock.withLock({ !released }), let what = msg.pointee.what as? LoadMessageKind else { return }
+
+        if what == .start {
+            execute(); return
+        }
+
+        loadDelegate?.loadFinished()
+        let nowMs = clock.milliseconds
+        let durationMs = nowMs - startTimeMs
+        if lock.withLock({ canceled }) {
+            loadCallback?.onLoadCancelled(
+                loadable: loadable,
+                onTime: nowMs,
+                loadDurationMs: durationMs,
+                released: false
+            )
+            return
+        }
+
+        if what == .finish {
+            loadCallback?.onLoadCompleted(
+                loadable: loadable,
+                onTime: nowMs,
+                loadDurationMs: durationMs
+            )
+        } else if case let .ioError(error) = what {
+            currentError = error
+            errorCount += 1
+            let action = loadCallback?.onLoadError(
+                loadable: loadable,
+                onTime: nowMs,
+                loadDurationMs: durationMs,
+                error: error,
+                errorCount: errorCount
+            )
+
+            if action?.type == .dontRetryFatal {
+                loadDelegate?.loadFatalError(error: error)
+            } else if action?.type != .dontRetry {
+                if action?.type == .retryResetErrorCount {
+                    errorCount = 1
+                }
+
+                let retryDelayMs = if let retryDelayMillis = action?.retryDelayMillis,
+                                      retryDelayMillis != .timeUnset {
+                    retryDelayMillis
+                } else {
+                    Int64(min((errorCount - 1) * 1000, 5000))
+                }
+
+                start(delayMillis: retryDelayMs)
+            }
+        }
+    }
+
+    private func execute() {
+        let nowMs = clock.milliseconds
+        let durationMs = nowMs - startTimeMs
+        loadCallback?.onLoadStarted(
+            loadable: loadable,
+            onTime: nowMs,
+            loadDurationMs: durationMs,
+            retryCount: errorCount
+        )
+        currentError = nil
+
+        let currentTask = Task<Void, Never> {
+            await run(isolation: syncActor)
+        }
+        self.currentTask = currentTask
+
+        Task { await currentTask.value }
+    }
+}
+
+private extension LoadTask {
+    enum LoadMessageKind: MessageKind, Equatable {
+        case start
+        case finish
+        case ioError(Error)
+
+        func isEqual(to other: any MessageKind) -> Bool {
+            guard let other = other as? LoadMessageKind else {
+                return false
+            }
+
+            return self == other
+        }
+
+        static func == (lhs: LoadMessageKind, rhs: LoadMessageKind) -> Bool {
+            switch (lhs, rhs) {
+            case (.start, .start),
+                 (.finish, .finish),
+                 (.ioError, .ioError):
+                return true
+            default:
+                return false
+            }
+        }
     }
 }

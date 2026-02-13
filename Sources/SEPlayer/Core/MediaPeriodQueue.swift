@@ -11,11 +11,7 @@ final class MediaPeriodQueue {
     var playing: MediaPeriodHolder?
     var reading: MediaPeriodHolder?
     var prewarming: MediaPeriodHolder?
-    var loading: MediaPeriodHolder? {
-        didSet {
-            print()
-        }
-    }
+    var loading: MediaPeriodHolder?
     var preloading: MediaPeriodHolder?
 
     private var period: Period

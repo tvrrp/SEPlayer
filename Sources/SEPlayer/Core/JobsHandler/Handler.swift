@@ -29,12 +29,20 @@ public class Handler {
         self.messageQueue = self.looper.messageQueue
     }
 
+    public func handleMessage(msg: UnsafeMutablePointer<Message>) {}
+
     public func dispatchMessage(msg: UnsafeMutablePointer<Message>) {
         assert(queue.isCurrent())
         if let callback = msg.pointee.callback {
             callback()
         } else {
-            _ = callback?.handleMessage(msg: msg)
+            if let callback {
+                if callback.handleMessage(msg: msg) {
+                    return
+                }
+            }
+
+            handleMessage(msg: msg)
         }
     }
 
@@ -114,9 +122,9 @@ public class Handler {
         return message
     }
 
-//    public func hasMessage(_ what: MessageKind) {
-//        messageQueue.
-//    }
+    public func hasMessage(_ what: MessageKind) -> Bool {
+        messageQueue.hasMessages(handler: self, what: what)
+    }
 }
 
 struct PostMessageKind: MessageKind {

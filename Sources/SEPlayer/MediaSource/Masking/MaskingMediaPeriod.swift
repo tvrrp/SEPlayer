@@ -17,12 +17,13 @@ final class MaskingMediaPeriod: MediaPeriod {
     weak var listener: PrepareListener?
     let id: MediaPeriodId
     var preparePositionOverrideUs: Int64
-    
+
     let preparePositionUs: Int64
     private let allocator: Allocator
     private weak var mediaSource: MediaSource?
     private var mediaPeriod: MediaPeriod?
 
+    private var notifiedPrepareError = false
     private var callback: (any MediaPeriodCallback)?
 
     init(id: MediaPeriodId, allocator: Allocator, preparePositionUs: Int64) {
@@ -57,6 +58,25 @@ final class MaskingMediaPeriod: MediaPeriod {
             callback: self,
             on: preparePositionWithOverride(preparePositionUs: preparePositionUs)
         )
+    }
+
+    func maybeThrowPrepareError() throws {
+        do {
+            if let mediaPeriod {
+                try mediaPeriod.maybeThrowPrepareError()
+            } else if let mediaSource {
+                try mediaSource.maybeThrowSourceInfoRefreshError()
+            }
+        } catch {
+            guard let listener else {
+                throw error
+            }
+
+            if !notifiedPrepareError {
+                notifiedPrepareError = true
+                listener.prepareError(mediaPeriodId: id, error: error)
+            }
+        }
     }
 
     func selectTrack(
