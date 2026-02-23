@@ -6,7 +6,7 @@
 //
 
 public protocol MediaPeriod: SequenceableLoader, AnyObject {
-    var trackGroups: [TrackGroup] { get }
+    var trackGroups: TrackGroupArray { get }
 
     func prepare(callback: any MediaPeriodCallback, on time: Int64)
     func maybeThrowPrepareError() throws

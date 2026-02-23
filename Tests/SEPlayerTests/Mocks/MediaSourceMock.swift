@@ -73,7 +73,7 @@ class MediaPeriodMock: MediaPeriod {
         // TODO: 
     }
     
-    let trackGroups = [TrackGroup]()
+    let trackGroups = TrackGroupArray.empty
     let isLoading: Bool = false
 
     func prepare(callback: any MediaPeriodCallback, on time: Int64) {}

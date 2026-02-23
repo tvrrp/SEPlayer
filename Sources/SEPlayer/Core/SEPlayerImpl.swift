@@ -103,7 +103,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
     private let queue: Queue
     private let workQueue: Queue
     private let mediaSourceFactory: MediaSourceFactory
-    private let emptyTrackSelectorResult: TrackSelectionResult
+    private let emptyTrackSelectorResult: TrackSelectorResult
     private let renderers: [SERenderer]
     private let internalPlayer: SEPlayerImplInternal
     private let useLazyPreparation: Bool
@@ -160,8 +160,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
             clock: clock,
             renderSynchronizer: renderSynchronizer
         )
-        emptyTrackSelectorResult = TrackSelectionResult(
-            renderersConfig: Array(repeating: nil, count: renderers.count),
+        emptyTrackSelectorResult = TrackSelectorResult(
+            rendererConfigurations: Array(repeating: nil, count: renderers.count),
             selections: Array(repeating: nil, count: renderers.count),
             tracks: Tracks(groups: [])
         )
@@ -1134,7 +1134,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
                 requestedContentPositionUs: positionUs,
                 discontinuityStartPositionUs: positionUs,
                 totalBufferedDurationUs: 0,
-                trackGroups: [],
+                trackGroups: .empty,
                 trackSelectorResult: emptyTrackSelectorResult
             )
             playbackInfo = playbackInfo.loadingMediaPeriodId(dummyMediaPeriodId)
@@ -1169,7 +1169,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer {
                 requestedContentPositionUs: newContentPositionUs,
                 discontinuityStartPositionUs: newContentPositionUs,
                 totalBufferedDurationUs: 0,
-                trackGroups: playingPeriodChanged ? [] : playbackInfo.trackGroups,
+                trackGroups: playingPeriodChanged ? .empty : playbackInfo.trackGroups,
                 trackSelectorResult: playingPeriodChanged ? emptyTrackSelectorResult : playbackInfo.trackSelectorResult
             )
             playbackInfo = playbackInfo.loadingMediaPeriodId(newPeriodId)

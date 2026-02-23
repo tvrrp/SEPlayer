@@ -10,7 +10,7 @@ import Testing
 @testable import SEPlayer
 
 final class FakeClock: SEClock {
-    let timebase: TimebaseSource? = nil
+    let clock: CMClock = CMClockGetHostTimeClock()
 
     var milliseconds: Int64 {
         lock.withLock { bootTimeMs + timeSinceBootMs }
@@ -171,9 +171,6 @@ final class FakeClock: SEClock {
             return messageIdProvider
         }
     }
-
-    func setRate(_ rate: Double) throws {}
-    func setTime(_ time: CMTime) throws {}
 }
 
 private final class ClockMessage: HandlerWrapperMessage, Hashable, Comparable {
@@ -255,21 +252,21 @@ private final class ClockHandler: HandlerWrapper {
         self.uptimeMsGetter = uptimeMsGetter
     }
 
-    func obtainMessage(what: MessageKind) -> UnsafeMutablePointer<HandlerWrapperMessage> {
-        let pointer = UnsafeMutablePointer<HandlerWrapperMessage>.allocate(capacity: 1)
-        pointer.initialize(
-            to:ClockMessage(
-                timeMs: uptimeMsGetter(),
-                handler: self,
-                what: what,
-                pendingHandlerMessageClosure: pendingHandlerMessageClosure
-            )
-        )
-        return pointer
+    func hasMessage(_ what: MessageKind) -> Bool {
+        return false // TODO: fixme
     }
 
-    func sendMessageAtFrontOfQueue(_ msg: UnsafeMutablePointer<HandlerWrapperMessage>) -> Bool {
-        guard let message = msg.pointee as? ClockMessage else {
+    func obtainMessage(what: MessageKind) -> HandlerWrapperMessage {
+        ClockMessage(
+            timeMs: uptimeMsGetter(),
+            handler: self,
+            what: what,
+            pendingHandlerMessageClosure: pendingHandlerMessageClosure
+        )
+    }
+
+    func sendMessageAtFrontOfQueue(_ msg: HandlerWrapperMessage) -> Bool {
+        guard let message = msg as? ClockMessage else {
             return false
         }
 

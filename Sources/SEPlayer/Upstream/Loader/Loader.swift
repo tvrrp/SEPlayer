@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 12.05.2025.
 //
 
-import CoreMedia
+import Dispatch
 
 public protocol Loadable {
     func load(isolation: isolated any Actor) async throws
@@ -14,18 +14,12 @@ public protocol Loadable {
 public final class Loader {
     private let workQueue: Queue
     private let loadQueue: Queue
-    private let clock: CMClock
     private var currentTask: AnyLoadTask?
     private var fatalError: Error?
 
-    public init(
-        workQueue: Queue,
-        loadQueue: Queue,
-        clock: CMClock = CMClockGetHostTimeClock()
-    ) {
+    public init(workQueue: Queue, loadQueue: Queue) {
         self.workQueue = workQueue
         self.loadQueue = loadQueue
-        self.clock = clock
     }
 
     public func hasFatalError() -> Bool {
@@ -44,11 +38,10 @@ public final class Loader {
     ) -> Int64 {
         assert(currentTask == nil)
         fatalError = nil
-        let startTimeMs = clock.milliseconds
+        let startTimeMs = DispatchTime.now()
         let loadTask = LoadTask(
             workQueue: workQueue,
             loadQueue: loadQueue,
-            clock: clock,
             loadable: loadable,
             loadCallback: callback,
             defaultMinRetryCount: defaultMinRetryCount,
@@ -56,7 +49,7 @@ public final class Loader {
         )
         loadTask.loadDelegate = self
         loadTask.start(delayMillis: 0)
-        return startTimeMs
+        return startTimeMs.milliseconds
     }
 
     public func isLoading() -> Bool {
@@ -198,11 +191,10 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
     weak var loadDelegate: LoadDelegate?
     let defaultMinRetryCount: Int
 
-    private let clock: CMClock
     private let lock: UnfairLock
     private let syncActor: PlayerActor
     private let loadable: T
-    private let startTimeMs: Int64
+    private let startTimeMs: DispatchTime
     private weak var loadCallback: (any Loader.Callback<T>)?
 
     private var currentTask: Task<Void, Never>?
@@ -214,14 +206,12 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
     init(
         workQueue: Queue,
         loadQueue: Queue,
-        clock: CMClock,
         loadable: T,
         loadCallback: any Loader.Callback<T>,
         defaultMinRetryCount: Int,
-        startTimeMs: Int64
+        startTimeMs: DispatchTime
     ) {
         self.syncActor = loadQueue.playerActor()
-        self.clock = clock
         self.loadable = loadable
         self.loadCallback = loadCallback
         self.defaultMinRetryCount = defaultMinRetryCount
@@ -262,11 +252,11 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
 
         if released {
             loadDelegate?.loadFinished()
-            let nowMs = clock.milliseconds
+            let nowMs = DispatchTime.now()
             loadCallback?.onLoadCancelled(
                 loadable: loadable,
-                onTime: nowMs,
-                loadDurationMs: nowMs - startTimeMs,
+                onTime: nowMs.milliseconds,
+                loadDurationMs: startTimeMs.advanced(by: .nanoseconds(Int(nowMs.uptimeNanoseconds))).milliseconds,
                 released: true
             )
         }
@@ -280,7 +270,7 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         } catch {
             if !Task.isCancelled {
                 if lock.withLock({ released == false }) {
-                    Message.sendToTarget(obtainMessage(what: LoadMessageKind.ioError(error)))
+                    obtainMessage(what: LoadMessageKind.ioError(error)).sendToTarget()
                 }
 
                 return
@@ -292,20 +282,20 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         }
     }
 
-    override func handleMessage(msg: UnsafeMutablePointer<Message>) {
-        guard lock.withLock({ !released }), let what = msg.pointee.what as? LoadMessageKind else { return }
+    override func handleMessage(_ msg: Message) {
+        guard lock.withLock({ !released }), let what = msg.what as? LoadMessageKind else { return }
 
         if what == .start {
             execute(); return
         }
 
         loadDelegate?.loadFinished()
-        let nowMs = clock.milliseconds
-        let durationMs = nowMs - startTimeMs
+        let nowMs = DispatchTime.now()
+        let durationMs = startTimeMs.advanced(by: .nanoseconds(Int(nowMs.uptimeNanoseconds))).milliseconds
         if lock.withLock({ canceled }) {
             loadCallback?.onLoadCancelled(
                 loadable: loadable,
-                onTime: nowMs,
+                onTime: nowMs.milliseconds,
                 loadDurationMs: durationMs,
                 released: false
             )
@@ -315,7 +305,7 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         if what == .finish {
             loadCallback?.onLoadCompleted(
                 loadable: loadable,
-                onTime: nowMs,
+                onTime: nowMs.milliseconds,
                 loadDurationMs: durationMs
             )
         } else if case let .ioError(error) = what {
@@ -323,7 +313,7 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
             errorCount += 1
             let action = loadCallback?.onLoadError(
                 loadable: loadable,
-                onTime: nowMs,
+                onTime: nowMs.milliseconds,
                 loadDurationMs: durationMs,
                 error: error,
                 errorCount: errorCount
@@ -349,11 +339,11 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
     }
 
     private func execute() {
-        let nowMs = clock.milliseconds
-        let durationMs = nowMs - startTimeMs
+        let nowMs = DispatchTime.now()
+        let durationMs = startTimeMs.advanced(by: .nanoseconds(Int(nowMs.uptimeNanoseconds))).milliseconds
         loadCallback?.onLoadStarted(
             loadable: loadable,
-            onTime: nowMs,
+            onTime: nowMs.milliseconds,
             loadDurationMs: durationMs,
             retryCount: errorCount
         )

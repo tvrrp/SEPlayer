@@ -17,7 +17,7 @@ public protocol VideoSampleBufferRenderer: VideoSampleBufferRendererPerformance,
     var isReadyForMoreMediaData: Bool { get }
     var hasSufficientMediaDataForReliablePlaybackStart: Bool { get }
 
-    func setControlTimebase(_ timebase: TimebaseSource?)
+    func setControlTimebase(_ timebase: CMTimebase?)
     func enqueue(_ sampleBuffer: CMSampleBuffer)
     func flush()
     func flush(removeImage: Bool)
@@ -146,32 +146,9 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
         }
     }
 
-    func setControlTimebase(_ timebase: TimebaseSource?) {
-        let action = { [weak self] in
-            guard let self else { return }
-
-            switch timebase {
-            case let .cmTimebase(timebase):
-                DispatchQueue.main.async {
-                    self.layer.controlTimebase = timebase
-                }
-            case let .renderSynchronizer(renderSynchronizer):
-                lock.withLock { self.previosRenderSynchronizer = renderSynchronizer }
-                renderSynchronizer.addRenderer(renderer)
-            case nil:
-                DispatchQueue.main.async {
-                    self.layer.controlTimebase = nil
-                }
-            }
-        }
-
-        if let previosRenderSynchronizer = lock.withLock({ previosRenderSynchronizer }) {
-            lock.withLock { self.previosRenderSynchronizer = nil }
-            previosRenderSynchronizer.removeRenderer(renderer, at: .zero) { result in
-                action()
-            }
-        } else {
-            action()
+    func setControlTimebase(_ timebase: CMTimebase?) {
+        Task { @MainActor in
+            layer.controlTimebase = timebase
         }
     }
 
@@ -260,22 +237,9 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
         DispatchQueue.main.async { self.layer.setPresentationTimeExpectation(expectation) }
     }
 
-    func setControlTimebase(_ timebase: TimebaseSource?) {
+    func setControlTimebase(_ timebase: CMTimebase?) {
         Task { @MainActor in
-            if let previosRenderSynchronizer {
-                self.previosRenderSynchronizer = nil
-                _ = await previosRenderSynchronizer.removeRenderer(layer, at: .zero)
-            }
-
-            switch timebase {
-            case let .cmTimebase(timebase):
-                layer.controlTimebase = timebase
-            case let .renderSynchronizer(renderSynchronizer):
-                previosRenderSynchronizer = renderSynchronizer
-                renderSynchronizer.addRenderer(layer)
-            case nil:
-                layer.controlTimebase = nil
-            }
+            layer.controlTimebase = timebase
         }
     }
 

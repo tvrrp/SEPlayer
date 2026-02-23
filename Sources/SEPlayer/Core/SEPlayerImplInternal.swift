@@ -11,7 +11,7 @@ protocol SEPlayerImplInternalDelegate: AnyObject {
     func onPlaybackInfoUpdate(playbackInfoUpdate: SEPlayerImplInternal.PlaybackInfoUpdate)
 }
 
-final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSourceList.Delegate, MediaPeriodCallback, PlayerMessage.Sender {
+final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSourceList.Delegate, MediaPeriodCallback, PlayerMessage.Sender, TrackSelector.InvalidationListener {
     weak var playbackInfoUpdateListener: SEPlayerImplInternalDelegate?
 
     let identifier: UUID
@@ -42,12 +42,13 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     }
 
     let queue: Queue
+    let playerActor: PlayerActor
     private let handler: HandlerWrapper
     private let renderers: [RenderersHolder]
-    private let rendererCapabilities: [RendererCapabilities]
+    private let rendererCapabilities: [RendererCapabilitiesResolver]
     private var rendererReportedReady: [Bool]
     private let trackSelector: TrackSelector
-    private let emptyTrackSelectorResult: TrackSelectionResult
+    private let emptyTrackSelectorResult: TrackSelectorResult
     private let loadControl: LoadControl
     private let bandwidthMeter: BandwidthMeter
     private var window: Window
@@ -94,7 +95,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         queue: Queue,
         renderers: [SERenderer],
         trackSelector: TrackSelector,
-        emptyTrackSelectorResult: TrackSelectionResult,
+        emptyTrackSelectorResult: TrackSelectorResult,
         loadControl: LoadControl,
         bandwidthMeter: BandwidthMeter,
         repeatMode: RepeatMode,
@@ -108,6 +109,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         audioSessionManager: IAudioSessionManager
     ) throws {
         self.queue = queue
+        self.playerActor = queue.playerActor()
         self.handler = clock.createHandler(queue: queue, looper: nil)
         self.identifier = identifier
         self.trackSelector = trackSelector
@@ -133,6 +135,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         playbackInfoUpdate = PlaybackInfoUpdate(playbackInfo: playbackInfo)
         self.renderers = renderers.enumerated().map { RenderersHolder(primaryRenderer: $1, index: $0) }
         rendererCapabilities = renderers.map { $0.getCapabilities() }
+        rendererCapabilities.forEach {
+            $0.listener = trackSelector.getRendererCapabilitiesListener()
+        }
         rendererReportedReady = Array(repeating: false, count: renderers.count)
         hasSecondaryRenderers = false
 
@@ -146,7 +151,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 queue: queue,
                 rendererCapabilities: renderers.map { $0.getCapabilities() },
                 rendererPositionOffsetUs: rendererPositionOffsetUs,
-                trackSelector: DefaultTrackSelector(),
+                trackSelector: trackSelector,
                 allocator: loadControl.getAllocator(),
                 mediaSourceList: mediaSourceList,
                 info: info,
@@ -157,6 +162,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
         mediaSourceList.delegate = self
         handler.callback = self
+        trackSelector.initialize(listener: self, bandwidthMeter: bandwidthMeter)
 //        NotificationCenter.default
 //            .addObserver(self, selector: #selector(didGoBS), name: UIApplication.didEnterBackgroundNotification, object: nil)
 //        NotificationCenter.default
@@ -164,7 +170,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     }
 
     nonisolated func prepare() {
-        handler.obtainMessage(what: SEPlayerMessageImpl.prepare).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.prepare).sendToTarget()
     }
 
     nonisolated func setPlayWhenReady(
@@ -176,41 +182,41 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             playWhenReady,
             playWhenReadyChangeReason,
             playbackSuppressionReason
-        )).pointee.sendToTarget()
+        )).sendToTarget()
     }
 
     nonisolated func setPauseAtEndOfWindow(_ pauseAtEndOfWindow: Bool) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setPauseAtEndOfWindow(pauseAtEndOfWindow)).pointee
+        handler.obtainMessage(what: SEPlayerMessageImpl.setPauseAtEndOfWindow(pauseAtEndOfWindow))
             .sendToTarget()
     }
 
     nonisolated func setRepeatMode(_ repeatMode: RepeatMode) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setRepeatMode(repeatMode)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setRepeatMode(repeatMode)).sendToTarget()
     }
 
     nonisolated func setShuffleModeEnabled(_ shuffleModeEnabled: Bool) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setShuffleEnabled(shuffleModeEnabled)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setShuffleEnabled(shuffleModeEnabled)).sendToTarget()
     }
 
     nonisolated func setPreloadConfiguration(_ preloadConfiguration: PreloadConfiguration) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setPreloadConfiguration(preloadConfiguration)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setPreloadConfiguration(preloadConfiguration)).sendToTarget()
     }
 
     nonisolated func seekTo(timeline: Timeline, windowIndex: Int, positionUs: Int64) {
         handler.obtainMessage(what: SEPlayerMessageImpl.seekTo(
             timeline, windowIndex, positionUs
-        )).pointee.sendToTarget()
+        )).sendToTarget()
     }
 
     nonisolated func setPlaybackParameters(_ playbackParameters: PlaybackParameters) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setPlaybackParameters(playbackParameters)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setPlaybackParameters(playbackParameters)).sendToTarget()
     }
 
     nonisolated func setSeekParameters(_ seekParameters: SeekParameters) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setSeekParameters(seekParameters)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setSeekParameters(seekParameters)).sendToTarget()
     }
 
-    nonisolated func stop() { handler.obtainMessage(what: SEPlayerMessageImpl.stop).pointee.sendToTarget() }
+    nonisolated func stop() { handler.obtainMessage(what: SEPlayerMessageImpl.stop).sendToTarget() }
 
     nonisolated func setMediaSources(
         _ mediaSources: [MediaSourceList.MediaSourceHolder],
@@ -223,7 +229,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             windowIndex,
             positionUs,
             shuffleOrder
-        )).pointee.sendToTarget()
+        )).sendToTarget()
     }
 
     nonisolated func insertMediaSources(
@@ -233,35 +239,35 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     ) {
         handler.obtainMessage(what: SEPlayerMessageImpl.addMediaSources(
             mediaSources, index, shuffleOrder
-        )).pointee.sendToTarget()
+        )).sendToTarget()
     }
 
     nonisolated func removeMediaSources(range: Range<Int>, shuffleOrder: ShuffleOrder) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.removeMediaSources(range, shuffleOrder)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.removeMediaSources(range, shuffleOrder)).sendToTarget()
     }
 
     nonisolated func moveMediaSources(range: Range<Int>, to newIndex: Int, shuffleOrder: ShuffleOrder) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.moveMediaSources(range, newIndex, shuffleOrder)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.moveMediaSources(range, newIndex, shuffleOrder)).sendToTarget()
     }
 
     nonisolated func setShuffleOrder(_ shuffleOrder: ShuffleOrder) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setShuffleOrder(shuffleOrder)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setShuffleOrder(shuffleOrder)).sendToTarget()
     }
 
     nonisolated func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) {
         handler.obtainMessage(what: SEPlayerMessageImpl.updateMediaSourcesWithMediaItems(
             mediaItems, range
-        )).pointee.sendToTarget()
+        )).sendToTarget()
     }
 
     nonisolated func sendMessage(_ message: PlayerMessage) {
         // TODO: check for release
-        handler.obtainMessage(what: SEPlayerMessageImpl.sendMessage(message)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.sendMessage(message)).sendToTarget()
     }
 
     nonisolated func release() async {
         await withCheckedContinuation { continuation in
-            handler.obtainMessage(what: SEPlayerMessageImpl.release(continuation)).pointee.sendToTarget()
+            handler.obtainMessage(what: SEPlayerMessageImpl.release(continuation)).sendToTarget()
         }
     }
 
@@ -271,21 +277,24 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     }
 
     func didPrepare(mediaPeriod: any MediaPeriod) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.periodPrepared(mediaPeriod)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.periodPrepared(mediaPeriod)).sendToTarget()
     }
 
     func continueLoadingRequested(with source: any MediaPeriod) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.sourceContinueLoadingRequested(source)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.sourceContinueLoadingRequested(source)).sendToTarget()
     }
 
-    func handleMessage(msg: UnsafeMutablePointer<Message>) -> Bool {
-        do {
-            guard let messageKing = msg.pointee.what as? SEPlayerMessageImpl else {
-                assertionFailure()
-                return false
-            }
+    func onTrackSelectionsInvalidated() {
+        handler.sendEmptyMessage(SEPlayerMessageImpl.trackSelectionInvalidated)
+    }
 
-            switch messageKing {
+    func onRendererCapabilitiesChanged(_ renderer: SERenderer) {
+        handler.sendEmptyMessage(SEPlayerMessageImpl.rendererCapabilitiesChanged)
+    }
+
+    func handleMessage(_ msg: Message) -> Bool {
+        do {
+            switch msg.what as! SEPlayerMessageImpl {
             case .prepare:
                 try prepareInternal()
             case let .playWhenReady(playWhenReady, playWhenReadyChangeReason, playbackSuppressionReason):
@@ -405,7 +414,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     private func prepareInternal() throws {
         assert(queue.isCurrent())
         playbackInfoUpdate.incrementPendingOperationAcks(1)
-        // TODO: audioSessionManager.registerPlayer(self, playerId: identifier)
+        audioSessionManager.registerPlayer(self, playerId: identifier, playerIsolation: queue.playerActor())
         resetInternal(
             resetRenderers: false,
             resetPosition: false,
@@ -415,6 +424,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         loadControl.onPrepared(playerId: identifier)
         setState(playbackInfo.timeline.isEmpty ? .ended : .buffering)
         try! mediaSourceList.prepare(mediaTransferListener: bandwidthMeter.transferListener)
+        try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
         handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
     }
 
@@ -491,7 +501,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         var periodHolder = periodQueue.playing
         while let unwrappedPeriodHolder = periodHolder {
             unwrappedPeriodHolder.trackSelectorResults.selections.forEach {
-                $0?.playWhenReadyChanged(new: playWhenReady)
+                $0?.playWhenReadyChanged(playWhenReady)
             }
             periodHolder = unwrappedPeriodHolder.next
         }
@@ -590,7 +600,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             periodQueue.reevaluateBuffer(rendererPositionUs: rendererPositionUs)
         } else {
             if playbackInfo.state == .ready {
-                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
+//                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
                 mediaClock.start()
                 try! startRenderers()
                 handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
@@ -826,7 +836,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                     isRebuffering: false,
                     resetLastRebufferRealtimeMs: false
                 )
-                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
+//                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
                 mediaClock.start()
                 try startRenderers()
             }
@@ -1179,6 +1189,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             )
             releaseRenderers()
             loadControl.onReleased(playerId: identifier)
+            audioSessionManager.removePlayer(self, playerId: identifier)
+            trackSelector.release()
             setState(.idle)
             continuation.resume()
         } catch {
@@ -1244,7 +1256,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             state: playbackInfo.state,
             playbackError: resetError ? nil : playbackInfo.playbackError,
             isLoading: false,
-            trackGroups: resetTrackInfo ? [] : playbackInfo.trackGroups,
+            trackGroups: resetTrackInfo ? .empty : playbackInfo.trackGroups,
             trackSelectorResult: resetTrackInfo ? emptyTrackSelectorResult : playbackInfo.trackSelectorResult,
             loadingMediaPeriodId: mediaPeriodId,
             playWhenReady: playbackInfo.playWhenReady,
@@ -1316,7 +1328,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 }
             }
         } else {
-            handler.obtainMessage(what: SEPlayerMessageImpl.sendMessageToTargetQueue(message)).pointee.sendToTarget()
+            handler.obtainMessage(what: SEPlayerMessageImpl.sendMessageToTargetQueue(message)).sendToTarget()
         }
     }
 
@@ -1472,9 +1484,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         var periodHolder = periodQueue.playing
         let readingPeriodHolder = periodQueue.reading
         var selectionsChangedForReadPeriod = true
-        var newTrackSelectorResult: TrackSelectionResult
+        var newTrackSelectorResult: TrackSelectorResult
         // Keep playing period result in case of track selection change for reading period only.
-        var newPlayingPeriodTrackSelectorResult: TrackSelectionResult?
+        var newPlayingPeriodTrackSelectorResult: TrackSelectorResult?
 
         while true {
             guard let periodHolderCopy = periodHolder, periodHolderCopy.isPrepared else {
@@ -2011,6 +2023,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             allUpdated = allUpdated && result
         }
 
+//        try renderers.forEach { try $0.setControlTimebase(clock.timebase) }
         if allUpdated {
             for (index, renderer) in renderers.enumerated() {
                 if newTrackSelectorResult.isRendererEnabled(for: index), !renderer.isReading(from: readingMediaPeriod) {
@@ -2134,12 +2147,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         let result = rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime()
             && nextPlayingPeriodHolder.allRenderersInCorrectState
 
-        if rendererPositionUs >= nextPlayingPeriodHolder.getStartPositionRendererTime() {
-            print()
-        }
-        print("👠 should adavnce = \(result), pos = \(rendererPositionUs), next = \(nextPlayingPeriodHolder.getStartPositionRendererTime())")
-        print()
-        print()
         return result
     }
 
@@ -2325,12 +2332,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             || mediaPeriodId != playbackInfo.periodId
 
         resetPendingPauseAtEndOfPeriod()
-        var trackGroups = playbackInfo.trackGroups
+        var trackGroupArray = playbackInfo.trackGroups
         var trackSelectorResult = playbackInfo.trackSelectorResult
 
         if mediaSourceList.isPrepared {
             let playingPeriodHolder = periodQueue.playing
-            trackGroups = playingPeriodHolder?.trackGroups ?? []
+            trackGroupArray = playingPeriodHolder?.trackGroups ?? .empty
             trackSelectorResult = playingPeriodHolder?.trackSelectorResults ?? emptyTrackSelectorResult
 
             if let playingPeriodHolder,
@@ -2338,7 +2345,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 playingPeriodHolder.info = playingPeriodHolder.info.copyWithRequestedContentPositionUs(requestedContentPositionUs)
             }
         } else if mediaPeriodId != playbackInfo.periodId {
-            trackGroups = []
+            trackGroupArray = .empty
             trackSelectorResult = emptyTrackSelectorResult
         }
         if reportDiscontinuity {
@@ -2350,7 +2357,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             requestedContentPositionUs: requestedContentPositionUs,
             discontinuityStartPositionUs: discontinuityStartPositionUs,
             totalBufferedDurationUs: getTotalBufferedDurationUs(),
-            trackGroups: trackGroups,
+            trackGroups: trackGroupArray,
             trackSelectorResult: trackSelectorResult
         )
     }
@@ -2482,8 +2489,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
     private func updateLoadControlTrackSelection(
         mediaPeriodId: MediaPeriodId,
-        trackGroups: [TrackGroup],
-        trackSelectorResult: TrackSelectionResult
+        trackGroups: TrackGroupArray,
+        trackSelectorResult: TrackSelectorResult
     ) {
         guard let loadingPeriodHolder = periodQueue.loading else {
             return
@@ -2903,27 +2910,10 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         // TODO
         return .none
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // MARK: THIS IS END
-
 }
 
 extension SEPlayerImplInternal: AudioSessionObserver {
-    func executePlayerCommand(_ command: PlayerCommand) {
+    func executePlayerCommand(_ command: PlayerCommand, isolation: isolated PlayerActor) async {
 //        TODO: queue.sync {
 //            do {
 //                try updatePlayWhenReadyWithAudioFocus(
@@ -2939,19 +2929,16 @@ extension SEPlayerImplInternal: AudioSessionObserver {
     }
 
     func audioDeviceDidChange() {
-        queue.async { [self] in
-//            ignoreAudioSinkFlushError = true
-        }
     }
 }
 
 extension SEPlayerImplInternal {
     func setVideoOutput(_ output: VideoSampleBufferRenderer) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setVideoOutput(output)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.setVideoOutput(output)).sendToTarget()
     }
 
     func removeVideoOutput(_ output: VideoSampleBufferRenderer) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.removeVideoOutput(output)).pointee.sendToTarget()
+        handler.obtainMessage(what: SEPlayerMessageImpl.removeVideoOutput(output)).sendToTarget()
     }
 }
 

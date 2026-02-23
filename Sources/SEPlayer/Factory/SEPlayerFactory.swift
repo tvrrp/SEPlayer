@@ -11,7 +11,9 @@ import Foundation
 public final class SEPlayerFactory {
     private let sessionLoader: IPlayerSessionLoader
     private let bandwidthMeter: BandwidthMeter
+    private let trackSelector: TrackSelector
     private let audioSessionManager: IAudioSessionManager
+    private let loadControl: LoadControl
     private let clock: SEClock
     private let workQueue: Queue
     private let loaderQueue: Queue
@@ -20,12 +22,16 @@ public final class SEPlayerFactory {
         let operationQueue = OperationQueue()
         operationQueue.underlyingQueue = Queues.loaderQueue.queue
         operationQueue.maxConcurrentOperationCount = 1
-        self.sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
-        self.bandwidthMeter = DefaultBandwidthMeter()
-        self.clock = DefaultSEClock()
+        sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
+        bandwidthMeter = DefaultBandwidthMeter()
+        clock = DefaultSEClock()
         audioSessionManager = AudioSessionManager.shared
         workQueue = SignalQueue(name: "com.seplayer.work.shared", qos: .userInitiated)
         loaderQueue = SignalQueue(name: "com.seplayer.loader.shared", qos: .userInitiated)
+        trackSelector = DefaultTrackSelector(
+            trackSelectionFactory: AdaptiveTrackSelection.Factory(clock: clock)
+        )
+        loadControl = DefaultLoadControl(queue: workQueue)
 
         Prewarmer.shared.prewarm()
     }
@@ -61,8 +67,8 @@ public final class SEPlayerFactory {
         )
 
         let renderersFactory = renderersFactory ?? DefaultRenderersFactory()
-        let trackSelector = trackSelector ?? DefaultTrackSelector()
-        let loadControl = loadControl ?? DefaultLoadControl(queue: workQueue)
+        let trackSelector = trackSelector ?? self.trackSelector
+        let loadControl = loadControl ?? self.loadControl
 
         return SEPlayerImpl(
             identifier: identifier,

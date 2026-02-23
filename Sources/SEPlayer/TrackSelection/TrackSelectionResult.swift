@@ -1,27 +1,26 @@
 //
-//  TrackSelectionResult.swift
+//  TrackSelectorResult.swift
 //  SEPlayer
 //
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
-public struct TrackSelectionResult: Equatable {
-    let renderersConfig: [Bool?]
+public struct TrackSelectorResult {
+    let rendererConfigurations: [RendererConfiguration?]
     let selections: [SETrackSelection?]
     let tracks: Tracks
+    let info: Any?
 
-    public static func == (lhs: TrackSelectionResult, rhs: TrackSelectionResult) -> Bool {
-        guard lhs.selections.count == rhs.selections.count else { return false }
-
-        for (firstSelection, secondSelection) in zip(lhs.selections, rhs.selections) {
-            guard let firstSelection, let secondSelection else {
-                return false
-            }
-
-            return true // TODO: compare properly
-        }
-
-        return true
+    init(
+        rendererConfigurations: [RendererConfiguration?],
+        selections: [SETrackSelection?],
+        tracks: Tracks = .empty,
+        info: Any? = nil
+    ) {
+        self.rendererConfigurations = rendererConfigurations
+        self.selections = selections
+        self.tracks = tracks
+        self.info = info
     }
 
     func isRendererEnabled(for index: Int) -> Bool {
@@ -29,87 +28,27 @@ public struct TrackSelectionResult: Equatable {
     }
 }
 
-struct Tracks: Hashable {
-    let groups: [Group]
-    var isEmpty: Bool { groups.isEmpty }
+extension TrackSelectorResult: Equatable {
+    public static func == (lhs: TrackSelectorResult, rhs: TrackSelectorResult) -> Bool {
+        guard lhs.selections.count == rhs.selections.count else { return false }
 
-    func containsType(_ type: TrackType) -> Bool {
-        for group in groups {
-            if group.mediaTrackGroup.type == type {
-                return true
-            }
-        }
-        return false
-    }
-
-    func typeSupported(_ trackType: TrackType, allowExceedsCapabilities: Bool = false) -> Bool {
-        for group in groups {
-            if group.mediaTrackGroup.type == trackType, group.isSupported(allowExceedsCapabilities: allowExceedsCapabilities) {
-                return true
+        for index in 0..<lhs.selections.count {
+            if !isEquivalent(lhs: lhs, rhs: rhs, index: index) {
+                return false
             }
         }
 
-        return false
+        return true
     }
 
-    func isSupportedOrEmpty(trackType: TrackType, allowExceedsCapabilities: Bool = false) -> Bool {
-        return !containsType(trackType) || typeSupported(trackType, allowExceedsCapabilities: allowExceedsCapabilities)
-    }
-
-    func typeSelected(for trackType: TrackType) -> Bool {
-        for group in groups {
-            if group.isSelected && group.mediaTrackGroup.type == trackType {
-                return true
-            }
-        }
-
-        return false
-    }
-}
-
-extension Tracks {
-    static var empty: Tracks = Tracks(groups: [])
-
-    struct Group: Hashable {
-        var length: Int { mediaTrackGroup.length }
-        let mediaTrackGroup: TrackGroup
-        let trackSupport: [FormatSupported]
-        let trackSelected: [Bool]
-
-        var isSelected: Bool { trackSelected.contains(true) }
-
-        func format(for trackIndex: Int) -> Format {
-            mediaTrackGroup.formats[trackIndex]
-        }
-
-        func trackSupport(for index: Int) -> FormatSupported {
-            trackSupport[index]
-        }
-
-        func isTrackSupported(for trackIndex: Int, allowExceedsCapabilities: Bool = false) -> Bool {
-            trackSupport[trackIndex] == .handled || (allowExceedsCapabilities && trackSupport[trackIndex] == .exceedsCapabilities)
-        }
-
-        func isSupported(allowExceedsCapabilities: Bool = false) -> Bool {
-            for index in 0..<trackSupport.count {
-                if isTrackSupported(for: index, allowExceedsCapabilities: allowExceedsCapabilities) {
-                    return true
-                }
-            }
-
+    private static func isEquivalent(lhs: TrackSelectorResult, rhs: TrackSelectorResult, index: Int) -> Bool {
+        guard let lhsRendererConfiguration = lhs.rendererConfigurations[index],
+              let rhsRendererConfiguration = rhs.rendererConfigurations[index],
+              let lhsSelections = lhs.selections[index],
+              let rhsSelections = rhs.selections[index] else {
             return false
         }
 
-        func isTrackSelected(for trackIndex: Int) -> Bool {
-            return trackSelected[trackIndex]
-        }
+        return lhsRendererConfiguration == rhsRendererConfiguration && lhsSelections.isEquals(to: rhsSelections)
     }
-}
-
-enum FormatSupported {
-    case handled
-    case exceedsCapabilities
-    case unsuportedDrm
-    case unsuportedSubtype
-    case unsuportedType
 }

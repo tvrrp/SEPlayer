@@ -11,12 +11,12 @@ public final class Allocation {
 
     private let _buffer: UnsafeMutableBufferPointer<UInt8>
 
-    var bytes: RawSpan {
-        @_lifetime(borrow self)
-        borrowing get {
-            _overrideLifetime(RawSpan(_unsafeBytes: data), borrowing: self)
-        }
-    }
+//    var bytes: RawSpan {
+//        @_lifetime(borrow self)
+//        borrowing get {
+//            _overrideLifetime(RawSpan(_unsafeBytes: data), borrowing: self)
+//        }
+//    }
 
 //    var mutableBytes: MutableRawSpan {
 //        @_lifetime(self)
@@ -25,12 +25,12 @@ public final class Allocation {
 //        }
 //    }
 
-    var span: Span<UInt8> {
-        @_lifetime(borrow self)
-        borrowing get {
-            _overrideLifetime(Span(_unsafeElements: _buffer), borrowing: self)
-        }
-    }
+//    var span: Span<UInt8> {
+//        @_lifetime(borrow self)
+//        borrowing get {
+//            _overrideLifetime(Span(_unsafeElements: _buffer), borrowing: self)
+//        }
+//    }
 
 //    var mutableSpan: MutableSpan<UInt8> {
 //        @_lifetime(self)

@@ -55,8 +55,14 @@ final class AVFVideoRenderer: BaseSERenderer {
         super.init(queue: queue, trackType: .video, clock: clock)
     }
 
-    override func getCapabilities() -> RendererCapabilities {
-        self
+    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+        RendererCapabilities.Support(
+            formatSupport: try VTDecoder.supportsFormat(format),
+            adaptiveSupport: .notSeamless,
+            hardwareAccelerationSupport: .supported,
+            decoderSupport: .primary,
+            tunnelingSupport: .supported
+        )
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
@@ -166,6 +172,9 @@ final class AVFVideoRenderer: BaseSERenderer {
             joiningDeadlineMs = .timeUnset
         }
 
+        if formatQueue.size > 0 {
+            waitingForFirstSampleInFormat = true
+        }
         formatQueue.clear()
     }
 
@@ -551,12 +560,6 @@ extension AVFVideoRenderer: VideoSampleBufferRendererDelegate {
 
     func renderer(_ renderer: VideoSampleBufferRenderer, didFailedRenderingWith error: Error?, isolation: isolated any Actor) {
         assert(queue.isCurrent())
-    }
-}
-
-extension AVFVideoRenderer: RendererCapabilities {
-    func supportsFormat(_ format: Format) -> Bool {
-        VTDecoder.supportsFormat(format)
     }
 }
 

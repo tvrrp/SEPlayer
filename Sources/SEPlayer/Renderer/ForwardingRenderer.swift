@@ -16,19 +16,19 @@ public class ForwardingRenderer: SERenderer {
         self.renderer = renderer
     }
 
-    public func handleMessage(_ message: RendererMessage) throws {
-        try renderer.handleMessage(message)
+    public func getCapabilities() -> RendererCapabilitiesResolver {
+        renderer.getCapabilities()
     }
 
-    public func getCapabilities() -> RendererCapabilities {
-        renderer.getCapabilities()
+    public func handleMessage(_ message: RendererMessage) throws {
+        try renderer.handleMessage(message)
     }
 
     public func getMediaClock() -> MediaClock? {
         renderer.getMediaClock()
     }
 
-    public func getTimebase() -> TimebaseSource? {
+    public func getTimebase() -> CMTimebase? {
         renderer.getTimebase()
     }
 

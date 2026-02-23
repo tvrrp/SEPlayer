@@ -107,7 +107,13 @@ class FakeRenderer: BaseSERenderer {
 
     override func isEnded () -> Bool { _isEnded }
 
-    override func getCapabilities() -> RendererCapabilities { self }
+    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+        if format.sampleMimeType?.trackType == trackType {
+            return .create(formatSupport: .handled, adaptiveSupport: .seamless, tunnelingSupport: .notSupported)
+        } else {
+            return .create(formatSupport: .unsupportedType)
+        }
+    }
 
     func onFormatChange(format: Format) {}
 
@@ -117,11 +123,5 @@ class FakeRenderer: BaseSERenderer {
 
     override func onRelease() {
         isReleased = true
-    }
-}
-
-extension FakeRenderer: RendererCapabilities {
-    func supportsFormat(_ format: Format) -> Bool {
-        return format.sampleMimeType?.trackType == trackType
     }
 }

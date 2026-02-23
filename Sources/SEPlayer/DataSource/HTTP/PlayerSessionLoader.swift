@@ -10,15 +10,14 @@ import Foundation.NSURLSession
 
 public protocol IPlayerSessionLoader {
     func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask
-//    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, Error>
 }
 
 public protocol PlayerSessionDelegate: AnyObject {
-    var syncActor: PlayerActor { get }
-    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, isolation: isolated PlayerActor) async -> URLSession.ResponseDisposition
-    nonisolated func didReciveBuffer(_ buffer: Data, task: URLSessionTask)
-    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask, isolation: isolated PlayerActor) async
-    func didFinishTask(_ task: URLSessionTask, error: Error?, isolation: isolated PlayerActor) async
+    var queue: Queue { get }
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void)
+    func didReciveBuffer(_ buffer: Data, task: URLSessionTask)
+    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask)
+    func didFinishTask(_ task: URLSessionTask, error: Error?)
 }
 
 final class PlayerSessionLoader: IPlayerSessionLoader {
@@ -51,12 +50,6 @@ final class PlayerSessionLoader: IPlayerSessionLoader {
     func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask {
         impl.createTask(session, request: request, delegate: delegate)
     }
-
-//    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, any Error> {
-//        let streamProvider = PlayerSessionLoaderAsyncStreamProvider()
-//        let task = impl.createTask(session, request: request, delegate: streamProvider)
-//        return streamProvider.createStream(with: task)
-//    }
 
     private static func createOperationQueue() -> OperationQueue {
         let operationQueue = OperationQueue()
@@ -95,9 +88,8 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
             completionHandler(.cancel); return
         }
 
-        Task {
-            let result = await handler.didRecieveResponse(response, task: dataTask, isolation: handler.syncActor)
-            completionHandler(result)
+        handler.queue.async {
+            handler.didRecieveResponse(response, task: dataTask, completionHandler: completionHandler)
         }
     }
 
@@ -106,15 +98,17 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
             return
         }
 
-        handler.didReciveBuffer(data, task: dataTask)
+        handler.queue.async {
+            handler.didReciveBuffer(data, task: dataTask)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         guard let handler = handlers[task] else { return }
         handlers[task] = nil
 
-        Task {
-            await handler.didFinishTask(task, error: error, isolation: handler.syncActor)
+        handler.queue.async {
+            handler.didFinishTask(task, error: error)
         }
     }
 
@@ -123,8 +117,8 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
             return
         }
 
-        Task {
-            await handler.didFinishCollectingMetrics(metrics, task: task, isolation: handler.syncActor)
+        handler.queue.async {
+            handler.didFinishCollectingMetrics(metrics, task: task)
         }
     }
 }

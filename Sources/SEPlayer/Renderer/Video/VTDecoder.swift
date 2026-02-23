@@ -29,10 +29,10 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
         try createDecoder(format: format)
     }
 
-    static func supportsFormat(_ format: Format) -> Bool {
-        guard let formatDescription = try? format.buildFormatDescription(),
-              formatDescription.mediaType == .video else {
-            return false
+    static func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support.FormatSupport {
+        let formatDescription = try format.buildFormatDescription()
+        guard formatDescription.mediaType == .video else {
+            return .unsupportedType
         }
 
         var decompressionSession: VTDecompressionSession?
@@ -50,7 +50,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
             VTDecompressionSessionInvalidate(decompressionSession)
         }
 
-        return status == noErr && didCreateDecoder
+        return (status == noErr && didCreateDecoder) ? .handled : .unsupportedSubtype
     }
 
     override func setPlaybackSpeed(_ speed: Float) {
@@ -208,8 +208,6 @@ enum VTDecoderErrors: Error {
         case colorSyncTransformConvertFailed = -12919
         case videoDecoderAuthorization = -12210
         case colorCorrectionPixelTransferFailed = -12212
-        case frameSiloInvalidTimeStamp = -12215
-        case frameSiloInvalidTimeRange = -12216
         case couldNotFindTemporalFilter = -12217
         case pixelTransferNotPermitted = -12218
         case colorCorrectionImageRotationFailed = -12219

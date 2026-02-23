@@ -26,6 +26,9 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
         renderersStorage.allObjects as! [VideoSampleBufferRenderer]
     }
 
+    nonisolated(unsafe) private var controlTimebase: CMTimebase?
+    nonisolated(unsafe) private var presentationTimeExpectation = PresentationTimeExpectation.none
+
     private let queue: Queue
     nonisolated(unsafe) private let renderersStorage = NSHashTable<AnyObject>()
 
@@ -36,6 +39,9 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
     func addRenderer(_ renderer: VideoSampleBufferRenderer) {
         assert(queue.isCurrent())
         renderersStorage.add(renderer)
+        renderer.delegate = delegate
+        renderer.setControlTimebase(controlTimebase)
+        renderer.setPresentationTimeExpectation(presentationTimeExpectation)
     }
 
     func removeRenderer(_ renderer: VideoSampleBufferRenderer) {
@@ -45,11 +51,13 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
 
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
         assert(queue.isCurrent())
+        presentationTimeExpectation = expectation
         renderers.forEach { $0.setPresentationTimeExpectation(expectation) }
     }
 
-    func setControlTimebase(_ timebase: TimebaseSource?) {
+    func setControlTimebase(_ timebase: CMTimebase?) {
         assert(queue.isCurrent())
+        controlTimebase = timebase
         renderers.forEach { $0.setControlTimebase(timebase) }
     }
 

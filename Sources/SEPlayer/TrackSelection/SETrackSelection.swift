@@ -7,24 +7,23 @@
 
 import Foundation.NSUUID
 
-public protocol SETrackSelection: TrackSelection {
-    var id: UUID { get }
-    var selectedReason: TrackSelectionReason { get }
-    var selectedFormat: Format { get }
-    var selectedIndex: Int { get }
+public struct SETrackSelectionDefinition {
+    public let group: TrackGroup
+    public let tracks: [Int]
+    public let type: TrackSelectionType
 
-    func enable()
-    func disable()
-    func playWhenReadyChanged(new playWhenReady: Bool)
+    public init(
+        group: TrackGroup,
+        tracks: [Int],
+        type: TrackSelectionType = .unset
+    ) {
+        self.group = group
+        self.tracks = tracks
+        self.type = type
+    }
 }
 
-extension SETrackSelection {
-    func enable() {}
-    func disable() {}
-    func playWhenReadyChanged(new playWhenReady: Bool) {}
-}
-
-public enum TrackSelectionReason {
+@frozen public enum TrackSelectionReason {
     case unknown
     case initial
     case manual
@@ -32,70 +31,56 @@ public enum TrackSelectionReason {
     case trickPlay
 }
 
-public protocol TrackSelector {
-    func selectTracks(
-        rendererCapabilities: [RendererCapabilities],
-        trackGroups: [TrackGroup],
-        periodId: MediaPeriodId,
+public protocol SETrackSelectionFactory {
+    func createTrackSelections(
+        definitions: [SETrackSelectionDefinition?],
+        bandwidthMeter: BandwidthMeter,
+        mediaPeriodId: MediaPeriodId,
         timeline: Timeline
-    ) throws -> TrackSelectionResult
+    ) -> [SETrackSelection?]
 }
 
-struct DefaultTrackSelector: TrackSelector {
-    func selectTracks(
-        rendererCapabilities: [RendererCapabilities],
-        trackGroups: [TrackGroup],
-        periodId: MediaPeriodId,
-        timeline: Timeline
-    ) -> TrackSelectionResult {
-        var updatedGroups: [TrackGroup?] = Array(repeating: nil, count: rendererCapabilities.count)
+public protocol SETrackSelection: TrackSelection {
+    var selectedFormat: Format { get }
+    var selectedIndexInTrackGroup: Int? { get }
+    var selectedIndex: Int { get }
+    var selectedReason: TrackSelectionReason { get }
+    var selectionData: Any? { get }
 
-        for (index, rendererCapability) in rendererCapabilities.enumerated() {
-            for group in trackGroups {
-                if rendererSupported(rendererCapability, group: group) {
-                    updatedGroups[index] = group
-                }
-            }
-        }
+    func enable()
+    func disable()
+    func playbackSpeedDidChange(_ playbackSpeed: Float)
+    func onDiscontinuity()
+    func onRebuffer()
+    func playWhenReadyChanged(_ playWhenReady: Bool)
 
-        let selections: [SETrackSelection?] = updatedGroups.map { trackGroup in
-            if let trackGroup {
-                return FixedTrackSelection(trackGroup: trackGroup)
-            } else {
-                return nil
-            }
-        }
+    // TODO: HLS
+//    func updateSelectedTrack(
+//        playbackPositionUs: Int64,
+//        bufferedDurationUs: Int64,
+//        availableDurationUs: Int64,
+//        queue: [Void /*TODO: MediaChunk */],
+//        mediaChunkIterators: [Void /*TODO: MediaChunkIterator */],
+//    )
+//    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int
+//    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Int
 
-        return TrackSelectionResult(
-            renderersConfig: updatedGroups.map { _ in true },
-            selections: selections,
-            tracks: Tracks.empty
-        )
-    }
+    func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool
+    func isTrackExcluded(index: Int, nowMs: Int64) -> Bool
+    func getLatestBitrateEstimate() -> Int64?
 
-    func findRenderer(rendererCapabilities: [RendererCapabilities], group: TrackGroup) -> Int? {
-        for format in group.formats {
-            for (index, rendererCapability) in rendererCapabilities.enumerated() {
-                if rendererCapability.supportsFormat(format) {
-                    return index
-                }
-            }
-        }
+    func isEquals(to other: SETrackSelection) -> Bool
+}
 
-        return nil
-    }
+extension SETrackSelection {
+    func onDiscontinuity() {}
+    func onRebuffer() {}
+    func playWhenReadyChanged(_ playWhenReady: Bool) {}
 
-    func rendererSupported(_ rendererCapability: RendererCapabilities, group: TrackGroup) -> Bool {
-        for format in group.formats {
-            if rendererCapability.supportsFormat(format) {
-                return true
-            }
-        }
+//    TODO: HLS
+//    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Int {
+//        false
+//    }
 
-        return false
-    }
-
-    func supportsFormat(rendererCapabilities: RendererCapabilities, trackGroup: TrackGroup) -> [Bool] {
-        trackGroup.formats.map { rendererCapabilities.supportsFormat($0) }
-    }
+    func getLatestBitrateEstimate() -> Int64? { nil }
 }

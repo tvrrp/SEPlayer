@@ -14,7 +14,7 @@ final class FakeMediaPeriod: MediaPeriod {
         // TODO: 
     }
     
-    var trackGroups: [TrackGroup]
+    var trackGroups: TrackGroupArray
     let isLoading: Bool = false
 
     private let queue: Queue
@@ -33,7 +33,7 @@ final class FakeMediaPeriod: MediaPeriod {
 
     convenience init(
         queue: Queue,
-        trackGroups: [TrackGroup],
+        trackGroups: TrackGroupArray,
         allocator: Allocator,
         singleSampleTimeUs: Int64,
         deferOnPrepared: Bool = false
@@ -49,7 +49,7 @@ final class FakeMediaPeriod: MediaPeriod {
 
     init(
         queue: Queue,
-        trackGroups: [TrackGroup],
+        trackGroups: TrackGroupArray,
         allocator: Allocator,
         trackDataFactory: TrackDataFactory,
         syncSampleTimestampsUs: [Int64]? = nil,

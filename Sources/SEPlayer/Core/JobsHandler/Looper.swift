@@ -40,8 +40,10 @@ public final class Looper: Sendable {
                 return false
             }
 
-            message.pointee.target?.dispatchMessage(msg: message)
-            Message.recycleUnchecked(message)
+//            message.pointee.target?.dispatchMessage(msg: message)
+//            Message.recycleUnchecked(message)
+            message.target?.dispatchMessage(msg: message)
+            message.recycleUnchecked()
             return true
         } catch {
             return false

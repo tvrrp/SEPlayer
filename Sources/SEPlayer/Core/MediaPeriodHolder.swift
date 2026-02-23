@@ -8,12 +8,12 @@
 final class MediaPeriodHolder {
     var allRenderersInCorrectState: Bool = false
     var renderPositionOffset: Int64
-    var trackSelectorResults: TrackSelectionResult
+    var trackSelectorResults: TrackSelectorResult
 
     let queue: Queue
     let mediaPeriod: any MediaPeriod
     let id: AnyHashable
-    let rendererCapabilities: [RendererCapabilities]
+    let rendererCapabilities: [RendererCapabilitiesResolver]
 
     var sampleStreams: [SampleStream?]
     let targetPreloadBufferDurationUs: Int64
@@ -22,7 +22,7 @@ final class MediaPeriodHolder {
     let mediaSourceList: MediaSourceList
     let trackSelector: TrackSelector
 
-    var trackGroups: [TrackGroup] = []
+    var trackGroups: TrackGroupArray = .empty
     var prepareCalled: Bool = false
     var isPrepared: Bool = false
     var hasEnabledTracks: Bool = false
@@ -33,13 +33,13 @@ final class MediaPeriodHolder {
 
     init(
         queue: Queue,
-        rendererCapabilities: [RendererCapabilities],
+        rendererCapabilities: [RendererCapabilitiesResolver],
         rendererPositionOffsetUs: Int64,
         trackSelector: TrackSelector,
         allocator: Allocator,
         mediaSourceList: MediaSourceList,
         info: MediaPeriodInfo,
-        emptyTrackSelectorResult: TrackSelectionResult,
+        emptyTrackSelectorResult: TrackSelectorResult,
         targetPreloadBufferDurationUs: Int64
     ) throws {
         self.queue = queue
@@ -125,7 +125,7 @@ final class MediaPeriodHolder {
         mediaPeriod.continueLoading(with: loadingInfo)
     }
 
-    func selectTracks(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws -> TrackSelectionResult {
+    func selectTracks(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws -> TrackSelectorResult {
         let selectorResult = try trackSelector.selectTracks(
             rendererCapabilities: rendererCapabilities,
             trackGroups: trackGroups,
@@ -137,7 +137,7 @@ final class MediaPeriodHolder {
 
     @discardableResult
     func applyTrackSelection(
-        trackSelectorResult: TrackSelectionResult,
+        trackSelectorResult: TrackSelectorResult,
         positionUs: Int64,
         forceRecreateStreams: Bool
     ) -> Int64 {
@@ -152,7 +152,7 @@ final class MediaPeriodHolder {
     }
 
     func applyTrackSelection(
-        newTrackSelectorResult: TrackSelectionResult,
+        newTrackSelectorResult: TrackSelectorResult,
         positionUs: Int64,
         forceRecreateStreams: Bool,
         streamResetFlags: inout [Bool]

@@ -10,7 +10,7 @@ import Foundation.NSUUID
 public protocol LoadControl {
     var queue: Queue { get }
     func onPrepared(playerId: UUID)
-    func onTracksSelected(parameters: LoadControlParams, trackGroups: [TrackGroup], trackSelections: [SETrackSelection?])
+    func onTracksSelected(parameters: LoadControlParams, trackGroups: TrackGroupArray, trackSelections: [SETrackSelection?])
     func onStopped(playerId: UUID)
     func onReleased(playerId: UUID)
     func getAllocator() -> Allocator
@@ -84,7 +84,7 @@ final class DefaultLoadControl: LoadControl {
 
     func onTracksSelected(
         parameters: LoadControlParams,
-        trackGroups: [TrackGroup],
+        trackGroups: TrackGroupArray,
         trackSelections: [SETrackSelection?]
     ) {
         assertQueue()
@@ -169,7 +169,7 @@ final class DefaultLoadControl: LoadControl {
     private func calculateTargetBufferBytes(trackSelectionArray: [SETrackSelection?]) -> Int {
         let targetBufferSize = trackSelectionArray
             .compactMap { $0 }
-            .reduce(0, { $0 + $1.trackGroup.type.defaultBufferSize })
+            .reduce(0, { $0 + $1.trackGroup.type.defaultBufferSize(isLocalPlayback: false) /*TODO: check for local*/ })
         return max(.defaultMinBufferSize, targetBufferSize)
     }
 
@@ -225,25 +225,37 @@ extension DefaultLoadControl {
 private extension Int {
     static let defaultBufferSegmentSize: Int = 64 * 1024
     static let defaultVideoBufferSize: Int = 2000 * .defaultBufferSegmentSize
+    static let defaultVideoBufferSizeForLocalPlayback: Int = 300 * .defaultBufferSegmentSize
     static let defaultAudioBufferSize: Int = 200 * .defaultBufferSegmentSize
     static let defaultTextBufferSize: Int = 2 * .defaultBufferSegmentSize
+    static let defaultMetadataBufferSize: Int = 2 * .defaultBufferSegmentSize
+    static let defaultCameraMotionBufferSize: Int = 2 * .defaultBufferSegmentSize
+    static let defaultImageBufferSize: Int = 300 * .defaultBufferSegmentSize
     static let defaultMuxedBufferSize: Int = .defaultVideoBufferSize + .defaultAudioBufferSize + .defaultTextBufferSize
     static let defaultMinBufferSize: Int = 200 * .defaultBufferSegmentSize
 }
 
 private extension TrackType {
-    var defaultBufferSize: Int {
+    func defaultBufferSize(isLocalPlayback: Bool) -> Int {
         switch self {
         case .default:
-            return .defaultMuxedBufferSize
+            .defaultMuxedBufferSize
         case .audio:
-            return .defaultAudioBufferSize
+            .defaultAudioBufferSize
         case .video:
-            return .defaultVideoBufferSize
+            isLocalPlayback ? .defaultVideoBufferSizeForLocalPlayback : .defaultVideoBufferSize
+        case .text:
+            .defaultTextBufferSize
+        case .metadata:
+            .defaultMetadataBufferSize
+        case .cameraMotion:
+            .defaultCameraMotionBufferSize
+        case .image:
+            .defaultImageBufferSize
         case .none:
-            return .zero
+            .zero
         case .unknown:
-            return .defaultMinBufferSize
+            .defaultMinBufferSize
         }
     }
 }

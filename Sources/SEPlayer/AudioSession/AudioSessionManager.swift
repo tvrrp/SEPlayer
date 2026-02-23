@@ -12,14 +12,14 @@ public enum PlayerCommand {
     case playWhenReady
 }
 
-public protocol AudioSessionObserver {
-    func executePlayerCommand(_ command: PlayerCommand)
+public protocol AudioSessionObserver: AnyObject {
+    func executePlayerCommand(_ command: PlayerCommand, isolation: isolated PlayerActor) async
     func audioDeviceDidChange()
 }
 
 public protocol IAudioSessionManager {
     var observers: MulticastDelegate<AudioSessionObserver> { get }
-    func registerPlayer(_ player: AudioSessionObserver, playerId: UUID)
+    func registerPlayer(_ player: AudioSessionObserver, playerId: UUID, playerIsolation: PlayerActor)
     func removePlayer(_ player: AudioSessionObserver, playerId: UUID)
     func setPrefferedStrategy(strategy: AudioCategoryStrategy, for playerId: UUID)
     func updateAudioState(playerId: UUID, for playerState: PlayerState, playWhenReady: Bool)
@@ -30,11 +30,11 @@ public protocol IAudioSessionManager {
 public final class AudioSessionManager: IAudioSessionManager {
     static let shared: IAudioSessionManager = AudioSessionManager()
 
-    public let observers = MulticastDelegate<AudioSessionObserver>()
+    public let observers = MulticastDelegate<AudioSessionObserver>(isThreadSafe: true)
     private let audioSession = AVAudioSession.sharedInstance()
     private let lock = NSRecursiveLock()
 
-    private var registeredPlayers = Set<UUID>()
+    private var registeredPlayers = [UUID: PlayerActor]()
     private var strategies: [(playerId: UUID, strategy: AudioCategoryStrategy)] = []
 
     private var currentCategory: AudioCategoryStrategy = .default
@@ -48,17 +48,17 @@ public final class AudioSessionManager: IAudioSessionManager {
                            object: nil)
     }
 
-    public func registerPlayer(_ player: AudioSessionObserver, playerId: UUID) {
+    public func registerPlayer(_ player: AudioSessionObserver, playerId: UUID, playerIsolation: PlayerActor) {
         lock.withLock {
             observers.addDelegate(player)
-            registeredPlayers.insert(playerId)
+            registeredPlayers[playerId] = playerIsolation
         }
     }
 
     public func removePlayer(_ player: AudioSessionObserver, playerId: UUID) {
         lock.withLock {
             observers.removeDelegate(player)
-            registeredPlayers.insert(playerId)
+            registeredPlayers[playerId] = nil
         }
     }
 

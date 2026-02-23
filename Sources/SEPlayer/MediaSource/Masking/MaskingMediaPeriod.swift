@@ -11,7 +11,7 @@ final class MaskingMediaPeriod: MediaPeriod {
         func prepareError(mediaPeriodId: MediaPeriodId, error: Error)
     }
 
-    var trackGroups: [TrackGroup] { mediaPeriod?.trackGroups ?? [] }
+    var trackGroups: TrackGroupArray { mediaPeriod?.trackGroups ?? .empty }
     var isLoading: Bool { mediaPeriod?.isLoading ?? false }
 
     weak var listener: PrepareListener?

@@ -12,7 +12,7 @@ public enum RendererMessage {
     case stopRequestingMediaData
     case setVideoOutput(_ output: VideoSampleBufferRenderer)
     case removeVideoOutput(_ output: VideoSampleBufferRenderer)
-    case setControlTimebase(_ timebase: TimebaseSource?)
+    case setControlTimebase(_ timebase: CMTimebase?)
     case setAudioVolume(_ volume: Float)
     case setAudioIsMuted(_ isMuted: Bool)
 }

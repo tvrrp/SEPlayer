@@ -90,11 +90,14 @@ extension DefautlHTTPDataSource {
 }
 
 extension DefautlHTTPDataSource: PlayerSessionDelegate {
-    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, isolation: isolated PlayerActor) async -> URLSession.ResponseDisposition {
+    var queue: Queue { syncActor.executor.queue }
+
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void) {
+        syncActor.assertIsolated()
         guard let response = response as? HTTPURLResponse else {
             openContinuation?.resume(throwing: DataReaderError.wrongURLResponse)
             openContinuation = nil
-            return .cancel
+            completionHandler(.cancel); return
         }
 
         let responseCode = response.statusCode
@@ -102,28 +105,30 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
             // TODO: check for 416 out of range code
             openContinuation?.resume(throwing: DataReaderError.wrongResponseStatusCode)
             openContinuation = nil
-            return .cancel
+            completionHandler(.cancel); return
         }
 
         openContinuation?.resume(returning: response)
         openContinuation = nil
 
-        return .allow
+        completionHandler(.allow)
     }
 
     func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
-        syncActor.executor.queue.async {
-            self.loadHandler.assumeIsolated { handler in
-                handler.consumeData(data: buffer)
-            }
-        }
+        loadHandler.assumeIsolated { $0.consumeData(data: buffer) }
     }
 
-    func didFinishTask(_ task: URLSessionTask, error: Error?, isolation: isolated PlayerActor) async {
+    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask) {
+        syncActor.assertIsolated()
+        transferEnded(source: self, metrics: metrics)
+    }
+
+    func didFinishTask(_ task: URLSessionTask, error: Error?) {
+        syncActor.assertIsolated()
         if let error, (error as NSError).code == NSURLErrorCancelled {
             openContinuation?.resume(throwing: CancellationError())
             openContinuation = nil
-            await loadHandler.didCloseConnection(with: CancellationError())
+            loadHandler.assumeIsolated { $0.didCloseConnection(with: CancellationError()) }
             return
         }
 
@@ -132,11 +137,7 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
             openContinuation = nil
         }
 
-        await loadHandler.didCloseConnection(with: error)
-    }
-
-    func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask, isolation: isolated PlayerActor) async {
-        transferEnded(source: self, metrics: metrics)
+        loadHandler.assumeIsolated { $0.didCloseConnection(with: error) }
     }
 }
 

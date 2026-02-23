@@ -7,11 +7,19 @@
 
 import CoreMedia
 
-class BaseSERenderer: SERenderer {
+class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
+    final var listener: RendererCapabilitiesListener? {
+        get { lock.withLock { _listener } }
+        set { lock.withLock { _listener = newValue } }
+    }
+    var name: String { String(describing: self) }
     let trackType: TrackType
+
     private let queue: Queue
+    private let lock: UnfairLock
     private let clock: SEClock
 
+    private weak var _listener: RendererCapabilitiesListener?
     private var state: SERendererState = .disabled
     private var sampleStream: SampleStream?
     private var formats: [Format] = []
@@ -27,11 +35,12 @@ class BaseSERenderer: SERenderer {
         self.queue = queue
         self.trackType = trackType
         self.clock = clock
+        lock = UnfairLock()
         timeline = emptyTimeline
     }
 
-    func getCapabilities() -> RendererCapabilities {
-        EmptyRendererCapabilities()
+    final func getCapabilities() -> RendererCapabilitiesResolver {
+        self
     }
 
     func handleMessage(_ message: RendererMessage) throws {}
@@ -108,7 +117,7 @@ class BaseSERenderer: SERenderer {
     func isReady() -> Bool { false }
     func isEnded() -> Bool { true }
     func getMediaClock() -> MediaClock? { return nil }
-    func getTimebase() -> TimebaseSource? { return nil }
+    func getTimebase() -> CMTimebase? { return nil }
     func setPlaybackSpeed(current: Float, target: Float) throws {}
     func enableRenderStartOfStream() {}
 
@@ -135,6 +144,14 @@ class BaseSERenderer: SERenderer {
     final func release() {
         assert(queue.isCurrent() && state == .disabled)
         onRelease()
+    }
+
+    func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+        .create(formatSupport: .unsupportedType)
+    }
+
+    func supportsMixedMimeTypeAdaptation() throws -> RendererCapabilities.Support.AdaptiveSupport {
+        .notSupported
     }
 
     func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {}
@@ -181,5 +198,10 @@ class BaseSERenderer: SERenderer {
 
     final func isSourceReady() -> Bool {
         didReadStreamToEnd() ? streamIsFinal : sampleStream?.isReady() ?? false
+    }
+
+    final func onRendererCapabilitiesChanged() {
+        let listener = lock.withLock { _listener }
+        listener?.onRendererCapabilitiesChanged(self)
     }
 }

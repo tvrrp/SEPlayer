@@ -6,39 +6,48 @@
 //
 
 public struct TrackGroup: Hashable {
-    let id: String
-    var length: Int { formats.count }
-    let type: TrackType
-    let formats: [Format]
+    public var length: Int { formats.count }
+    public let id: String
+    public let type: TrackType
+    private let formats: [Format]
 
-    enum TrackGroupError: Error {
+    public enum TrackGroupError: Error {
+        case emptyFormats
         case differentFormatsForTrackGroup
     }
 
-    init(id: String? = nil, formats: [Format]) throws(TrackGroupError) {
-        self.id = id ?? ""
-        self.type = try! TrackGroup.verify(formats: formats)
+    public init(
+        id: String = "",
+        formats: [Format]
+    ) throws(TrackGroupError) {
+        guard !formats.isEmpty else { throw .emptyFormats  }
+        self.id = id
         self.formats = formats
-    }
 
-    private static func verify(formats: [Format]) throws(TrackGroupError) -> TrackType {
-        let types = Set(formats.map { $0.sampleMimeType })
-        if types.count > 1 { throw TrackGroupError.differentFormatsForTrackGroup }
-
-        // TODO: compare samples
-        for type in types {
-            guard let type else { continue }
-
-            if type.isVideo {
-                return .video
-            } else if type.isAudio {
-                return .audio
-            } else {
-                return .unknown
-            }
+        let sampleMimeType = formats[0].sampleMimeType
+        self.type = if let sampleMimeType, sampleMimeType.rawValue.isEmpty {
+            formats[0].containerMimeType.trackType
+        } else {
+            sampleMimeType.trackType
         }
 
-        return .none
+        try verifyCorrectness()
+    }
+
+    public func copyWithId(_ id: String) throws(TrackGroupError) -> TrackGroup {
+        try TrackGroup(id: id, formats: formats)
+    }
+
+    public func getFormat(index: Int) -> Format {
+        formats[index]
+    }
+
+    public func indexOf(format: Format) -> Int? {
+        formats.firstIndex(of: format)
+    }
+
+    private func verifyCorrectness() throws(TrackGroupError) {
+        // TODO: verifyCorrectness
     }
 
     public static func == (lhs: TrackGroup, rhs: TrackGroup) -> Bool {
@@ -46,16 +55,17 @@ public struct TrackGroup: Hashable {
     }
 }
 
-public enum TrackType {
-    case unknown
-    case `default`
-    case video
-    case audio
-    case none
-}
+extension TrackGroup: Collection {
+    public typealias Index = Array<Format>.Index
+    public typealias Element = Format
+    public var startIndex: Int { formats.startIndex }
+    public var endIndex: Int { formats.endIndex }
 
-extension Array where Element == TrackGroup {
-    func index(of group: TrackGroup) -> Int? {
-        return self.firstIndex(where: { $0 == group })
+    public subscript(index: Index) -> Iterator.Element {
+        get { return formats[index] }
+    }
+
+    public func index(after i: Index) -> Index {
+        return formats.index(after: i)
     }
 }

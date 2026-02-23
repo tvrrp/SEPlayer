@@ -30,7 +30,7 @@ class MediaPeriodQueueTest {
     private var addPlaybackState: AdPlaybackState = .none
     private var firstPeriodId: AnyHashable = 0
     private var playbackInfo: PlaybackInfo?
-    private var rendererCapabilities: [RendererCapabilities]
+    private var rendererCapabilities: [RendererCapabilitiesResolver]
     private let trackSelector: TrackSelector
     private let allocator: Allocator
     private let mediaSourceList: MediaSourceList
@@ -63,8 +63,8 @@ class MediaPeriodQueueTest {
                 allocator: allocator,
                 mediaSourceList: mediaSourceList,
                 info: info,
-                emptyTrackSelectorResult: TrackSelectionResult(
-                    renderersConfig: [],
+                emptyTrackSelectorResult: TrackSelectorResult(
+                    rendererConfigurations: [],
                     selections: [],
                     tracks: .empty
                 ),
@@ -202,7 +202,7 @@ class MediaPeriodQueueTest {
                 try super.init(
                     queue: queue,
                     timeline: FakeTimeline(),
-                    trackGroups: FakeMediaSource.buildTrackGroups(formats: [])
+                    trackGroupArray: FakeMediaSource.buildTrackGroupArray(formats: [])
                 )
             }
 
@@ -374,7 +374,7 @@ class MediaPeriodQueueTest {
                 try super.init(
                     queue: queue,
                     timeline: timeline,
-                    trackGroups: FakeMediaSource.buildTrackGroups(formats: [])
+                    trackGroupArray: FakeMediaSource.buildTrackGroupArray(formats: [])
                 )
             }
 
@@ -403,7 +403,7 @@ class MediaPeriodQueueTest {
         let firstSource = try FakeMediaSource(
             queue: playerSyncQueue,
             timeline: FakeTimeline(),
-            trackGroups: FakeMediaSource.buildTrackGroups(formats: [])
+            trackGroupArray: FakeMediaSource.buildTrackGroupArray(formats: [])
         )
 
         try setupMediaSources([firstSource, preloadedSource])
@@ -507,9 +507,9 @@ class MediaPeriodQueueTest {
             state: .ready,
             playbackError: nil,
             isLoading: false,
-            trackGroups: [],
-            trackSelectorResult: TrackSelectionResult(
-                renderersConfig: [],
+            trackGroups: .empty,
+            trackSelectorResult: TrackSelectorResult(
+                rendererConfigurations: [],
                 selections: [],
                 tracks: .empty
             ),
@@ -552,9 +552,9 @@ class MediaPeriodQueueTest {
             requestedContentPositionUs: .timeUnset,
             discontinuityStartPositionUs: 0,
             totalBufferedDurationUs: 0,
-            trackGroups: [],
+            trackGroups: .empty,
             trackSelectorResult: .init(
-                renderersConfig: [],
+                rendererConfigurations: [],
                 selections: [],
                 tracks: .empty
             )

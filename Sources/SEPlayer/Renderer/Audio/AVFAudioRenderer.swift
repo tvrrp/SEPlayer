@@ -72,12 +72,21 @@ final class AVFAudioRenderer: BaseSERenderer {
         renderSynchronizer.removeRenderer(audioRenderer, at: .zero)
     }
 
-    override func getTimebase() -> TimebaseSource? {
-        .renderSynchronizer(renderSynchronizer)
+    override func getTimebase() -> CMTimebase? {
+        renderSynchronizer.timebase
     }
 
     override func getMediaClock() -> MediaClock? { self }
-    override func getCapabilities() -> RendererCapabilities { self }
+
+    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+        RendererCapabilities.Support(
+            formatSupport: try AudioConverterDecoder.supportsFormat(format),
+            adaptiveSupport: .notSupported,
+            hardwareAccelerationSupport: .notSupported,
+            decoderSupport: .primary,
+            tunnelingSupport: .supported,
+        )
+    }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
         if outputStreamEnded {
@@ -458,16 +467,5 @@ extension AVFAudioRenderer: MediaClock {
         }
 
         return currentPositionUs
-    }
-}
-
-extension AVFAudioRenderer: RendererCapabilities {
-    func supportsFormat(_ format: Format) -> Bool {
-        guard let formatDescription = try? format.buildFormatDescription(),
-              formatDescription.mediaType == .audio else {
-            return false
-        }
-
-        return AudioConverterDecoder.formatSupported(formatDescription)
     }
 }

@@ -9,9 +9,9 @@ import AVFoundation
 
 final class DefaultMediaClock: MediaClock {
     private let standaloneClock: StandaloneClock
+    private let rendererTimebase: CMTimebase
 
     private var rendererClock: MediaClock?
-    private var rendererTimebase: TimebaseSource?
     private var renderClockSource: SERenderer?
 
     private var playbackParameters: PlaybackParameters = .default
@@ -20,23 +20,27 @@ final class DefaultMediaClock: MediaClock {
 
     init(clock: SEClock) throws {
         standaloneClock = try StandaloneClock(clock: clock)
+        rendererTimebase = try CMTimebase(sourceTimebase: standaloneClock.timebase)
     }
 
-    func getTimebase() -> TimebaseSource? {
-        rendererTimebase ?? standaloneClock.timebase
+    func getTimebase() -> CMTimebase? {
+        rendererTimebase
     }
 
     func start() {
+        try! rendererTimebase.setRate(Double(playbackParameters.playbackRate))
         standaloneClockIsStarted = true
         standaloneClock.start()
     }
 
     func stop() {
+        try! rendererTimebase.setRate(.zero)
         standaloneClockIsStarted = false
         standaloneClock.stop()
     }
 
     func resetPosition(positionUs: Int64) {
+        try! rendererTimebase.setTime(.from(microseconds: positionUs))
         standaloneClock.resetPosition(positionUs: positionUs)
     }
 
@@ -48,9 +52,8 @@ final class DefaultMediaClock: MediaClock {
             rendererMediaClock.setPlaybackParameters(new: standaloneClock.getPlaybackParameters())
         }
 
-        let rendererTimebase = renderer.getTimebase()
-        if let rendererTimebase, rendererTimebase != self.rendererTimebase {
-            self.rendererTimebase = rendererTimebase
+        if let rendererSourceTimebase = renderer.getTimebase() {
+            self.rendererTimebase.source = rendererSourceTimebase
         }
     }
 
@@ -58,7 +61,8 @@ final class DefaultMediaClock: MediaClock {
         if renderer === rendererClock {
             rendererClock = nil
             renderClockSource = nil
-            rendererTimebase = nil
+
+            rendererTimebase.source = standaloneClock.timebase
         }
     }
 
@@ -104,6 +108,7 @@ final class DefaultMediaClock: MediaClock {
         }
 
         standaloneClock.resetPosition(positionUs: rendererClockPosition)
+        try! rendererTimebase.setTime(.from(microseconds: rendererClockPosition))
         let playbackParameters = rendererClock.getPlaybackParameters()
         if playbackParameters != standaloneClock.getPlaybackParameters() {
             standaloneClock.setPlaybackParameters(new: playbackParameters)

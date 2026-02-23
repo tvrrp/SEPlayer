@@ -10,10 +10,10 @@ import CoreMedia
 public protocol SERenderer: AnyObject {
     var trackType: TrackType { get }
     func handleMessage(_ message: RendererMessage) throws
-    func getCapabilities() -> RendererCapabilities
+    func getCapabilities() -> RendererCapabilitiesResolver
 
     func getMediaClock() -> MediaClock?
-    func getTimebase() -> TimebaseSource?
+    func getTimebase() -> CMTimebase?
     func getState() -> SERendererState
     func enable(
         formats: [Format],

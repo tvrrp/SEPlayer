@@ -43,13 +43,11 @@ final class Prewarmer {
                 return
             }
 
-            let format = try? Format.Builder()
-                .setInitializationData(PrewarmerAudioInitializationData(formatDescription: codecInfo))
+            let format = Format.Builder()
+                .setInitializationData(PrewarmerInitializationData(formatDescription: codecInfo))
                 .build()
-                .buildFormatDescription()
 
-            guard let format else { return }
-            _ = AudioConverterDecoder.formatSupported(format)
+            _ = try? AudioConverterDecoder.supportsFormat(format)
         }
     }
 
@@ -77,7 +75,7 @@ final class Prewarmer {
     }
 }
 
-private struct PrewarmerAudioInitializationData: Format.InitializationData {
+private struct PrewarmerInitializationData: Format.InitializationData {
     let formatDescription: CMFormatDescription
 
     func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {

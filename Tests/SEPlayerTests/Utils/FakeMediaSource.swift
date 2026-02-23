@@ -11,7 +11,7 @@ import Testing
 
 class FakeMediaSource: BaseMediaSource {
     let queue: Queue
-    private let trackGroups: [TrackGroup]
+    private let trackGroupArray: TrackGroupArray
     private let trackDataFactory: FakeMediaPeriod.TrackDataFactory?
     private let syncSampleTimesUs: [Int64]?
     private var activeMediaPeriods: NSHashTable<FakeMediaPeriod>
@@ -37,7 +37,7 @@ class FakeMediaSource: BaseMediaSource {
         try self.init(
             queue: queue,
             timeline: timeline,
-            trackGroups: Self.buildTrackGroups(formats: formats)
+            trackGroupArray: Self.buildTrackGroupArray(formats: formats)
         )
     }
 
@@ -46,10 +46,10 @@ class FakeMediaSource: BaseMediaSource {
         timeline: Timeline? = nil,
         trackDataFactory: FakeMediaPeriod.TrackDataFactory? = nil,
         syncSampleTimesUs: [Int64]? = nil,
-        trackGroups: [TrackGroup]
+        trackGroupArray: TrackGroupArray
     ) {
         self.queue = queue
-        self.trackGroups = trackGroups
+        self.trackGroupArray = trackGroupArray
         self.trackDataFactory = trackDataFactory
         self.syncSampleTimesUs = syncSampleTimesUs
         self.timeline = timeline
@@ -120,7 +120,7 @@ class FakeMediaSource: BaseMediaSource {
         timeline.getPeriod(periodIndex: periodIndex, period: Period())
         let mediaPeriod = try createMediaPeriod(
             id: id,
-            trackGroups: trackGroups,
+            trackGroups: trackGroupArray,
             allocator: allocator,
             transferListener: transferListener
         )
@@ -167,7 +167,7 @@ class FakeMediaSource: BaseMediaSource {
 
     func createMediaPeriod(
         id: MediaPeriodId,
-        trackGroups: [TrackGroup],
+        trackGroups: TrackGroupArray,
         allocator: Allocator,
         transferListener: TransferListener?
     ) throws -> FakeMediaPeriod {
@@ -205,8 +205,8 @@ extension FakeMediaSource {
         }
     }
 
-    static func buildTrackGroups(formats: [Format]) throws -> [TrackGroup] {
-        try formats.map { try TrackGroup(formats: [$0]) }
+    static func buildTrackGroupArray(formats: [Format]) throws -> TrackGroupArray {
+        TrackGroupArray(trackGroups: try formats.map { try TrackGroup(formats: [$0]) })
     }
 }
 

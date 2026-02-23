@@ -63,8 +63,8 @@ final class RenderersHolder {
     }
     
     func maybeSetOldStreamToFinal(
-        oldTrackSelectorResult: TrackSelectionResult,
-        newTrackSelectorResult: TrackSelectionResult,
+        oldTrackSelectorResult: TrackSelectorResult,
+        newTrackSelectorResult: TrackSelectorResult,
         streamEndPositionUs: Int64
     ) {
         let oldRendererEnabled = oldTrackSelectorResult.isRendererEnabled(for: index)
@@ -78,9 +78,9 @@ final class RenderersHolder {
         
         if oldRendererEnabled, !oldRenderer.isCurrentStreamFinal() {
             let isNoSampleRenderer = trackType == .none
-            let oldConfig = oldTrackSelectorResult.renderersConfig[index]
-            let newConfig = newTrackSelectorResult.renderersConfig[index]
-            
+            let oldConfig = oldTrackSelectorResult.rendererConfigurations[index]
+            let newConfig = newTrackSelectorResult.rendererConfigurations[index]
+
             if !newRendererEnabled || oldConfig != newConfig || isNoSampleRenderer || isPrewarming {
                 setCurrentStreamFinalInternal(renderer: oldRenderer, streamEndPositionUs: streamEndPositionUs)
             }
@@ -301,7 +301,7 @@ final class RenderersHolder {
 
     func replaceStreamsOrDisableRendererForTransition(
         readingPeriodHolder: MediaPeriodHolder,
-        newTrackSelectorResult: TrackSelectionResult,
+        newTrackSelectorResult: TrackSelectorResult,
         mediaClock: DefaultMediaClock
     ) throws -> Bool {
         let primaryRendererResult = try! replaceStreamsOrDisableRendererForTransitionInternal(
@@ -309,7 +309,6 @@ final class RenderersHolder {
             readingPeriodHolder: readingPeriodHolder,
             newTrackSelectorResult: newTrackSelectorResult,
             mediaClock: mediaClock
-            
         )
 
         let secondaryRendererResult = try! replaceStreamsOrDisableRendererForTransitionInternal(
@@ -317,7 +316,6 @@ final class RenderersHolder {
             readingPeriodHolder: readingPeriodHolder,
             newTrackSelectorResult: newTrackSelectorResult,
             mediaClock: mediaClock
-            
         )
 
         return primaryRendererResult ? secondaryRendererResult : primaryRendererResult
@@ -330,7 +328,7 @@ final class RenderersHolder {
         secondaryRequiresReset = false
     }
 
-    func setControlTimebase(_ timebase: TimebaseSource?) throws {
+    func setControlTimebase(_ timebase: CMTimebase?) throws {
         guard let timebase else {
             try primaryRenderer.handleMessage(.setControlTimebase(timebase))
             try secondaryRenderer?.handleMessage(.setControlTimebase(timebase))
@@ -505,7 +503,7 @@ private extension RenderersHolder {
     func replaceStreamsOrDisableRendererForTransitionInternal(
         _ renderer: SERenderer?,
         readingPeriodHolder: MediaPeriodHolder,
-        newTrackSelectorResult: TrackSelectionResult,
+        newTrackSelectorResult: TrackSelectorResult,
         mediaClock: DefaultMediaClock
     ) throws -> Bool {
         guard let renderer, isRendererEnabled(renderer: renderer),

@@ -12,7 +12,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         func sourceInfoRefreshed(durationUs: Int64, seekMap: SeekMap, isLive: Bool)
     }
 
-    var trackGroups: [TrackGroup] { trackState.tracks }
+    var trackGroups: TrackGroupArray { trackState.tracks }
     var isLoading: Bool { queue.sync { loader.isLoading() && loadCondition.isOpen } }
 
     private let queue: Queue
@@ -131,7 +131,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
         for (index, selection) in selections.enumerated() {
             if let selection, streams[index] == nil {
-                if let trackIndex = tracks.index(of: selection.trackGroup)  {
+                if let trackIndex = tracks.firstIndex(of: selection.trackGroup)  {
                     streams[index] = SampleStreamHolder(
                         track: trackIndex,
                         isReadyClosure: isReady,
@@ -553,7 +553,7 @@ private extension ProgressiveMediaPeriod {
             }
         }
 
-        trackState = TrackState(tracks: trackGroups, isAudioOrVideo: isAudioOrVideo)
+        trackState = TrackState(tracks: .init(trackGroups: trackGroups), isAudioOrVideo: isAudioOrVideo)
         listener?.sourceInfoRefreshed(durationUs: durationUs, seekMap: seekMap, isLive: false)
         isPrepared = true
         callback?.didPrepare(mediaPeriod: self)
@@ -642,17 +642,19 @@ private extension ProgressiveMediaPeriod {
     }
 
     struct TrackState {
-        let tracks: [TrackGroup]
+        let tracks: TrackGroupArray
         let isAudioOrVideo: [Bool]
         var trackEnabledState: [Bool]
+        var trackNotifiedDownstreamFormats: [Bool]
 
-        init(tracks: [TrackGroup], isAudioOrVideo: [Bool]) {
+        init(tracks: TrackGroupArray, isAudioOrVideo: [Bool]) {
             self.tracks = tracks
             self.isAudioOrVideo = isAudioOrVideo
-            self.trackEnabledState = Array(repeating: false, count: tracks.count)
+            trackEnabledState = Array(repeating: false, count: tracks.count)
+            trackNotifiedDownstreamFormats = Array(repeating: false, count: tracks.count)
         }
 
-        static var empty: TrackState = .init(tracks: [], isAudioOrVideo: [])
+        static var empty: TrackState = .init(tracks: .empty, isAudioOrVideo: [])
     }
 }
 

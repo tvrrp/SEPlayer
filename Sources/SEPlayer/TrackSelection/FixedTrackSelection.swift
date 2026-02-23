@@ -5,12 +5,23 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
-import Foundation.NSUUID
+final class FixedTrackSelection: BaseTrackSelection {
+    override var selectedReason: TrackSelectionReason { _selectedReason }
+    override var selectionData: Any? { data }
+    override var selectedIndex: Int { 0 }
 
-struct FixedTrackSelection: SETrackSelection {
-    let id = UUID()
-    let trackGroup: TrackGroup
-    let selectedReason: TrackSelectionReason = .unknown
-    let selectedIndex: Int = 0
-    var selectedFormat: Format { trackGroup.formats[selectedIndex] }
+    private let _selectedReason: TrackSelectionReason
+    private let data: Any?
+
+    init(
+        group: TrackGroup,
+        track: Int,
+        type: TrackSelectionType = .unset,
+        reason: TrackSelectionReason = .unknown,
+        data: Any? = nil
+    ) {
+        _selectedReason = reason
+        self.data = data
+        super.init(group: group, tracks: [track], type: type)
+    }
 }

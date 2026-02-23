@@ -20,8 +20,10 @@ public final class Format: Sendable {
     let label: String?
     let labels: [String]
     let language: String?
+    let roleFlags: RoleFlags
     let averageBitrate: Int
     let peakBitrate: Int
+    let bitrate: Int
     let codecs: String?
 
     // Container specific.
@@ -56,8 +58,10 @@ public final class Format: Sendable {
         label = builder.label
         labels = builder.labels
         language = builder.language
+        roleFlags = builder.roleFlags
         averageBitrate = builder.averageBitrate
         peakBitrate = builder.peakBitrate
+        bitrate = peakBitrate != Format.noValue ? peakBitrate : averageBitrate
         codecs = builder.codecs
         // Container specific.
         containerMimeType = builder.containerMimeType
@@ -165,6 +169,7 @@ extension Format {
         fileprivate var label: String?
         fileprivate var labels: [String]
         fileprivate var language: String?
+        fileprivate var roleFlags = RoleFlags()
         fileprivate var averageBitrate: Int
         fileprivate var peakBitrate: Int
         fileprivate var codecs: String?
@@ -226,6 +231,7 @@ extension Format {
             label = format.label
             labels = format.labels
             language = format.language
+            roleFlags = format.roleFlags
             averageBitrate = format.averageBitrate
             peakBitrate = format.peakBitrate
             codecs = format.codecs
@@ -280,6 +286,12 @@ extension Format {
         @discardableResult
         func setLanguage(_ language: String?) -> Builder {
             self.language = language
+            return self
+        }
+
+        @discardableResult
+        func setRoleFlags(_ roleFlags: RoleFlags) -> Builder {
+            self.roleFlags = roleFlags
             return self
         }
 

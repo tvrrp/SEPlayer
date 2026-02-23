@@ -69,7 +69,6 @@ enum MimeTypes: String {
     case audioWAV = "audio/wav"
     case audioMIDI = "audio/midi"
     case audioIAMF = "audio/iamf"
-    case audioExoplayerMIDI = "audio/x-exoplayer-midi"
     case audioUnknown = "audio/x-unknown"
 
     // MARK: - Text
@@ -125,9 +124,23 @@ enum MimeTypes: String {
 }
 
 extension MimeTypes {
-    var isVideo: Bool { self.rawValue.hasPrefix("video") }
     var isAudio: Bool { self.rawValue.hasPrefix("audio") }
+    var isVideo: Bool { self.rawValue.hasPrefix("video") }
     var isImage: Bool { self.rawValue.hasPrefix("image") }
+    var isText: Bool {
+        self.rawValue.hasPrefix("text")
+            || self == .applicationMedia3Cues
+            || self == .applicationCEA608
+            || self == .applicationCEA708
+            || self == .applicationMP4CEA608
+            || self == .applicationSubrip
+            || self == .applicationTTML
+            || self == .applicationTX3G
+            || self == .applicationMP4VTT
+            || self == .applicationVobSub
+            || self == .applicationPGS
+            || self == .applicationDVBSubs
+    }
     var isApplication: Bool { self.rawValue.hasPrefix("application") }
 
     var trackType: TrackType {
@@ -158,6 +171,33 @@ extension Optional where Wrapped == MimeTypes {
             return true // TODO: check for codec type
         default:
             return false
+        }
+    }
+
+    var trackType: TrackType {
+        guard let mimeType = self else { return .unknown }
+
+        if mimeType.isAudio {
+            return .audio
+        } else if mimeType.isVideo {
+            return .video
+        } else if mimeType.isText {
+            return .text
+        } else if mimeType.isImage {
+            return .image
+        } else {
+            switch mimeType {
+            case .applicationID3,
+                 .applicationEMSG,
+                 .applicationSCTE35,
+                 .applicationICY,
+                 .applicationAIT:
+                return .metadata
+            case .applicationCameraMotion:
+                return .cameraMotion
+            default:
+                return .unknown
+            }
         }
     }
 }

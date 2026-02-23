@@ -16,8 +16,8 @@ struct PlaybackInfo {
     private(set) var state: PlayerState
     private(set) var playbackError: Error?
     private(set) var isLoading: Bool
-    private(set) var trackGroups: [TrackGroup]
-    private(set) var trackSelectorResult: TrackSelectionResult
+    private(set) var trackGroups: TrackGroupArray
+    private(set) var trackSelectorResult: TrackSelectorResult
     private(set) var loadingMediaPeriodId: MediaPeriodId
     private(set) var playWhenReady: Bool
     private(set) var playWhenReadyChangeReason: PlayWhenReadyChangeReason
@@ -41,8 +41,8 @@ struct PlaybackInfo {
         state: PlayerState,
         playbackError: Error? = nil,
         isLoading: Bool,
-        trackGroups: [TrackGroup],
-        trackSelectorResult: TrackSelectionResult,
+        trackGroups: TrackGroupArray,
+        trackSelectorResult: TrackSelectorResult,
         loadingMediaPeriodId: MediaPeriodId,
         playWhenReady: Bool,
         playWhenReadyChangeReason: PlayWhenReadyChangeReason,
@@ -76,7 +76,7 @@ struct PlaybackInfo {
         self.object = object
     }
 
-    static func dummy(clock: SEClock, emptyTrackSelectorResult: TrackSelectionResult) -> PlaybackInfo {
+    static func dummy(clock: SEClock, emptyTrackSelectorResult: TrackSelectorResult) -> PlaybackInfo {
         PlaybackInfo(
             clock: clock,
             timeline: emptyTimeline,
@@ -86,7 +86,7 @@ struct PlaybackInfo {
             state: .idle,
             playbackError: nil,
             isLoading: false,
-            trackGroups: [],
+            trackGroups: TrackGroupArray.empty,
             trackSelectorResult: emptyTrackSelectorResult,
             loadingMediaPeriodId: PlaybackInfo.placeholderMediaPeriodId,
             playWhenReady: false,
@@ -114,8 +114,8 @@ struct PlaybackInfo {
         requestedContentPositionUs: Int64,
         discontinuityStartPositionUs: Int64,
         totalBufferedDurationUs: Int64,
-        trackGroups: [TrackGroup],
-        trackSelectorResult: TrackSelectionResult
+        trackGroups: TrackGroupArray,
+        trackSelectorResult: TrackSelectorResult
     ) -> PlaybackInfo {
         var newValue = self
         newValue.object = NSObject()

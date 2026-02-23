@@ -55,7 +55,9 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
         try setInitialInputBufferSize(maximumPacketSize)
     }
 
-    static func formatSupported(_ formatDescription: CMFormatDescription) -> Bool {
+    static func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support.FormatSupport {
+        let formatDescription = try format.buildFormatDescription()
+        guard formatDescription.mediaType == .audio else { return .unsupportedType }
         let inputFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
         let outputFormat = if let channelLayout = inputFormat.channelLayout {
             AVAudioFormat(
@@ -73,8 +75,10 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
             )
         }
 
-        guard let outputFormat else { return false }
-        return AVAudioConverter(from: inputFormat, to: outputFormat) != nil
+        guard let outputFormat else { return .unsupportedSubtype }
+        let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+
+        return converter != nil ? .handled : .unsupportedSubtype
     }
 
     override func createInputBuffer() -> ACDecoderInputBuffer {
