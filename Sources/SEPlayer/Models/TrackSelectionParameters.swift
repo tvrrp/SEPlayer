@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import SEPlayerCommon
 
 // TODO: RoleFlags setters
 public class TrackSelectionParameters: Hashable {

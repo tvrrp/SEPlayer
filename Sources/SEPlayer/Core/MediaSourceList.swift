@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
+import DataSource
 import Foundation.NSUUID
+import SEPlayerCommon
 
 protocol MediaSourceInfoHolder {
     var id: AnyHashable { get }

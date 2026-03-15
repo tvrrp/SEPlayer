@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import SEPlayerCommon
 
 public protocol VideoSampleBufferRendererDelegate: AnyObject {
     nonisolated var isolation: any Actor { get }

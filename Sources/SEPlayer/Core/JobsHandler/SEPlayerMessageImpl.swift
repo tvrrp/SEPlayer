@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 20.11.2025.
 //
 
+import SEPlayerCommon
+
 enum SEPlayerMessageImpl: MessageKind {
     case noMessage
     case playWhenReady(

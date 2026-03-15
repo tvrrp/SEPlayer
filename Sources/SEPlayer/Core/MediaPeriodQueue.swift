@@ -6,6 +6,7 @@
 //
 
 import Foundation.NSUUID
+import SEPlayerCommon
 
 final class MediaPeriodQueue {
     var playing: MediaPeriodHolder?

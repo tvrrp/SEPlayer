@@ -5,6 +5,8 @@
 //  Created by tvrrp on 13.02.2026.
 //
 
+import SEPlayerCommon
+
 public struct TrackSelectionOverride: Hashable {
     public var type: TrackType { mediaTrackGroup.type }
     public let mediaTrackGroup: TrackGroup

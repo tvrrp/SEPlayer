@@ -6,6 +6,8 @@
 //
 
 import AVFoundation
+import Decoder
+import SEPlayerCommon
 
 final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoderOutputBuffer, ACDecoderError> {
     private let audioConverter: AVAudioConverter

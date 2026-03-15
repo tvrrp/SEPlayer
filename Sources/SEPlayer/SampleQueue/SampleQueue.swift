@@ -5,7 +5,10 @@
 //  Created by Damir Yackupov on 07.04.2025.
 //
 
+import Decoder
 import Foundation
+import Extractor
+import SEPlayerCommon
 
 protocol SampleQueueDelegate: AnyObject {
     func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format)
@@ -336,7 +339,7 @@ extension SampleQueue: TrackOutput {
         try sampleDataQueue.loadSampleData(buffer: data, length: length, isolation: isolation)
     }
 
-    func setFormat(_ format: Format) {
+    func setFormat(_ format: Format, isolation: isolated any Actor) {
         let adjustedUpstreamFormat = getAdjustedUpstreamFormat(format)
         upstreamFormatAdjustmentRequired = false
         unadjustedUpstreamFormat = format
@@ -349,9 +352,9 @@ extension SampleQueue: TrackOutput {
         upstreamFormatAdjustmentRequired = true
     }
 
-    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int) {
+    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int, isolation: isolated any Actor) {
         if upstreamFormatAdjustmentRequired, let unadjustedUpstreamFormat {
-            setFormat(unadjustedUpstreamFormat)
+            setFormat(unadjustedUpstreamFormat, isolation: isolation)
         }
 
         let isKeyframe = flags.contains(.keyframe)

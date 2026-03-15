@@ -6,6 +6,7 @@
 //
 
 import Foundation.NSUUID
+import SEPlayerCommon
 
 final class MaskingMediaSource: WrappingMediaSource {
     let useLazyPreparation: Bool
@@ -265,7 +266,7 @@ extension MaskingMediaSource {
         }
     }
 
-    struct PlaceholderTimeline: Timeline {
+    final class PlaceholderTimeline: Timeline {
         private let mediaItem: MediaItem
 
         init(mediaItem: MediaItem) {
@@ -278,11 +279,13 @@ extension MaskingMediaSource {
             window.set(
                 id: Window.singleWindowId,
                 mediaItem: mediaItem,
+                manifest: nil,
                 presentationStartTimeMs: .timeUnset,
                 windowStartTimeMs: .timeUnset,
                 elapsedRealtimeEpochOffsetMs: .timeUnset,
                 isSeekable: false,
                 isDynamic: true,
+                liveConfiguration: nil,
                 defaultPositionUs: 0,
                 durationUs: .timeUnset,
                 firstPeriodIndex: 0,

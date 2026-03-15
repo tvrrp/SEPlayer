@@ -6,6 +6,8 @@
 //
 
 import Foundation.NSURLSession
+import Extractor
+import SEPlayerCommon
 
 final class BundledMediaExtractor: ProgressiveMediaExtractor {
     private let syncActor: PlayerActor
@@ -32,7 +34,7 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
         self.extractorInput = extractorInput
         guard extractor == nil else { return }
         let httpHeaders = (response as? HTTPURLResponse)?.allHeaderFields ?? [:]
-        let extractors = extractorsFactory.createExtractors(output: output, url: url, httpHeaders: httpHeaders)
+        let extractors = extractorsFactory.createExtractors(url: url, httpHeaders: httpHeaders)
 
         var sniffFailures = [SniffFailure]()
         if extractors.count == 1 {
@@ -42,30 +44,36 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
                 func postAction() { extractorInput.resetPeekPosition(isolation: isolation) }
 
                 do {
-                    try await extractor.shiff(input: extractorInput, isolation: isolation)
-                    self.extractor = extractor
-                    postAction()
-                    break
-                } catch {
-                    if let error = error as? SniffFailure {
-                        sniffFailures.append(error)
+                    if try await extractor.shiff(input: extractorInput, isolation: isolation) {
+                        self.extractor = extractor
+                        postAction()
+                        break
+                    } else {
+                        sniffFailures.append(contentsOf: extractor.getSniffFailureDetails(isolation: isolation))
                     }
+                } catch is EndOfFileError {
+                    // Do nothing
                 }
 
                 postAction()
             }
 
             if extractor == nil {
-                fatalError("\(sniffFailures)")
-                // TODO: throw error
+                throw UnrecognizedInputFormatError(
+                    message: "None of the available extractors could read the stream.",
+                    url: url,
+                    sniffFailures: sniffFailures
+                )
             }
         }
+
+        try extractor?.initialize(output: output, isolation: isolation)
     }
 
     func release() {
         Task {
             await syncActor.run { _ in
-                extractor?.release()
+                await extractor?.release(isolation: syncActor)
                 extractor = nil
                 extractorInput = nil
             }
@@ -77,9 +85,9 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
         return extractorInput?.getPosition(isolation: isolation)
     }
 
-    func seek(position: Int, time: Int64, isolation: isolated any Actor) {
+    func seek(position: Int, time: Int64, isolation: isolated any Actor) throws {
         syncActor.assertIsolated()
-        extractor?.seek(to: position, timeUs: time, isolation: isolation)
+        try extractor?.seek(to: position, timeUs: time, isolation: isolation)
     }
 
     func read(isolation: isolated any Actor) async throws -> ExtractorReadResult {

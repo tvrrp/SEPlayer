@@ -6,6 +6,7 @@
 //
 
 import Dispatch
+import SEPlayerCommon
 
 class BaseTrackSelection: SETrackSelection, Hashable {
     let trackGroup: TrackGroup
@@ -59,6 +60,20 @@ class BaseTrackSelection: SETrackSelection, Hashable {
     func enable() {}
     func disable() {}
     func playbackSpeedDidChange(_ playbackSpeed: Float) {}
+
+    func updateSelectedTrack(
+        playbackPositionUs: Int64,
+        bufferedDurationUs: Int64,
+        availableDurationUs: Int64,
+        queue: [MediaChunk],
+        mediaChunkIterators: [MediaChunkIterator]
+    ) {
+        fatalError()
+    }
+
+    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int {
+        queue.count
+    }
 
     func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool {
         let nowMs = DispatchTime.now().milliseconds

@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import SEPlayerCommon
 
 final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
     nonisolated(unsafe) weak var delegate: VideoSampleBufferRendererDelegate? {

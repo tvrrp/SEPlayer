@@ -6,10 +6,10 @@
 //
 
 import Foundation.NSUUID
+import SEPlayerCommon
 
-struct SinglePeriodTimeline: Timeline {
+final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
     private static let uuid = UUID()
-    private let mediaItem: MediaItem
     private let presentationStartTimeMs: Int64
     private let windowStartTimeMs: Int64
     private let elapsedRealtimeEpochOffsetMs: Int64
@@ -20,21 +20,74 @@ struct SinglePeriodTimeline: Timeline {
     private let isSeekable: Bool
     private let isDynamic: Bool
     private let suppressPositionProjection: Bool
+    private let manifest: Any?
+    private let mediaItem: MediaItem
+    private let liveConfiguration: MediaItem.LiveConfiguration?
 
-    init(
-        mediaItem: MediaItem,
-        presentationStartTimeMs: Int64 = .timeUnset,
-        windowStartTimeMs: Int64 = .timeUnset,
-        elapsedRealtimeEpochOffsetMs: Int64 = .timeUnset,
-        periodDurationUs: Int64,
-        windowDurationUs: Int64,
-        windowPositionInPeriodUs: Int64 = .zero,
-        windowDefaultStartPositionUs: Int64 = .zero,
+    convenience init(
+        durationUs: Int64,
         isSeekable: Bool,
         isDynamic: Bool,
-        suppressPositionProjection: Bool = false
+        useLiveConfiguration: Bool,
+        manifest: Any?,
+        mediaItem: MediaItem,
     ) {
-        self.mediaItem = mediaItem
+        self.init(
+            periodDurationUs: durationUs,
+            windowDurationUs: durationUs,
+            windowPositionInPeriodUs: 0,
+            windowDefaultStartPositionUs: 0,
+            isSeekable: isSeekable,
+            isDynamic: isDynamic,
+            useLiveConfiguration: useLiveConfiguration,
+            manifest: manifest,
+            mediaItem: mediaItem
+        )
+    }
+
+    convenience init(
+        periodDurationUs: Int64,
+        windowDurationUs: Int64,
+        windowPositionInPeriodUs: Int64,
+        windowDefaultStartPositionUs: Int64,
+        isSeekable: Bool,
+        isDynamic: Bool,
+        useLiveConfiguration: Bool,
+        manifest: Any?,
+        mediaItem: MediaItem,
+    ) {
+        self.init(
+            presentationStartTimeMs: .timeUnset,
+            windowStartTimeMs: .timeUnset,
+            elapsedRealtimeEpochOffsetMs: .timeUnset,
+            periodDurationUs: periodDurationUs,
+            windowDurationUs: windowDurationUs,
+            windowPositionInPeriodUs: windowPositionInPeriodUs,
+            windowDefaultStartPositionUs: windowDefaultStartPositionUs,
+            isSeekable: isSeekable,
+            isDynamic: isDynamic,
+            suppressPositionProjection: false,
+            manifest: manifest,
+            mediaItem: mediaItem,
+            liveConfiguration: useLiveConfiguration ? mediaItem.liveConfiguration : nil
+        )
+    }
+
+    init(
+        presentationStartTimeMs: Int64,
+        windowStartTimeMs: Int64,
+        elapsedRealtimeEpochOffsetMs: Int64,
+        periodDurationUs: Int64,
+        windowDurationUs: Int64,
+        windowPositionInPeriodUs: Int64,
+        windowDefaultStartPositionUs: Int64,
+        isSeekable: Bool,
+        isDynamic: Bool,
+        suppressPositionProjection: Bool,
+        manifest: Any?,
+        mediaItem: MediaItem,
+        liveConfiguration: MediaItem.LiveConfiguration?
+    ) {
         self.presentationStartTimeMs = presentationStartTimeMs
         self.windowStartTimeMs = windowStartTimeMs
         self.elapsedRealtimeEpochOffsetMs = elapsedRealtimeEpochOffsetMs
@@ -45,6 +98,9 @@ struct SinglePeriodTimeline: Timeline {
         self.isSeekable = isSeekable
         self.isDynamic = isDynamic
         self.suppressPositionProjection = suppressPositionProjection
+        self.manifest = manifest
+        self.mediaItem = mediaItem
+        self.liveConfiguration = liveConfiguration
     }
 
     func windowCount() -> Int { 1 }
@@ -66,11 +122,13 @@ struct SinglePeriodTimeline: Timeline {
         return window.set(
             id: Window.singleWindowId,
             mediaItem: mediaItem,
+            manifest: manifest,
             presentationStartTimeMs: presentationStartTimeMs,
             windowStartTimeMs: windowStartTimeMs,
             elapsedRealtimeEpochOffsetMs: elapsedRealtimeEpochOffsetMs,
             isSeekable: isSeekable,
             isDynamic: isDynamic,
+            liveConfiguration: liveConfiguration,
             defaultPositionUs: windowDefaultStartPositionUs,
             durationUs: windowDurationUs,
             firstPeriodIndex: 0,

@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import SEPlayerCommon
 
 public protocol SEClock {
     var clock: CMClock { get }

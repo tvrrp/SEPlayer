@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import SEPlayerCommon
+
 public class ForwardingTimeline: Timeline, @unchecked Sendable {
     public let timeline: Timeline
 

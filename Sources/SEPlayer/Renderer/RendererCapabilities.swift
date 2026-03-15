@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 23.04.2025.
 //
 
+import SEPlayerCommon
+
 public enum RendererCapabilities {
     public struct Support {
         let formatSupport: FormatSupport

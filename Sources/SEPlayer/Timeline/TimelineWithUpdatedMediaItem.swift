@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import SEPlayerCommon
+
 final class TimelineWithUpdatedMediaItem: ForwardingTimeline, @unchecked Sendable {
     private let updatedMediaItem: MediaItem
 

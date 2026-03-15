@@ -6,6 +6,7 @@
 //
 
 import Foundation.NSUUID
+import SEPlayerCommon
 
 public protocol LoadControl {
     var queue: Queue { get }

@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 21.05.2025.
 //
 
-struct PlaylistTimeline: AbstractConcatenatedTimeline, @unchecked Sendable {
+import SEPlayerCommon
+
+final class PlaylistTimeline: AbstractConcatenatedTimeline, @unchecked Sendable {
     let timelines: [Timeline]
     let shuffleOrder: ShuffleOrder
     let isAtomic: Bool = false
@@ -18,7 +20,7 @@ struct PlaylistTimeline: AbstractConcatenatedTimeline, @unchecked Sendable {
     private let ids: [AnyHashable]
     private let childIndexById: [AnyHashable: Int]
 
-    init(mediaSourceInfoHolders: [MediaSourceInfoHolder], shuffleOrder: ShuffleOrder) {
+    convenience init(mediaSourceInfoHolders: [MediaSourceInfoHolder], shuffleOrder: ShuffleOrder) {
         self.init(
             timelines: mediaSourceInfoHolders.map { $0.timeline },
             ids: mediaSourceInfoHolders.map { $0.id },

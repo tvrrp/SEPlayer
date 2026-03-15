@@ -6,6 +6,7 @@
 //
 
 import Dispatch
+import SEPlayerCommon
 
 public protocol HandlerWrapperMessage: AnyObject {
     var target: HandlerWrapper? { get }

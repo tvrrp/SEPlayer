@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import DataSource
 import ObjectiveC
+import SEPlayerCommon
 
 class WrappingMediaSource: CompositeMediaSource<NSObject> {
     let mediaSource: MediaSource

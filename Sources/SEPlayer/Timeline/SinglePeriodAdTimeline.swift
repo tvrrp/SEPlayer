@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 14.11.2025.
 //
 
+import SEPlayerCommon
+
 public final class SinglePeriodAdTimeline: ForwardingTimeline, @unchecked Sendable {
     private let adPlaybackState: AdPlaybackState
 

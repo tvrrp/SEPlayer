@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import DataSource
 import Foundation.NSMapTable
+import SEPlayerCommon
 
 class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
     private var childSources = NSMapTable<ID, MediaSourceAndListener>.init()

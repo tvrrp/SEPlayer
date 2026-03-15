@@ -7,6 +7,7 @@
 
 import AVFoundation
 import UIKit
+import SEPlayerCommon
 
 public protocol SEPlayerViewDelegate: AnyObject {
     func willRenderNewBuffer(_ view: SEPlayerView, of size: CGSize)
@@ -19,7 +20,7 @@ public final class SEPlayerView: UIView {
 
     @MainActor public weak var delegate: SEPlayerViewDelegate?
 
-    @MainActor public weak var player: Player? {
+    @MainActor public weak var player: SEPlayer? {
         get {
             assert(Queues.mainQueue.isCurrent())
             return _player
@@ -39,7 +40,7 @@ public final class SEPlayerView: UIView {
         layer as! AVSampleBufferDisplayLayer
     }
 
-    private weak var _player: Player?
+    private weak var _player: SEPlayer?
 
     private var oldIsReadyForMoreMediaData: Bool = true
     private let lock = UnfairLock()
@@ -57,7 +58,7 @@ public final class SEPlayerView: UIView {
 
 private extension SEPlayerView {
     @MainActor
-    func _set(player: Player?) {
+    func _set(player: SEPlayer?) {
         _player?.removeVideoOutput(displayLayer.createRenderer())
 
         player?.setVideoOutput(displayLayer.createRenderer())

@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
+import SEPlayerCommon
+
 final class MediaPeriodHolder {
     var allRenderersInCorrectState: Bool = false
     var renderPositionOffset: Int64
@@ -229,7 +231,7 @@ final class MediaPeriodHolder {
 
         for (index, selection) in trackSelectorResults.selections.enumerated() {
             let rendererEnabled = trackSelectorResults.isRendererEnabled(for: index)
-            if !rendererEnabled, let selection {
+            if rendererEnabled, let selection {
                 selection.disable()
             }
         }

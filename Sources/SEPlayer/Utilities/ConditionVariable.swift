@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SEPlayerCommon
 
 final class ConditionVariable {
     var isOpen: Bool { condition.withLock { _isOpen } }

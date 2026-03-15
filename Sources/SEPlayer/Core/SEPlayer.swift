@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
+@_exported import SEPlayerCommon
+
 public protocol SEPlayer: Player {
     var clock: SEClock { get }
     var preloadConfiguration: PreloadConfiguration { get set }
@@ -25,4 +27,6 @@ public protocol SEPlayer: Player {
     func set(shuffleOrder: ShuffleOrder)
 
     func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage
+    func setVideoOutput(_ output: VideoSampleBufferRenderer)
+    func removeVideoOutput(_ output: VideoSampleBufferRenderer)
 }

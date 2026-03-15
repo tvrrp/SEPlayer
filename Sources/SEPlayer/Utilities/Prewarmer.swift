@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 09.07.2025.
 //
 
+import Extractor
 import VideoToolbox
+import SEPlayerCommon
 
 final class Prewarmer {
     static let shared = Prewarmer()

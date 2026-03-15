@@ -6,6 +6,7 @@
 //
 
 import Foundation.NSUUID
+import SEPlayerCommon
 
 public struct SETrackSelectionDefinition {
     public let group: TrackGroup
@@ -54,16 +55,15 @@ public protocol SETrackSelection: TrackSelection {
     func onRebuffer()
     func playWhenReadyChanged(_ playWhenReady: Bool)
 
-    // TODO: HLS
-//    func updateSelectedTrack(
-//        playbackPositionUs: Int64,
-//        bufferedDurationUs: Int64,
-//        availableDurationUs: Int64,
-//        queue: [Void /*TODO: MediaChunk */],
-//        mediaChunkIterators: [Void /*TODO: MediaChunkIterator */],
-//    )
-//    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int
-//    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Int
+    func updateSelectedTrack(
+        playbackPositionUs: Int64,
+        bufferedDurationUs: Int64,
+        availableDurationUs: Int64,
+        queue: [MediaChunk],
+        mediaChunkIterators: [MediaChunkIterator],
+    )
+    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int
+    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool
 
     func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool
     func isTrackExcluded(index: Int, nowMs: Int64) -> Bool
@@ -77,10 +77,9 @@ extension SETrackSelection {
     func onRebuffer() {}
     func playWhenReadyChanged(_ playWhenReady: Bool) {}
 
-//    TODO: HLS
-//    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Int {
-//        false
-//    }
+    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool {
+        false
+    }
 
     func getLatestBitrateEstimate() -> Int64? { nil }
 }

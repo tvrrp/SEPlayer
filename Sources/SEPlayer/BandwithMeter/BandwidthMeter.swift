@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 25.05.2025.
 //
 
+import DataSource
 import Foundation.NSURLSession
+import SEPlayerCommon
 
 public protocol BandwidthMeterDelegate {
     

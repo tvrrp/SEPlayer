@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 14.12.2025.
 //
 
+import Decoder
 import VideoToolbox
+import SEPlayerCommon
 
 final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, VTDecoderErrors> {
     private var decompressionSession: VTDecompressionSession?

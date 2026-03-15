@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import DataSource
 import Foundation
+import SEPlayerCommon
 
 public protocol MediaSource: AnyObject {
     var isSingleWindow: Bool { get }

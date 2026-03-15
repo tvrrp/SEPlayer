@@ -7,21 +7,55 @@ let package = Package(
     name: "SEPlayer",
     platforms: [ .iOS(.v15)],
     products: [
-        .library(name: "Common", targets: ["Common"]),
+        .library(name: "SEPlayerCommon", targets: ["SEPlayerCommon"]),
+        .library(name: "DataSource", targets: ["DataSource"]),
+        .library(name: "Extractor", targets: ["Extractor"]),
+        .library(name: "Decoder", targets: ["Decoder"]),
         .library(name: "SEPlayer", targets: ["SEPlayer"]),
     ],
     dependencies: [],
     targets: [
         .target(
-            name: "Common",
+            name: "SEPlayerCommon",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
+                .enableExperimentalFeature("Lifetimes"),
+            ]
+        ),
+        .target(
+            name: "DataSource",
+            dependencies: [
+                "SEPlayerCommon",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        .target(
+            name: "Extractor",
+            dependencies: [
+                "SEPlayerCommon",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        .target(
+            name: "Decoder",
+            dependencies: [
+                "SEPlayerCommon",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
             ]
         ),
         .target(
             name: "SEPlayer",
             dependencies: [
-                "Common",
+                "SEPlayerCommon",
+                "DataSource",
+                "Extractor",
+                "Decoder",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
@@ -31,6 +65,9 @@ let package = Package(
         .testTarget(
             name: "SEPlayerTests",
             dependencies: [
+                "SEPlayerCommon",
+                "DataSource",
+                "Extractor",
                 "SEPlayer",
             ],
             swiftSettings: [

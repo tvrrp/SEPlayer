@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SEPlayerCommon
 
 public protocol AllocationNode: AnyObject {
     func getAllocation() -> Allocation?

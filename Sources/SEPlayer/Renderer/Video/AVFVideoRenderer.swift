@@ -6,7 +6,9 @@
 //
 
 import AVFoundation
+import Decoder
 import VideoToolbox
+import SEPlayerCommon
 
 final class AVFVideoRenderer: BaseSERenderer {
     private let queue: Queue
@@ -56,8 +58,19 @@ final class AVFVideoRenderer: BaseSERenderer {
     }
 
     override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-        RendererCapabilities.Support(
-            formatSupport: try VTDecoder.supportsFormat(format),
+        guard format.sampleMimeType.trackType == .video else {
+            return .create(formatSupport: .unsupportedType)
+        }
+
+        let formatSupport: RendererCapabilities.Support.FormatSupport
+        if isFormatSupportedFromAVFAsset(format) {
+            formatSupport = .handled
+        } else {
+            formatSupport = try AudioConverterDecoder.supportsFormat(format)
+        }
+
+        return RendererCapabilities.Support(
+            formatSupport: formatSupport,
             adaptiveSupport: .notSeamless,
             hardwareAccelerationSupport: .supported,
             decoderSupport: .primary,
@@ -372,8 +385,12 @@ final class AVFVideoRenderer: BaseSERenderer {
             }
 
             if waitingForFirstSampleInFormat {
-                formatQueue.add(timestamp: inputBuffer.timeUs, value: inputFormat!) // TODO: make error
+                try formatQueue.add(timestamp: inputBuffer.timeUs, value: inputFormat.checkNotNil())
                 waitingForFirstSampleInFormat = false
+            }
+
+            if getLastResetPosition() > inputBuffer.timeUs, inputBuffer.flags.contains(.notDependedOn) {
+                return true
             }
 
             inputBuffer.format = inputFormat

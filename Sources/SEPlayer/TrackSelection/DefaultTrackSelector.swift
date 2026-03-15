@@ -6,13 +6,14 @@
 //
 
 import AVFoundation
+import SEPlayerCommon
 
 public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesListener {
     private let trackSelectionFactory: SETrackSelectionFactory
     private let lock: UnfairLock
     private var parameters: Parameters
 
-    convenience init(parameters: TrackSelectionParameters = .defaultParameters) {
+    public convenience init(parameters: TrackSelectionParameters = .defaultParameters) {
         self.init(
             parameters: parameters,
             trackSelectionFactory: AdaptiveTrackSelection.Factory()
@@ -54,15 +55,15 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         invalidate()
     }
 
-    override func release() {
+    public override func release() {
         super.release()
     }
 
-    override func getParameters() -> Parameters {
+    public override func getParameters() -> Parameters {
         lock.withLock { parameters }
     }
 
-    override func setParameters(_ parameters: TrackSelectionParameters) {
+    public override func setParameters(_ parameters: TrackSelectionParameters) {
         if let parameters = parameters as? Parameters {
             setParametersInternal(parameters)
         }
@@ -71,11 +72,11 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         setParametersInternal(mergedParameters)
     }
 
-    func setParameters(_ parametersBuilder: Parameters.Builder) {
+    public func setParameters(_ parametersBuilder: Parameters.Builder) {
         setParametersInternal(parametersBuilder.build())
     }
 
-    func buildUponParameters() -> Parameters.Builder {
+    public func buildUponParameters() -> Parameters.Builder {
         getParameters().buildUpon()
     }
 
@@ -92,7 +93,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         }
     }
 
-    override func getRendererCapabilitiesListener() -> RendererCapabilitiesListener? {
+    public override func getRendererCapabilitiesListener() -> RendererCapabilitiesListener? {
         self
     }
 
@@ -100,7 +101,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         maybeInvalidateForRendererCapabilitiesChange(renderer)
     }
 
-    override func selectTracks(
+    public override func selectTracks(
         mappedTrackInfo: MappingTrackSelector.MappedTrackInfo,
         rendererFormatSupports: [[[RendererCapabilities.Support]]],
         rendererMixedMimeTypeAdaptationSupport: [RendererCapabilities.Support.AdaptiveSupport],

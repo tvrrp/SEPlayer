@@ -6,6 +6,7 @@
 //
 
 import CoreMedia
+import SEPlayerCommon
 
 public class ForwardingRenderer: SERenderer {
     public var trackType: TrackType { renderer.trackType }

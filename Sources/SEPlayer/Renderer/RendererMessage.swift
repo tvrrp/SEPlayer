@@ -6,6 +6,7 @@
 //
 
 import CoreMedia
+import SEPlayerCommon
 
 public enum RendererMessage {
     case requestMediaDataWhenReady(queue: Queue, block: () -> Void)

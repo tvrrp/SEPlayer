@@ -6,6 +6,7 @@
 //
 
 import Dispatch
+import SEPlayerCommon
 
 public protocol Loadable {
     func load(isolation: isolated any Actor) async throws
@@ -63,7 +64,7 @@ public final class Loader {
     public func release(completion: (() -> Void)? = nil) {
         currentTask?.cancel(released: true)
         loadQueue.async {
-            self.workQueue.sync { completion?() }
+            self.workQueue.async { completion?() }
         }
     }
 

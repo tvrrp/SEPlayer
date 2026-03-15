@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 26.12.2025.
 //
 
+import SEPlayerCommon
+
 public final class PlayerMessage {
     public protocol Sender: AnyObject {
         func sendMessage(_ message: PlayerMessage)

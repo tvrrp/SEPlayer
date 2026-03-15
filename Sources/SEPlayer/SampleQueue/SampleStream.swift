@@ -5,6 +5,9 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import Decoder
+import SEPlayerCommon
+
 public protocol SampleStream: AnyObject {
     func isReady() -> Bool
     func maybeThrowError() throws

@@ -5,7 +5,11 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import DataSource
+import Decoder
 import Foundation
+import Extractor
+import SEPlayerCommon
 
 final class ProgressiveMediaPeriod: MediaPeriod {
     protocol Listener: AnyObject {
@@ -35,7 +39,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     private var haveAudioVideoTracks: Bool = false
     private var isSingleSample: Bool = false
     private var trackState = TrackState.empty
-    private weak var seekMap: SeekMap?
+    private var seekMap: SeekMap?
     private var durationUs: Int64 = .zero
     private var isLive: Bool = false
 
@@ -472,7 +476,7 @@ extension ProgressiveMediaPeriod: Loader.Callback {
 }
 
 extension ProgressiveMediaPeriod: ExtractorOutput {
-    func track(for id: Int, trackType: TrackType) -> TrackOutput {
+    func track(for id: Int, trackType: TrackType) throws -> TrackOutput {
         queue.sync { prepareTrackOutput(id: id) }
     }
 
@@ -714,7 +718,7 @@ extension ProgressiveMediaPeriod {
                     )
 
                     if pendingExtractorSeek {
-                        progressiveMediaExtractor.seek(
+                        try progressiveMediaExtractor.seek(
                             position: position,
                             time: seekTime,
                             isolation: isolation
@@ -756,7 +760,7 @@ extension ProgressiveMediaPeriod {
                 position = currentInputPosition
             }
 
-            await dataSource.close(isolation: isolation)
+            _ = try? await dataSource.close(isolation: isolation)
         }
 
         private func buildDataSpec(position: Int) -> DataSpec {

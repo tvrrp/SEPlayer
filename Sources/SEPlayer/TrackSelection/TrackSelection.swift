@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
+import SEPlayerCommon
+
 @frozen public enum TrackSelectionType {
     case unset
     case customBase

@@ -6,6 +6,7 @@
 //
 
 import CoreMedia
+import SEPlayerCommon
 
 final class RenderersHolder {
     let primaryRenderer: SERenderer

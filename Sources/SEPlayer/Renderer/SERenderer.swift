@@ -6,6 +6,7 @@
 //
 
 import CoreMedia
+import SEPlayerCommon
 
 public protocol SERenderer: AnyObject {
     var trackType: TrackType { get }

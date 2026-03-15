@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 21.05.2025.
 //
 
+import SEPlayerCommon
+
 protocol AbstractConcatenatedTimeline: Timeline {
     var shuffleOrder: ShuffleOrder { get }
     var isAtomic: Bool { get }

@@ -6,6 +6,7 @@
 //
 
 import CoreMedia.CMSync
+import SEPlayerCommon
 
 protocol SEPlayerImplInternalDelegate: AnyObject {
     func onPlaybackInfoUpdate(playbackInfoUpdate: SEPlayerImplInternal.PlaybackInfoUpdate)
@@ -846,7 +847,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             updateRebufferingState(isRebuffering: shouldPlayWhenReady(), resetLastRebufferRealtimeMs: false)
             setState(.buffering)
             if isRebuffering {
-                // TODO: notifyTrackSelectionRebuffer
+                notifyTrackSelectionRebuffer()
                 // TODO: livePlaybackSpeedControl.notifyRebuffer
             }
             stopRenderers()
@@ -1129,7 +1130,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         try! renderers.forEach {
             try! $0.resetPosition(for: playingMediaPeriod, positionUs: rendererPositionUs)
         }
-        // TODO: notifyTrackSelectionDiscontinuity
+        notifyTrackSelectionDiscontinuity()
     }
 
     private func setPlaybackParametersInternal(_ playbackParameters: PlaybackParameters) {

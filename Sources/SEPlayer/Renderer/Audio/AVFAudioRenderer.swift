@@ -6,6 +6,8 @@
 //
 
 import AVFoundation
+import Decoder
+import SEPlayerCommon
 
 final class AVFAudioRenderer: BaseSERenderer {
     private let queue: Queue
@@ -43,6 +45,7 @@ final class AVFAudioRenderer: BaseSERenderer {
     private var timeObserver: Any?
     private var playbackParameters: PlaybackParameters = .default
     private var requestMediaDataInfo: (Queue, () -> Void)?
+    private var currentRendererError: SEPlaybackError?
 
     init(
         queue: Queue,
@@ -66,6 +69,15 @@ final class AVFAudioRenderer: BaseSERenderer {
 
         renderSynchronizer.delaysRateChangeUntilHasSufficientMediaData = false
         renderSynchronizer.addRenderer(audioRenderer)
+
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(onRendererError(notification:)),
+                                               name: .AVSampleBufferAudioRendererWasFlushedAutomatically,
+                                               object: audioRenderer)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(onRendererError(notification:)),
+                                               name: .AVSampleBufferAudioRendererOutputConfigurationDidChange,
+                                               object: audioRenderer)
     }
 
     deinit {
@@ -79,8 +91,19 @@ final class AVFAudioRenderer: BaseSERenderer {
     override func getMediaClock() -> MediaClock? { self }
 
     override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-        RendererCapabilities.Support(
-            formatSupport: try AudioConverterDecoder.supportsFormat(format),
+        guard format.sampleMimeType.trackType == .audio else {
+            return .create(formatSupport: .unsupportedType)
+        }
+
+        let formatSupport: RendererCapabilities.Support.FormatSupport
+        if isFormatSupportedFromAVFAsset(format) {
+            formatSupport = .handled
+        } else {
+            formatSupport = try AudioConverterDecoder.supportsFormat(format)
+        }
+
+        return RendererCapabilities.Support(
+            formatSupport: formatSupport,
             adaptiveSupport: .notSupported,
             hardwareAccelerationSupport: .notSupported,
             decoderSupport: .primary,
@@ -89,6 +112,11 @@ final class AVFAudioRenderer: BaseSERenderer {
     }
 
     override func render(position: Int64, elapsedRealtime: Int64) throws {
+        if let currentRendererError {
+            self.currentRendererError = nil
+            throw currentRendererError
+        }
+
         if outputStreamEnded {
             try playEndOfStream()
             nextBufferToWritePresentationTimeUs = lastBufferInStreamPresentationTimeUs
@@ -445,6 +473,22 @@ final class AVFAudioRenderer: BaseSERenderer {
                 self.timeObserver = nil
             }
         }
+    }
+
+    @objc
+    private func onRendererError(notification: NSNotification) {
+        currentRendererError = SEPlaybackError(
+            type: .renderer(
+                .init(
+                    rendererName: "AVFAudioRenderer",
+                    rendererIndex: 0,
+                    rendererFormat: inputFormat,
+                    rendererFormatSupport: .handled
+                )
+            ),
+            mediaPeriodId: .init(),
+            isRecoverable: true
+        )
     }
 }
 

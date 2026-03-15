@@ -5,6 +5,8 @@
 //  Created by tvrrp on 13.02.2026.
 //
 
+import SEPlayerCommon
+
 struct Tracks: Hashable {
     let groups: [Group]
     var isEmpty: Bool { groups.isEmpty }

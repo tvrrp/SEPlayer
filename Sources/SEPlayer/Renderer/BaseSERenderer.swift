@@ -5,7 +5,9 @@
 //  Created by Damir Yackupov on 21.04.2025.
 //
 
-import CoreMedia
+import AVFoundation
+import Decoder
+import SEPlayerCommon
 
 class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     final var listener: RendererCapabilitiesListener? {
@@ -203,5 +205,27 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     final func onRendererCapabilitiesChanged() {
         let listener = lock.withLock { _listener }
         listener?.onRendererCapabilitiesChanged(self)
+    }
+
+    final func isFormatSupportedFromAVFAsset(_ format: Format) -> Bool {
+        guard let codecs = format.codecs else {
+            return false
+        }
+
+        if let containerMimeType = format.containerMimeType {
+            let extendedMIMEType = "\(containerMimeType.rawValue); codecs=\"\(codecs)\""
+            if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
+                return true
+            }
+        }
+
+        if let sampleMimeType = format.sampleMimeType {
+            let extendedMIMEType = "\(sampleMimeType.rawValue); codecs=\"\(codecs)\""
+            if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
+                return true
+            }
+        }
+
+        return false
     }
 }

@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 09.06.2025.
 //
 
+import SEPlayerCommon
+
 private typealias Support = RendererCapabilities.Support
 
 public class MappingTrackSelector: TrackSelector {
@@ -18,7 +20,7 @@ public class MappingTrackSelector: TrackSelector {
         currentMappedTrackInfo = info
     }
 
-    override func selectTracks(
+    public override func selectTracks(
         rendererCapabilities: [RendererCapabilitiesResolver],
         trackGroups: TrackGroupArray,
         periodId: MediaPeriodId,
@@ -109,7 +111,7 @@ public class MappingTrackSelector: TrackSelector {
         )
     }
 
-    func selectTracks(
+    public func selectTracks(
         mappedTrackInfo: MappedTrackInfo,
         rendererFormatSupports: [[[RendererCapabilities.Support]]],
         rendererMixedMimeTypeAdaptationSupport: [RendererCapabilities.Support.AdaptiveSupport],
@@ -230,22 +232,22 @@ public class MappingTrackSelector: TrackSelector {
 
 public extension MappingTrackSelector {
     struct MappedTrackInfo {
-        let rendererCount: Int
-        let rendererNames: [String]
-        let rendererTrackTypes: [TrackType]
-        let rendererTrackGroups: [TrackGroupArray]
-        let rendererMixedMimeTypeAdaptiveSupports: [RendererCapabilities.Support.AdaptiveSupport]
-        let rendererFormatSupports: [[[RendererCapabilities.Support]]]
-        let unmappedTrackGroups: TrackGroupArray
+        public let rendererCount: Int
+        public let rendererNames: [String]
+        public let rendererTrackTypes: [TrackType]
+        public let rendererTrackGroups: [TrackGroupArray]
+        public let rendererMixedMimeTypeAdaptiveSupports: [RendererCapabilities.Support.AdaptiveSupport]
+        public let rendererFormatSupports: [[[RendererCapabilities.Support]]]
+        public let unmappedTrackGroups: TrackGroupArray
 
-        enum RendererSupport: Comparable {
+        public enum RendererSupport: Comparable {
             case noTracks
             case unsupportedTracks
             case exceedCapabilitiesTracks
             case playableTraks
         }
 
-        init(
+        public init(
             rendererNames: [String],
             rendererTrackTypes: [TrackType],
             rendererTrackGroups: [TrackGroupArray],
@@ -262,7 +264,7 @@ public extension MappingTrackSelector {
             self.rendererCount = rendererTrackTypes.count
         }
 
-        func getRendererSupport(rendererIndex: Int) -> RendererSupport {
+        public func getRendererSupport(rendererIndex: Int) -> RendererSupport {
             var bestRendererSupport = RendererSupport.noTracks
             let rendererFormatSupport = rendererFormatSupports[rendererIndex]
 
@@ -284,7 +286,7 @@ public extension MappingTrackSelector {
             return bestRendererSupport
         }
 
-        func getTypeSupport(_ trackType: TrackType) -> RendererSupport {
+        public func getTypeSupport(_ trackType: TrackType) -> RendererSupport {
             var bestRendererSupport = RendererSupport.noTracks
             for (index, rendererTrackType) in rendererTrackTypes.enumerated() {
                 if rendererTrackType == trackType {

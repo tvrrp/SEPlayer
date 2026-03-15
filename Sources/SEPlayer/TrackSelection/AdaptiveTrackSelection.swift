@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import SEPlayerCommon
 
 class AdaptiveTrackSelection: BaseTrackSelection {
     final class Factory: SETrackSelectionFactory {

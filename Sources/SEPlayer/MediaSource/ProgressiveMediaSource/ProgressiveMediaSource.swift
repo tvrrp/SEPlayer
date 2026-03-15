@@ -5,6 +5,10 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import DataSource
+import Extractor
+import SEPlayerCommon
+
 final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.Listener {
     protocol Listener: AnyObject {
         func onSeekMap(source: MediaSource, seekMap: SeekMap)
@@ -120,11 +124,12 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     private func notifySourceInfoRefreshed() throws {
         var timeline: Timeline = SinglePeriodTimeline(
-            mediaItem: mediaItem,
-            periodDurationUs: timelineDurationUs,
-            windowDurationUs: timelineDurationUs,
+            durationUs: timelineDurationUs,
             isSeekable: timelineIsSeekable,
-            isDynamic: false
+            isDynamic: false,
+            useLiveConfiguration: timelineIsLive,
+            manifest: nil,
+            mediaItem: getMediaItem()
         )
 
         if timelineIsPlaceholder {

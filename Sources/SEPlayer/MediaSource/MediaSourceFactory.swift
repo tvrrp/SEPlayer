@@ -5,6 +5,10 @@
 //  Created by Damir Yackupov on 23.05.2025.
 //
 
+import DataSource
+import Extractor
+import SEPlayerCommon
+
 public protocol MediaSourceFactory {
     func createMediaSource(mediaItem: MediaItem) -> MediaSource
 }

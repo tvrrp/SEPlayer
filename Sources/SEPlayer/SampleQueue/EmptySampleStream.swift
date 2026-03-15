@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 18.05.2025.
 //
 
+import Decoder
+
 final class EmptySampleStream: SampleStream {
     func isReady() -> Bool { true }
     func maybeThrowError() throws {}

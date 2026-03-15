@@ -24,4 +24,14 @@ final class FixedTrackSelection: BaseTrackSelection {
         self.data = data
         super.init(group: group, tracks: [track], type: type)
     }
+
+    override func updateSelectedTrack(
+        playbackPositionUs: Int64,
+        bufferedDurationUs: Int64,
+        availableDurationUs: Int64,
+        queue: [MediaChunk],
+        mediaChunkIterators: [MediaChunkIterator]
+    ) {
+        // nop
+    }
 }

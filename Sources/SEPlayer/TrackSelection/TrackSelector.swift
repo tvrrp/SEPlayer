@@ -5,6 +5,8 @@
 //  Created by tvrrp on 13.02.2026.
 //
 
+import SEPlayerCommon
+
 public class TrackSelector {
     public protocol Factory {
         func createTrackSelector() -> TrackSelector
@@ -15,20 +17,20 @@ public class TrackSelector {
         func onRendererCapabilitiesChanged(_ renderer: SERenderer)
     }
 
-    var bandwidthMeter: BandwidthMeter!
+    public var bandwidthMeter: BandwidthMeter!
     private weak var listener: InvalidationListener?
 
-    func initialize(listener: InvalidationListener, bandwidthMeter: BandwidthMeter) {
+    public func initialize(listener: InvalidationListener, bandwidthMeter: BandwidthMeter) {
         self.listener = listener
         self.bandwidthMeter = bandwidthMeter
     }
 
-    func release() {
+    public func release() {
         self.listener = nil
         self.bandwidthMeter = nil
     }
 
-    func selectTracks(
+    public func selectTracks(
         rendererCapabilities: [RendererCapabilitiesResolver],
         trackGroups: TrackGroupArray,
         periodId: MediaPeriodId,
@@ -37,20 +39,20 @@ public class TrackSelector {
         fatalError()
     }
 
-    func onSelectionActivated(info: Any?) {}
-    func getParameters() -> TrackSelectionParameters { .defaultParameters }
-    func setParameters(_ parameters: TrackSelectionParameters) {}
-    func isSetParametersSupported() -> Bool { false }
+    public func onSelectionActivated(info: Any?) {}
+    public func getParameters() -> TrackSelectionParameters { .defaultParameters }
+    public func setParameters(_ parameters: TrackSelectionParameters) {}
+    public func isSetParametersSupported() -> Bool { false }
 
-    func getRendererCapabilitiesListener() -> RendererCapabilitiesListener? {
+    public func getRendererCapabilitiesListener() -> RendererCapabilitiesListener? {
         nil
     }
 
-    final func invalidate() {
+    public final func invalidate() {
         listener?.onTrackSelectionsInvalidated()
     }
 
-    final func invalidateForRendererCapabilitiesChange(_ renderer: SERenderer) {
+    public final func invalidateForRendererCapabilitiesChange(_ renderer: SERenderer) {
         listener?.onRendererCapabilitiesChanged(renderer)
     }
 }

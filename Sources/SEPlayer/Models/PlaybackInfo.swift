@@ -6,6 +6,7 @@
 //
 
 import CoreMedia.CMSync
+import SEPlayerCommon
 
 struct PlaybackInfo {
     private(set) var clock: SEClock

@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import SEPlayerCommon
+
 public struct TrackGroup: Hashable {
     public var length: Int { formats.count }
     public let id: String

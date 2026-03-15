@@ -6,8 +6,9 @@
 //
 
 import AVFoundation
+import SEPlayerCommon
 
-final class SEPlayerImpl: BasePlayer, SEPlayer {
+final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     @MainActor public let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
 
     let clock: SEClock
