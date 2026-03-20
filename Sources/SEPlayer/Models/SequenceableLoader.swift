@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
+
 public protocol SequenceableLoaderCallback {
     associatedtype Source
     func continueLoadingRequested(with source: Source)
@@ -12,13 +14,13 @@ public protocol SequenceableLoaderCallback {
 
 public protocol SequenceableLoader {
     var isLoading: Bool { get }
-    func getBufferedPositionUs() -> Int64
-    func getNextLoadPositionUs() -> Int64
+    func getBufferedPosition() -> CMTime
+    func getNextLoadPosition() -> CMTime
     @discardableResult
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool
-    func reevaluateBuffer(positionUs: Int64)
+    func reevaluateBuffer(position: CMTime)
 }
 
 extension SequenceableLoader {
-    func reevaluateBuffer(positionUs: Int64) {}
+    func reevaluateBuffer(position: CMTime) {}
 }

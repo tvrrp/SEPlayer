@@ -23,13 +23,13 @@ struct DefaultRenderersFactory: RenderersFactory {
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {
         let renderers = [
-            AVFVideoRenderer(
+            try? AVFVideoRenderer(
                 queue: queue,
                 clock: clock,
                 allowedJoiningTimeMs: .zero,
                 maxDroppedFramesToNotify: .zero
             ),
-            AVFAudioRenderer(
+            try? AVFAudioRenderer(
                 queue: queue,
                 renderSynchronizer: renderSynchronizer,
                 clock: clock

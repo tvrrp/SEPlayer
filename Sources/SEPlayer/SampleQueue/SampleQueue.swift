@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 07.04.2025.
 //
 
+import CoreMedia
 import Decoder
 import Foundation
 import Extractor
@@ -14,7 +15,7 @@ protocol SampleQueueDelegate: AnyObject {
     func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format)
 }
 
-class SampleQueue {
+class SampleQueue: TrackOutput {
     weak var delegate: SampleQueueDelegate?
 
     private let queue: Queue
@@ -31,9 +32,9 @@ class SampleQueue {
     private var relativeFirstIndex: Int = 0
     private var readPosition: Int = 0
 
-    private var startTime: Int64
-    private var largestDiscardedTimestamp: Int64
-    private var largestQueuedTimestamp: Int64
+    private var startTime: CMTime
+    private var largestDiscardedTimestamp: CMTime
+    private var largestQueuedTimestamp: CMTime
 
     private var isLastSampleQueued: Bool = false
     private var upstreamKeyframeRequired: Bool
@@ -44,11 +45,13 @@ class SampleQueue {
     private var upstreamFormat: Format?
 
     private var allSamplesAreSyncSamples: Bool
-    private var sampleOffsetUs: Int64 = 0
+    private var sampleOffset: CMTime = .zero
 
     private var pendingSplice: Bool = false
 
     private var sharedSampleMetadata: SpannedData<Format>
+
+    private var _backBufferDuration: CMTime? = nil
 
     init(queue: Queue, allocator: Allocator) {
         self.queue = queue
@@ -57,9 +60,9 @@ class SampleQueue {
         capacity = SampleQueue.sampleCapacityIncrement
         samples = ContiguousArray(repeating: .init(), count: capacity)
         sharedSampleMetadata = SpannedData<Format>(removeCallback: { _ in }) // TODO: fix
-        startTime = .min
-        largestDiscardedTimestamp = .min
-        largestQueuedTimestamp = .min
+        startTime = .negativeInfinity
+        largestDiscardedTimestamp = .negativeInfinity
+        largestQueuedTimestamp = .negativeInfinity
         upstreamFormatRequired = true
         upstreamKeyframeRequired = true
         allSamplesAreSyncSamples = true
@@ -75,9 +78,9 @@ class SampleQueue {
         relativeFirstIndex = 0
         readPosition = 0
         upstreamKeyframeRequired = true
-        startTime = .min
-        largestDiscardedTimestamp = .min
-        largestQueuedTimestamp = .min
+        startTime = .negativeInfinity
+        largestDiscardedTimestamp = .negativeInfinity
+        largestQueuedTimestamp = .negativeInfinity
         isLastSampleQueued = false
         sharedSampleMetadata.clear()
         if resetUpstreamFormat {
@@ -87,7 +90,7 @@ class SampleQueue {
         }
     }
 
-    final func setStartTime(_ startTime: Int64) {
+    final func setStartTime(_ startTime: CMTime) {
         self.startTime = startTime
     }
 
@@ -107,7 +110,7 @@ class SampleQueue {
         )
     }
 
-    final func discardUpstreamFrom(time: Int64) {
+    final func discardUpstreamFrom(time: CMTime) {
         guard length > 0 else { return }
 
         let retainCount = countUnreadSamplesBefore(time: time)
@@ -132,18 +135,18 @@ class SampleQueue {
         lock.withLock { return upstreamFormatRequired ? nil : upstreamFormat }
     }
 
-    final func getLargestQueuedTimestamp() -> Int64 {
+    final func getLargestQueuedTimestamp() -> CMTime {
         lock.withLock { return largestQueuedTimestamp }
     }
 
-    final func getLargestReadTimestamp() -> Int64 {
+    final func getLargestReadTimestamp() -> CMTime {
         lock.withLock { return max(largestDiscardedTimestamp, getLargestTimestamp(length: readPosition)) }
     }
 
     final func lastSampleQueued() -> Bool { lock.withLock { isLastSampleQueued } }
 
-    final func getFirstTimestamp() -> Int64 {
-        lock.withLock { return length == 0 ? .min : samples[relativeFirstIndex].time }
+    final func getFirstTimestamp() -> CMTime {
+        lock.withLock { return length == 0 ? .negativeInfinity : samples[relativeFirstIndex].time.decodeTimeStamp }
     }
 
     func isReady(loadingFinished: Bool) -> Bool {
@@ -193,30 +196,40 @@ class SampleQueue {
             }
 
             if !peek { readPosition += 1 }
+
+            if !peek,
+               let backBuffer = backBufferDuration,
+               !buffer.flags.contains(.endOfStream),
+               buffer.time.presentationTimeStamp > .negativeInfinity {
+                let discardThreshold = buffer.time.presentationTimeStamp - backBuffer
+                // `to: true` keeps samples up to the keyframe that anchors the back buffer,
+                // ensuring seeks into the retained window always have a valid decode point.
+                discard(toTime: discardThreshold, to: true, stopAtReadPosition: false)
+            }
         }
 
         return result
     }
 
     @discardableResult
-    final func seek(to sampleIndex: Int) -> Bool {
+    func seek(to sampleIndex: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         rewind()
         if sampleIndex < absoluteFirstIndex || sampleIndex > absoluteFirstIndex + length {
             return false
         }
-        startTime = .min
+        startTime = .negativeInfinity
         readPosition = sampleIndex - absoluteFirstIndex
         return true
     }
 
     @discardableResult
-    final func seek(to time: Int64, allowTimeBeyondBuffer: Bool) -> Bool {
+    func seek(time: CMTime, allowTimeBeyondBuffer: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
         rewind()
         let relativeReadIndex = getRelativeIndex(offset: readPosition)
 
-        if !hasNextSample() || time < samples[relativeReadIndex].time
+        if !hasNextSample() || time < samples[relativeReadIndex].time.presentationTimeStamp
             || time > largestQueuedTimestamp && !allowTimeBeyondBuffer {
             return false
         }
@@ -245,10 +258,10 @@ class SampleQueue {
         return true
     }
 
-    final func getSkipCount(time: Int64, allowEndOfQueue: Bool) -> Int {
+    final func getSkipCount(time: CMTime, allowEndOfQueue: Bool) -> Int {
         lock.lock(); defer { lock.unlock() }
         let relativeReadIndex = getRelativeIndex(offset: readPosition)
-        if !hasNextSample() || time < samples[relativeReadIndex].time {
+        if !hasNextSample() || time < samples[relativeReadIndex].time.presentationTimeStamp {
             return .zero
         }
         if time > largestQueuedTimestamp && allowEndOfQueue {
@@ -271,10 +284,10 @@ class SampleQueue {
         readPosition += count
     }
 
-    final func discard(to time: Int64, to keyframe: Bool, stopAtReadPosition: Bool) {
+    final func discard(toTime: CMTime, to keyframe: Bool, stopAtReadPosition: Bool) {
         sampleDataQueue.discardDownstreamTo(
             absolutePosition: discardSampleMetadata(
-                to: time, to: keyframe, stopAtReadPosition: stopAtReadPosition
+                toTime: toTime, to: keyframe, stopAtReadPosition: stopAtReadPosition
             )
         )
     }
@@ -291,9 +304,9 @@ class SampleQueue {
         )
     }
 
-    func setSampleOffsetTime(_ sampleOffsetTime: Int64) {
-        guard sampleOffsetTime != self.sampleOffsetUs else { return }
-        self.sampleOffsetUs = sampleOffsetTime
+    func setSampleOffsetTime(_ sampleOffsetTime: CMTime) {
+        guard sampleOffsetTime != self.sampleOffset else { return }
+        self.sampleOffset = sampleOffsetTime
         invalidateUpstreamFormatAdjustment()
     }
 
@@ -311,16 +324,14 @@ class SampleQueue {
 
     func getAdjustedUpstreamFormat(_ format: Format) -> Format {
         var format = format
-        if sampleOffsetUs != 0, format.subsampleOffsetUs != Format.offsetSampleRelative {
+        if sampleOffset != .zero, format.subsampleOffset != Format.offsetSampleRelative {
             format = format.buildUpon()
-                .setSubsampleOffsetUs(sampleOffsetUs)
+                .setSubsampleOffset(sampleOffset)
                 .build()
         }
         return format
     }
-}
 
-extension SampleQueue: TrackOutput {
     final func loadSampleData(
         input: DataReader,
         length: Int,
@@ -352,7 +363,7 @@ extension SampleQueue: TrackOutput {
         upstreamFormatAdjustmentRequired = true
     }
 
-    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int, isolation: isolated any Actor) {
+    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, size: Int, offset: Int, isolation: isolated any Actor) {
         if upstreamFormatAdjustmentRequired, let unadjustedUpstreamFormat {
             setFormat(unadjustedUpstreamFormat, isolation: isolation)
         }
@@ -364,15 +375,19 @@ extension SampleQueue: TrackOutput {
             upstreamKeyframeRequired = false
         }
 
-        let time = time + sampleOffsetUs
+        let time = CMSampleTimingInfo(
+            duration: time.duration,
+            presentationTimeStamp: time.presentationTimeStamp + sampleOffset,
+            decodeTimeStamp: time.decodeTimeStamp
+        )
         if allSamplesAreSyncSamples {
-            if time < startTime { return }
+            if time.presentationTimeStamp < startTime { return }
             // TODO: log bad data
             flags.insert(.keyframe)
         }
 
         if pendingSplice {
-            if !isKeyframe || !attemptSplice(time: time) {
+            if !isKeyframe || !attemptSplice(time: time.presentationTimeStamp) {
                 return
             }
             pendingSplice = false
@@ -383,16 +398,46 @@ extension SampleQueue: TrackOutput {
     }
 }
 
+extension SampleQueue {
+    var bufferedAheadDuration: CMTime {
+        lock.withLock {
+            guard readPosition < length else { return .zero }
+            let readIndex = getRelativeIndex(offset: readPosition)
+            return max(.zero, largestQueuedTimestamp - samples[readIndex].time.presentationTimeStamp)
+        }
+    }
+
+    var readableSampleCount: Int {
+        lock.withLock { length - readPosition }
+    }
+
+    var minReadableTimestamp: CMTime? {
+        lock.withLock {
+            guard readPosition < length else { return nil }
+            return samples[getRelativeIndex(offset: readPosition)].time.presentationTimeStamp
+        }
+    }
+
+    var hasReadableSamples: Bool { readableSampleCount > 0 }
+
+    var isEndOfData: Bool { lastSampleQueued() && !hasReadableSamples }
+
+    var backBufferDuration: CMTime? {
+        get { lock.withLock { _backBufferDuration } }
+        set { lock.withLock { _backBufferDuration = newValue } }
+    }
+}
+
 private extension SampleQueue {
-    private func discardSampleMetadata(to time: Int64, to keyframe: Bool, stopAtReadPosition: Bool) -> Int? {
+    private func discardSampleMetadata(toTime: CMTime, to keyframe: Bool, stopAtReadPosition: Bool) -> Int? {
         lock.lock(); defer { lock.unlock() }
-        if length == 0 || time < samples[relativeFirstIndex].time { return nil }
+        if length == 0 || toTime < samples[relativeFirstIndex].time.presentationTimeStamp { return nil }
 
         let searchLength = stopAtReadPosition && readPosition != length ? readPosition + 1 : length
         let discardCount = findSampleBefore(
             relativeStartIndex: relativeFirstIndex,
             length: searchLength,
-            time: time,
+            time: toTime,
             keyframe: keyframe
         )
 
@@ -414,7 +459,11 @@ private extension SampleQueue {
         if !hasNextSample() {
             if loadingFinished || isLastSampleQueued {
                 buffer.flags = .endOfStream
-                buffer.timeUs = .endOfSource
+                buffer.time = .init(
+                    duration: .invalid,
+                    presentationTimeStamp: .positiveInfinity,
+                    decodeTimeStamp: .positiveInfinity
+                )
                 return (.didReadBuffer, nil)
             } else if let upstreamFormat, (formatRequired || upstreamFormat != downstreamFormat) {
                 downstreamFormat = upstreamFormat
@@ -438,7 +487,7 @@ private extension SampleQueue {
         }
 
         buffer.size = sampleInfo.size
-        buffer.timeUs = sampleInfo.time
+        buffer.time = sampleInfo.time
         let extras = SampleExtrasHolder(
             size: sampleInfo.size,
             offset: sampleInfo.offset
@@ -466,7 +515,7 @@ private extension SampleQueue {
         return true
     }
 
-    private func commitSample(time: Int64, sampleFlags: SampleFlags, offset: Int, size: Int) {
+    private func commitSample(time: CMSampleTimingInfo, sampleFlags: SampleFlags, offset: Int, size: Int) {
         lock.lock(); defer { lock.unlock() }
         if length > 0 {
             let previousSampleRelativeIndex = getRelativeIndex(offset: length - 1)
@@ -474,7 +523,7 @@ private extension SampleQueue {
         }
 
         isLastSampleQueued = sampleFlags.contains(.lastSample)
-        largestQueuedTimestamp = max(largestQueuedTimestamp, time)
+        largestQueuedTimestamp = max(largestQueuedTimestamp, time.presentationTimeStamp)
 
         let relativeEndIndex = getRelativeIndex(offset: length)
         samples[relativeEndIndex] = .init(offset: offset, size: size, flags: sampleFlags, time: time)
@@ -501,7 +550,7 @@ private extension SampleQueue {
         }
     }
 
-    private func attemptSplice(time: Int64) -> Bool {
+    private func attemptSplice(time: CMTime) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard length != 0 else { return time > largestDiscardedTimestamp }
         guard getLargestReadTimestamp() < time else { return false }
@@ -530,15 +579,15 @@ private extension SampleQueue {
         return readPosition != length
     }
 
-    private func findSampleBefore(relativeStartIndex: Int, length: Int, time: Int64, keyframe: Bool) -> Int {
+    private func findSampleBefore(relativeStartIndex: Int, length: Int, time: CMTime, keyframe: Bool) -> Int {
         var sampleCountToTarget = -1
         var searchIndex = relativeStartIndex
 
-        for i in 0..<length where samples[searchIndex].time <= time {
+        for i in 0..<length where samples[searchIndex].time.presentationTimeStamp <= time {
             if !keyframe || samples[searchIndex].flags.contains(.keyframe) {
                 sampleCountToTarget = i
 
-                if samples[searchIndex].time == time {
+                if samples[searchIndex].time.presentationTimeStamp == time {
                     break
                 }
             }
@@ -552,10 +601,10 @@ private extension SampleQueue {
         return sampleCountToTarget
     }
 
-    private func findSampleAfter(relativeStartIndex: Int, length: Int, time: Int64, allowTimeBeyondBuffer: Bool) -> Int {
+    private func findSampleAfter(relativeStartIndex: Int, length: Int, time: CMTime, allowTimeBeyondBuffer: Bool) -> Int {
         var searchIndex = relativeStartIndex
         for i in 0..<length {
-            if samples[searchIndex].time >= time {
+            if samples[searchIndex].time.presentationTimeStamp >= time {
                 return i
             }
             searchIndex += 1
@@ -566,11 +615,11 @@ private extension SampleQueue {
         return allowTimeBeyondBuffer ? length : -1
     }
 
-    private func countUnreadSamplesBefore(time: Int64) -> Int {
+    private func countUnreadSamplesBefore(time: CMTime) -> Int {
         var count = length
         var relativeSampleIndex = getRelativeIndex(offset: length - 1)
 
-        while count > readPosition, samples[relativeSampleIndex].time >= time {
+        while count > readPosition, samples[relativeSampleIndex].time.presentationTimeStamp >= time {
             count -= 1
             relativeSampleIndex -= 1
             if relativeSampleIndex == -1 {
@@ -601,14 +650,14 @@ private extension SampleQueue {
         }
     }
 
-    private func getLargestTimestamp(length: Int) -> Int64 {
-        guard length > 0 else { return .min }
+    private func getLargestTimestamp(length: Int) -> CMTime {
+        guard length > 0 else { return .negativeInfinity }
 
-        var largestTimestamp = Int64.min
+        var largestTimestamp = CMTime.negativeInfinity
         var relativeSampleIndex = getRelativeIndex(offset: length - 1)
 
         for _ in 0..<length {
-            largestTimestamp = max(largestTimestamp, samples[relativeSampleIndex].time)
+            largestTimestamp = max(largestTimestamp, samples[relativeSampleIndex].time.presentationTimeStamp)
             if samples[relativeSampleIndex].flags.contains(.keyframe) {
                 break
             }
@@ -639,9 +688,14 @@ extension SampleQueue {
         let offset: Int
         let size: Int
         let flags: SampleFlags
-        let time: Int64
+        let time: CMSampleTimingInfo
 
-        init(offset: Int = 0, size: Int = 0, flags: SampleFlags = .init(), time: Int64 = 0) {
+        init(
+            offset: Int = 0,
+            size: Int = 0,
+            flags: SampleFlags = .init(),
+            time: CMSampleTimingInfo = .invalid
+        ) {
             self.offset = offset
             self.size = size
             self.flags = flags

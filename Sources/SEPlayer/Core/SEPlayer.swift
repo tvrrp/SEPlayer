@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
+import CoreMedia
 @_exported import SEPlayerCommon
 
 public protocol SEPlayer: Player {
@@ -15,9 +16,9 @@ public protocol SEPlayer: Player {
 
     func set(mediaSources: [MediaSource])
     func set(mediaSources: [MediaSource], resetPosition: Bool)
-    func set(mediaSources: [MediaSource], startMediaItemIndex: Int, startPositionMs: Int64)
+    func set(mediaSources: [MediaSource], startMediaItemIndex: Int, startPosition: CMTime)
     func set(mediaSource: MediaSource)
-    func set(mediaSource: MediaSource, startPositionMs: Int64)
+    func set(mediaSource: MediaSource, startPosition: CMTime)
     func set(mediaSource: MediaSource, resetPosition: Bool)
     func append(mediaSource: MediaSource)
     func insert(mediaSource: MediaSource, at index: Int)

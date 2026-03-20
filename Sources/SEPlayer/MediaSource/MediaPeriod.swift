@@ -5,22 +5,24 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
+
 public protocol MediaPeriod: SequenceableLoader, AnyObject {
     var trackGroups: TrackGroupArray { get }
 
-    func prepare(callback: any MediaPeriodCallback, on time: Int64)
+    func prepare(callback: any MediaPeriodCallback, on time: CMTime)
     func maybeThrowPrepareError() throws
-    func discardBuffer(to position: Int64, toKeyframe: Bool)
-    func readDiscontinuity() -> Int64
-    func seek(to position: Int64) -> Int64
-    func getAdjustedSeekPositionUs(positionUs: Int64, seekParameters: SeekParameters) -> Int64
+    func discardBuffer(position: CMTime, toKeyframe: Bool)
+    func readDiscontinuity() -> CMTime
+    func seek(position: CMTime) -> CMTime
+    func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime
     func selectTrack(
         selections: [SETrackSelection?],
         mayRetainStreamFlags: [Bool],
-        streams: inout [SampleStream?],
+        streams: inout [TriggerableSampleStream?],
         streamResetFlags: inout [Bool],
-        positionUs: Int64
-    ) -> Int64
+        position: CMTime
+    ) -> CMTime
 }
 
 public protocol MediaPeriodCallback: SequenceableLoaderCallback where Source == any MediaPeriod {

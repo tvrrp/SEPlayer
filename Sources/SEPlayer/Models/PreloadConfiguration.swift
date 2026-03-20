@@ -5,8 +5,10 @@
 //  Created by Damir Yackupov on 16.05.2025.
 //
 
-public struct PreloadConfiguration: Equatable {
-    let targetPreloadDurationUs: Int64
+import CoreMedia
 
-    public static let `default` = PreloadConfiguration(targetPreloadDurationUs: .timeUnset)
+public struct PreloadConfiguration: Equatable {
+    let targetPreloadDuration: CMTime
+
+    public static let `default` = PreloadConfiguration(targetPreloadDuration: .invalid)
 }

@@ -57,7 +57,7 @@ public final class Format: Sendable {
     public let maxInputSize: Int
     public let maxNumReorderSamples: Int
     public let initializationData: (any InitializationData)?
-    public let subsampleOffsetUs: Int64
+    public let subsampleOffset: CMTime
     public let hasPrerollSamples: Bool
 
     // Video specific.
@@ -93,7 +93,7 @@ public final class Format: Sendable {
         maxInputSize = builder.maxInputSize
         maxNumReorderSamples = builder.maxNumReorderSamples
         initializationData = builder.initializationData
-        subsampleOffsetUs = builder.subsampleOffsetUs
+        subsampleOffset = builder.subsampleOffset
         hasPrerollSamples = builder.hasPrerollSamples
         // Video specific.
         width = builder.width
@@ -131,7 +131,7 @@ public final class Format: Sendable {
 
 public extension Format {
     static let noValue: Int = -1
-    static let offsetSampleRelative = Int64.max
+    static let offsetSampleRelative = CMTime.positiveInfinity
 
     enum Error: Swift.Error {
         case initializationDataIsEmpty
@@ -158,7 +158,7 @@ extension Format: Hashable {
             lhs.sampleMimeType == rhs.sampleMimeType &&
             lhs.maxInputSize == rhs.maxInputSize &&
             lhs.maxNumReorderSamples == rhs.maxNumReorderSamples &&
-            lhs.subsampleOffsetUs == rhs.subsampleOffsetUs &&
+            lhs.subsampleOffset == rhs.subsampleOffset &&
             lhs.hasPrerollSamples == rhs.hasPrerollSamples &&
             lhs.width == rhs.width &&
             lhs.height == rhs.height &&
@@ -184,7 +184,7 @@ extension Format: Hashable {
         hasher.combine(sampleMimeType)
         hasher.combine(maxInputSize)
         hasher.combine(maxNumReorderSamples)
-        hasher.combine(subsampleOffsetUs)
+        hasher.combine(subsampleOffset)
         hasher.combine(hasPrerollSamples)
         hasher.combine(width)
         hasher.combine(height)
@@ -269,7 +269,7 @@ extension Format {
         fileprivate var maxInputSize: Int
         fileprivate var maxNumReorderSamples: Int
         fileprivate var initializationData: (any Format.InitializationData)?
-        fileprivate var subsampleOffsetUs: Int64
+        fileprivate var subsampleOffset: CMTime
         fileprivate var hasPrerollSamples: Bool
 
         // Video specific.
@@ -295,7 +295,7 @@ extension Format {
             // Sample specific.
             maxInputSize = Format.noValue
             maxNumReorderSamples = Format.noValue
-            subsampleOffsetUs = Format.offsetSampleRelative
+            subsampleOffset = Format.offsetSampleRelative
             hasPrerollSamples = false
             // Video specific.
             width = Format.noValue
@@ -329,7 +329,7 @@ extension Format {
             maxInputSize = format.maxInputSize
             maxNumReorderSamples = format.maxNumReorderSamples
             initializationData = format.initializationData
-            subsampleOffsetUs = format.subsampleOffsetUs
+            subsampleOffset = format.subsampleOffset
             hasPrerollSamples = format.hasPrerollSamples
             // Video specific.
             width = format.width
@@ -433,8 +433,8 @@ extension Format {
         }
 
         @discardableResult
-        public func setSubsampleOffsetUs(_ subsampleOffsetUs: Int64) -> Builder {
-            self.subsampleOffsetUs = subsampleOffsetUs
+        public func setSubsampleOffset(_ subsampleOffset: CMTime) -> Builder {
+            self.subsampleOffset = subsampleOffset
             return self
         }
 

@@ -5,31 +5,32 @@
 //  Created by Damir Yackupov on 14.05.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 
 public final class Window {
     public var id: AnyHashable
     public var mediaItem: MediaItem
     public var manifest: Any?
-    public var presentationStartTimeMs: Int64 = .zero
-    public var windowStartTimeMs: Int64 = .zero
-    public var elapsedRealtimeEpochOffsetMs: Int64 = .zero
+    public var presentationStartTime: CMTime = .zero
+    public var windowStartTime: CMTime = .zero
+    public var elapsedRealtimeEpochOffset: CMTime = .zero
 
     public var isSeekable: Bool = false
     public var isDynamic: Bool = false
     public var liveConfiguration: MediaItem.LiveConfiguration?
     public var isPlaceholder: Bool = false
 
-    public var defaultPositionUs: Int64 = .zero
-    public var durationUs: Int64 = .zero
+    public var defaultPosition: CMTime = .zero
+    public var duration: CMTime = .zero
 
     public var firstPeriodIndex: Int = .zero
     public var lastPeriodIndex: Int = .zero
-    public var positionInFirstPeriodUs: Int64 = .zero
+    public var positionInFirstPeriod: CMTime = .zero
 
-    public var durationMs: Int64 {
-        return Time.usToMs(timeUs: durationUs)
-    }
+//    public var durationMs: Int64 {
+//        return Time.usToMs(timeUs: durationUs)
+//    }
 
     public var isLive: Bool {
         liveConfiguration != nil
@@ -45,32 +46,32 @@ public final class Window {
         id: AnyHashable,
         mediaItem: MediaItem,
         manifest: Any?,
-        presentationStartTimeMs: Int64,
-        windowStartTimeMs: Int64,
-        elapsedRealtimeEpochOffsetMs: Int64,
+        presentationStartTime: CMTime,
+        windowStartTime: CMTime,
+        elapsedRealtimeEpochOffset: CMTime,
         isSeekable: Bool,
         isDynamic: Bool,
         liveConfiguration: MediaItem.LiveConfiguration?,
-        defaultPositionUs: Int64,
-        durationUs: Int64,
+        defaultPosition: CMTime,
+        duration: CMTime,
         firstPeriodIndex: Int,
         lastPeriodIndex: Int,
-        positionInFirstPeriodUs: Int64
+        positionInFirstPeriod: CMTime
     ) -> Window {
         self.id = id
         self.mediaItem = mediaItem
         self.manifest = manifest
-        self.presentationStartTimeMs = presentationStartTimeMs
-        self.windowStartTimeMs = windowStartTimeMs
-        self.elapsedRealtimeEpochOffsetMs = elapsedRealtimeEpochOffsetMs
+        self.presentationStartTime = presentationStartTime
+        self.windowStartTime = windowStartTime
+        self.elapsedRealtimeEpochOffset = elapsedRealtimeEpochOffset
         self.isSeekable = isSeekable
         self.isDynamic = isDynamic
         self.liveConfiguration = liveConfiguration
-        self.defaultPositionUs = defaultPositionUs
-        self.durationUs = durationUs
+        self.defaultPosition = defaultPosition
+        self.duration = duration
         self.firstPeriodIndex = firstPeriodIndex
         self.lastPeriodIndex = lastPeriodIndex
-        self.positionInFirstPeriodUs = positionInFirstPeriodUs
+        self.positionInFirstPeriod = positionInFirstPeriod
         return self
     }
 }
@@ -81,33 +82,33 @@ extension Window: Hashable {
 
         return lhs.id == rhs.id
             && lhs.mediaItem == rhs.mediaItem
-            && lhs.presentationStartTimeMs == rhs.presentationStartTimeMs
-            && lhs.windowStartTimeMs == rhs.windowStartTimeMs
-            && lhs.elapsedRealtimeEpochOffsetMs == rhs.elapsedRealtimeEpochOffsetMs
+            && lhs.presentationStartTime == rhs.presentationStartTime
+            && lhs.windowStartTime == rhs.windowStartTime
+            && lhs.elapsedRealtimeEpochOffset == rhs.elapsedRealtimeEpochOffset
             && lhs.isSeekable == rhs.isSeekable
             && lhs.isDynamic == rhs.isDynamic
             && lhs.isPlaceholder == rhs.isPlaceholder
-            && lhs.defaultPositionUs == rhs.defaultPositionUs
-            && lhs.durationUs == rhs.durationUs
+            && lhs.defaultPosition == rhs.defaultPosition
+            && lhs.duration == rhs.duration
             && lhs.firstPeriodIndex == rhs.firstPeriodIndex
             && lhs.lastPeriodIndex == rhs.lastPeriodIndex
-            && lhs.positionInFirstPeriodUs == rhs.positionInFirstPeriodUs
+            && lhs.positionInFirstPeriod == rhs.positionInFirstPeriod
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(mediaItem)
-        hasher.combine(presentationStartTimeMs)
-        hasher.combine(windowStartTimeMs)
-        hasher.combine(elapsedRealtimeEpochOffsetMs)
+        hasher.combine(presentationStartTime)
+        hasher.combine(windowStartTime)
+        hasher.combine(elapsedRealtimeEpochOffset)
         hasher.combine(isSeekable)
         hasher.combine(isDynamic)
         hasher.combine(isPlaceholder)
-        hasher.combine(defaultPositionUs)
-        hasher.combine(durationUs)
+        hasher.combine(defaultPosition)
+        hasher.combine(duration)
         hasher.combine(firstPeriodIndex)
         hasher.combine(lastPeriodIndex)
-        hasher.combine(positionInFirstPeriodUs)
+        hasher.combine(positionInFirstPeriod)
     }
 }
 

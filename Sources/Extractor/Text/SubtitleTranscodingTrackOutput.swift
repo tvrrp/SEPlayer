@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CoreMedia
 import SEPlayerCommon
 
 final class SubtitleTranscodingTrackOutput: TrackOutput {
@@ -52,7 +53,7 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
                 format.buildUpon()
                     .setSampleMimeType(.applicationSEPlayerCues)
                     .setCodecs(sampleMimeType.rawValue)
-                    .setSubsampleOffsetUs(Format.offsetSampleRelative)
+                    .setSubsampleOffset(Format.offsetSampleRelative)
                     // TODO: .setCueReplacementBehavior
                     .build(),
                 isolation: isolation
@@ -99,7 +100,7 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
         sampleDataEnd += length
     }
 
-    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int, isolation: isolated any Actor) throws {
+    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, size: Int, offset: Int, isolation: isolated any Actor) throws {
         if currentSubtitleParser == nil {
             try delegate.sampleMetadata(
                 time: time,
@@ -118,7 +119,7 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
                 offset: sampleStart,
                 lenght: size,
                 outputOptions: .allCues(),
-                output: { try outputSample(cuesWithTiming: $0, timeUs: time, flags: flags, isolation: isolation) }
+                output: { try outputSample(cuesWithTiming: $0, time: time, flags: flags, isolation: isolation) }
             )
         } catch {
             if !shouldSuppressParsingErrors {
@@ -135,7 +136,7 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
 
     private func outputSample(
         cuesWithTiming: CuesWithTiming,
-        timeUs: Int64,
+        time: CMSampleTimingInfo,
         flags: SampleFlags,
         isolation: isolated any Actor
     ) throws {
@@ -148,22 +149,23 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
             isolation: isolation
         )
 
-        let outputSampleTimeUs: Int64
-        if cuesWithTiming.startTimeUs == .timeUnset {
-            assert(currentFormat.subsampleOffsetUs == Format.offsetSampleRelative)
-            outputSampleTimeUs = timeUs
-        } else if currentFormat.subsampleOffsetUs == Format.offsetSampleRelative {
-            outputSampleTimeUs = timeUs + cuesWithTiming.startTimeUs
-        } else {
-            outputSampleTimeUs = cuesWithTiming.startTimeUs + currentFormat.subsampleOffsetUs
-        }
-
-        try delegate.sampleMetadata(
-            time: outputSampleTimeUs,
-            flags: flags.union(.keyframe),
-            size: data.readableBytes,
-            offset: 0,
-            isolation: isolation
-        )
+        // TODO: Fix for use with CMTime
+//        let outputSampleTimeUs: Int64
+//        if cuesWithTiming.startTimeUs == .timeUnset {
+//            assert(currentFormat.subsampleOffsetUs == Format.offsetSampleRelative)
+//            outputSampleTimeUs = timeUs
+//        } else if currentFormat.subsampleOffsetUs == Format.offsetSampleRelative {
+//            outputSampleTimeUs = timeUs + cuesWithTiming.startTimeUs
+//        } else {
+//            outputSampleTimeUs = cuesWithTiming.startTimeUs + currentFormat.subsampleOffsetUs
+//        }
+//
+//        try delegate.sampleMetadata(
+//            time: outputSampleTimeUs,
+//            flags: flags.union(.keyframe),
+//            size: data.readableBytes,
+//            offset: 0,
+//            isolation: isolation
+//        )
     }
 }

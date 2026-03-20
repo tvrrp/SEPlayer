@@ -147,7 +147,7 @@ class PlayerViewController: UIViewController {
 
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
         if videoUrls.count == 1 {
-            player.repeatMode = .one
+//            player.repeatMode = .one
             backwardsButton.isHidden = true
             forwardsButton.isHidden = true
         }
@@ -227,14 +227,14 @@ class PlayerViewController: UIViewController {
 
     @objc private func sliderTouchUp(_ sender: UISlider) {
         let newTime = Int64(sender.value)
-        player.seek(to: newTime)
+//        player.seek(to: CMTime(seconds: sender.value, preferredTimescale: <#T##CMTimeScale#>))
         player.playWhenReady = playWhenReadyBeforeSlider
         updateTime()
     }
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
         currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
-        player.seek(to: Int64(sender.value))
+//        player.seek(to: Int64(sender.value))
     }
 
     @objc private func volumeSliderDidChange(_ sender: UISlider) {
@@ -313,15 +313,15 @@ class PlayerViewController: UIViewController {
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
         let duration = player.duration
-        if duration != .timeUnset {
-            durationLabel.text = "\(player.duration)"
-            seekSlider.maximumValue = Float(player.duration)
+        if duration.isValid {
+            durationLabel.text = "\(player.duration.seconds)"
+            seekSlider.maximumValue = Float(player.duration.seconds)
         }
     }
 
     private func handleTimer() {
-        let position = player.currentPosition
-        currentTimeLabel.text = "\(player.bufferedPosition)|\(position)"
+        let position = player.currentPosition.seconds
+        currentTimeLabel.text = "\(player.bufferedPosition.seconds)|\(position)"
         seekSlider.setValue(Float(position), animated: false)
     }
 
@@ -356,9 +356,9 @@ extension PlayerViewController: SEPlayerDelegate {
 
     func player(_ player: any Player, didTransitionMediaItem mediaItem: MediaItem?, reason: MediaItemTransitionReason?) {
         let duration = player.duration
-        if duration != .timeUnset {
-            durationLabel.text = "\(player.duration)"
-            seekSlider.maximumValue = Float(player.duration)
+        if duration.isValid {
+            durationLabel.text = "\(player.duration.seconds)"
+            seekSlider.maximumValue = Float(player.duration.seconds)
         }
     }
 }

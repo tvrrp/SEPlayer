@@ -245,11 +245,12 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        DispatchQueue.main.async { [self] in
+        let isReadyForMoreMediaData = DispatchQueue.main.sync {
             layer.enqueue(sampleBuffer)
-            let isReadyForMoreMediaData = layer.isReadyForMoreMediaData
-            lock.withLock { _isReadyForMoreMediaData = isReadyForMoreMediaData }
-
+            return layer.isReadyForMoreMediaData
+        }
+        lock.withLock { _isReadyForMoreMediaData = isReadyForMoreMediaData }
+        DispatchQueue.main.async { [self] in
             if !isReadyForMoreMediaData {
                 registerForReadyNotifications()
             }

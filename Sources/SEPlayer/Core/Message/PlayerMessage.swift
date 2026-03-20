@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 26.12.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 public final class PlayerMessage {
@@ -21,7 +22,7 @@ public final class PlayerMessage {
     public private(set) var payload: Any?
     public private(set) var queue: Queue
     public private(set) var mediaItemIndex: Int
-    public private(set) var positionMs = Int64.zero
+    public private(set) var position = CMTime.zero
     public private(set) var deleteAfterDelivery = false
     private var isSent = false
     @UnfairLocked private var isDelivered = false
@@ -44,7 +45,7 @@ public final class PlayerMessage {
         self.queue = defaultQueue
         self.clock = clock
         self.mediaItemIndex = defaultMediaItemIndex
-        self.positionMs = .timeUnset
+        self.position = .invalid
         self.deleteAfterDelivery = true
     }
 
@@ -70,21 +71,21 @@ public final class PlayerMessage {
     }
 
     @discardableResult
-    public func setPositionMs(_ positionMs: Int64) -> PlayerMessage {
+    public func setPositionMs(_ position: CMTime) -> PlayerMessage {
         assert(!isSent)
-        self.positionMs = positionMs
+        self.position = position
         return self
     }
 
     @discardableResult
-    public func setPositionMs(_ positionMs: Int64, mediaItemIndex: Int) -> PlayerMessage {
+    public func setPositionMs(_ position: CMTime, mediaItemIndex: Int) -> PlayerMessage {
         assert(!isSent)
-        assert(positionMs != .timeUnset)
+        assert(position.isValid)
         if mediaItemIndex < 0 || (!timeline.isEmpty && mediaItemIndex >= timeline.windowCount()) {
             assertionFailure()
         }
         self.mediaItemIndex = mediaItemIndex
-        self.positionMs = positionMs
+        self.position = position
         return self
     }
 
@@ -98,7 +99,7 @@ public final class PlayerMessage {
     @discardableResult
     public func send() -> PlayerMessage {
         assert(!isSent)
-        if positionMs == .timeUnset {
+        if position.isValid == false {
             assert(deleteAfterDelivery)
         }
         isSent = true

@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSURLSession
 import Extractor
 import SEPlayerCommon
@@ -20,6 +21,6 @@ protocol ProgressiveMediaExtractor {
     ) async throws
     func release()
     func getCurrentInputPosition(isolation: isolated any Actor) -> Int?
-    func seek(position: Int, time: Int64, isolation: isolated any Actor) throws
+    func seek(position: Int, time: CMTime, isolation: isolated any Actor) throws
     func read(isolation: isolated any Actor) async throws -> ExtractorReadResult
 }

@@ -27,14 +27,16 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
         renderersStorage.allObjects as! [VideoSampleBufferRenderer]
     }
 
-    nonisolated(unsafe) private var controlTimebase: CMTimebase?
+    nonisolated(unsafe) var controlTimebase: CMTimebase
     nonisolated(unsafe) private var presentationTimeExpectation = PresentationTimeExpectation.none
 
     private let queue: Queue
     nonisolated(unsafe) private let renderersStorage = NSHashTable<AnyObject>()
 
-    init(queue: Queue) {
+    init(queue: Queue) throws {
         self.queue = queue
+
+        controlTimebase = try CMTimebase(sourceClock: .hostTimeClock)
     }
 
     func addRenderer(_ renderer: VideoSampleBufferRenderer) {
@@ -58,12 +60,17 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
 
     func setControlTimebase(_ timebase: CMTimebase?) {
         assert(queue.isCurrent())
-        controlTimebase = timebase
-        renderers.forEach { $0.setControlTimebase(timebase) }
+        if let timebase {
+            controlTimebase.source = timebase
+            updateControlTimebase(from: timebase)
+            setupTimebaseNotifications(timebase: timebase)
+        } else {
+            controlTimebase.source = CMClock.hostTimeClock
+        }
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        assert(queue.isCurrent())
+//        assert(queue.isCurrent())
         renderers.forEach { $0.enqueue(sampleBuffer) }
     }
 
@@ -92,12 +99,43 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
     }
 
     func requestMediaDataWhenReady(on queue: DispatchQueue, using block: @escaping @Sendable () -> Void) {
-        assert(self.queue.isCurrent())
+//        assert(self.queue.isCurrent())
         renderers.forEach { $0.requestMediaDataWhenReady(on: queue, using: block) }
     }
 
     func stopRequestingMediaData() {
-        assert(queue.isCurrent())
+//        assert(queue.isCurrent())
         renderers.forEach { $0.stopRequestingMediaData() }
+    }
+
+    private func setupTimebaseNotifications(timebase: CMTimebase) {
+        NotificationCenter.default.removeObserver(self)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(timbasePropertyChanged),
+                                               name: CMTimebase.effectiveRateChanged,
+                                               object: timebase)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(timbasePropertyChanged),
+                                               name: CMTimebase.timeJumped,
+                                               object: timebase)
+    }
+
+    @objc
+    private func timbasePropertyChanged(_ notification: Notification) {
+        guard CMTimebaseGetTypeID() == CFGetTypeID(notification.object as CFTypeRef) else {
+            return
+        }
+
+        updateControlTimebase(from: notification.object as! CMTimebase)
+    }
+
+    private func updateControlTimebase(from timebase: CMTimebase) {
+        print("👠 RESET TIMEBASE, time = \(timebase.time.microseconds), rate = \(timebase.rate)")
+
+        if timebase.time.microseconds < 1000000000000 {
+            print()
+        }
+        try? controlTimebase.setTime(timebase.time)
+        try? controlTimebase.setRate(timebase.rate)
     }
 }

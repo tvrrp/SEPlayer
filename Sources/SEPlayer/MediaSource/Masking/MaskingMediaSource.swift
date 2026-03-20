@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 import SEPlayerCommon
 
@@ -58,8 +59,8 @@ final class MaskingMediaSource: WrappingMediaSource {
         }
     }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) throws -> any MediaPeriod {
-        let mediaPeriod = MaskingMediaPeriod(id: id, allocator: allocator, preparePositionUs: startPosition)
+    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> any MediaPeriod {
+        let mediaPeriod = MaskingMediaPeriod(id: id, allocator: allocator, preparePosition: startPosition)
         mediaPeriod.setMediaSource(mediaSource)
         if isPrepared {
             let idInSource = id.copy(with: internalPeriodId(for: id.periodId))
@@ -95,7 +96,7 @@ final class MaskingMediaSource: WrappingMediaSource {
             timeline = timeline.clone(with: newTimeline)
             if let unpreparedMaskingMediaPeriod {
                 setPreparePositionOverrideToUnpreparedMaskingPeriod(
-                    unpreparedMaskingMediaPeriod.preparePositionOverrideUs
+                    unpreparedMaskingMediaPeriod.preparePositionOverride
                 )
             }
         } else if newTimeline.isEmpty {
@@ -110,24 +111,24 @@ final class MaskingMediaSource: WrappingMediaSource {
             }
         } else {
             newTimeline.getWindow(windowIndex: 0, window: window)
-            var windowStartPositionUs = window.defaultPositionUs
+            var windowStartPosition = window.defaultPosition
             let windowId = window.id
 
             if let unpreparedMaskingMediaPeriod {
-                let periodPreparePositionUs = unpreparedMaskingMediaPeriod.preparePositionUs
+                let periodPreparePosition = unpreparedMaskingMediaPeriod.preparePosition
                 timeline.periodById(unpreparedMaskingMediaPeriod.id.periodId, period: period)
-                let windowPreparePositionUs = period.positionInWindowUs + periodPreparePositionUs
-                let oldWindowDefaultPositionUs = timeline.getWindow(windowIndex: 0, window: window).defaultPositionUs
-                if windowPreparePositionUs != oldWindowDefaultPositionUs {
-                    windowStartPositionUs = windowPreparePositionUs
+                let windowPreparePosition = period.positionInWindow + periodPreparePosition
+                let oldWindowDefaultPosition = timeline.getWindow(windowIndex: 0, window: window).defaultPosition
+                if windowPreparePosition != oldWindowDefaultPosition {
+                    windowStartPosition = windowPreparePosition
                 }
             }
 
-            guard let (periodId, periodPositionUs) = newTimeline.periodPositionUs(
+            guard let (periodId, periodPosition) = newTimeline.periodPosition(
                 window: window,
                 period: period,
                 windowIndex: 0,
-                windowPositionUs: windowStartPositionUs
+                windowPosition: windowStartPosition
             ) else { return }
 
             timeline = if hasRealTimeline {
@@ -137,7 +138,7 @@ final class MaskingMediaSource: WrappingMediaSource {
             }
 
             if let maskingPeriod = unpreparedMaskingMediaPeriod,
-               setPreparePositionOverrideToUnpreparedMaskingPeriod(periodPositionUs) {
+               setPreparePositionOverrideToUnpreparedMaskingPeriod(periodPosition) {
                 idForMaskingPeriodPreparation = maskingPeriod.id
                     .copy(with: internalPeriodId(for: maskingPeriod.id.periodId))
             }
@@ -174,18 +175,18 @@ final class MaskingMediaSource: WrappingMediaSource {
     }
 
     @discardableResult
-    private func setPreparePositionOverrideToUnpreparedMaskingPeriod(_ preparePositionOverrideUs: Int64) -> Bool {
-        var preparePositionOverrideUs = preparePositionOverrideUs
+    private func setPreparePositionOverrideToUnpreparedMaskingPeriod(_ preparePositionOverride: CMTime) -> Bool {
+        var preparePositionOverride = preparePositionOverride
         let maskingPeriod = unpreparedMaskingMediaPeriod
         guard let maskingPeriodIndex = timeline.indexOfPeriod(by: maskingPeriod?.id.periodId) else {
             return false
         }
 
-        let periodDurationUs = timeline.getPeriod(periodIndex: maskingPeriodIndex, period: period).durationUs
-        if periodDurationUs != .timeUnset, preparePositionOverrideUs >= periodDurationUs {
-            preparePositionOverrideUs = max(0, periodDurationUs - 1)
+        let periodDuration = timeline.getPeriod(periodIndex: maskingPeriodIndex, period: period).duration
+        if periodDuration.isValid, preparePositionOverride >= periodDuration {
+            preparePositionOverride = max(.zero, CMTime(value: periodDuration.value - 1, timescale: periodDuration.timescale))
         }
-        maskingPeriod?.preparePositionOverrideUs = preparePositionOverrideUs
+        maskingPeriod?.preparePositionOverride = preparePositionOverride
         return true
     }
 }
@@ -214,8 +215,8 @@ extension MaskingMediaSource {
             )
         }
 
-        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
-            timeline.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
+            timeline.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjection: defaultPositionProjection)
             if window.id == replacedInternalWindowId {
                 window.id = Window.singleWindowId
             }
@@ -275,22 +276,22 @@ extension MaskingMediaSource {
 
         func windowCount() -> Int { 1 }
 
-        func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+        func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
             window.set(
                 id: Window.singleWindowId,
                 mediaItem: mediaItem,
                 manifest: nil,
-                presentationStartTimeMs: .timeUnset,
-                windowStartTimeMs: .timeUnset,
-                elapsedRealtimeEpochOffsetMs: .timeUnset,
+                presentationStartTime: .invalid,
+                windowStartTime: .invalid,
+                elapsedRealtimeEpochOffset: .invalid,
                 isSeekable: false,
                 isDynamic: true,
                 liveConfiguration: nil,
-                defaultPositionUs: 0,
-                durationUs: .timeUnset,
+                defaultPosition: .zero,
+                duration: .invalid,
                 firstPeriodIndex: 0,
                 lastPeriodIndex: 0,
-                positionInFirstPeriodUs: 0
+                positionInFirstPeriod: .zero
             )
             window.isPlaceholder = true
             return window
@@ -303,8 +304,8 @@ extension MaskingMediaSource {
                 id: setIds ? 0 : nil,
                 uid: setIds ? MaskingTimeline.maskingExternalPeriodId : nil,
                 windowIndex: 0,
-                durationUs: .timeUnset,
-                positionInWindowUs: 0,
+                duration: .invalid,
+                positionInWindow: .zero,
                 adPlaybackState: .none,
                 isPlaceholder: true
             )

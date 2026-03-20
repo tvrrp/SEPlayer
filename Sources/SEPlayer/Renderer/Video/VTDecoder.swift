@@ -9,15 +9,18 @@ import Decoder
 import VideoToolbox
 import SEPlayerCommon
 
-final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, VTDecoderErrors> {
+final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, VTDecoderErrors>, AVFDecoder {
+    @UnfairLocked var currentOutputFormatDescription: CMFormatDescription?
+
     private var decompressionSession: VTDecompressionSession?
     private let format: Format
     private var playbackSpeed: Float = 1.0
+    private var currentInputFormatDescription: CMFormatDescription?
 
     init(
-        decodeQueue: Queue = Queues.sharedDecodeQueue,
+        decodeQueue: Queue = Queues.sharedVideoDecodeQueue,
         format: Format,
-        highWaterMark: Int = 10,
+        highWaterMark: Int = 5,
         initialInputBufferSize: Int? = nil
     ) throws {
         self.format = format
@@ -84,13 +87,19 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
         isolation: isolated PlayerActor = #isolation
     ) async throws(VTDecoderErrors) {
         do {
+            let formatDescription = try format.buildFormatDescription()
             guard let decompressionSession,
-                  let sampleBuffer = try inputBuffer.sampleBuffer(formatDescription: format.buildFormatDescription()) else {
+                  let sampleBuffer = try inputBuffer.sampleBuffer(formatDescription: formatDescription) else {
                 throw VTDecoderErrors.missingData
             }
 
-            let shouldNotProduceFrame = !isAtLeastOutputStartTimeUs(inputBuffer.timeUs)
-            let pixelBuffer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CVPixelBuffer?, Error>) in
+            if let currentInputFormatDescription, currentInputFormatDescription != formatDescription {
+                self.currentOutputFormatDescription = nil
+            }
+
+            self.currentInputFormatDescription = formatDescription
+            let shouldNotProduceFrame = !isAtLeastOutputStartTime(inputBuffer.time.presentationTimeStamp)
+            let (pixelBuffer, pts, duration) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(CVPixelBuffer?, CMTime, CMTime), Error>) in
                 var flags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
 
                 if shouldNotProduceFrame {
@@ -110,7 +119,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
                         return
                     }
 
-                    continuation.resume(returning: imageBuffer)
+                    continuation.resume(returning: (imageBuffer, pts, duration))
                 }
 
                 if status != noErr {
@@ -122,7 +131,13 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
             case false:
                 guard let pixelBuffer else { fallthrough }
 
-                outputBuffer.initialise(pixelBuffer: pixelBuffer, timeUs: inputBuffer.timeUs)
+                outputBuffer.initialise(
+                    pixelBuffer: pixelBuffer,
+                    time: .init(duration: duration, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+                )
+                if currentOutputFormatDescription == nil {
+                    currentOutputFormatDescription = try CMFormatDescription(imageBuffer: pixelBuffer)
+                }
             case true:
                 outputBuffer.shouldBeSkipped = true
             }
@@ -233,13 +248,8 @@ extension DecoderInputBuffer {
         guard size > 0 else { return nil }
 
         let blockBuffer = try CMBlockBuffer(buffer: data[0..<size], deallocator: { _, _ in })
-        let sampleTiming = CMSampleTimingInfo(
-            duration: CMTime.from(microseconds: timeUs),
-            presentationTimeStamp: .invalid,
-            decodeTimeStamp: .invalid
-        )
 
-        let sampleTimings = !flags.contains(.endOfStream) ? [sampleTiming] : []
+        let sampleTimings = !flags.contains(.endOfStream) ? [time] : []
         let sampleSizes = !flags.contains(.endOfStream) ? [size] : []
 
         return try CMSampleBuffer(
@@ -255,9 +265,9 @@ extension DecoderInputBuffer {
 final class VTDecoderOutputBuffer: SimpleDecoderOutputBuffer {
     var pixelBuffer: CVPixelBuffer?
 
-    func initialise(pixelBuffer: CVPixelBuffer, timeUs: Int64) {
+    func initialise(pixelBuffer: CVPixelBuffer, time: CMSampleTimingInfo) {
         self.pixelBuffer = pixelBuffer
-        self.timeUs = timeUs
+        self.time = time
     }
 
     override func release() {

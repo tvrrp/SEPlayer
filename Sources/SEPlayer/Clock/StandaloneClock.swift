@@ -37,7 +37,7 @@ final class StandaloneClock: MediaClock {
 
     func stop() {
         guard started else { return }
-        resetPosition(positionUs: getPositionUs())
+        resetPosition(position: getPosition())
         started = false
 
         do {
@@ -47,16 +47,16 @@ final class StandaloneClock: MediaClock {
         }
     }
 
-    func resetPosition(positionUs: Int64) {
+    func resetPosition(position: CMTime) {
         do {
-            try timebase.setTime(.from(microseconds: positionUs))
+            try timebase.setTime(position)
         } catch {
             print(error)
         }
     }
 
-    func getPositionUs() -> Int64  {
-        timebase.time.microseconds
+    func getPosition() -> CMTime  {
+        timebase.time
     }
 
     func setPlaybackParameters(new playbackParameters: PlaybackParameters) {

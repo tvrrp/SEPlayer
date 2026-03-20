@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import DataSource
 import Extractor
 import SEPlayerCommon
@@ -24,7 +25,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     private let continueLoadingCheckIntervalBytes: Int
 
     private var timelineIsPlaceholder: Bool
-    private var timelineDurationUs: Int64
+    private var timelineDuration: CMTime
     private var timelineIsSeekable = false
     private var timelineIsLive = false
 
@@ -45,7 +46,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         self.extractorsFactory = extractorsFactory
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
         self.timelineIsPlaceholder = true
-        self.timelineDurationUs = .timeUnset
+        self.timelineDuration = .invalid
         super.init(queue: queue)
     }
 
@@ -68,7 +69,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     override func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64
+        startPosition: CMTime
     ) throws -> MediaPeriod {
         let dataSource = dataSourceFactory.createDataSource()
         if let mediaTransferListener {
@@ -98,19 +99,19 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         (mediaPeriod as! ProgressiveMediaPeriod).release()
     }
 
-    func sourceInfoRefreshed(durationUs: Int64, seekMap: SeekMap, isLive: Bool) {
-        let durationUs = durationUs == .timeUnset ? timelineDurationUs : durationUs
+    func sourceInfoRefreshed(duration: CMTime, seekMap: SeekMap, isLive: Bool) {
+        let duration = duration.isValid ? duration : timelineDuration
         let isSeekable = seekMap.isSeekable()
 
         if !timelineIsPlaceholder
-            && timelineDurationUs == durationUs
+            && timelineDuration == duration
             && timelineIsSeekable == isSeekable
             && timelineIsLive == isLive {
             return
         }
 
         timelineIsPlaceholder = false
-        timelineDurationUs = durationUs
+        timelineDuration = duration
         timelineIsSeekable = isSeekable
         timelineIsLive = isLive
 
@@ -124,7 +125,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     private func notifySourceInfoRefreshed() throws {
         var timeline: Timeline = SinglePeriodTimeline(
-            durationUs: timelineDurationUs,
+            duration: timelineDuration,
             isSeekable: timelineIsSeekable,
             isDynamic: false,
             useLiveConfiguration: timelineIsLive,
@@ -142,8 +143,8 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
 private extension ProgressiveMediaSource {
     final class ForwardingTimelineImpl: ForwardingTimeline, @unchecked Sendable {
-        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
-            super.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
+            super.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjection: defaultPositionProjection)
             window.isPlaceholder = true
             return window
         }

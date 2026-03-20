@@ -9,7 +9,7 @@ import AVFoundation
 import Decoder
 import SEPlayerCommon
 
-final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoderOutputBuffer, ACDecoderError> {
+final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoderOutputBuffer, ACDecoderError>, AVFDecoder {
     private let audioConverter: AVAudioConverter
     private let inputFormat: AVAudioFormat
     private let outputFormat: AVAudioFormat
@@ -18,9 +18,9 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
     private let memoryPool: CMMemoryPool
 
     init(
-        decodeQueue: Queue = Queues.sharedDecodeQueue,
+        decodeQueue: Queue = Queues.sharedAudioDecodeQueue,
         format: Format,
-        highWaterMark: Int = 60,
+        highWaterMark: Int = 240,
     ) throws {
         inputFormat = try AVAudioFormat(cmAudioFormatDescription: format.buildFormatDescription())
         let outputFormat = if let channelLayout = inputFormat.channelLayout {
@@ -53,7 +53,49 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
 
         maximumPacketSize = format.maxInputSize > 0 ? format.maxInputSize : .defaultInputBufferSize
         memoryPool = CMMemoryPoolCreate(options: nil)
-        try super.init(decodeQueue: decodeQueue, inputBuffersCount: highWaterMark, outputBuffersCount: highWaterMark)
+
+        let handlers: CMBufferQueue.Handlers = .init { handlers in
+            handlers.compare { lhs, rhs in
+                guard let lhs = lhs as? ACDecoderOutputBuffer,
+                      let rhs = rhs as? ACDecoderOutputBuffer else {
+                    return .compareEqualTo
+                }
+
+                if lhs.sampleFlags.contains(.endOfStream) {
+                    return .compareGreaterThan
+                }
+                if rhs.sampleFlags.contains(.endOfStream) {
+                    return .compareLessThan
+                }
+
+                guard let lhsSampleBuffer = lhs.sampleBuffer,
+                   let rhsSampleBuffer = rhs.sampleBuffer else {
+                    return .compareEqualTo
+                }
+
+                if lhsSampleBuffer.presentationTimeStamp == rhsSampleBuffer.presentationTimeStamp {
+                    return .compareEqualTo
+                } else if lhsSampleBuffer.presentationTimeStamp > rhsSampleBuffer.presentationTimeStamp {
+                    return .compareGreaterThan
+                } else {
+                    return .compareLessThan
+                }
+            }
+
+            handlers.getPresentationTimeStamp { buffer in
+                (buffer as? ACDecoderOutputBuffer)?.sampleBuffer?.presentationTimeStamp ?? .invalid
+            }
+
+            handlers.getDuration { buffer in
+                (buffer as? ACDecoderOutputBuffer)?.sampleBuffer?.duration ?? .invalid
+            }
+        }
+        try super.init(
+            decodeQueue: decodeQueue,
+            inputBuffersCount: highWaterMark,
+            outputBuffersCount: highWaterMark,
+            handlers: handlers
+        )
         try setInitialInputBufferSize(maximumPacketSize)
     }
 
@@ -81,6 +123,10 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
         let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
 
         return converter != nil ? .handled : .unsupportedSubtype
+    }
+
+    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
+        return false
     }
 
     override func createInputBuffer() -> ACDecoderInputBuffer {
@@ -143,7 +189,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
                 dataReady: false,
                 formatDescription: outputFormat.formatDescription,
                 numSamples: CMItemCount(decompressedBuffer.frameLength),
-                presentationTimeStamp: .from(microseconds: inputBuffer.timeUs),
+                presentationTimeStamp: inputBuffer.time.presentationTimeStamp,
                 packetDescriptions: [],
                 makeDataReadyHandler: { _ in return noErr }
             )
@@ -154,7 +200,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
                 flags: []
             )
 
-            outputBuffer.initBuffer(timeUs: inputBuffer.timeUs, sampleBuffer: sampleBuffer)
+            outputBuffer.initBuffer(time: inputBuffer.time, sampleBuffer: sampleBuffer)
         } catch {
             SELogger.error(.renderer, "ACDecoder unexpected error = \(error)")
 
@@ -241,8 +287,9 @@ final class ACDecoderInputBuffer: DecoderInputBuffer {
 final class ACDecoderOutputBuffer: SimpleDecoderOutputBuffer {
     var sampleBuffer: CMSampleBuffer?
 
-    func initBuffer(timeUs: Int64, sampleBuffer: CMSampleBuffer) {
-        self.timeUs = timeUs
+    func initBuffer(time: CMSampleTimingInfo, sampleBuffer: CMSampleBuffer) {
+        super.initBuffer(time: time, size: .zero)
+//        self.timeUs = timeUs
         self.sampleBuffer = sampleBuffer
     }
 

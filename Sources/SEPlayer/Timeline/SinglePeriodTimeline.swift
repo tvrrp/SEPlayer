@@ -5,18 +5,19 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 import SEPlayerCommon
 
 final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
     private static let uuid = UUID()
-    private let presentationStartTimeMs: Int64
-    private let windowStartTimeMs: Int64
-    private let elapsedRealtimeEpochOffsetMs: Int64
-    private let periodDurationUs: Int64
-    private let windowDurationUs: Int64
-    private let windowPositionInPeriodUs: Int64
-    private let windowDefaultStartPositionUs: Int64
+    private let presentationStartTime: CMTime
+    private let windowStartTime: CMTime
+    private let elapsedRealtimeEpochOffset: CMTime
+    private let periodDuration: CMTime
+    private let windowDuration: CMTime
+    private let windowPositionInPeriod: CMTime
+    private let windowDefaultStartPosition: CMTime
     private let isSeekable: Bool
     private let isDynamic: Bool
     private let suppressPositionProjection: Bool
@@ -25,7 +26,7 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
     private let liveConfiguration: MediaItem.LiveConfiguration?
 
     convenience init(
-        durationUs: Int64,
+        duration: CMTime,
         isSeekable: Bool,
         isDynamic: Bool,
         useLiveConfiguration: Bool,
@@ -33,10 +34,10 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
         mediaItem: MediaItem,
     ) {
         self.init(
-            periodDurationUs: durationUs,
-            windowDurationUs: durationUs,
-            windowPositionInPeriodUs: 0,
-            windowDefaultStartPositionUs: 0,
+            periodDuration: duration,
+            windowDuration: duration,
+            windowPositionInPeriod: .zero,
+            windowDefaultStartPosition: .zero,
             isSeekable: isSeekable,
             isDynamic: isDynamic,
             useLiveConfiguration: useLiveConfiguration,
@@ -46,10 +47,10 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
     }
 
     convenience init(
-        periodDurationUs: Int64,
-        windowDurationUs: Int64,
-        windowPositionInPeriodUs: Int64,
-        windowDefaultStartPositionUs: Int64,
+        periodDuration: CMTime,
+        windowDuration: CMTime,
+        windowPositionInPeriod: CMTime,
+        windowDefaultStartPosition: CMTime,
         isSeekable: Bool,
         isDynamic: Bool,
         useLiveConfiguration: Bool,
@@ -57,13 +58,13 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
         mediaItem: MediaItem,
     ) {
         self.init(
-            presentationStartTimeMs: .timeUnset,
-            windowStartTimeMs: .timeUnset,
-            elapsedRealtimeEpochOffsetMs: .timeUnset,
-            periodDurationUs: periodDurationUs,
-            windowDurationUs: windowDurationUs,
-            windowPositionInPeriodUs: windowPositionInPeriodUs,
-            windowDefaultStartPositionUs: windowDefaultStartPositionUs,
+            presentationStartTime: .invalid,
+            windowStartTime: .invalid,
+            elapsedRealtimeEpochOffset: .invalid,
+            periodDuration: periodDuration,
+            windowDuration: windowDuration,
+            windowPositionInPeriod: windowPositionInPeriod,
+            windowDefaultStartPosition: windowDefaultStartPosition,
             isSeekable: isSeekable,
             isDynamic: isDynamic,
             suppressPositionProjection: false,
@@ -74,13 +75,13 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
     }
 
     init(
-        presentationStartTimeMs: Int64,
-        windowStartTimeMs: Int64,
-        elapsedRealtimeEpochOffsetMs: Int64,
-        periodDurationUs: Int64,
-        windowDurationUs: Int64,
-        windowPositionInPeriodUs: Int64,
-        windowDefaultStartPositionUs: Int64,
+        presentationStartTime: CMTime,
+        windowStartTime: CMTime,
+        elapsedRealtimeEpochOffset: CMTime,
+        periodDuration: CMTime,
+        windowDuration: CMTime,
+        windowPositionInPeriod: CMTime,
+        windowDefaultStartPosition: CMTime,
         isSeekable: Bool,
         isDynamic: Bool,
         suppressPositionProjection: Bool,
@@ -88,13 +89,13 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
         mediaItem: MediaItem,
         liveConfiguration: MediaItem.LiveConfiguration?
     ) {
-        self.presentationStartTimeMs = presentationStartTimeMs
-        self.windowStartTimeMs = windowStartTimeMs
-        self.elapsedRealtimeEpochOffsetMs = elapsedRealtimeEpochOffsetMs
-        self.periodDurationUs = periodDurationUs
-        self.windowDurationUs = windowDurationUs
-        self.windowPositionInPeriodUs = windowPositionInPeriodUs
-        self.windowDefaultStartPositionUs = windowDefaultStartPositionUs
+        self.presentationStartTime = presentationStartTime
+        self.windowStartTime = windowStartTime
+        self.elapsedRealtimeEpochOffset = elapsedRealtimeEpochOffset
+        self.periodDuration = periodDuration
+        self.windowDuration = windowDuration
+        self.windowPositionInPeriod = windowPositionInPeriod
+        self.windowDefaultStartPosition = windowDefaultStartPosition
         self.isSeekable = isSeekable
         self.isDynamic = isDynamic
         self.suppressPositionProjection = suppressPositionProjection
@@ -105,16 +106,16 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
 
     func windowCount() -> Int { 1 }
 
-    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
-        var windowDefaultStartPositionUs = windowDefaultStartPositionUs
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
+        var windowDefaultStartPosition = windowDefaultStartPosition
 
-        if isDynamic, !suppressPositionProjection, defaultPositionProjectionUs != 0 {
-            if windowDurationUs != .timeUnset {
-                windowDefaultStartPositionUs = .timeUnset
+        if isDynamic, !suppressPositionProjection, defaultPositionProjection != .zero {
+            if windowDuration.isValid {
+                windowDefaultStartPosition = .invalid
             } else {
-                windowDefaultStartPositionUs += defaultPositionProjectionUs
-                if windowDefaultStartPositionUs > windowDurationUs {
-                    windowDefaultStartPositionUs = .timeUnset
+                windowDefaultStartPosition = windowDefaultStartPosition + defaultPositionProjection
+                if windowDefaultStartPosition > windowDuration {
+                    windowDefaultStartPosition = .invalid
                 }
             }
         }
@@ -123,17 +124,17 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
             id: Window.singleWindowId,
             mediaItem: mediaItem,
             manifest: manifest,
-            presentationStartTimeMs: presentationStartTimeMs,
-            windowStartTimeMs: windowStartTimeMs,
-            elapsedRealtimeEpochOffsetMs: elapsedRealtimeEpochOffsetMs,
+            presentationStartTime: presentationStartTime,
+            windowStartTime: windowStartTime,
+            elapsedRealtimeEpochOffset: elapsedRealtimeEpochOffset,
             isSeekable: isSeekable,
             isDynamic: isDynamic,
             liveConfiguration: liveConfiguration,
-            defaultPositionUs: windowDefaultStartPositionUs,
-            durationUs: windowDurationUs,
+            defaultPosition: windowDefaultStartPosition,
+            duration: windowDuration,
             firstPeriodIndex: 0,
             lastPeriodIndex: 0,
-            positionInFirstPeriodUs: windowPositionInPeriodUs
+            positionInFirstPeriod: windowPositionInPeriod
         )
     }
 
@@ -144,8 +145,8 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
             id: nil,
             uid: setIds ? Self.uuid : nil,
             windowIndex: 0,
-            durationUs: periodDurationUs,
-            positionInWindowUs: -windowPositionInPeriodUs
+            duration: periodDuration,
+            positionInWindow: CMTimeMultiply(windowPositionInPeriod, multiplier: -1)
         )
     }
 

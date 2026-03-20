@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 21.05.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 protocol AbstractConcatenatedTimeline: Timeline {
@@ -151,7 +152,7 @@ extension AbstractConcatenatedTimeline {
             + (timeline(by: firstChildIndex).firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) ?? .zero)
     }
 
-    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
         let childIndex = childIndexBy(windowIndex: windowIndex)
         let firstWindowIndexInChild = firstWindowIndex(by: childIndex)
         let firstPeriodIndexInChild = firstPeriodIndex(by: childIndex)
@@ -159,7 +160,7 @@ extension AbstractConcatenatedTimeline {
         timeline(by: childIndex).getWindow(
             windowIndex: windowIndex - firstWindowIndexInChild,
             window: window,
-            defaultPositionProjectionUs: defaultPositionProjectionUs
+            defaultPositionProjection: defaultPositionProjection
         )
 
         let childId = childId(by: childIndex)

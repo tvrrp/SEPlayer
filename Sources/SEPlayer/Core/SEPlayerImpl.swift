@@ -48,9 +48,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     var isLoading: Bool { queue.sync { playbackInfo.isLoading } }
 
-    let seekBackIncrement: Int64
-    let seekForwardIncrement: Int64
-    let maxSeekToPreviousPosition: Int64
+    let seekBackIncrement: CMTime
+    let seekForwardIncrement: CMTime
+    let maxSeekToPreviousPosition: CMTime
 
     var playbackParameters: PlaybackParameters {
         get { queue.sync { playbackInfo.playbackParameters } }
@@ -78,21 +78,21 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         queue.sync { currentWindowIndexInternal(playbackInfo: playbackInfo) ?? .zero }
     }
 
-    var duration: Int64 { queue.sync { contentDuration } }
+    var duration: CMTime { queue.sync { contentDuration } }
 
-    var currentPosition: Int64 {
+    var currentPosition: CMTime {
         queue.sync {
-            Time.usToMs(timeUs: currentPositionUsInternal(playbackInfo: playbackInfo))
+            currentPositionInternal(playbackInfo: playbackInfo)
         }
     }
 
-    var bufferedPosition: Int64 { queue.sync { contentBufferedPosition } }
+    var bufferedPosition: CMTime { queue.sync { contentBufferedPosition } }
 
-    var totalBufferedDuration: Int64 { queue.sync { Time.usToMs(timeUs: playbackInfo.totalBufferedDurationUs) } }
+    var totalBufferedDuration: CMTime { queue.sync { playbackInfo.totalBufferedDuration } }
 
-    var contentPosition: Int64 { queue.sync { contentPositionInternal(playbackInfo: playbackInfo) } }
+    var contentPosition: CMTime { queue.sync { contentPositionInternal(playbackInfo: playbackInfo) } }
 
-    var contentBufferedPosition: Int64 { queue.sync { getContentBufferedPosition() } }
+    var contentBufferedPosition: CMTime { queue.sync { getContentBufferedPosition() } }
 
     var pauseAtTheEndOfMediaItem: Bool {
         get { queue.sync { _pauseAtTheEndOfMediaItem } }
@@ -121,7 +121,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     private var maskingWindowIndex: Int?
     private var maskingPeriodIndex: Int = 0
-    private var maskingWindowPositionMs: Int64 = 0
+    private var maskingWindowPosition: CMTime = .zero
     private var pendingOperationAcks: Int = 0
     private var pendingDiscontinuityReason: DiscontinuityReason = .autoTransition
     private var pendingDiscontinuity: Bool = false
@@ -139,9 +139,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         audioSessionManager: IAudioSessionManager,
         useLazyPreparation: Bool = true,
         seekParameters: SeekParameters = .default,
-        seekBackIncrementMs: Int64 = 5_000,
-        seekForwardIncrementMs: Int64 = 5_000,
-        maxSeekToPreviousPositionMs: Int64 = 3000,
+        seekBackIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
+        seekForwardIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
+        maxSeekToPreviousPosition: CMTime = CMTime(seconds: 3, preferredTimescale: 1000),
         pauseAtTheEndOfMediaItem: Bool = false
     ) {
         self.workQueue = workQueue
@@ -150,9 +150,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         self.mediaSourceFactory = mediaSourceFactory
         self.useLazyPreparation = useLazyPreparation
         _seekParameters = seekParameters
-        seekBackIncrement = seekBackIncrementMs
-        seekForwardIncrement = seekForwardIncrementMs
-        maxSeekToPreviousPosition = maxSeekToPreviousPositionMs
+        self.seekBackIncrement = seekBackIncrement
+        self.seekForwardIncrement = seekForwardIncrement
+        self.maxSeekToPreviousPosition = maxSeekToPreviousPosition
         _pauseAtTheEndOfMediaItem = pauseAtTheEndOfMediaItem
 
         let renderSynchronizer = AVSampleBufferRenderSynchronizer()
@@ -210,7 +210,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .sourceUpdate,
                 positionDiscontinuity: false,
                 positionDiscontinuityReason: .internal,
-                discontinuityWindowStartPositionUs: .timeUnset,
+                discontinuityWindowStartPosition: .invalid,
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -228,14 +228,14 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
     }
 
-    func set(mediaItems: [MediaItem], startIndex: Int, startPositionMs: Int64) {
+    func set(mediaItems: [MediaItem], startIndex: Int, startPosition: CMTime) {
         queue.async { [weak self] in
             guard let self else { return }
 
             set(
                 mediaSources: createMediaSources(mediaItems: mediaItems),
                 startMediaItemIndex: startIndex,
-                startPositionMs: startPositionMs
+                startPosition: startPosition
             )
         }
     }
@@ -244,11 +244,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         set(mediaSources: [mediaSource])
     }
 
-    func set(mediaSource: MediaSource, startPositionMs: Int64) {
+    func set(mediaSource: MediaSource, startPosition: CMTime) {
         set(
             mediaSources: [mediaSource],
             startMediaItemIndex: 0,
-            startPositionMs: startPositionMs
+            startPosition: startPosition
         )
     }
 
@@ -267,20 +267,20 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             setMediaSourcesInternal(
                 mediaSources,
                 startWindowIndex: nil,
-                startPositionMs: .timeUnset,
+                startPosition: .invalid,
                 resetToDefaultPosition: resetPosition
             )
         }
     }
 
-    func set(mediaSources: [MediaSource], startMediaItemIndex: Int, startPositionMs: Int64) {
+    func set(mediaSources: [MediaSource], startMediaItemIndex: Int, startPosition: CMTime) {
         queue.async { [weak self] in
             guard let self else { return }
 
             setMediaSourcesInternal(
                 mediaSources,
                 startWindowIndex: startMediaItemIndex,
-                startPositionMs: startPositionMs,
+                startPosition: startPosition,
                 resetToDefaultPosition: false
             )
         }
@@ -329,7 +329,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: false,
                 positionDiscontinuityReason: .internal,
-                discontinuityWindowStartPositionUs: .timeUnset,
+                discontinuityWindowStartPosition: .invalid,
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -355,7 +355,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: positionDiscontinuity,
                 positionDiscontinuityReason: .remove,
-                discontinuityWindowStartPositionUs: currentPositionUsInternal(playbackInfo: newPlaybackInfo),
+                discontinuityWindowStartPosition: currentPositionInternal(playbackInfo: newPlaybackInfo),
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -397,11 +397,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             let newPlaybackInfo = maskTimelineAndPosition(
                 playbackInfo: playbackInfo,
                 timeline: newTimeline,
-                periodPositionUs: periodPositionUsAfterTimelineChanged(
+                periodPosition: periodPositionAfterTimelineChanged(
                     oldTimeline: oldTimeline,
                     newTimeline: newTimeline,
                     currentWindowIndexInternal: currentWindowIndexInternal(playbackInfo: playbackInfo),
-                    contentPositionMs: contentPositionInternal(playbackInfo: playbackInfo)
+                    contentPosition: contentPositionInternal(playbackInfo: playbackInfo)
                 )
             )
             internalPlayer.moveMediaSources(
@@ -412,7 +412,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: false,
                 positionDiscontinuityReason: .internal,
-                discontinuityWindowStartPositionUs: .timeUnset,
+                discontinuityWindowStartPosition: .invalid,
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -443,7 +443,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: positionDiscontinuity,
                 positionDiscontinuityReason: .remove,
-                discontinuityWindowStartPositionUs: currentPositionUsInternal(playbackInfo: newPlaybackInfo),
+                discontinuityWindowStartPosition: currentPositionInternal(playbackInfo: newPlaybackInfo),
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -458,10 +458,10 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             let newPlaybackInfo = maskTimelineAndPosition(
                 playbackInfo: playbackInfo,
                 timeline: timeline,
-                periodPositionUs: maskWindowPositionMsOrGetPeriodPositionUs(
+                periodPosition: maskWindowPositionMsOrGetPeriodPosition(
                     timeline: timeline,
                     windowIndex: currentMediaItemIndex,
-                    windowPositionMs: currentPosition
+                    windowPosition: currentPosition
                 )
             )
             pendingOperationAcks += 1
@@ -471,7 +471,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: false,
                 positionDiscontinuityReason: .internal,
-                discontinuityWindowStartPositionUs: .timeUnset,
+                discontinuityWindowStartPosition: .invalid,
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -517,7 +517,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
     }
 
-    func seek(to mediaItemIndex: Int?, positionMs: Int64, isRepeatingCurrentItem: Bool) {
+    func seek(to mediaItemIndex: Int?, position: CMTime, isRepeatingCurrentItem: Bool) {
         queue.async { [weak self] in
             guard let self, let mediaItemIndex, mediaItemIndex >= 0 else { return }
 
@@ -539,23 +539,23 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             newPlaybackInfo = maskTimelineAndPosition(
                 playbackInfo: newPlaybackInfo,
                 timeline: timeline,
-                periodPositionUs: maskWindowPositionMsOrGetPeriodPositionUs(
+                periodPosition: maskWindowPositionMsOrGetPeriodPosition(
                     timeline: timeline,
                     windowIndex: mediaItemIndex,
-                    windowPositionMs: positionMs
+                    windowPosition: position
                 )
             )
             self.internalPlayer.seekTo(
                 timeline: timeline,
                 windowIndex: mediaItemIndex,
-                positionUs: Time.msToUs(timeMs: positionMs)
+                position: position
             )
             updatePlaybackInfo(
                 new: newPlaybackInfo,
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: true,
                 positionDiscontinuityReason: .seek,
-                discontinuityWindowStartPositionUs: currentPositionUsInternal(playbackInfo: playbackInfo),
+                discontinuityWindowStartPosition: currentPositionInternal(playbackInfo: playbackInfo),
                 oldMaskingMediaItemIndex: oldMaskingMediaItemIndex,
                 repeatCurrentMediaItem: isRepeatingCurrentItem
             )
@@ -574,7 +574,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: false,
                 positionDiscontinuityReason: .internal,
-                discontinuityWindowStartPositionUs: .timeUnset,
+                discontinuityWindowStartPosition: .invalid,
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )
@@ -605,29 +605,29 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         queue.sync { createMessageInternal(handler: handler) }
     }
 
-    private func getContentBufferedPosition() -> Int64 {
+    private func getContentBufferedPosition() -> CMTime {
         assert(queue.isCurrent())
         guard !playbackInfo.timeline.isEmpty else {
-            return maskingWindowPositionMs
+            return maskingWindowPosition
         }
 
         if playbackInfo.loadingMediaPeriodId.windowSequenceNumber != playbackInfo.periodId.windowSequenceNumber {
-            let timeUs = playbackInfo.timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).durationUs
-            return Time.usToMs(timeUs: timeUs)
+            return playbackInfo.timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).duration
         }
 
-        return Time.usToMs(timeUs: periodPositionUs(
-            to: playbackInfo.bufferedPositionUs,
+        
+        return periodPosition(
+            to: playbackInfo.bufferedPosition,
             timeline: playbackInfo.timeline,
             periodId: playbackInfo.loadingMediaPeriodId
-        ))
+        )
     }
 
     private func stopInternal(error: Error?) {
         assert(queue.isCurrent())
         var playbackInfo = playbackInfo.loadingMediaPeriodId(playbackInfo.periodId)
-        playbackInfo.bufferedPositionUs = playbackInfo.positionUs
-        playbackInfo.totalBufferedDurationUs = 0
+        playbackInfo.bufferedPosition = playbackInfo.position
+        playbackInfo.totalBufferedDuration = .zero
         playbackInfo = mask(playbackState: .idle, playbackInfo: playbackInfo)
         if let error {
             playbackInfo = playbackInfo.setPlaybackError(error)
@@ -639,7 +639,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             timelineChangeReason: .playlistChanged,
             positionDiscontinuity: false,
             positionDiscontinuityReason: .internal,
-            discontinuityWindowStartPositionUs: .timeUnset,
+            discontinuityWindowStartPosition: .invalid,
             oldMaskingMediaItemIndex: nil,
             repeatCurrentMediaItem: false
         )
@@ -655,19 +655,19 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             .periodById(playbackInfo.periodId.periodId, period: period).windowIndex
     }
 
-    func contentPositionInternal(playbackInfo: PlaybackInfo) -> Int64 {
+    func contentPositionInternal(playbackInfo: PlaybackInfo) -> CMTime {
         assert(queue.isCurrent())
-        return Time.usToMs(timeUs: currentPositionUsInternal(playbackInfo: playbackInfo))
+        return currentPositionInternal(playbackInfo: playbackInfo)
     }
 
-    func currentPositionUsInternal(playbackInfo: PlaybackInfo) -> Int64 {
+    func currentPositionInternal(playbackInfo: PlaybackInfo) -> CMTime {
         assert(queue.isCurrent())
         guard !playbackInfo.timeline.isEmpty else {
-            return Time.msToUs(timeMs: maskingWindowPositionMs)
+            return maskingWindowPosition
         }
 
-        return periodPositionUs(
-            to: playbackInfo.positionUs,
+        return periodPosition(
+            to: playbackInfo.position,
             timeline: playbackInfo.timeline,
             periodId: playbackInfo.periodId
         )
@@ -682,7 +682,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         timelineChangeReason: TimelineChangeReason,
         positionDiscontinuity: Bool,
         positionDiscontinuityReason: DiscontinuityReason,
-        discontinuityWindowStartPositionUs: Int64,
+        discontinuityWindowStartPosition: CMTime,
         oldMaskingMediaItemIndex: Int?,
         repeatCurrentMediaItem: Bool
     ) {
@@ -729,7 +729,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 oldPlaybackInfo: previousPlaybackInfo,
                 oldMaskingMediaItemIndex: oldMaskingMediaItemIndex
             )
-            let positionInfo = positionInfo(for: discontinuityWindowStartPositionUs)
+            let positionInfo = positionInfo(for: discontinuityWindowStartPosition)
             DispatchQueue.main.async { [self] in
                 delegate.invokeDelegates {
                     $0.player(
@@ -832,15 +832,15 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             oldMediaItem = window.mediaItem
         }
 
-        let oldPositionUs: Int64
-        let oldContentPositionUs: Int64
+        let oldPosition: CMTime
+        let oldContentPosition: CMTime
 
         if positionDiscontinuityReason == .autoTransition {
-            oldPositionUs = oldPeriod.positionInWindowUs + oldPeriod.durationUs
-            oldContentPositionUs = oldPositionUs
+            oldPosition = oldPeriod.positionInWindow + oldPeriod.duration
+            oldContentPosition = oldPosition
         } else {
-            oldPositionUs = oldPeriod.positionInWindowUs + oldPlaybackInfo.positionUs
-            oldContentPositionUs = oldPositionUs
+            oldPosition = oldPeriod.positionInWindow + oldPlaybackInfo.position
+            oldContentPosition = oldPosition
         }
 
         return PositionInfo(
@@ -849,12 +849,12 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             mediaItem: oldMediaItem,
             periodId: oldPeriodId,
             periodIndex: oldPeriodIndex,
-            positionMs: Time.usToMs(timeUs: oldPositionUs),
-            contentPositionMs: Time.usToMs(timeUs: oldContentPositionUs)
+            position: oldPosition,
+            contentPosition: oldContentPosition
         )
     }
 
-    private func positionInfo(for discontinuityWindowStartPositionUs: Int64) -> PositionInfo {
+    private func positionInfo(for discontinuityWindowStartPosition: CMTime) -> PositionInfo {
         assert(queue.isCurrent())
         var newWindowId: AnyHashable?
         var newPeriodId: AnyHashable?
@@ -870,28 +870,27 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             newMediaItem = window.mediaItem
         }
 
-        let positionMs = Time.usToMs(timeUs: discontinuityWindowStartPositionUs)
         return PositionInfo(
             windowId: newWindowId,
             mediaItemIndex: newMediaItemIndex,
             mediaItem: newMediaItem,
             periodId: newPeriodId,
             periodIndex: newPeriodIndex,
-            positionMs: positionMs,
-            contentPositionMs: positionMs
+            position: discontinuityWindowStartPosition,
+            contentPosition: discontinuityWindowStartPosition
         )
     }
 
-    private func requestedContentPositionUs(playbackInfo: PlaybackInfo) -> Int64 {
+    private func requestedContentPosition(playbackInfo: PlaybackInfo) -> CMTime {
         assert(queue.isCurrent())
         let window = Window()
         let period = Period()
         playbackInfo.timeline.periodById(playbackInfo.periodId.periodId, period: period)
 
-        if playbackInfo.requestedContentPositionUs == .timeUnset {
-            return playbackInfo.timeline.getWindow(windowIndex: period.windowIndex, window: window).defaultPositionUs
+        if playbackInfo.requestedContentPosition.isValid == false {
+            return playbackInfo.timeline.getWindow(windowIndex: period.windowIndex, window: window).defaultPosition
         } else {
-            return period.positionInWindowUs + playbackInfo.requestedContentPositionUs
+            return period.positionInWindow + playbackInfo.requestedContentPosition
         }
     }
 
@@ -950,12 +949,12 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private func setMediaSourcesInternal(
         _ mediaSources: [MediaSource],
         startWindowIndex: Int?,
-        startPositionMs: Int64,
+        startPosition: CMTime,
         resetToDefaultPosition: Bool
     ) {
         assert(queue.isCurrent())
         var startWindowIndex = startWindowIndex
-        var startPositionMs = startPositionMs
+        var startPosition = startPosition
         let currentWindowIndex = currentWindowIndexInternal(playbackInfo: playbackInfo)
         let currentPositionMs = currentPosition
         pendingOperationAcks += 1
@@ -973,19 +972,19 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
         if resetToDefaultPosition {
             startWindowIndex = timeline.firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
-            startPositionMs = .timeUnset
+            startPosition = .invalid
         } else if startWindowIndex == nil {
             startWindowIndex = currentWindowIndex
-            startPositionMs = currentPositionMs
+            startPosition = currentPosition
         }
 
         var newPlaybackInfo = maskTimelineAndPosition(
             playbackInfo: playbackInfo,
             timeline: timeline,
-            periodPositionUs: maskWindowPositionMsOrGetPeriodPositionUs(
+            periodPosition: maskWindowPositionMsOrGetPeriodPosition(
                 timeline: timeline,
                 windowIndex: startWindowIndex,
-                windowPositionMs: startPositionMs
+                windowPosition: startPosition
             )
         )
 
@@ -1002,7 +1001,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         internalPlayer.setMediaSources(
             holders,
             windowIndex: startWindowIndex,
-            positionUs: Time.msToUs(timeMs: startPositionMs),
+            position: startPosition,
             shuffleOrder: _shufflerOrder
         )
 
@@ -1012,7 +1011,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             timelineChangeReason: .playlistChanged,
             positionDiscontinuity: positionDiscontinuity,
             positionDiscontinuityReason: .remove,
-            discontinuityWindowStartPositionUs: currentPositionUsInternal(playbackInfo: newPlaybackInfo),
+            discontinuityWindowStartPosition: currentPositionInternal(playbackInfo: newPlaybackInfo),
             oldMaskingMediaItemIndex: nil,
             repeatCurrentMediaItem: false
         )
@@ -1054,11 +1053,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         let newPlaybackInfo = maskTimelineAndPosition(
             playbackInfo: playbackInfo,
             timeline: newTimeline,
-            periodPositionUs: periodPositionUsAfterTimelineChanged(
+            periodPosition: periodPositionAfterTimelineChanged(
                 oldTimeline: oldTimeline,
                 newTimeline: newTimeline,
                 currentWindowIndexInternal: currentWindowIndexInternal(playbackInfo: playbackInfo),
-                contentPositionMs: contentPositionInternal(playbackInfo: playbackInfo)
+                contentPosition: contentPositionInternal(playbackInfo: playbackInfo)
             )
         )
 
@@ -1079,11 +1078,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         var newPlaybackInfo = maskTimelineAndPosition(
             playbackInfo: playbackInfo,
             timeline: newTimeline,
-            periodPositionUs: periodPositionUsAfterTimelineChanged(
+            periodPosition: periodPositionAfterTimelineChanged(
                 oldTimeline: oldTimeline,
                 newTimeline: newTimeline,
                 currentWindowIndexInternal: currentIndex,
-                contentPositionMs: contentPositionMs
+                contentPosition: contentPosition
             )
         )
 
@@ -1116,66 +1115,69 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private func maskTimelineAndPosition(
         playbackInfo: PlaybackInfo,
         timeline: Timeline,
-        periodPositionUs: (id: AnyHashable, periodPositionUs: Int64)?
+        periodPosition: (id: AnyHashable, periodPosition: CMTime)?
     ) -> PlaybackInfo {
-        guard timeline.isEmpty || periodPositionUs != nil else {
+        guard timeline.isEmpty || periodPosition != nil else {
+            assertionFailure()
             return playbackInfo
         }
 
         let oldTimeline = playbackInfo.timeline
-        let oldContentPositionMs = contentPositionInternal(playbackInfo: playbackInfo)
+        var oldContentPosition = contentPositionInternal(playbackInfo: playbackInfo)
         var playbackInfo = playbackInfo.timeline(timeline)
 
         if timeline.isEmpty {
             let dummyMediaPeriodId = PlaybackInfo.placeholderMediaPeriodId
-            let positionUs = Time.msToUs(timeMs: maskingWindowPositionMs)
-            playbackInfo = playbackInfo.positionUs(
+            let position = maskingWindowPosition
+            playbackInfo = playbackInfo.setPosition(
                 periodId: dummyMediaPeriodId,
-                positionUs: positionUs,
-                requestedContentPositionUs: positionUs,
-                discontinuityStartPositionUs: positionUs,
-                totalBufferedDurationUs: 0,
+                position: position,
+                requestedContentPosition: position,
+                discontinuityStartPosition: position,
+                totalBufferedDuration: .zero,
                 trackGroups: .empty,
                 trackSelectorResult: emptyTrackSelectorResult
             )
             playbackInfo = playbackInfo.loadingMediaPeriodId(dummyMediaPeriodId)
-            playbackInfo.bufferedPositionUs = playbackInfo.positionUs
+            playbackInfo.bufferedPosition = playbackInfo.position
             return playbackInfo
         }
 
-        guard let periodPositionUs else { return playbackInfo }
+        guard let periodPosition else { return playbackInfo }
         let oldPeriodId = playbackInfo.periodId.periodId
-        let playingPeriodChanged = oldPeriodId != periodPositionUs.id
-        let newPeriodId = playingPeriodChanged ? MediaPeriodId(periodId: periodPositionUs.id) : playbackInfo.periodId
-        let newContentPositionUs = periodPositionUs.periodPositionUs
-        var oldContentPositionUs = Time.msToUs(timeMs: oldContentPositionMs)
+        let playingPeriodChanged = oldPeriodId != periodPosition.id
+        let newPeriodId = playingPeriodChanged ? MediaPeriodId(periodId: periodPosition.id) : playbackInfo.periodId
+        let newContentPosition = periodPosition.periodPosition
 
         if !oldTimeline.isEmpty {
-            oldContentPositionUs -= timeline.periodById(oldPeriodId, period: period).positionInWindowUs
+            oldContentPosition = oldContentPosition - oldTimeline.periodById(oldPeriodId, period: period).positionInWindow
 
-            if !playingPeriodChanged, oldContentPositionUs - newContentPositionUs == 1 {
-                let oldDurationUs = oldTimeline.periodById(oldPeriodId, period: period).durationUs
-                let endOfSameStream = oldContentPositionUs == oldDurationUs
-                if endOfSameStream {
-                    oldContentPositionUs -= 1
+            if !playingPeriodChanged {
+                let diff = oldContentPosition - newContentPosition
+                // Check if off by one tick (the duration-1 clamp artifact)
+                if diff == CMTime(value: 1, timescale: oldContentPosition.timescale) {
+                    let oldDuration = oldTimeline.periodById(oldPeriodId, period: period).duration
+                    if oldContentPosition == oldDuration {
+                        oldContentPosition = oldContentPosition - CMTime(value: 1, timescale: oldContentPosition.timescale)
+                    }
                 }
             }
         }
 
-        if playingPeriodChanged || newContentPositionUs < oldContentPositionUs {
-            // TODO: check is not ad
-            playbackInfo = playbackInfo.positionUs(
+        if playingPeriodChanged || newContentPosition < oldContentPosition {
+            //TODO: assert(!newPeriodId.isAd)
+            playbackInfo = playbackInfo.setPosition(
                 periodId: newPeriodId,
-                positionUs: newContentPositionUs,
-                requestedContentPositionUs: newContentPositionUs,
-                discontinuityStartPositionUs: newContentPositionUs,
-                totalBufferedDurationUs: 0,
+                position: newContentPosition,
+                requestedContentPosition: newContentPosition,
+                discontinuityStartPosition: newContentPosition,
+                totalBufferedDuration: .zero,
                 trackGroups: playingPeriodChanged ? .empty : playbackInfo.trackGroups,
                 trackSelectorResult: playingPeriodChanged ? emptyTrackSelectorResult : playbackInfo.trackSelectorResult
             )
             playbackInfo = playbackInfo.loadingMediaPeriodId(newPeriodId)
-            playbackInfo.bufferedPositionUs = newContentPositionUs
-        } else if newContentPositionUs == oldContentPositionUs {
+            playbackInfo.bufferedPosition = newContentPosition
+        } else if newContentPosition == oldContentPosition {
             let loadingPeriodIndex = timeline.indexOfPeriod(by: playbackInfo.loadingMediaPeriodId.periodId)
 
             switch loadingPeriodIndex {
@@ -1185,38 +1187,44 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 if loadingWindowIndex != newWindowIndex { fallthrough }
             default:
                 timeline.periodById(newPeriodId.periodId, period: period)
-                let maskedBufferedPositionUs = period.durationUs
+                let maskedBufferedPosition: CMTime
+//               TODO: if newPeriodId.isAd {
+//                    maskedBufferedPosition = period.adDuration(adGroupIndex: newPeriodId.adGroupIndex, adIndexInAdGroup: newPeriodId.adIndexInAdGroup)
+//                } else {
+//                    maskedBufferedPosition = period.duration
+//                }
+                maskedBufferedPosition = period.duration
 
-                playbackInfo = playbackInfo.positionUs(
+                playbackInfo = playbackInfo.setPosition(
                     periodId: newPeriodId,
-                    positionUs: playbackInfo.positionUs,
-                    requestedContentPositionUs: playbackInfo.positionUs,
-                    discontinuityStartPositionUs: playbackInfo.discontinuityStartPositionUs,
-                    totalBufferedDurationUs: maskedBufferedPositionUs - playbackInfo.positionUs,
+                    position: playbackInfo.position,
+                    requestedContentPosition: playbackInfo.position,
+                    discontinuityStartPosition: playbackInfo.discontinuityStartPosition,
+                    totalBufferedDuration: maskedBufferedPosition - playbackInfo.position,
                     trackGroups: playbackInfo.trackGroups,
                     trackSelectorResult: playbackInfo.trackSelectorResult
                 )
                 playbackInfo = playbackInfo.loadingMediaPeriodId(newPeriodId)
-                playbackInfo.bufferedPositionUs = maskedBufferedPositionUs
+                playbackInfo.bufferedPosition = maskedBufferedPosition
             }
         } else {
-            let maskedTotalBufferedDurationUs = max(0, playbackInfo.totalBufferedDurationUs - (newContentPositionUs - oldContentPositionUs))
-            var maskedBufferedPositionUs = playbackInfo.bufferedPositionUs
+            // TODO: assert(!newPeriodId.isAd)
+            let maskedTotalBufferedDuration = max(.zero, playbackInfo.totalBufferedDuration - (newContentPosition - oldContentPosition))
+            var maskedBufferedPosition = playbackInfo.bufferedPosition
             if playbackInfo.loadingMediaPeriodId == playbackInfo.periodId {
-                maskedBufferedPositionUs = newContentPositionUs + maskedTotalBufferedDurationUs
+                maskedBufferedPosition = newContentPosition + maskedTotalBufferedDuration
             }
 
-            playbackInfo = playbackInfo.positionUs(
+            playbackInfo = playbackInfo.setPosition(
                 periodId: newPeriodId,
-                positionUs: newContentPositionUs,
-                requestedContentPositionUs: newContentPositionUs,
-                discontinuityStartPositionUs: newContentPositionUs,
-                totalBufferedDurationUs: maskedTotalBufferedDurationUs,
+                position: newContentPosition,
+                requestedContentPosition: newContentPosition,
+                discontinuityStartPosition: newContentPosition,
+                totalBufferedDuration: maskedTotalBufferedDuration,
                 trackGroups: playbackInfo.trackGroups,
                 trackSelectorResult: playbackInfo.trackSelectorResult
             )
-
-            playbackInfo.bufferedPositionUs = maskedBufferedPositionUs
+            playbackInfo.bufferedPosition = maskedBufferedPosition
         }
 
         return playbackInfo
@@ -1233,18 +1241,18 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         return playbackInfo
     }
 
-    private func periodPositionUsAfterTimelineChanged(
+    private func periodPositionAfterTimelineChanged(
         oldTimeline: Timeline,
         newTimeline: Timeline,
         currentWindowIndexInternal: Int?,
-        contentPositionMs: Int64
-    ) -> (id: AnyHashable, periodPositionUs: Int64)? {
+        contentPosition: CMTime
+    ) -> (id: AnyHashable, periodPosition: CMTime)? {
         if oldTimeline.isEmpty || newTimeline.isEmpty {
             let isCleared = !oldTimeline.isEmpty && newTimeline.isEmpty
-            return maskWindowPositionMsOrGetPeriodPositionUs(
+            return maskWindowPositionMsOrGetPeriodPosition(
                 timeline: newTimeline,
                 windowIndex: isCleared ? nil : currentWindowIndexInternal,
-                windowPositionMs: isCleared ? .timeUnset : contentPositionMs
+                windowPosition: isCleared ? .invalid : contentPosition
             )
         }
 
@@ -1252,15 +1260,15 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             return nil
         }
 
-        guard let (oldPeriodId, oldPeriodPositionUs) = oldTimeline.periodPositionUs(
+        guard let (oldPeriodId, oldPeriodPosition) = oldTimeline.periodPosition(
             window: window,
             period: period,
             windowIndex: currentWindowIndexInternal,
-            windowPositionUs: Time.msToUs(timeMs: contentPositionMs)
+            windowPosition: contentPosition
         ) else { return nil }
 
         guard timeline.indexOfPeriod(by: oldPeriodId) != nil else {
-            return (oldPeriodId, oldPeriodPositionUs)
+            return (oldPeriodId, oldPeriodPosition)
         }
 
         if let newWindowIndex = internalPlayer.resolveSubsequentPeriod(
@@ -1272,32 +1280,32 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             oldTimeline: oldTimeline,
             newTimeline: newTimeline
         ) {
-            return maskWindowPositionMsOrGetPeriodPositionUs(
+            return maskWindowPositionMsOrGetPeriodPosition(
                 timeline: newTimeline,
                 windowIndex: newWindowIndex,
-                windowPositionMs: newTimeline.getWindow(windowIndex: newWindowIndex, window: window).defaultPositionUs
+                windowPosition: newTimeline.getWindow(windowIndex: newWindowIndex, window: window).defaultPosition
             )
         } else {
-            return maskWindowPositionMsOrGetPeriodPositionUs(
+            return maskWindowPositionMsOrGetPeriodPosition(
                 timeline: newTimeline,
                 windowIndex: nil,
-                windowPositionMs: .timeUnset
+                windowPosition: .invalid
             )
         }
     }
 
-    private func maskWindowPositionMsOrGetPeriodPositionUs(
-        timeline: Timeline, windowIndex: Int?, windowPositionMs: Int64
-    ) -> (id: AnyHashable, periodPositionUs: Int64)? {
+    private func maskWindowPositionMsOrGetPeriodPosition(
+        timeline: Timeline, windowIndex: Int?, windowPosition: CMTime
+    ) -> (id: AnyHashable, periodPosition: CMTime)? {
         guard !timeline.isEmpty else {
             maskingWindowIndex = windowIndex
-            maskingWindowPositionMs = windowPositionMs == .timeUnset ? .zero : windowPositionMs
+            maskingWindowPosition = windowPosition.isValid ? windowPosition : .zero
             maskingPeriodIndex = 0
             return nil
         }
 
         let updatedWindowIndex: Int
-        var windowPositionMs: Int64 = windowPositionMs
+        var windowPosition: CMTime = windowPosition
 
         switch windowIndex {
         case let .some(windowIndex):
@@ -1308,21 +1316,21 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 return nil
             }
             updatedWindowIndex = windowIndex
-            windowPositionMs = timeline.getWindow(windowIndex: windowIndex, window: window).defaultPositionUs
+            windowPosition = timeline.getWindow(windowIndex: windowIndex, window: window).defaultPosition
         }
 
-        return timeline.periodPositionUs(
+        return timeline.periodPosition(
             window: window,
             period: period,
             windowIndex: updatedWindowIndex,
-            windowPositionUs: Time.msToUs(timeMs: windowPositionMs)
+            windowPosition: windowPosition
         )
     }
 
-    private func periodPositionUs(to windowPositionUs: Int64, timeline: Timeline, periodId: MediaPeriodId) -> Int64 {
+    private func periodPosition(to windowPosition: CMTime, timeline: Timeline, periodId: MediaPeriodId) -> CMTime {
         assert(queue.isCurrent())
         timeline.periodById(periodId.periodId, period: period)
-        return windowPositionUs + period.positionInWindowUs
+        return windowPosition + period.positionInWindow
     }
 
     private func createMessageInternal(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage {
@@ -1370,7 +1378,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             timelineChangeReason: .playlistChanged,
             positionDiscontinuity: false,
             positionDiscontinuityReason: .internal,
-            discontinuityWindowStartPositionUs: .timeUnset,
+            discontinuityWindowStartPosition: .invalid,
             oldMaskingMediaItemIndex: nil,
             repeatCurrentMediaItem: false
         )
@@ -1413,7 +1421,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             timelineChangeReason: .playlistChanged,
             positionDiscontinuity: false,
             positionDiscontinuityReason: .remove,
-            discontinuityWindowStartPositionUs: .timeUnset,
+            discontinuityWindowStartPosition: .invalid,
             oldMaskingMediaItemIndex: nil,
             repeatCurrentMediaItem: false
         )
@@ -1447,7 +1455,7 @@ extension SEPlayerImpl: SEPlayerImplInternalDelegate {
             let newTimeline = playbackInfoUpdate.playbackInfo.timeline
             if !playbackInfo.timeline.isEmpty, newTimeline.isEmpty {
                 maskingWindowIndex = nil
-                maskingWindowPositionMs = 0
+                maskingWindowPosition = .zero
                 maskingPeriodIndex = 0
             }
 
@@ -1459,18 +1467,18 @@ extension SEPlayerImpl: SEPlayerImplInternalDelegate {
             }
 
             var positionDiscontinuity = false
-            var discontinuityWindowStartPositionUs = Int64.timeUnset
+            var discontinuityWindowStartPosition = CMTime.invalid
 
             if pendingDiscontinuity {
                 positionDiscontinuity = playbackInfoUpdate.playbackInfo.periodId != playbackInfo.periodId ||
-                    playbackInfoUpdate.playbackInfo.discontinuityStartPositionUs != playbackInfo.positionUs
+                    playbackInfoUpdate.playbackInfo.discontinuityStartPosition != playbackInfo.position
 
                 if positionDiscontinuity {
-                    discontinuityWindowStartPositionUs = if newTimeline.isEmpty {
-                        playbackInfoUpdate.playbackInfo.discontinuityStartPositionUs
+                    discontinuityWindowStartPosition = if newTimeline.isEmpty {
+                        playbackInfoUpdate.playbackInfo.discontinuityStartPosition
                     } else {
-                        periodPositionUs(
-                            to: playbackInfoUpdate.playbackInfo.discontinuityStartPositionUs,
+                        periodPosition(
+                            to: playbackInfoUpdate.playbackInfo.discontinuityStartPosition,
                             timeline: newTimeline,
                             periodId: playbackInfoUpdate.playbackInfo.periodId
                         )
@@ -1484,7 +1492,7 @@ extension SEPlayerImpl: SEPlayerImplInternalDelegate {
                 timelineChangeReason: .sourceUpdate,
                 positionDiscontinuity: positionDiscontinuity,
                 positionDiscontinuityReason: pendingDiscontinuityReason,
-                discontinuityWindowStartPositionUs: discontinuityWindowStartPositionUs,
+                discontinuityWindowStartPosition: discontinuityWindowStartPosition,
                 oldMaskingMediaItemIndex: nil,
                 repeatCurrentMediaItem: false
             )

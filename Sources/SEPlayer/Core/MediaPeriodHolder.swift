@@ -5,11 +5,12 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 final class MediaPeriodHolder {
     var allRenderersInCorrectState: Bool = false
-    var renderPositionOffset: Int64
+    var renderPositionOffset: CMTime
     var trackSelectorResults: TrackSelectorResult
 
     let queue: Queue
@@ -17,8 +18,8 @@ final class MediaPeriodHolder {
     let id: AnyHashable
     let rendererCapabilities: [RendererCapabilitiesResolver]
 
-    var sampleStreams: [SampleStream?]
-    let targetPreloadBufferDurationUs: Int64
+    var sampleStreams: [TriggerableSampleStream?]
+    let targetPreloadBufferDuration: CMTime
     var info: MediaPeriodInfo
 
     let mediaSourceList: MediaSourceList
@@ -36,19 +37,19 @@ final class MediaPeriodHolder {
     init(
         queue: Queue,
         rendererCapabilities: [RendererCapabilitiesResolver],
-        rendererPositionOffsetUs: Int64,
+        rendererPositionOffset: CMTime,
         trackSelector: TrackSelector,
         allocator: Allocator,
         mediaSourceList: MediaSourceList,
         info: MediaPeriodInfo,
         emptyTrackSelectorResult: TrackSelectorResult,
-        targetPreloadBufferDurationUs: Int64
+        targetPreloadBufferDuration: CMTime
     ) throws {
         self.queue = queue
         self.rendererCapabilities = rendererCapabilities
-        self.renderPositionOffset = rendererPositionOffsetUs
+        self.renderPositionOffset = rendererPositionOffset
         self.sampleStreams = Array(repeating: nil, count: rendererCapabilities.count)
-        self.targetPreloadBufferDurationUs = targetPreloadBufferDurationUs
+        self.targetPreloadBufferDuration = targetPreloadBufferDuration
         self.mayRetainStreamFlags = Array(repeating: false, count: rendererCapabilities.count)
         self.mediaSourceList = mediaSourceList
         self.info = info
@@ -60,41 +61,41 @@ final class MediaPeriodHolder {
             id: info.id,
             mediaSourceList: mediaSourceList,
             allocator: allocator,
-            startPositionUs: info.startPositionUs,
-            endPositionUs: info.endPositionUs
+            startPosition: info.startPosition,
+            endPosition: info.endPosition
         )
     }
-    
-    func toRendererTime(periodTime: Int64) -> Int64 {
+
+    func toRendererTime(periodTime: CMTime) -> CMTime {
         periodTime + renderPositionOffset
     }
 
-    func toPeriodTime(rendererTime: Int64) -> Int64 {
+    func toPeriodTime(rendererTime: CMTime) -> CMTime {
         return rendererTime - renderPositionOffset
     }
 
-    func getStartPositionRendererTime() -> Int64 {
-        info.startPositionUs + renderPositionOffset
+    func getStartPositionRendererTime() -> CMTime {
+        info.startPosition + renderPositionOffset
     }
-    
+
     func isFullyBuffered() -> Bool {
-        return isPrepared && (!hasEnabledTracks || mediaPeriod.getBufferedPositionUs() == .endOfSource )
+        return isPrepared && (!hasEnabledTracks || mediaPeriod.getBufferedPosition().isPositiveInfinity )
     }
 
     func isFullyPreloaded() -> Bool {
         return isPrepared &&
-            isFullyBuffered() || getBufferedPositionUs() - info.startPositionUs >= targetPreloadBufferDurationUs
+            isFullyBuffered() || getBufferedPosition() - info.startPosition >= targetPreloadBufferDuration
     }
 
-    func getBufferedPositionUs() -> Int64 {
-        guard isPrepared else { return info.startPositionUs }
+    func getBufferedPosition() -> CMTime {
+        guard isPrepared else { return info.startPosition }
 
-        let bufferedPosition = hasEnabledTracks ? mediaPeriod.getBufferedPositionUs() : .endOfSource
-        return bufferedPosition == .endOfSource ? info.durationUs : bufferedPosition
+        let bufferedPosition = hasEnabledTracks ? mediaPeriod.getBufferedPosition() : .positiveInfinity
+        return bufferedPosition.isPositiveInfinity ? info.duration : bufferedPosition
     }
 
-    func getNextLoadPosition() -> Int64 {
-        !isPrepared ? .zero : mediaPeriod.getNextLoadPositionUs()
+    func getNextLoadPosition() -> CMTime {
+        !isPrepared ? .zero : mediaPeriod.getNextLoadPosition()
     }
 
     func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws {
@@ -106,20 +107,20 @@ final class MediaPeriodHolder {
             timeline: timeline,
             playWhenReady: playWhenReady
         )
-        var requestedStartPosition = info.startPositionUs
-        if info.durationUs != .timeUnset && requestedStartPosition >= info.durationUs {
-            requestedStartPosition = max(0, info.durationUs - 1)
+        var requestedStartPosition = info.startPosition
+        if info.duration.isValid && requestedStartPosition >= info.duration {
+            requestedStartPosition = max(.zero, CMTime(value: info.duration.value - 1, timescale: info.duration.timescale))
         }
         let newStartPosition = applyTrackSelection(trackSelectorResult: selectorResult,
-                                                   positionUs: requestedStartPosition,
+                                                   position: requestedStartPosition,
                                                    forceRecreateStreams: false)
-        renderPositionOffset += info.startPositionUs - newStartPosition
-        info = info.copyWithStartPositionUs(newStartPosition)
+        renderPositionOffset = renderPositionOffset + info.startPosition - newStartPosition
+        info = info.copyWithStartPosition(newStartPosition)
     }
 
-    func reevaluateBuffer(rendererPosition: Int64) {
+    func reevaluateBuffer(rendererPosition: CMTime) {
         if isPrepared {
-            mediaPeriod.reevaluateBuffer(positionUs: toPeriodTime(rendererTime: rendererPosition))
+            mediaPeriod.reevaluateBuffer(position: toPeriodTime(rendererTime: rendererPosition))
         }
     }
 
@@ -140,14 +141,14 @@ final class MediaPeriodHolder {
     @discardableResult
     func applyTrackSelection(
         trackSelectorResult: TrackSelectorResult,
-        positionUs: Int64,
+        position: CMTime,
         forceRecreateStreams: Bool
-    ) -> Int64 {
+    ) -> CMTime {
         assert(queue.isCurrent())
         var streamResetFlags = Array(repeating: false, count: rendererCapabilities.count)
         return applyTrackSelection(
             newTrackSelectorResult: trackSelectorResult,
-            positionUs: positionUs,
+            position: position,
             forceRecreateStreams: forceRecreateStreams,
             streamResetFlags: &streamResetFlags
         )
@@ -155,10 +156,10 @@ final class MediaPeriodHolder {
 
     func applyTrackSelection(
         newTrackSelectorResult: TrackSelectorResult,
-        positionUs: Int64,
+        position: CMTime,
         forceRecreateStreams: Bool,
         streamResetFlags: inout [Bool]
-    ) -> Int64 {
+    ) -> CMTime {
         for index in 0..<newTrackSelectorResult.selections.count {
             mayRetainStreamFlags[index] = !forceRecreateStreams
                 && trackSelectorResults == newTrackSelectorResult
@@ -169,12 +170,12 @@ final class MediaPeriodHolder {
         self.trackSelectorResults = newTrackSelectorResult
         enableTrackSelectionsInResult()
 
-        let positionUs = mediaPeriod.selectTrack(
+        let position = mediaPeriod.selectTrack(
             selections: newTrackSelectorResult.selections,
             mayRetainStreamFlags: mayRetainStreamFlags,
             streams: &sampleStreams,
             streamResetFlags: &streamResetFlags,
-            positionUs: positionUs
+            position: position
         )
         associateNoSampleRenderersWithEmptySampleStream(sampleStreams: &sampleStreams)
         hasEnabledTracks = false
@@ -188,7 +189,7 @@ final class MediaPeriodHolder {
             }
         }
 
-        return positionUs
+        return position
     }
 
     func release() {
@@ -205,12 +206,12 @@ final class MediaPeriodHolder {
     }
 
     func canBeUsedFor(mediaPeriodInfo: MediaPeriodInfo) -> Bool {
-        Self.durationsCompatible(lhs: self.info.durationUs, rhs: mediaPeriodInfo.durationUs)
-            && self.info.startPositionUs == info.startPositionUs
+        Self.durationsCompatible(lhs: self.info.duration, rhs: mediaPeriodInfo.duration)
+            && self.info.startPosition == info.startPosition
             && self.info.id == mediaPeriodInfo.id
     }
 
-    func prepare(callback: any MediaPeriodCallback, on time: Int64) {
+    func prepare(callback: any MediaPeriodCallback, on time: CMTime) {
         prepareCalled = true
         mediaPeriod.prepare(callback: callback, on: time)
     }
@@ -237,7 +238,7 @@ final class MediaPeriodHolder {
         }
     }
 
-    func disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream?]) {
+    func disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [TriggerableSampleStream?]) {
         for (index, capability) in rendererCapabilities.enumerated() {
             if capability.trackType == .unknown {
                 sampleStreams[index] = nil
@@ -245,7 +246,7 @@ final class MediaPeriodHolder {
         }
     }
 
-    func associateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream?]) {
+    func associateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [TriggerableSampleStream?]) {
         for (index, capability) in rendererCapabilities.enumerated() {
             if capability.trackType == .unknown, trackSelectorResults.isRendererEnabled(for: index) {
                 sampleStreams[index] = EmptySampleStream()
@@ -261,16 +262,16 @@ final class MediaPeriodHolder {
         id: MediaPeriodId,
         mediaSourceList: MediaSourceList,
         allocator: Allocator,
-        startPositionUs: Int64,
-        endPositionUs: Int64
+        startPosition: CMTime,
+        endPosition: CMTime
     ) throws -> MediaPeriod {
         let mediaPeriod = try! mediaSourceList.createPeriod(
             id: id,
             allocator: allocator,
-            startPosition: startPositionUs
+            startPosition: startPosition
         )
 
-        if endPositionUs != .timeUnset {
+        if endPosition.isValid {
             // TODO: clipping
         }
 
@@ -289,7 +290,7 @@ extension MediaPeriodHolder: Equatable {
 }
 
 extension MediaPeriodHolder {
-    static func durationsCompatible(lhs: Int64, rhs: Int64) -> Bool {
-        lhs == .timeUnset || lhs == rhs
+    static func durationsCompatible(lhs: CMTime, rhs: CMTime) -> Bool {
+        !lhs.isValid || lhs == rhs
     }
 }

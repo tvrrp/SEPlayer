@@ -18,6 +18,12 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
         return time.isValid ? time : nil
     }
 
+    public var onInputBufferAvailable: (() -> Void)? {
+        get { lock.withLock { _onInputBufferAvailable } }
+        set { lock.withLock { _onInputBufferAvailable = newValue } }
+    }
+    var _onInputBufferAvailable: (() -> Void)?
+
     private let decodeQueue: Queue
     private let decodeActor: PlayerActor
     private let lock: UnfairLock
@@ -37,28 +43,43 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
     private var flushed = false
     private var released = false
     private var skippedOutputBufferCount = 0
-    private var outputStartTimeUs = Int64.zero
+    private var outputStartTime: CMTime
 
     private var decodeContinuation: CheckedContinuation<Void, Never>?
 
     public init(
         decodeQueue: Queue,
         inputBuffersCount: Int,
-        outputBuffersCount: Int
+        outputBuffersCount: Int,
+        handlers: CMBufferQueue.Handlers? = nil
     ) throws {
         self.decodeQueue = decodeQueue
         self.decodeActor = decodeQueue.playerActor()
         lock = UnfairLock()
-        outputStartTimeUs = .timeUnset
+        outputStartTime = .invalid
         queuedInputBuffers = []
-        queuedOutputBuffers = try .init(
-            capacity: outputBuffersCount,
-            compareHandler: { lhs, rhs in
-                guard lhs.timeUs != rhs.timeUs else { return .compareEqualTo }
-                return lhs.timeUs > rhs.timeUs ? .compareGreaterThan : .compareLessThan
-            },
-            ptsHandler: { .from(microseconds: $0.timeUs) }
-        )
+        if let handlers {
+            queuedOutputBuffers = try .init(capacity: outputBuffersCount, handlers: handlers)
+        } else {
+            queuedOutputBuffers = try .init(
+                capacity: outputBuffersCount,
+                compareHandler: { lhs, rhs in
+                    if lhs.sampleFlags.contains(.endOfStream) {
+                        return .compareGreaterThan
+                    }
+                    if rhs.sampleFlags.contains(.endOfStream) {
+                        return .compareLessThan
+                    }
+                    if lhs.time.presentationTimeStamp != rhs.time.presentationTimeStamp {
+                        return .compareEqualTo
+                    }
+
+                    return lhs.time.presentationTimeStamp > rhs.time.presentationTimeStamp ? .compareGreaterThan : .compareLessThan
+                },
+                ptsHandler: { $0.time.presentationTimeStamp },
+                durationHandler: { $0.time.duration }
+            )
+        }
 
         availableInputBuffers = []
         availableInputBufferCount = inputBuffersCount
@@ -73,21 +94,33 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
         }
     }
 
+    public func installTrigger(condition: CMBufferQueue.TriggerCondition, _ body: CMBufferQueueTriggerHandler?) throws -> CMBufferQueue.TriggerToken {
+        try! queuedOutputBuffers.installTrigger(condition: condition, body)
+    }
+
+    public func removeTrigger(_ triggerToken: CMBufferQueue.TriggerToken) throws {
+        try queuedOutputBuffers.removeTrigger(triggerToken)
+    }
+
+    public func testTrigger(_ triggerToken: CMBufferQueue.TriggerToken) -> Bool {
+        queuedOutputBuffers.testTrigger(triggerToken)
+    }
+
     public final func setInitialInputBufferSize(_ size: Int) throws {
         try availableInputBuffers.forEach {
             try $0.ensureSpaceForWrite(size)
         }
     }
 
-    public final func isAtLeastOutputStartTimeUs(_ timeUs: Int64) -> Bool {
+    public final func isAtLeastOutputStartTime(_ time: CMTime) -> Bool {
         lock.withLock {
-            outputStartTimeUs == .timeUnset || timeUs >= outputStartTimeUs
+            !outputStartTime.isValid || time >= outputStartTime
         }
     }
 
-    open func setOutputStartTimeUs(_ outputStartTimeUs: Int64) {
+    open func setOutputStartTime(_ outputStartTime: CMTime) {
         lock.withLock {
-            self.outputStartTimeUs = outputStartTimeUs
+            self.outputStartTime = outputStartTime
         }
     }
 
@@ -198,11 +231,11 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
         if inputBuffer.flags.contains(.endOfStream) {
             outputBuffer.sampleFlags.insert(.endOfStream)
         } else {
-            outputBuffer.timeUs = inputBuffer.timeUs
+            outputBuffer.time = inputBuffer.time
             if inputBuffer.flags.contains(.firstSample) {
                 outputBuffer.sampleFlags.insert(.firstSample)
             }
-            if !isAtLeastOutputStartTimeUs(inputBuffer.timeUs) {
+            if !isAtLeastOutputStartTime(inputBuffer.time.presentationTimeStamp) {
                 outputBuffer.shouldBeSkipped = true
             }
 
@@ -237,6 +270,7 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
         }
 
         lock.withLock { releaseInputBufferInternal(inputBuffer) }
+        onInputBufferAvailable?()
 
         return true
     }

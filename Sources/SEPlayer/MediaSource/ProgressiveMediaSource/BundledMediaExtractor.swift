@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSURLSession
 import Extractor
 import SEPlayerCommon
@@ -85,9 +86,9 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
         return extractorInput?.getPosition(isolation: isolation)
     }
 
-    func seek(position: Int, time: Int64, isolation: isolated any Actor) throws {
+    func seek(position: Int, time: CMTime, isolation: isolated any Actor) throws {
         syncActor.assertIsolated()
-        try extractor?.seek(to: position, timeUs: time, isolation: isolation)
+        try extractor?.seek(to: position, time: time, isolation: isolation)
     }
 
     func read(isolation: isolated any Actor) async throws -> ExtractorReadResult {

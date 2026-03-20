@@ -5,26 +5,28 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
+
 public protocol SeekMap: AnyObject {
     func isSeekable() -> Bool
-    func getDurationUs() -> Int64
-    func getSeekPoints(for timeUs: Int64) -> SeekPoints
+    func getDuration() -> CMTime
+    func getSeekPoints(for time: CMTime) -> SeekPoints
 }
 
 public final class Unseekable: SeekMap {
-    private let durationUs: Int64
+    private let duration: CMTime
     private let startSeekPoints: SeekPoints
 
-    public init(durationUs: Int64, startPosition: Int) {
-        self.durationUs = durationUs
+    public init(duration: CMTime, startPosition: Int) {
+        self.duration = duration
         self.startSeekPoints = SeekPoints(
-            first: startPosition == 0 ? .start : .init(timeUs: 0, position: startPosition)
+            first: startPosition == 0 ? .start : .init(time: .zero, position: startPosition)
         )
     }
 
     public func isSeekable() -> Bool { return false }
-    public func getDurationUs() -> Int64 { durationUs }
-    public func getSeekPoints(for timeUs: Int64) -> SeekPoints { startSeekPoints }
+    public func getDuration() -> CMTime { duration }
+    public func getSeekPoints(for time: CMTime) -> SeekPoints { startSeekPoints }
 }
 
 public struct SeekPoints: Hashable, Sendable {
@@ -39,14 +41,14 @@ public struct SeekPoints: Hashable, Sendable {
 
 public extension SeekPoints {
     struct SeekPoint: Hashable, Sendable {
-        public let timeUs: Int64
+        public let time: CMTime
         public let position: Int
 
-        public init(timeUs: Int64, position: Int) {
-            self.timeUs = timeUs
+        public init(time: CMTime, position: Int) {
+            self.time = time
             self.position = position
         }
 
-        public static let start = SeekPoint(timeUs: 0, position: 0)
+        public static let start = SeekPoint(time: .zero, position: 0)
     }
 }

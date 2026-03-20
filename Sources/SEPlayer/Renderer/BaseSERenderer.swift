@@ -14,23 +14,24 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         get { lock.withLock { _listener } }
         set { lock.withLock { _listener = newValue } }
     }
+    final weak var delegate: SERendererDelegate?
     var name: String { String(describing: self) }
     let trackType: TrackType
 
-    private let queue: Queue
+    let queue: Queue
     private let lock: UnfairLock
     private let clock: SEClock
 
     private weak var _listener: RendererCapabilitiesListener?
     private var state: SERendererState = .disabled
-    private var sampleStream: SampleStream?
+    private var sampleStream: TriggerableSampleStream?
     private var formats: [Format] = []
 
     private var streamIsFinal: Bool = false
 
-    private var lastResetPosition: Int64 = .zero
-    private var readingPosition: Int64 = .endOfSource
-    private var streamOffset: Int64 = .zero
+    private var lastResetPosition: CMTime = .zero
+    private var readingPosition: CMTime = .positiveInfinity
+    private var streamOffset: CMTime = .zero
     private var timeline: Timeline
 
     init(queue: Queue, trackType: TrackType, clock: SEClock) {
@@ -51,15 +52,16 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     final func enable(
         formats: [Format],
-        stream: SampleStream,
-        position: Int64,
+        stream: TriggerableSampleStream,
+        position: CMTime,
         joining: Bool,
         mayRenderStartOfStream: Bool,
-        startPosition: Int64,
-        offset: Int64,
+        startPosition: CMTime,
+        offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws {
         assert(queue.isCurrent() && state == .disabled)
+        try willChangeStream()
         state = .enabled
         self.sampleStream = stream
         self.formats = formats
@@ -76,13 +78,14 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     final func replaceStream(
         formats: [Format],
-        stream: SampleStream,
-        startPosition: Int64,
-        offset: Int64,
+        stream: TriggerableSampleStream,
+        startPosition: CMTime,
+        offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws {
+        try willChangeStream()
         self.sampleStream = stream
-        if readingPosition == .endOfSource {
+        if readingPosition.isPositiveInfinity {
             readingPosition = startPosition
         }
         self.formats = formats
@@ -90,9 +93,9 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         try! onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
     }
 
-    final func getStream() -> SampleStream? { sampleStream }
-    final func didReadStreamToEnd() -> Bool { return readingPosition == .endOfSource }
-    final func getReadingPosition() -> Int64 { return readingPosition }
+    final func getStream() -> TriggerableSampleStream? { sampleStream }
+    final func didReadStreamToEnd() -> Bool { return readingPosition.isPositiveInfinity }
+    final func getReadingPosition() -> CMTime { return readingPosition }
     final func setStreamFinal() { streamIsFinal = true }
     final func isCurrentStreamFinal() -> Bool { streamIsFinal }
 
@@ -104,18 +107,18 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         onTimelineChanged(new: timeline)
     }
 
-    final func resetPosition(new position: Int64) throws {
+    final func resetPosition(new position: CMTime) throws {
         try! resetPosition(new: position, joining: false)
     }
 
-    private func resetPosition(new position: Int64, joining: Bool) throws {
+    private func resetPosition(new position: CMTime, joining: Bool) throws {
         streamIsFinal = false
         lastResetPosition = position
         readingPosition = position
         try! onPositionReset(position: position, joining: joining)
     }
 
-    func render(position: Int64, elapsedRealtime: Int64) throws {}
+    func render(position: CMTime, elapsedRealtime: CMTime) throws {}
     func isReady() -> Bool { false }
     func isEnded() -> Bool { true }
     func getMediaClock() -> MediaClock? { return nil }
@@ -158,14 +161,15 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {}
 
+    func willChangeStream() throws {}
     func onStreamChanged(
         formats: [Format],
-        startPosition: Int64,
-        offset: Int64,
+        startPosition: CMTime,
+        offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws {}
 
-    func onPositionReset(position: Int64, joining: Bool) throws {}
+    func onPositionReset(position: CMTime, joining: Bool) throws {}
     func onStarted() throws {}
     func onStopped() {}
     func onDisabled() {}
@@ -173,8 +177,8 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     func onRelease() {}
     func onTimelineChanged(new timeline: Timeline) {}
 
-    final func getLastResetPosition() -> Int64 { lastResetPosition }
-    final func getStreamOffset() -> Int64 { streamOffset }
+    final func getLastResetPosition() -> CMTime { lastResetPosition }
+    final func getStreamOffset() -> CMTime { streamOffset }
     final func getStreamFormats() -> [Format] { formats }
     final func getClock() -> SEClock { clock }
 
@@ -184,17 +188,22 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         let result = try sampleStream.readData(to: buffer, readFlags: readFlags)
         if case .didReadBuffer = result {
             if buffer.flags.contains(.endOfStream) {
-                readingPosition = .endOfSource
+                readingPosition = .positiveInfinity
                 return streamIsFinal ? .didReadBuffer : .nothingRead
             }
-            buffer.timeUs += streamOffset
-            readingPosition = max(readingPosition, buffer.timeUs)
+//            buffer.time = buffer.time + streamOffset
+            buffer.time = CMSampleTimingInfo(
+                duration: buffer.time.duration,
+                presentationTimeStamp: buffer.time.presentationTimeStamp + streamOffset,
+                decodeTimeStamp: buffer.time.decodeTimeStamp + streamOffset
+            )
+            readingPosition = max(readingPosition, buffer.time.presentationTimeStamp)
         }
 
         return result
     }
 
-    final func skipSource(position: Int64) -> Int {
+    final func skipSource(position: CMTime) -> Int {
         sampleStream?.skipData(position: position - streamOffset) ?? 0
     }
 
@@ -205,27 +214,5 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     final func onRendererCapabilitiesChanged() {
         let listener = lock.withLock { _listener }
         listener?.onRendererCapabilitiesChanged(self)
-    }
-
-    final func isFormatSupportedFromAVFAsset(_ format: Format) -> Bool {
-        guard let codecs = format.codecs else {
-            return false
-        }
-
-        if let containerMimeType = format.containerMimeType {
-            let extendedMIMEType = "\(containerMimeType.rawValue); codecs=\"\(codecs)\""
-            if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
-                return true
-            }
-        }
-
-        if let sampleMimeType = format.sampleMimeType {
-            let extendedMIMEType = "\(sampleMimeType.rawValue); codecs=\"\(codecs)\""
-            if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
-                return true
-            }
-        }
-
-        return false
     }
 }

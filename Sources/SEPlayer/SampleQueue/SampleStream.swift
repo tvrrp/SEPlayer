@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Decoder
 import SEPlayerCommon
 
@@ -12,7 +13,7 @@ public protocol SampleStream: AnyObject {
     func isReady() -> Bool
     func maybeThrowError() throws
     func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult
-    func skipData(position: Int64) -> Int
+    func skipData(position: CMTime) -> Int
 }
 
 @frozen public enum SampleStreamReadResult: Equatable {

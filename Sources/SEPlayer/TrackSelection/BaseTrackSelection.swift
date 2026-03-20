@@ -5,6 +5,7 @@
 //  Created by tvrrp on 19.02.2026.
 //
 
+import CoreMedia
 import Dispatch
 import SEPlayerCommon
 
@@ -22,7 +23,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
     var selectionData: Any? { fatalError() }
 
     private(set) var playWhenReady: Bool
-    private var excludeUntilTimes: [Int64]
+    private var excludeUntilTimes: [CMTime]
 
     init(group: TrackGroup, tracks: [Int], type: TrackSelectionType = .unset) {
         precondition(!tracks.isEmpty)
@@ -37,7 +38,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
             tracks.append(group.indexOf(format: formats[index]))
         }
         self.tracks = tracks
-        excludeUntilTimes = Array(repeating: 0, count: length)
+        excludeUntilTimes = Array(repeating: .zero, count: length)
         playWhenReady = false
     }
 
@@ -62,40 +63,42 @@ class BaseTrackSelection: SETrackSelection, Hashable {
     func playbackSpeedDidChange(_ playbackSpeed: Float) {}
 
     func updateSelectedTrack(
-        playbackPositionUs: Int64,
-        bufferedDurationUs: Int64,
-        availableDurationUs: Int64,
+        playbackPosition: CMTime,
+        bufferedDuration: CMTime,
+        availableDuration: CMTime,
         queue: [MediaChunk],
         mediaChunkIterators: [MediaChunkIterator]
     ) {
         fatalError()
     }
 
-    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int {
+    func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int {
         queue.count
     }
 
-    func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool {
-        let nowMs = DispatchTime.now().milliseconds
-        var canExclude = isTrackExcluded(index: index, nowMs: nowMs)
-        for i in 0..<length {
-            canExclude = i != index && !isTrackExcluded(index: i, nowMs: nowMs)
-            if !canExclude { break }
+    func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool {
+        let now = CMClock.hostTimeClock.time
+        var canExclude = !isTrackExcluded(index: index, now: now)
+        for i in 0..<length where i != index {
+            if !isTrackExcluded(index: i, now: now) {
+                canExclude = true
+            }
         }
 
         if !canExclude { return false }
 
-        let (value, overflow) = nowMs.addingReportingOverflow(exclusionDurationMs)
-        excludeUntilTimes[index] = max(
-            excludeUntilTimes[index],
-            overflow ? .max : value
-        )
+        let excludeUntil = now + exclusionDuration
+        if excludeUntil.isValid {
+            excludeUntilTimes[index] = max(excludeUntilTimes[index], excludeUntil)
+        } else {
+            excludeUntilTimes[index] = .positiveInfinity
+        }
 
         return true
     }
 
-    func isTrackExcluded(index: Int, nowMs: Int64) -> Bool {
-        excludeUntilTimes[index] > nowMs
+    func isTrackExcluded(index: Int, now: CMTime) -> Bool {
+        excludeUntilTimes[index] > now
     }
 
     func playWhenReadyChanged(_ playWhenReady: Bool) {

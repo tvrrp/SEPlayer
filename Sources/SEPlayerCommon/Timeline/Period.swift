@@ -5,12 +5,14 @@
 //  Created by Damir Yackupov on 14.05.2025.
 //
 
+import CoreMedia
+
 public final class Period {
     public var id: AnyHashable?
     public var uid: AnyHashable?
     public var windowIndex: Int = .zero
-    public var durationUs: Int64 = .zero
-    public var positionInWindowUs: Int64 = .zero
+    public var duration: CMTime = .zero
+    public var positionInWindow: CMTime = .zero
     public var isPlaceholder: Bool = false
     public var adPlaybackState: AdPlaybackState
 
@@ -23,16 +25,16 @@ public final class Period {
         id: AnyHashable?,
         uid: AnyHashable?,
         windowIndex: Int,
-        durationUs: Int64,
-        positionInWindowUs: Int64,
+        duration: CMTime,
+        positionInWindow: CMTime,
         adPlaybackState: AdPlaybackState = .none,
         isPlaceholder: Bool = false,
     ) -> Period {
         self.id = id
         self.uid = uid
         self.windowIndex = windowIndex
-        self.durationUs = durationUs
-        self.positionInWindowUs = positionInWindowUs
+        self.duration = duration
+        self.positionInWindow = positionInWindow
         self.adPlaybackState = adPlaybackState
         self.isPlaceholder = isPlaceholder
         return self
@@ -42,16 +44,16 @@ public final class Period {
         id: AnyHashable? = nil,
         uid: AnyHashable? = nil,
         windowIndex: Int = .zero,
-        durationUs: Int64 = .zero,
-        positionInWindowUs: Int64 = .zero,
+        duration: CMTime = .zero,
+        positionInWindow: CMTime = .zero,
         isPlaceholder: Bool = false,
         adPlaybackState: AdPlaybackState = .none
     ) {
         self.id = id
         self.uid = uid
         self.windowIndex = windowIndex
-        self.durationUs = durationUs
-        self.positionInWindowUs = positionInWindowUs
+        self.duration = duration
+        self.positionInWindow = positionInWindow
         self.isPlaceholder = isPlaceholder
         self.adPlaybackState = adPlaybackState
     }
@@ -64,8 +66,8 @@ extension Period: Hashable {
         return lhs.id == rhs.id
             && lhs.uid == rhs.uid
             && lhs.windowIndex == rhs.windowIndex
-            && lhs.durationUs == rhs.durationUs
-            && lhs.positionInWindowUs == rhs.positionInWindowUs
+            && lhs.duration == rhs.duration
+            && lhs.positionInWindow == rhs.positionInWindow
             && lhs.isPlaceholder == rhs.isPlaceholder
             && lhs.adPlaybackState == rhs.adPlaybackState
     }
@@ -74,8 +76,8 @@ extension Period: Hashable {
         hasher.combine(id)
         hasher.combine(uid)
         hasher.combine(windowIndex)
-        hasher.combine(durationUs)
-        hasher.combine(positionInWindowUs)
+        hasher.combine(duration)
+        hasher.combine(positionInWindow)
         hasher.combine(isPlaceholder)
         hasher.combine(adPlaybackState)
     }

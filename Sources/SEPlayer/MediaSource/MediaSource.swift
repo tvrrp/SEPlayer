@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import DataSource
 import Foundation
 import SEPlayerCommon
@@ -22,7 +23,7 @@ public protocol MediaSource: AnyObject {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64
+        startPosition: CMTime
     ) throws -> MediaPeriod
     func release(mediaPeriod: MediaPeriod)
     func disable(delegate: MediaSourceDelegate)
@@ -80,7 +81,7 @@ class BaseMediaSource: MediaSource {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64
+        startPosition: CMTime
     ) throws -> MediaPeriod {
         fatalError("To override")
     }

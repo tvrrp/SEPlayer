@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import CoreMedia
+
 final class MaskingMediaPeriod: MediaPeriod {
     protocol PrepareListener: AnyObject {
         func prepareCompleted(mediaPeriodId: MediaPeriodId)
@@ -16,9 +18,9 @@ final class MaskingMediaPeriod: MediaPeriod {
 
     weak var listener: PrepareListener?
     let id: MediaPeriodId
-    var preparePositionOverrideUs: Int64
+    var preparePositionOverride: CMTime
 
-    let preparePositionUs: Int64
+    let preparePosition: CMTime
     private let allocator: Allocator
     private weak var mediaSource: MediaSource?
     private var mediaPeriod: MediaPeriod?
@@ -26,11 +28,11 @@ final class MaskingMediaPeriod: MediaPeriod {
     private var notifiedPrepareError = false
     private var callback: (any MediaPeriodCallback)?
 
-    init(id: MediaPeriodId, allocator: Allocator, preparePositionUs: Int64) {
+    init(id: MediaPeriodId, allocator: Allocator, preparePosition: CMTime) {
         self.id = id
         self.allocator = allocator
-        self.preparePositionUs = preparePositionUs
-        preparePositionOverrideUs = .timeUnset
+        self.preparePosition = preparePosition
+        preparePositionOverride = .invalid
     }
 
     func setMediaSource(_ mediaSource: MediaSource) {
@@ -41,10 +43,10 @@ final class MaskingMediaPeriod: MediaPeriod {
     func createPeriod(id: MediaPeriodId) throws {
         guard let mediaSource else { return }
 
-        let preparePositionUs = preparePositionWithOverride(preparePositionUs: preparePositionUs)
-        mediaPeriod = try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: preparePositionUs)
+        let preparePosition = preparePositionWithOverride(preparePosition: preparePosition)
+        mediaPeriod = try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: preparePosition)
         if callback != nil {
-            mediaPeriod?.prepare(callback: self, on: preparePositionUs)
+            mediaPeriod?.prepare(callback: self, on: preparePosition)
         }
     }
 
@@ -52,11 +54,11 @@ final class MaskingMediaPeriod: MediaPeriod {
         if let mediaPeriod { mediaSource?.release(mediaPeriod: mediaPeriod) }
     }
 
-    func prepare(callback: any MediaPeriodCallback, on time: Int64) {
+    func prepare(callback: any MediaPeriodCallback, on time: CMTime) {
         self.callback = callback
         mediaPeriod?.prepare(
             callback: self,
-            on: preparePositionWithOverride(preparePositionUs: preparePositionUs)
+            on: preparePositionWithOverride(preparePosition: preparePosition)
         )
     }
 
@@ -82,49 +84,49 @@ final class MaskingMediaPeriod: MediaPeriod {
     func selectTrack(
         selections: [SETrackSelection?],
         mayRetainStreamFlags: [Bool],
-        streams: inout [SampleStream?],
+        streams: inout [TriggerableSampleStream?],
         streamResetFlags: inout [Bool],
-        positionUs: Int64
-    ) -> Int64 {
-        let positionUs = (preparePositionOverrideUs != .timeUnset && positionUs == preparePositionUs)
-            ? preparePositionOverrideUs
-            : positionUs
-        preparePositionOverrideUs = .timeUnset
+        position: CMTime
+    ) -> CMTime {
+        let position = (preparePositionOverride.isValid && position == preparePosition)
+            ? preparePositionOverride
+            : position
+        preparePositionOverride = .invalid
         return mediaPeriod?.selectTrack(
             selections: selections,
             mayRetainStreamFlags: mayRetainStreamFlags,
             streams: &streams,
             streamResetFlags: &streamResetFlags,
-            positionUs: positionUs
-        ) ?? .timeUnset
+            position: position
+        ) ?? .invalid
     }
 
-    func discardBuffer(to position: Int64, toKeyframe: Bool) {
-        mediaPeriod?.discardBuffer(to: position, toKeyframe: toKeyframe)
+    func discardBuffer(position: CMTime, toKeyframe: Bool) {
+        mediaPeriod?.discardBuffer(position: position, toKeyframe: toKeyframe)
     }
 
-    func readDiscontinuity() -> Int64 {
-        mediaPeriod?.readDiscontinuity() ?? .timeUnset
+    func readDiscontinuity() -> CMTime {
+        mediaPeriod?.readDiscontinuity() ?? .invalid
     }
 
-    func getBufferedPositionUs() -> Int64 {
-        mediaPeriod?.getBufferedPositionUs() ?? .zero
+    func getBufferedPosition() -> CMTime {
+        mediaPeriod?.getBufferedPosition() ?? .zero
     }
 
-    func seek(to position: Int64) -> Int64 {
-        mediaPeriod?.seek(to: position) ?? .zero
+    func seek(position: CMTime) -> CMTime {
+        mediaPeriod?.seek(position: position) ?? .zero
     }
 
-    func getAdjustedSeekPositionUs(positionUs: Int64, seekParameters: SeekParameters) -> Int64 {
-        mediaPeriod?.getAdjustedSeekPositionUs(positionUs: positionUs, seekParameters: seekParameters) ?? positionUs
+    func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime {
+        mediaPeriod?.getAdjustedSeekPosition(position: position, seekParameters: seekParameters) ?? position
     }
 
-    func getNextLoadPositionUs() -> Int64 {
-        mediaPeriod?.getNextLoadPositionUs() ?? .zero
+    func getNextLoadPosition() -> CMTime {
+        mediaPeriod?.getNextLoadPosition() ?? .zero
     }
 
-    func reevaluateBuffer(positionUs: Int64) {
-        mediaPeriod?.reevaluateBuffer(positionUs: positionUs)
+    func reevaluateBuffer(position: CMTime) {
+        mediaPeriod?.reevaluateBuffer(position: position)
     }
 
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool {
@@ -143,7 +145,7 @@ extension MaskingMediaPeriod: MediaPeriodCallback {
 }
 
 private extension MaskingMediaPeriod {
-    func preparePositionWithOverride(preparePositionUs: Int64) -> Int64 {
-        preparePositionOverrideUs != .timeUnset ? preparePositionOverrideUs : preparePositionUs
+    func preparePositionWithOverride(preparePosition: CMTime) -> CMTime {
+        !preparePositionOverride.isValid ? preparePositionOverride : preparePosition
     }
 }

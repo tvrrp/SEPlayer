@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CoreMedia
 import SEPlayerCommon
 
 public class SubtitleExtractor: Extractor {
@@ -97,17 +98,17 @@ public class SubtitleExtractor: Extractor {
         return .continueRead
     }
 
-    public func seek(to position: Int, timeUs: Int64, isolation: isolated any Actor) throws {
-        try checkState(state != .created && state != .released)
-        seekTimeUs = timeUs
-
-        if state == .extracting {
-            state = .initialized
-        }
-
-        if state == .finished {
-            state = .seeking
-        }
+    public func seek(to position: Int, time: CMTime, isolation: isolated any Actor) throws {
+//        try checkState(state != .created && state != .released)
+//        seekTimeUs = timeUs
+//
+//        if state == .extracting {
+//            state = .initialized
+//        }
+//
+//        if state == .finished {
+//            state = .seeking
+//        }
     }
 
     public func release(isolation: isolated any Actor) {
@@ -149,31 +150,32 @@ public class SubtitleExtractor: Extractor {
     }
 
     private func parseAndWriteToOutput(isolation: isolated any Actor) async throws {
-        let outputOptions = seekTimeUs != .timeUnset
-            ? SubtitleParserOutputOptions.cuesAfterThenRemainingCuesBefore(startTimeUs: seekTimeUs)
-            : SubtitleParserOutputOptions.allCues()
-
-        try subtitleParser.parse(
-            data: &subtitleData,
-            offset: 0,
-            lenght: bytesRead,
-            outputOptions: outputOptions,
-            output: { cuesWithTiming in
-                let sample = try Sample(
-                    timeUs: cuesWithTiming.startTimeUs,
-                    cues: ByteBuffer(data: encoder.encode(cuesWithTiming))
-                )
-
-                samples.append(sample)
-                if seekTimeUs == .timeUnset || cuesWithTiming.endTimeUs >= seekTimeUs {
-                    try writeToOutput(sample: sample, isolation: isolation)
-                }
-            }
-        )
-
-        samples.sort()
-        timestamps = samples.map { $0.timeUs }
-        subtitleData.clear()
+        // TODO: fix
+//        let outputOptions = seekTimeUs != .timeUnset
+//            ? SubtitleParserOutputOptions.cuesAfterThenRemainingCuesBefore(startTimeUs: seekTimeUs)
+//            : SubtitleParserOutputOptions.allCues()
+//
+//        try subtitleParser.parse(
+//            data: &subtitleData,
+//            offset: 0,
+//            lenght: bytesRead,
+//            outputOptions: outputOptions,
+//            output: { cuesWithTiming in
+//                let sample = try Sample(
+//                    timeUs: cuesWithTiming.startTimeUs,
+//                    cues: ByteBuffer(data: encoder.encode(cuesWithTiming))
+//                )
+//
+//                samples.append(sample)
+//                if seekTimeUs == .timeUnset || cuesWithTiming.endTimeUs >= seekTimeUs {
+//                    try writeToOutput(sample: sample, isolation: isolation)
+//                }
+//            }
+//        )
+//
+//        samples.sort()
+//        timestamps = samples.map { $0.timeUs }
+//        subtitleData.clear()
     }
 
     private func writeToOutput(isolation: isolated any Actor) throws {
@@ -189,19 +191,19 @@ public class SubtitleExtractor: Extractor {
     }
 
     private func writeToOutput(sample: Sample, isolation: isolated any Actor) throws {
-        try trackOutput.sampleData(
-            data: sample.cues,
-            length: sample.cues.readableBytes,
-            isolation: isolation
-        )
-
-        try trackOutput.sampleMetadata(
-            time: sample.timeUs,
-            flags: .keyframe,
-            size: 0,
-            offset: 0,
-            isolation: isolation
-        )
+//        try trackOutput.sampleData(
+//            data: sample.cues,
+//            length: sample.cues.readableBytes,
+//            isolation: isolation
+//        )
+//
+//        try trackOutput.sampleMetadata(
+//            time: sample.time,
+//            flags: .keyframe,
+//            size: 0,
+//            offset: 0,
+//            isolation: isolation
+//        )
     }
 
     private func checkState(_ check: @autoclosure () -> Bool) throws {
@@ -220,15 +222,15 @@ private extension SubtitleExtractor {
     }
 
     struct Sample: Comparable {
-        let timeUs: Int64
+        let time: CMTime
         let cues: ByteBuffer
 
         static func < (lhs: SubtitleExtractor.Sample, rhs: SubtitleExtractor.Sample) -> Bool {
-            lhs.timeUs < rhs.timeUs
+            lhs.time < rhs.time
         }
 
         static func == (lhs: SubtitleExtractor.Sample, rhs: SubtitleExtractor.Sample) -> Bool {
-            lhs.timeUs == rhs.timeUs
+            lhs.time == rhs.time
         }
     }
 }

@@ -10,6 +10,7 @@ import SEPlayerCommon
 
 public protocol SEClock {
     var clock: CMClock { get }
+    var time: CMTime { get }
     var milliseconds: Int64 { get }
     var microseconds: Int64 { get }
     var nanoseconds: Int64 { get }
@@ -22,12 +23,13 @@ public struct DefaultSEClock: SEClock {
 
     public let clock: CMClock
 
+    public var time: CMTime { clock.time }
     public var milliseconds: Int64 { clock.milliseconds }
     public var microseconds: Int64 { clock.microseconds }
     public var nanoseconds: Int64 { clock.nanoseconds }
 
     init() {
-        clock = CMClockGetHostTimeClock()
+        clock = CMClock.hostTimeClock
     }
 
     public func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper {

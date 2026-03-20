@@ -5,44 +5,45 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 
 struct MediaPeriodInfo: Hashable {
     let id: MediaPeriodId
-    let startPositionUs: Int64
-    let requestedContentPositionUs: Int64
-    let endPositionUs: Int64
-    let durationUs: Int64
+    let startPosition: CMTime
+    let requestedContentPosition: CMTime
+    let endPosition: CMTime
+    let duration: CMTime
     let isLastInTimelinePeriod: Bool
     let isLastInTimelineWindow: Bool
     let isFinal: Bool
 
-    func copyWithStartPositionUs(_ positionUs: Int64) -> MediaPeriodInfo {
-        guard positionUs != startPositionUs else { return self }
+    func copyWithStartPosition(_ position: CMTime) -> MediaPeriodInfo {
+        guard position != startPosition else { return self }
 
         return MediaPeriodInfo(
             id: id,
-            startPositionUs: positionUs,
-            requestedContentPositionUs: requestedContentPositionUs,
-            endPositionUs: endPositionUs,
-            durationUs: durationUs,
+            startPosition: position,
+            requestedContentPosition: requestedContentPosition,
+            endPosition: endPosition,
+            duration: duration,
             isLastInTimelinePeriod: isLastInTimelinePeriod,
             isLastInTimelineWindow: isLastInTimelineWindow,
             isFinal: isFinal
         )
     }
 
-    func copyWithRequestedContentPositionUs(_ requestedContentPositionUs: Int64) -> MediaPeriodInfo {
-        guard self.requestedContentPositionUs != requestedContentPositionUs else {
+    func copyWithRequestedContentPosition(_ requestedContentPosition: CMTime) -> MediaPeriodInfo {
+        guard self.requestedContentPosition != requestedContentPosition else {
             return self
         }
 
         return MediaPeriodInfo(
             id: id,
-            startPositionUs: startPositionUs,
-            requestedContentPositionUs: requestedContentPositionUs,
-            endPositionUs: endPositionUs,
-            durationUs: durationUs,
+            startPosition: startPosition,
+            requestedContentPosition: requestedContentPosition,
+            endPosition: endPosition,
+            duration: duration,
             isLastInTimelinePeriod: isLastInTimelinePeriod,
             isLastInTimelineWindow: isLastInTimelineWindow,
             isFinal: isFinal

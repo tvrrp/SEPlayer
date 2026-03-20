@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
+import CoreMedia
 import Dispatch
 
 public protocol Player: AnyObject, Sendable {
@@ -17,10 +18,10 @@ public protocol Player: AnyObject, Sendable {
     var volume: Float { get set }
     var isMuted: Bool { get set }
     var isLoading: Bool { get }
-    var seekBackIncrement: Int64 { get }
-    var seekForwardIncrement: Int64 { get }
+    var seekBackIncrement: CMTime { get }
+    var seekForwardIncrement: CMTime { get }
     var hasPreviousMediaItem: Bool { get }
-    var maxSeekToPreviousPosition: Int64 { get }
+    var maxSeekToPreviousPosition: CMTime { get }
     var hasNextMediaItem: Bool { get }
     var playbackParameters: PlaybackParameters { get set }
     var timeline: Timeline { get }
@@ -30,22 +31,22 @@ public protocol Player: AnyObject, Sendable {
     var previousMediaItemIndex: Int? { get }
     var currentMediaItem: MediaItem? { get }
     var numberOfMediaItemsInPlaylist: Int { get }
-    var duration: Int64 { get }
-    var currentPosition: Int64 { get }
-    var bufferedPosition: Int64 { get }
+    var duration: CMTime { get }
+    var currentPosition: CMTime { get }
+    var bufferedPosition: CMTime { get }
     var bufferedPercentage: Int { get }
-    var totalBufferedDuration: Int64 { get }
+    var totalBufferedDuration: CMTime { get }
     var isCurrentMediaItemDynamic: Bool { get }
     var isCurrentMediaItemSeekable: Bool { get }
-    var contentDuration: Int64 { get }
-    var contentPosition: Int64 { get }
-    var contentBufferedPosition: Int64 { get }
+    var contentDuration: CMTime { get }
+    var contentPosition: CMTime { get }
+    var contentBufferedPosition: CMTime { get }
 
     func set(mediaItems: [MediaItem])
     func set(mediaItems: [MediaItem], resetPosition: Bool)
-    func set(mediaItems: [MediaItem], startIndex: Int, startPositionMs: Int64)
+    func set(mediaItems: [MediaItem], startIndex: Int, startPosition: CMTime)
     func set(mediaItem: MediaItem)
-    func set(mediaItem: MediaItem, startPositionMs: Int64)
+    func set(mediaItem: MediaItem, startPosition: CMTime)
     func set(mediaItem: MediaItem, resetPosition: Bool)
     func append(mediaItem: MediaItem)
     func insert(mediaItem: MediaItem, at position: Int)
@@ -64,8 +65,8 @@ public protocol Player: AnyObject, Sendable {
     func pause()
     func seekToDefaultPosition()
     func seekToDefaultPosition(of mediaItemIndex: Int)
-    func seek(to positionMs: Int64)
-    func seek(to positionMs: Int64, of mediaItemIndex: Int)
+    func seek(to position: CMTime)
+    func seek(to position: CMTime, of mediaItemIndex: Int)
     func seekBack()
     func seekForward()
     func seekToPreviousMediaItem()
@@ -125,8 +126,8 @@ public struct PositionInfo: Hashable {
     public let mediaItem: MediaItem?
     public let periodId: AnyHashable?
     public let periodIndex: Int?
-    public let positionMs: Int64
-    public let contentPositionMs: Int64
+    public let position: CMTime
+    public let contentPosition: CMTime
 
     public init(
         windowId: AnyHashable?,
@@ -134,16 +135,16 @@ public struct PositionInfo: Hashable {
         mediaItem: MediaItem?,
         periodId: AnyHashable?,
         periodIndex: Int?,
-        positionMs: Int64,
-        contentPositionMs: Int64
+        position: CMTime,
+        contentPosition: CMTime
     ) {
         self.windowId = windowId
         self.mediaItemIndex = mediaItemIndex
         self.mediaItem = mediaItem
         self.periodId = periodId
         self.periodIndex = periodIndex
-        self.positionMs = positionMs
-        self.contentPositionMs = contentPositionMs
+        self.position = position
+        self.contentPosition = contentPosition
     }
 }
 

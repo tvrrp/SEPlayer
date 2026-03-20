@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 20.11.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 enum SEPlayerMessageImpl: MessageKind {
@@ -15,7 +16,7 @@ enum SEPlayerMessageImpl: MessageKind {
         _ playbackSuppressionReason: PlaybackSuppressionReason
     )
     case doSomeWork
-    case seekTo(_ timeline: Timeline, _ windowIndex: Int, _ positionUs: Int64)
+    case seekTo(_ timeline: Timeline, _ windowIndex: Int, _ position: CMTime)
     case setPlaybackParameters(_ playbackParameters: PlaybackParameters)
     case setSeekParameters(_ seekParameters: SeekParameters)
     case setVideoOutput(_ output: VideoSampleBufferRenderer)
@@ -33,7 +34,7 @@ enum SEPlayerMessageImpl: MessageKind {
     case setMediaSources(
         _ mediaSources: [MediaSourceList.MediaSourceHolder],
         _ windowIndex: Int?,
-        _ positionUs: Int64,
+        _ position: CMTime,
         _ shuffleOrder: ShuffleOrder
     )
     case addMediaSources(

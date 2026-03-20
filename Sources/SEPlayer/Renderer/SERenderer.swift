@@ -8,8 +8,17 @@
 import CoreMedia
 import SEPlayerCommon
 
+public protocol SERendererDelegate: AnyObject {
+    func rendererReportsReady(_ renderer: SERenderer)
+    func rendererNeedsMoreData(_ renderer: SERenderer)
+    func rendererDidFinishReading(_ renderer: SERenderer)
+    func rendererDidFinishRendering(_ renderer: SERenderer)
+    func onRendererError(_ renderer: SERenderer, error: SEPlaybackError)
+}
+
 public protocol SERenderer: AnyObject {
     var trackType: TrackType { get }
+    var delegate: SERendererDelegate? { get set }
     func handleMessage(_ message: RendererMessage) throws
     func getCapabilities() -> RendererCapabilitiesResolver
 
@@ -18,12 +27,12 @@ public protocol SERenderer: AnyObject {
     func getState() -> SERendererState
     func enable(
         formats: [Format],
-        stream: SampleStream,
-        position: Int64,
+        stream: TriggerableSampleStream,
+        position: CMTime,
         joining: Bool,
         mayRenderStartOfStream: Bool,
-        startPosition: Int64,
-        offset: Int64,
+        startPosition: CMTime,
+        offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws
 
@@ -31,22 +40,22 @@ public protocol SERenderer: AnyObject {
 
     func replaceStream(
         formats: [Format],
-        stream: SampleStream,
-        startPosition: Int64,
-        offset: Int64,
+        stream: TriggerableSampleStream,
+        startPosition: CMTime,
+        offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws
-    func getStream() -> SampleStream?
+    func getStream() -> TriggerableSampleStream?
     func didReadStreamToEnd() -> Bool
-    func getReadingPosition() -> Int64
+    func getReadingPosition() -> CMTime
     func setStreamFinal()
     func isCurrentStreamFinal() -> Bool
-    func resetPosition(new position: Int64) throws
+    func resetPosition(new position: CMTime) throws
     func setPlaybackSpeed(current: Float, target: Float) throws
     func enableRenderStartOfStream()
     func getTimeline() -> Timeline
     func setTimeline(_ timeline: Timeline)
-    func render(position: Int64, elapsedRealtime: Int64) throws
+    func render(position: CMTime, elapsedRealtime: CMTime) throws
     func isReady() -> Bool
     func isEnded() -> Bool
     func stop()

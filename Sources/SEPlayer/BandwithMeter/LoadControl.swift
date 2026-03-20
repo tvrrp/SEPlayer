@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 25.05.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 import SEPlayerCommon
 
@@ -15,10 +16,10 @@ public protocol LoadControl {
     func onStopped(playerId: UUID)
     func onReleased(playerId: UUID)
     func getAllocator() -> Allocator
-    func getBackBufferDurationUs(playerId: UUID) -> Int64
+    func getBackBufferDuration(playerId: UUID) -> CMTime
     func retainBackBufferFromKeyframe(playerId: UUID) -> Bool
     func shouldContinueLoading(with parameters: LoadControlParams) -> Bool
-    func shouldContinuePreloading(timeline: Timeline, mediaPeriodId: MediaPeriodId, bufferedDurationUs: Int64) -> Bool
+    func shouldContinuePreloading(timeline: Timeline, mediaPeriodId: MediaPeriodId, bufferedDuration: CMTime) -> Bool
     func shouldStartPlayback(parameters: LoadControlParams) -> Bool
 }
 
@@ -26,26 +27,26 @@ public struct LoadControlParams {
     let playerId: UUID
     let timeline: Timeline
     let mediaPeriodId: MediaPeriodId
-    let playbackPositionUs: Int64
-    let bufferedDurationUs: Int64
+    let playbackPosition: CMTime
+    let bufferedDuration: CMTime
     let playbackSpeed: Float
     let playWhenReady: Bool
     let rebuffering: Bool
-    let targetLiveOffsetUs: Int64
-    let lastRebufferRealtimeMs: Int64
+    let targetLiveOffset: CMTime
+    let lastRebufferRealtime: CMTime
 }
 
 final class DefaultLoadControl: LoadControl {
     let queue: Queue
     private let allocator: DefaultAllocator
 
-    private let minBufferUs: Int64
-    private let maxBufferUs: Int64
-    private let bufferForPlaybackUs: Int64
-    private let bufferForPlaybackAfterRebufferUs: Int64
+    private let minBuffer: CMTime
+    private let maxBuffer: CMTime
+    private let bufferForPlayback: CMTime
+    private let bufferForPlaybackAfterRebuffer: CMTime
     private let targetBufferBytesOverwrite: Int?
     private let prioritizeTimeOverSizeThresholds: Bool
-    private let backBufferDurationUs: Int64
+    private let backBufferDuration: CMTime
     private let retainBackBufferFromKeyframe: Bool
 
     private var loadingStates: [UUID: PlayerLoadingState] = [:]
@@ -53,25 +54,25 @@ final class DefaultLoadControl: LoadControl {
     init(
         queue: Queue,
         allocator: DefaultAllocator? = nil,
-        minBufferMs: Int64 = DefaultConstants.minBufferMs,
-        maxBufferMs: Int64 = DefaultConstants.maxBufferMs,
-        bufferForPlaybackMs: Int64 = DefaultConstants.bufferForPlaybackMs,
-        bufferForPlaybackAfterRebufferMs: Int64 = DefaultConstants.bufferForPlaybackAfterRebuffer,
+        minBuffer: CMTime = DefaultConstants.minBuffer,
+        maxBuffer: CMTime = DefaultConstants.maxBuffer,
+        bufferForPlayback: CMTime = DefaultConstants.bufferForPlayback,
+        bufferForPlaybackAfterRebuffer: CMTime = DefaultConstants.bufferForPlaybackAfterRebuffer,
         targetBufferBytes: Int? = nil,
         prioritizeTimeOverSizeThresholds: Bool = false,
-        backBufferDurationMs: Int64 = DefaultConstants.backBufferDurationMs,
+        backBufferDuration: CMTime = DefaultConstants.backBufferDuration,
         retainBackBufferFromKeyframe: Bool = DefaultConstants.retainBackBufferFromKeyframe
     ) {
         self.queue = queue
         self.allocator = allocator ?? DefaultAllocator(individualAllocationSize: .defaultBufferSegmentSize)
 
-        self.minBufferUs = Time.msToUs(timeMs: minBufferMs)
-        self.maxBufferUs = Time.msToUs(timeMs: maxBufferMs)
-        self.bufferForPlaybackUs = Time.msToUs(timeMs: bufferForPlaybackMs)
-        self.bufferForPlaybackAfterRebufferUs = Time.msToUs(timeMs: bufferForPlaybackAfterRebufferMs)
+        self.minBuffer = minBuffer
+        self.maxBuffer = maxBuffer
+        self.bufferForPlayback = bufferForPlayback
+        self.bufferForPlaybackAfterRebuffer = bufferForPlaybackAfterRebuffer
         self.targetBufferBytesOverwrite = targetBufferBytes
         self.prioritizeTimeOverSizeThresholds = prioritizeTimeOverSizeThresholds
-        self.backBufferDurationUs = Time.msToUs(timeMs: backBufferDurationMs)
+        self.backBufferDuration = backBufferDuration
         self.retainBackBufferFromKeyframe = retainBackBufferFromKeyframe
     }
 
@@ -110,8 +111,8 @@ final class DefaultLoadControl: LoadControl {
         return allocator
     }
 
-    func getBackBufferDurationUs(playerId: UUID) -> Int64 {
-        return backBufferDurationUs
+    func getBackBufferDuration(playerId: UUID) -> CMTime {
+        return backBufferDuration
     }
 
     func retainBackBufferFromKeyframe(playerId: UUID) -> Bool {
@@ -121,20 +122,20 @@ final class DefaultLoadControl: LoadControl {
     func shouldContinueLoading(with parameters: LoadControlParams) -> Bool {
         assertQueue(); assert(loadingStates[parameters.playerId] != nil)
         let targetBufferSizeReached = allocator.totalBytesAllocated >= totalTargetBufferBytes()
-        var minBufferUs = minBufferUs
+        var minBuffer = minBuffer
 
         if parameters.playbackSpeed > 1 {
-            let mediaDurationMinBufferUs = AudioUtils.mediaDurationFor(
-                playoutDuration: minBufferUs,
-                speed: parameters.playbackSpeed
+            let mediaDurationMinBuffer = CMTimeMultiplyByFloat64(
+                minBuffer,
+                multiplier: Float64(parameters.playbackSpeed)
             )
-            minBufferUs = min(mediaDurationMinBufferUs, maxBufferUs)
+            minBuffer = min(mediaDurationMinBuffer, maxBuffer)
         }
 
-        minBufferUs = max(minBufferUs, 500_000)
-        if parameters.bufferedDurationUs < minBufferUs {
+        minBuffer = max(minBuffer, .from(microseconds: 500_000))
+        if parameters.bufferedDuration < minBuffer {
             loadingStates[parameters.playerId]?.isLoading = prioritizeTimeOverSizeThresholds || !targetBufferSizeReached
-        } else if parameters.bufferedDurationUs >= maxBufferUs || targetBufferSizeReached {
+        } else if parameters.bufferedDuration >= maxBuffer || targetBufferSizeReached {
             loadingStates[parameters.playerId]?.isLoading = false
         }
 
@@ -143,25 +144,25 @@ final class DefaultLoadControl: LoadControl {
 
     func shouldStartPlayback(parameters: LoadControlParams) -> Bool {
         assertQueue()
-        let bufferedDurationUs = AudioUtils.mediaDurationFor(
-            playoutDuration: parameters.bufferedDurationUs,
-            speed: parameters.playbackSpeed
+        let bufferedDuration = CMTimeMultiplyByFloat64(
+            parameters.bufferedDuration,
+            multiplier: Float64(parameters.playbackSpeed)
         )
 
-        var minBufferDurationUs = parameters.rebuffering ? bufferForPlaybackAfterRebufferUs : bufferForPlaybackUs
-        if parameters.targetLiveOffsetUs != .timeUnset {
-            minBufferDurationUs = min(parameters.targetLiveOffsetUs / 2, minBufferDurationUs)
+        var minBufferDuration = parameters.rebuffering ? bufferForPlaybackAfterRebuffer : bufferForPlayback
+        if parameters.targetLiveOffset.isValid {
+            minBufferDuration = min(CMTimeMultiplyByFloat64(parameters.targetLiveOffset, multiplier: 0.5), minBufferDuration)
         }
 
-        return minBufferDurationUs <= 0
-            || bufferedDurationUs >= minBufferDurationUs
+        return minBufferDuration <= .zero
+            || bufferedDuration >= minBufferDuration
             || (!prioritizeTimeOverSizeThresholds && allocator.totalBytesAllocated >= totalTargetBufferBytes())
     }
 
     func shouldContinuePreloading(
         timeline: Timeline,
         mediaPeriodId: MediaPeriodId,
-        bufferedDurationUs: Int64
+        bufferedDuration: CMTime
     ) -> Bool {
         assertQueue()
         return loadingStates.values.first(where: { $0.isLoading == true }) == nil
@@ -209,11 +210,11 @@ final class DefaultLoadControl: LoadControl {
 
 extension DefaultLoadControl {
     public enum DefaultConstants {
-        public static let minBufferMs: Int64 = 20000
-        public static let maxBufferMs: Int64 = 50000
-        public static let bufferForPlaybackMs: Int64 = 5000
-        public static let bufferForPlaybackAfterRebuffer: Int64 = 10000
-        public static let backBufferDurationMs: Int64 = .zero
+        public static let minBuffer: CMTime = CMTime(seconds: 20, preferredTimescale: 1000)
+        public static let maxBuffer: CMTime = CMTime(seconds: 50, preferredTimescale: 1000)
+        public static let bufferForPlayback: CMTime = CMTime(seconds: 5, preferredTimescale: 1000)
+        public static let bufferForPlaybackAfterRebuffer: CMTime = CMTime(seconds: 10, preferredTimescale: 1000)
+        public static let backBufferDuration: CMTime = .zero
         public static let retainBackBufferFromKeyframe: Bool = true
     }
 

@@ -5,9 +5,10 @@
 //  Created by Damir Yackupov on 18.05.2025.
 //
 
+import CoreMedia
 import Decoder
 
-final class EmptySampleStream: SampleStream {
+final class EmptySampleStream: TriggerableSampleStream {
     func isReady() -> Bool { true }
     func maybeThrowError() throws {}
 
@@ -16,5 +17,12 @@ final class EmptySampleStream: SampleStream {
         return .didReadBuffer
     }
 
-    func skipData(position: Int64) -> Int { .zero }
+    func skipData(position: CMTime) -> Int { .zero }
+
+    func installTrigger(condition: TriggerCondition, _ body: ((QueueTriggerToken) -> Void)?) -> QueueTriggerToken {
+        QueueTriggerToken()
+    }
+
+    func removeTrigger(_ token: QueueTriggerToken) {}
+    func testTrigger(_ token: QueueTriggerToken) -> Bool { false }
 }

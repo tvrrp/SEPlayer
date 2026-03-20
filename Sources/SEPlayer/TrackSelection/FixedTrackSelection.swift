@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
+import CoreMedia
+
 final class FixedTrackSelection: BaseTrackSelection {
     override var selectedReason: TrackSelectionReason { _selectedReason }
     override var selectionData: Any? { data }
@@ -26,9 +28,9 @@ final class FixedTrackSelection: BaseTrackSelection {
     }
 
     override func updateSelectedTrack(
-        playbackPositionUs: Int64,
-        bufferedDurationUs: Int64,
-        availableDurationUs: Int64,
+        playbackPosition: CMTime,
+        bufferedDuration: CMTime,
+        availableDuration: CMTime,
         queue: [MediaChunk],
         mediaChunkIterators: [MediaChunkIterator]
     ) {

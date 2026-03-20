@@ -5,9 +5,11 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
+import CoreMedia
+
 public protocol BasePlayer: Player {
     var window: Window { get set }
-    func seek(to mediaItemIndex: Int?, positionMs: Int64, isRepeatingCurrentItem: Bool)
+    func seek(to mediaItemIndex: Int?, position: CMTime, isRepeatingCurrentItem: Bool)
 }
 
 extension BasePlayer {
@@ -53,10 +55,12 @@ extension BasePlayer {
     public var bufferedPercentage: Int {
         let position = bufferedPosition
         let duration = duration
-        if bufferedPosition == .timeUnset || duration == .timeUnset {
+        if !bufferedPosition.isValid || !duration.isValid {
             return .zero
         } else {
-            return Int(duration == 0 ? 100 : max(0, min(((position * 100) / duration), 100)))
+//            return Int(duration == .zero ? 100 : max(0, min(((position * 100) / duration), 100)))
+            // TODO: fix
+            return .zero
         }
     }
 
@@ -68,14 +72,14 @@ extension BasePlayer {
         !timeline.isEmpty && timeline.getWindow(windowIndex: currentPeriodIndex ?? .zero, window: window).isSeekable
     }
 
-    public var contentDuration: Int64 {
+    public var contentDuration: CMTime {
         if timeline.isEmpty {
-            return .timeUnset
+            return .invalid
         } else {
             return timeline.getWindow(
                 windowIndex: currentMediaItemIndex,
                 window: window
-            ).durationMs
+            ).duration
         }
     }
 }
@@ -85,8 +89,8 @@ extension BasePlayer {
         set(mediaItems: [mediaItem])
     }
 
-    public func set(mediaItem: MediaItem, startPositionMs: Int64) {
-        set(mediaItems: [mediaItem], startIndex: 0, startPositionMs: startPositionMs)
+    public func set(mediaItem: MediaItem, startPosition: CMTime) {
+        set(mediaItems: [mediaItem], startIndex: 0, startPosition: startPosition)
     }
 
     public func set(mediaItem: MediaItem, resetPosition: Bool) {
@@ -147,11 +151,11 @@ extension BasePlayer {
     }
 
     public func seekBack() {
-        seekTo(offsetMs: -seekBackIncrement)
+        seekTo(offset: CMTimeMultiply(seekBackIncrement, multiplier: -1))
     }
 
     public func seekForward() {
-        seekTo(offsetMs: seekForwardIncrement)
+        seekTo(offset: seekForwardIncrement)
     }
 
     public func seekToPreviousMediaItem() {
@@ -169,7 +173,7 @@ extension BasePlayer {
         if hasPreviousMediaItem, currentPosition <= maxSeekToPreviousPosition {
             seekToPreviousMediaItemInternal()
         } else {
-            seekToCurrentItem(positionMs: .zero)
+            seekToCurrentItem(position: .zero)
         }
     }
 
@@ -191,12 +195,12 @@ extension BasePlayer {
         }
     }
 
-    public func seek(to positionMs: Int64) {
-        seekToCurrentItem(positionMs: positionMs)
+    public func seek(to position: CMTime) {
+        seekToCurrentItem(position: position)
     }
 
-    public func seek(to positionMs: Int64, of mediaItemIndex: Int) {
-        seek(to: mediaItemIndex, positionMs: positionMs, isRepeatingCurrentItem: false)
+    public func seek(to position: CMTime, of mediaItemIndex: Int) {
+        seek(to: mediaItemIndex, position: position, isRepeatingCurrentItem: false)
     }
 
     public func setPlaybackSpeed(new playbackSpeed: Float) {
@@ -218,25 +222,25 @@ private extension BasePlayer {
     }
 
     func ignoreSeek() {
-        seek(to: nil, positionMs: .timeUnset, isRepeatingCurrentItem: false)
+        seek(to: nil, position: .invalid, isRepeatingCurrentItem: false)
     }
 
-    func seekToCurrentItem(positionMs: Int64) {
-        seek(to: currentMediaItemIndex, positionMs: positionMs, isRepeatingCurrentItem: false)
+    func seekToCurrentItem(position: CMTime) {
+        seek(to: currentMediaItemIndex, position: position, isRepeatingCurrentItem: false)
     }
 
-    func seekTo(offsetMs: Int64) {
-        var positionMs = currentPosition + offsetMs
-        let durationMs = duration
-        if durationMs != .timeUnset {
-            positionMs = min(positionMs, durationMs)
+    func seekTo(offset: CMTime) {
+        var position = currentPosition + offset
+        let duration = duration
+        if duration.isValid {
+            position = min(position, duration)
         }
-        positionMs = max(positionMs, 0)
-        seekToCurrentItem(positionMs: positionMs)
+        position = max(position, .zero)
+        seekToCurrentItem(position: position)
     }
 
     func seekToDefaultPositionInternal(mediaItemIndex: Int) {
-        seek(to: mediaItemIndex, positionMs: .timeUnset, isRepeatingCurrentItem: false)
+        seek(to: mediaItemIndex, position: .invalid, isRepeatingCurrentItem: false)
     }
 
     func seekToNextMediaItemInternal() {
@@ -265,6 +269,6 @@ private extension BasePlayer {
     }
 
     private func repeatCurrentMediaItem() {
-        seek(to: currentMediaItemIndex, positionMs: .timeUnset, isRepeatingCurrentItem: true)
+        seek(to: currentMediaItemIndex, position: .invalid, isRepeatingCurrentItem: true)
     }
 }

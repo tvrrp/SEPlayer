@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import CoreMedia
 import DataSource
 import ObjectiveC
 import SEPlayerCommon
@@ -37,7 +38,7 @@ class WrappingMediaSource: CompositeMediaSource<NSObject> {
 
     override func updateMediaItem(new item: MediaItem) throws { try mediaSource.updateMediaItem(new: item) }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) throws -> any MediaPeriod {
+    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> any MediaPeriod {
         try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: startPosition)
     }
 

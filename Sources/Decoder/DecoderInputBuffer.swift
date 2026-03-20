@@ -20,7 +20,7 @@ open class DecoderInputBuffer: Buffer {
 
     public var flags = SampleFlags()
     public var format: Format?
-    public var timeUs: Int64 = 0
+    public var time: CMSampleTimingInfo = .invalid
     public var size: Int = 0
 
     public let bufferReplacementMode: BufferReplacementMode
@@ -62,7 +62,7 @@ open class DecoderInputBuffer: Buffer {
 
     open func clear() {
         flags = []
-        timeUs = .zero
+        time = .invalid
         size = 0
     }
 

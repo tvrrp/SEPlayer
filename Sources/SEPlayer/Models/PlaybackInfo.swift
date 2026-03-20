@@ -12,8 +12,8 @@ struct PlaybackInfo {
     private(set) var clock: SEClock
     private(set) var timeline: Timeline
     private(set) var periodId: MediaPeriodId
-    private(set) var requestedContentPositionUs: Int64
-    private(set) var discontinuityStartPositionUs: Int64
+    private(set) var requestedContentPosition: CMTime
+    private(set) var discontinuityStartPosition: CMTime
     private(set) var state: PlayerState
     private(set) var playbackError: Error?
     private(set) var isLoading: Bool
@@ -24,10 +24,10 @@ struct PlaybackInfo {
     private(set) var playWhenReadyChangeReason: PlayWhenReadyChangeReason
     private(set) var playbackSuppressionReason: PlaybackSuppressionReason
     private(set) var playbackParameters: PlaybackParameters
-    var bufferedPositionUs: Int64
-    var totalBufferedDurationUs: Int64
-    private(set) var positionUs: Int64
-    private(set) var positionUpdateTimeMs: Int64
+    var bufferedPosition: CMTime
+    var totalBufferedDuration: CMTime
+    private(set) var position: CMTime
+    private(set) var positionUpdateTime: CMTime
 
     var object = NSObject()
 
@@ -37,8 +37,8 @@ struct PlaybackInfo {
         clock: SEClock,
         timeline: Timeline,
         periodId: MediaPeriodId,
-        requestedContentPositionUs: Int64,
-        discontinuityStartPositionUs: Int64,
+        requestedContentPosition: CMTime,
+        discontinuityStartPosition: CMTime,
         state: PlayerState,
         playbackError: Error? = nil,
         isLoading: Bool,
@@ -49,17 +49,17 @@ struct PlaybackInfo {
         playWhenReadyChangeReason: PlayWhenReadyChangeReason,
         playbackSuppressionReason: PlaybackSuppressionReason,
         playbackParameters: PlaybackParameters,
-        bufferedPositionUs: Int64,
-        totalBufferedDurationUs: Int64,
-        positionUs: Int64,
-        positionUpdateTimeMs: Int64,
+        bufferedPosition: CMTime,
+        totalBufferedDuration: CMTime,
+        position: CMTime,
+        positionUpdateTime: CMTime,
         object: NSObject = NSObject()
     ) {
         self.clock = clock
         self.timeline = timeline
         self.periodId = periodId
-        self.requestedContentPositionUs = requestedContentPositionUs
-        self.discontinuityStartPositionUs = discontinuityStartPositionUs
+        self.requestedContentPosition = requestedContentPosition
+        self.discontinuityStartPosition = discontinuityStartPosition
         self.state = state
         self.playbackError = playbackError
         self.isLoading = isLoading
@@ -70,10 +70,10 @@ struct PlaybackInfo {
         self.playWhenReadyChangeReason = playWhenReadyChangeReason
         self.playbackSuppressionReason = playbackSuppressionReason
         self.playbackParameters = playbackParameters
-        self.bufferedPositionUs = bufferedPositionUs
-        self.totalBufferedDurationUs = totalBufferedDurationUs
-        self.positionUs = positionUs
-        self.positionUpdateTimeMs = positionUpdateTimeMs
+        self.bufferedPosition = bufferedPosition
+        self.totalBufferedDuration = totalBufferedDuration
+        self.position = position
+        self.positionUpdateTime = positionUpdateTime
         self.object = object
     }
 
@@ -82,8 +82,8 @@ struct PlaybackInfo {
             clock: clock,
             timeline: emptyTimeline,
             periodId: PlaybackInfo.placeholderMediaPeriodId,
-            requestedContentPositionUs: .timeUnset,
-            discontinuityStartPositionUs: .zero,
+            requestedContentPosition: .invalid,
+            discontinuityStartPosition: .zero,
             state: .idle,
             playbackError: nil,
             isLoading: false,
@@ -94,40 +94,40 @@ struct PlaybackInfo {
             playWhenReadyChangeReason: .userRequest,
             playbackSuppressionReason: .none,
             playbackParameters: .default,
-            bufferedPositionUs: .zero,
-            totalBufferedDurationUs: .zero,
-            positionUs: .zero,
-            positionUpdateTimeMs: .zero
+            bufferedPosition: .zero,
+            totalBufferedDuration: .zero,
+            position: .zero,
+            positionUpdateTime: .zero
         )
     }
 
-    func positionUs(_ positionUs: Int64) -> Self {
+    func setPosition(_ position: CMTime) -> Self {
         var newValue = self
         newValue.object = NSObject()
-        newValue.positionUs = positionUs
-        newValue.positionUpdateTimeMs = clock.milliseconds
+        newValue.position = position
+        newValue.positionUpdateTime = clock.time
         return newValue
     }
 
-    func positionUs(
+    func setPosition(
         periodId: MediaPeriodId,
-        positionUs: Int64,
-        requestedContentPositionUs: Int64,
-        discontinuityStartPositionUs: Int64,
-        totalBufferedDurationUs: Int64,
+        position: CMTime,
+        requestedContentPosition: CMTime,
+        discontinuityStartPosition: CMTime,
+        totalBufferedDuration: CMTime,
         trackGroups: TrackGroupArray,
         trackSelectorResult: TrackSelectorResult
     ) -> PlaybackInfo {
         var newValue = self
         newValue.object = NSObject()
         newValue.periodId = periodId
-        newValue.positionUs = positionUs
-        newValue.requestedContentPositionUs = requestedContentPositionUs
-        newValue.discontinuityStartPositionUs = discontinuityStartPositionUs
-        newValue.totalBufferedDurationUs = totalBufferedDurationUs
+        newValue.position = position
+        newValue.requestedContentPosition = requestedContentPosition
+        newValue.discontinuityStartPosition = discontinuityStartPosition
+        newValue.totalBufferedDuration = totalBufferedDuration
         newValue.trackGroups = trackGroups
         newValue.trackSelectorResult = trackSelectorResult
-        newValue.positionUpdateTimeMs = clock.milliseconds
+        newValue.positionUpdateTime = clock.time
         return newValue
     }
 
@@ -189,25 +189,17 @@ struct PlaybackInfo {
     func estimatedPosition() -> Self {
         var newValue = self
         newValue.object = NSObject()
-        newValue.positionUs = getEstimatedPositionUs()
-        newValue.positionUpdateTimeMs = clock.milliseconds
+        newValue.position = getEstimatedPosition()
+        newValue.positionUpdateTime = clock.time
         return newValue
     }
 
-    func getEstimatedPositionUs() -> Int64 {
-        guard isPlaying else { return positionUs }
+    func getEstimatedPosition() -> CMTime {
+        guard isPlaying else { return position }
 
-        let elapsedTimeMs = clock.milliseconds - positionUpdateTimeMs
-        let estimatedPositionMs = usToMs(elapsedTimeMs) + (elapsedTimeMs * Int64(playbackParameters.playbackRate))
-        return msToUs(estimatedPositionMs)
-    }
-
-    private func usToMs(_ timeUs: Int64) -> Int64 {
-        (timeUs == .timeUnset || timeUs == .endOfSource) ? timeUs : (timeUs / 1000);
-    }
-
-    private func msToUs(_ timeUs: Int64) -> Int64 {
-        (timeUs == .timeUnset || timeUs == .endOfSource) ? timeUs : (timeUs * 1000);
+        let elapsed = clock.time - positionUpdateTime
+        let estimatedPosition = position + CMTimeMultiplyByFloat64(elapsed, multiplier: Float64(playbackParameters.playbackRate))
+        return estimatedPosition
     }
 }
 

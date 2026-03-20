@@ -5,12 +5,13 @@
 //  Created by tvrrp on 10.03.2026.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 open class SimpleDecoderOutputBuffer: DecoderOutputBuffer {
     public var sampleFlags: SampleFlags = []
-    public var timeUs: Int64 = 0
-    public var skippedOutputBufferCount: Int = 0
+    public var time = CMSampleTimingInfo.invalid
+    public var skippedOutputBufferCount = 0
     public var shouldBeSkipped: Bool = false
 
     private let releaseCallback: ((SimpleDecoderOutputBuffer) -> Void)
@@ -21,8 +22,8 @@ open class SimpleDecoderOutputBuffer: DecoderOutputBuffer {
         self.releaseCallback = releaseCallback
     }
 
-    open func initBuffer(timeUs: Int64, size: Int) -> ByteBuffer {
-        self.timeUs = timeUs
+    open func initBuffer(time: CMSampleTimingInfo, size: Int) -> ByteBuffer {
+        self.time = time
         if data.capacity < size {
             data = allocator.buffer(capacity: size)
         }
@@ -37,7 +38,7 @@ open class SimpleDecoderOutputBuffer: DecoderOutputBuffer {
 
     open func clear() {
         sampleFlags = []
-        timeUs = 0
+        time = .invalid
         skippedOutputBufferCount = 0
         shouldBeSkipped = false
 

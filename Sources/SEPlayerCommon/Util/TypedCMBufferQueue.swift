@@ -84,7 +84,9 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
     public init(
         capacity: CMItemCount = 120,
         compareHandler: @escaping (_ lhs: T, _ rhs: T) -> CFComparisonResult,
-        ptsHandler: ((T) -> CMTime)? = nil
+        ptsHandler: ((T) -> CMTime)? = nil,
+        durationHandler: ((T) -> CMTime)? = nil,
+        isDataReady: ((T) -> Bool)? = nil,
     ) throws {
         self.capacity = capacity
         let handlers = CMBufferQueue.Handlers.unsortedSampleBuffers.withHandlers {
@@ -97,11 +99,27 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
                 ptsHandler?(buffer as! T) ?? .zero
             }
             $0.getSize { _ in return .zero }
+            $0.isDataReady { isDataReady?($0 as! T) ?? true }
+            if let durationHandler {
+                $0.getDuration { durationHandler($0 as! T) }
+            }
         }
         bufferQueue = try CMBufferQueue(
             capacity: capacity,
             handlers: handlers
         )
+    }
+
+    public func installTrigger(condition: CMBufferQueue.TriggerCondition, _ body: CMBufferQueueTriggerHandler? = nil) throws -> CMBufferQueue.TriggerToken {
+        try bufferQueue.installTrigger(condition: condition, body)
+    }
+
+    public func removeTrigger(_ triggerToken: CMBufferQueue.TriggerToken) throws {
+        try bufferQueue.removeTrigger(triggerToken)
+    }
+
+    public func testTrigger(_ triggerToken: CMBufferQueue.TriggerToken) -> Bool {
+        bufferQueue.testTrigger(triggerToken)
     }
 
     public func head() -> T? {

@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 
 public let emptyTimeline: Timeline = EmptyTimeline()
@@ -16,7 +17,7 @@ public protocol Timeline: Sendable, AnyObject {
     func lastWindowIndex(shuffleModeEnabled: Bool) -> Int?
     func firstWindowIndex(shuffleModeEnabled: Bool) -> Int?
     @discardableResult
-    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window
     func periodCount() -> Int
     @discardableResult
     func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period
@@ -85,7 +86,7 @@ public extension Timeline {
 
     @discardableResult
     func getWindow(windowIndex: Int, window: Window) -> Window {
-        getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: .zero)
+        getWindow(windowIndex: windowIndex, window: window, defaultPositionProjection: .zero)
     }
 
     func nextPeriodIndex(
@@ -126,36 +127,36 @@ public extension Timeline {
         )
     }
 
-    func periodPositionUs(
+    func periodPosition(
         window: Window,
         period: Period,
         windowIndex: Int,
-        windowPositionUs: Int64,
-        defaultPositionProjectionUs: Int64 = .zero
-    ) -> (AnyHashable, Int64)? {
-        guard windowIndex > 0 || windowIndex < windowCount() else {
+        windowPosition: CMTime,
+        defaultPositionProjection: CMTime = .zero
+    ) -> (AnyHashable, CMTime)? {
+        guard windowIndex >= 0, windowIndex < windowCount() else {
             assertionFailure()
             return nil
         }
-        getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
-        let windowPositionUs = windowPositionUs == .timeUnset ? window.defaultPositionUs : windowPositionUs
-        guard windowPositionUs != .timeUnset else { return nil }
+        getWindow(windowIndex: windowIndex, window: window, defaultPositionProjection: defaultPositionProjection)
+        let windowPosition = windowPosition.isValid ? windowPosition : window.defaultPosition
+        guard windowPosition.isValid else { return nil }
 
         var periodIndex = window.firstPeriodIndex
         getPeriod(periodIndex: periodIndex, period: period)
         while periodIndex < window.lastPeriodIndex,
-              period.positionInWindowUs != windowPositionUs,
-              getPeriod(periodIndex: periodIndex + 1, period: period).positionInWindowUs <= windowPositionUs {
+              period.positionInWindow != windowPosition,
+              getPeriod(periodIndex: periodIndex + 1, period: period).positionInWindow <= windowPosition {
             periodIndex += 1
         }
         getPeriod(periodIndex: periodIndex, period: period, setIds: true)
-        var periodPositionUs = windowPositionUs - period.positionInWindowUs
-        if period.durationUs != .timeUnset {
-            periodPositionUs = min(periodPositionUs, period.durationUs - 1)
+        var periodPosition = windowPosition - period.positionInWindow
+        if period.duration.isValid == false {
+            periodPosition = min(periodPosition, CMTime(value: period.duration.value - 1, timescale: period.duration.timescale))
         }
-        periodPositionUs = max(0, periodPositionUs)
+        periodPosition = max(.zero, periodPosition)
         guard let periodId = period.uid else { return nil }
-        return (periodId, periodPositionUs)
+        return (periodId, periodPosition)
     }
 
     @discardableResult
@@ -230,7 +231,7 @@ public extension Timeline {
 
 private final class EmptyTimeline: Timeline {
     func windowCount() -> Int { 0 }
-    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window { window }
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window { window }
     func periodCount() -> Int { 0 }
     func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period { period }
     func indexOfPeriod(by id: AnyHashable) -> Int? { nil }

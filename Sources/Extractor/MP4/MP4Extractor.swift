@@ -133,7 +133,7 @@ final class MP4Extractor: Extractor {
         }
     }
 
-    func seek(to position: Int, timeUs: Int64, isolation: isolated any Actor) throws {
+    func seek(to position: Int, time: CMTime, isolation: isolated any Actor) throws {
         containerAtoms.removeAll()
         atomHeaderBytesRead = 0
         sampleTrackIndex = nil
@@ -147,8 +147,8 @@ final class MP4Extractor: Extractor {
             enterReadingAtomHeaderState()
         } else {
             for track in tracks {
-                let sampleIndex = track.sampleTable.earlierOrEqualSyncSample(for: timeUs)
-                    ?? track.sampleTable.laterOrEqualSyncSample(for: timeUs)
+                let sampleIndex = track.sampleTable.earlierOrEqualSyncSample(for: time)
+                    ?? track.sampleTable.laterOrEqualSyncSample(for: time)
 
                 if let sampleIndex {
                     track.sampleIndex = sampleIndex
@@ -399,14 +399,20 @@ private extension MP4Extractor {
             }
         }
 
-        let timeUs = track.sampleTable.timestampsUs[sampleIndex]
+        let pts = track.sampleTable.pts[sampleIndex]
+        let dts = track.sampleTable.dts[sampleIndex]
+        let duration = track.sampleTable.durations[sampleIndex]
         var sampleFlags = track.sampleTable.flags[sampleIndex]
         if !isSampleDependedOn {
             sampleFlags.insert(.notDependedOn)
         }
 
         try trackOutput.sampleMetadata(
-            time: timeUs,
+            time: .init(
+                duration: duration,
+                presentationTimeStamp: pts,
+                decodeTimeStamp: dts
+            ),
             flags: sampleFlags,
             size: sampleSize,
             offset: 0,
@@ -427,7 +433,7 @@ private extension MP4Extractor {
 private extension MP4Extractor {
     func processMoovAtom(moov: ContainerBox, isolation: isolated any Actor) throws {
         var firstVideoTrackIndex: Int?
-        var durationUs = Int64.timeUnset
+        var duration = CMTime.invalid
         var tracks = [MP4Track]()
 
 //        let mvhdMetadata = try! BoxParser.Mp4TimestampData(
@@ -438,7 +444,7 @@ private extension MP4Extractor {
         let trackSampleTables = try! boxParser.parseTraks(
             moov: moov,
             gaplessInfoHolder: &gaplessInfoHolder,
-            duration: .timeUnset,
+            duration: .invalid,
             ignoreEditLists: flags.contains(.workaroundIgnoreEditLists),
             isQuickTime: fileType == .quickTime,
             omitTrackSampleTable: omitTrackSampleTable
@@ -458,9 +464,9 @@ private extension MP4Extractor {
                     trackType: track.type
                 )
             )
-            let trackDurationUs = track.durationUs != .timeUnset ? track.durationUs : trackSampleTable.durationUs
-            mp4Track.trackOutput.setDurationUs(trackDurationUs, isolation: isolation)
-            durationUs = max(durationUs, trackDurationUs)
+            let trackDuration = track.duration.isValid ? track.duration : trackSampleTable.duration
+            mp4Track.trackOutput.setDuration(trackDuration, isolation: isolation)
+            duration = max(duration, trackDuration)
 
             let maxInputSize: Int = if track.format.sampleMimeType == .audioTRUEHD {
                 trackSampleTable.maximumSize // TODO: size for TRUEHD
@@ -501,7 +507,7 @@ private extension MP4Extractor {
 
         extractorOutput.endTracks()
         extractorOutput.seekMap(seekMap: Mp4SeekMap(
-            durationUs: durationUs,
+            duration: duration,
             tracks: self.tracks,
             firstVideoTrackIndex: firstVideoTrackIndex
         ))
@@ -586,7 +592,7 @@ private extension MP4Extractor {
     private func calculateAccumulatedSampleSizes(_ tracks: [MP4Track]) -> [[Int]] {
         var accumulatedSampleSizes = tracks.map { Array(repeating: 0, count: $0.sampleTable.sampleCount) }
         var nextSampleIndices = Array(repeating: 0, count: tracks.count)
-        var nextSampleTimesUs = tracks.map { $0.sampleTable.timestampsUs[0] }
+        var nextSampleTimes = tracks.map { $0.sampleTable.pts[0] }
         var finishedTracks = Set<Int>()
 
         var accumulatedSize: Int = 0
@@ -594,7 +600,7 @@ private extension MP4Extractor {
         while finishedTracks.count < tracks.count {
             guard let minTrackIndex = tracks.indices
                 .filter({ !finishedTracks.contains($0) })
-                .min(by: { nextSampleTimesUs[$0] < nextSampleTimesUs[$1] })
+                .min(by: { nextSampleTimes[$0] < nextSampleTimes[$1] })
             else { break }
 
             let sampleIndex = nextSampleIndices[minTrackIndex]
@@ -605,7 +611,7 @@ private extension MP4Extractor {
             nextSampleIndices[minTrackIndex] = nextIndex
 
             if nextIndex < accumulatedSampleSizes[minTrackIndex].count {
-                nextSampleTimesUs[minTrackIndex] = tracks[minTrackIndex].sampleTable.timestampsUs[nextIndex]
+                nextSampleTimes[minTrackIndex] = tracks[minTrackIndex].sampleTable.pts[nextIndex]
             } else {
                 finishedTracks.insert(minTrackIndex)
             }
@@ -686,12 +692,12 @@ private extension MP4Extractor {
     }
 
     final class Mp4SeekMap: TrackAwareSeekMap {
-        private let durationUs: Int64
+        private let duration: CMTime
         private let tracks: [MP4Track]
         private let firstVideoTrackIndex: Int?
 
-        init(durationUs: Int64, tracks: [MP4Track], firstVideoTrackIndex: Int?) {
-            self.durationUs = durationUs
+        init(duration: CMTime, tracks: [MP4Track], firstVideoTrackIndex: Int?) {
+            self.duration = duration
             self.tracks = tracks
             self.firstVideoTrackIndex = firstVideoTrackIndex
         }
@@ -700,18 +706,18 @@ private extension MP4Extractor {
 
         func isSeekable(trackId: Int) -> Bool { true }
 
-        func getDurationUs() -> Int64 { durationUs }
+        func getDuration() -> CMTime { duration }
 
-        func getSeekPoints(for timeUs: Int64) -> SeekPoints {
-            getSeekPoints(timeUs: timeUs, trackId: nil)
+        func getSeekPoints(for time: CMTime) -> SeekPoints {
+            getSeekPoints(time: time, trackId: nil)
         }
 
-        func getSeekPoints(timeUs: Int64, trackId: Int?) -> SeekPoints {
+        func getSeekPoints(time: CMTime, trackId: Int?) -> SeekPoints {
             guard !tracks.isEmpty else { return SeekPoints(first: .start) }
 
-            var firstTimeUs: Int64
+            var firstTime: CMTime
             var firstOffset: Int
-            var secondTimeUs: Int64?
+            var secondTime: CMTime?
             var secondOffset: Int?
 
             // Note that the id matches the index in tracks.
@@ -719,23 +725,23 @@ private extension MP4Extractor {
             // If we have a video track, use it to establish one or two seek points.
             if let mainTrackIndex {
                 let sampleTable = tracks[mainTrackIndex].sampleTable
-                guard let sampleIndex = getSyncSampleIndex(from: sampleTable, timeUs: timeUs) else {
+                guard let sampleIndex = getSyncSampleIndex(from: sampleTable, time: time) else {
                     return SeekPoints(first: .start)
                 }
 
-                let sampleTimeUs = sampleTable.timestampsUs[sampleIndex]
-                firstTimeUs = sampleTimeUs
+                let sampleTime = sampleTable.pts[sampleIndex]
+                firstTime = sampleTime
                 firstOffset = sampleTable.offsets[sampleIndex]
 
-                if sampleTimeUs < timeUs && sampleIndex < sampleTable.sampleCount - 1 {
-                    let secondSampleIndex = sampleTable.laterOrEqualSyncSample(for: timeUs)
+                if sampleTime < time && sampleIndex < sampleTable.sampleCount - 1 {
+                    let secondSampleIndex = sampleTable.laterOrEqualSyncSample(for: time)
                     if let secondSampleIndex, secondSampleIndex != sampleIndex {
-                        secondTimeUs = sampleTable.timestampsUs[secondSampleIndex]
+                        secondTime = sampleTable.pts[secondSampleIndex]
                         secondOffset = sampleTable.offsets[secondSampleIndex]
                     }
                 }
             } else {
-                firstTimeUs = timeUs
+                firstTime = time
                 firstOffset = Int.max
             }
 
@@ -744,26 +750,26 @@ private extension MP4Extractor {
                 for index in 0..<tracks.count {
                     if index != firstVideoTrackIndex {
                         let sampleTable = tracks[index].sampleTable
-                        firstOffset = maybeAdjustSeekOffset(using: sampleTable, seekTimeUs: firstTimeUs, offset: firstOffset)
-                        if let secondTimeUs, let secondOffsetUnwrapped = secondOffset {
-                            secondOffset = maybeAdjustSeekOffset(using: sampleTable, seekTimeUs: secondTimeUs, offset: secondOffsetUnwrapped)
+                        firstOffset = maybeAdjustSeekOffset(using: sampleTable, seekTime: firstTime, offset: firstOffset)
+                        if let secondTime, let secondOffsetUnwrapped = secondOffset {
+                            secondOffset = maybeAdjustSeekOffset(using: sampleTable, seekTime: secondTime, offset: secondOffsetUnwrapped)
                         }
                     }
                 }
             }
 
-            if let secondTimeUs, let secondOffset {
+            if let secondTime, let secondOffset {
                 return SeekPoints(
-                    first: .init(timeUs: firstTimeUs, position: firstOffset),
-                    second: .init(timeUs: secondTimeUs, position: secondOffset)
+                    first: .init(time: firstTime, position: firstOffset),
+                    second: .init(time: secondTime, position: secondOffset)
                 )
             } else {
-                return SeekPoints(first: .init(timeUs: firstTimeUs, position: firstOffset))
+                return SeekPoints(first: .init(time: firstTime, position: firstOffset))
             }
         }
 
-        private func maybeAdjustSeekOffset(using sampleTable: TrackSampleTable, seekTimeUs: Int64, offset: Int) -> Int {
-            guard let sampleIndex = getSyncSampleIndex(from: sampleTable, timeUs: seekTimeUs) else {
+        private func maybeAdjustSeekOffset(using sampleTable: TrackSampleTable, seekTime: CMTime, offset: Int) -> Int {
+            guard let sampleIndex = getSyncSampleIndex(from: sampleTable, time: seekTime) else {
                 return offset
             }
 
@@ -771,8 +777,8 @@ private extension MP4Extractor {
             return min(sampleOffset, offset)
         }
 
-        private func getSyncSampleIndex(from sampleTable: TrackSampleTable, timeUs: Int64) -> Int? {
-            sampleTable.earlierOrEqualSyncSample(for: timeUs) ?? sampleTable.laterOrEqualSyncSample(for: timeUs)
+        private func getSyncSampleIndex(from sampleTable: TrackSampleTable, time: CMTime) -> Int? {
+            sampleTable.earlierOrEqualSyncSample(for: time) ?? sampleTable.laterOrEqualSyncSample(for: time)
         }
     }
 }

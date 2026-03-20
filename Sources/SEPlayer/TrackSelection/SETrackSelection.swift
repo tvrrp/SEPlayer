@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 import SEPlayerCommon
 
@@ -56,17 +57,17 @@ public protocol SETrackSelection: TrackSelection {
     func playWhenReadyChanged(_ playWhenReady: Bool)
 
     func updateSelectedTrack(
-        playbackPositionUs: Int64,
-        bufferedDurationUs: Int64,
-        availableDurationUs: Int64,
+        playbackPosition: CMTime,
+        bufferedDuration: CMTime,
+        availableDuration: CMTime,
         queue: [MediaChunk],
         mediaChunkIterators: [MediaChunkIterator],
     )
-    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int
-    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool
+    func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int
+    func shouldCancelChunkLoad(playbackPosition: CMTime, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool
 
-    func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool
-    func isTrackExcluded(index: Int, nowMs: Int64) -> Bool
+    func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool
+    func isTrackExcluded(index: Int, now: CMTime) -> Bool
     func getLatestBitrateEstimate() -> Int64?
 
     func isEquals(to other: SETrackSelection) -> Bool
@@ -77,7 +78,7 @@ extension SETrackSelection {
     func onRebuffer() {}
     func playWhenReadyChanged(_ playWhenReady: Bool) {}
 
-    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool {
+    func shouldCancelChunkLoad(playbackPosition: CMTime, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool {
         false
     }
 
