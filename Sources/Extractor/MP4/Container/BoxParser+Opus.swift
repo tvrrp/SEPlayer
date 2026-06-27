@@ -13,7 +13,7 @@ extension BoxParser {
     struct OpusData: Format.InitializationData {
         private let formatDescription: CMAudioFormatDescription
 
-        init?(parent: inout ByteBuffer) throws {
+        init?(parent: inout BlockBufferReader) throws {
             let version = try parent.readInt(as: UInt8.self)
             guard version == 0 else { return nil }
             let outputChannelCount = try parent.readInt(as: UInt8.self)

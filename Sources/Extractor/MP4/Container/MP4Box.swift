@@ -15,9 +15,9 @@ public enum MP4Box {
 
 public struct LeafBox: MP4Box.Box {
     public let type: MP4Box.BoxType?
-    public let data: ByteBuffer
+    public let data: BlockBufferReader
 
-    public init(type: UInt32, data: ByteBuffer) {
+    public init(type: UInt32, data: BlockBufferReader) {
         self.type = MP4Box.BoxType(rawValue: type)
         self.data = data
     }

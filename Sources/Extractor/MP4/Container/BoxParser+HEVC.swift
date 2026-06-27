@@ -13,7 +13,7 @@ extension BoxParser {
         let codecInfo: CMVideoFormatDescription
         let nalUnitLengthFieldLength: Int
 
-        init(reader: inout ByteBuffer) throws {
+        init(reader: inout BlockBufferReader) throws {
             reader.moveReaderIndex(forwardBy: 21)
 
             let nalUnitHeaderLength = try Int(reader.readInt(as: UInt8.self) & 0x03 + 1)
@@ -26,7 +26,7 @@ extension BoxParser {
 
                 for _ in 0..<numberOfNalUnits {
                     let nalUnitLength = try Int(reader.readInt(as: Int16.self))
-                    try data.append(reader.readData(count: nalUnitLength))
+                    try data.append(reader.readData(length: nalUnitLength))
                 }
             }
 

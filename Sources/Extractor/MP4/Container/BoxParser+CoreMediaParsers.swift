@@ -14,7 +14,7 @@ extension BoxParser {
         private let formatDescription: CMFormatDescription
 
         static func create(
-            parent: inout ByteBuffer,
+            parent: inout BlockBufferReader,
             position: Int,
             size: Int,
             trackId: Int,
@@ -27,21 +27,29 @@ extension BoxParser {
             parent.moveReaderIndex(to: position)
             var formatDescriptionOut: CMAudioFormatDescription?
 
-            try parent.withUnsafeReadableBytes { pointer in
-                try pointer.withMemoryRebound(to: UInt8.self) { buffer in
-                    guard let baseAdress = buffer.baseAddress else {
-                        throw ErrorBuilder.illegalState
-                    }
-
-                    return CMAudioFormatDescriptionCreateFromBigEndianSoundDescriptionData(
-                        allocator: kCFAllocatorDefault,
-                        bigEndianSoundDescriptionData: baseAdress,
-                        size: buffer.count,
-                        flavor: isQuickTime ? .quickTimeMovieV2 : .isoFamily,
-                        formatDescriptionOut: &formatDescriptionOut
-                    )
-                }
+            try parent.withUnsafeReadableBlockBuffer { blockBuffer in
+                return CMAudioFormatDescriptionCreateFromBigEndianSoundDescriptionBlockBuffer(
+                    allocator: kCFAllocatorDefault,
+                    bigEndianSoundDescriptionBlockBuffer: blockBuffer,
+                    flavor: isQuickTime ? .quickTimeMovieV2 : .isoFamily,
+                    formatDescriptionOut: &formatDescriptionOut
+                )
             }.validate()
+//            try parent.withUnsafeReadableBytes { pointer in
+//                try pointer.withMemoryRebound(to: UInt8.self) { buffer in
+//                    guard let baseAdress = buffer.baseAddress else {
+//                        throw ErrorBuilder.illegalState
+//                    }
+//
+//                    return CMAudioFormatDescriptionCreateFromBigEndianSoundDescriptionData(
+//                        allocator: kCFAllocatorDefault,
+//                        bigEndianSoundDescriptionData: baseAdress,
+//                        size: buffer.count,
+//                        flavor: isQuickTime ? .quickTimeMovieV2 : .isoFamily,
+//                        formatDescriptionOut: &formatDescriptionOut
+//                    )
+//                }
+//            }.validate()
 
             guard let formatDescriptionOut, let basicDescription = formatDescriptionOut.audioStreamBasicDescription else { return false }
             let initializationData = CoreMediaParsedAudio(formatDescription: formatDescriptionOut)
@@ -77,7 +85,7 @@ extension BoxParser {
         private let formatDescription: CMFormatDescription
 
         static func create(
-            parent: inout ByteBuffer,
+            parent: inout BlockBufferReader,
             position: Int,
             size: Int,
             trackId: Int,
@@ -90,21 +98,30 @@ extension BoxParser {
             parent.moveReaderIndex(to: position)
             var formatDescriptionOut: CMVideoFormatDescription?
 
-            try parent.withUnsafeReadableBytes { pointer in
-                try pointer.withMemoryRebound(to: UInt8.self) { buffer in
-                    guard let baseAdress = buffer.baseAddress else {
-                        throw ErrorBuilder.illegalState
-                    }
-
-                    return CMVideoFormatDescriptionCreateFromBigEndianImageDescriptionData(
-                        allocator: kCFAllocatorDefault,
-                        bigEndianImageDescriptionData: baseAdress,
-                        size: buffer.count,
-                        stringEncoding: CFStringGetSystemEncoding(),
-                        flavor: isQuickTime ? .quickTimeMovie : .isoFamily,
-                        formatDescriptionOut: &formatDescriptionOut
-                    )
-                }
+//            try parent.withUnsafeReadableBytes { pointer in
+//                try pointer.withMemoryRebound(to: UInt8.self) { buffer in
+//                    guard let baseAdress = buffer.baseAddress else {
+//                        throw ErrorBuilder.illegalState
+//                    }
+//
+//                    return CMVideoFormatDescriptionCreateFromBigEndianImageDescriptionData(
+//                        allocator: kCFAllocatorDefault,
+//                        bigEndianImageDescriptionData: baseAdress,
+//                        size: buffer.count,
+//                        stringEncoding: CFStringGetSystemEncoding(),
+//                        flavor: isQuickTime ? .quickTimeMovie : .isoFamily,
+//                        formatDescriptionOut: &formatDescriptionOut
+//                    )
+//                }
+//            }.validate()
+            try parent.withUnsafeReadableBlockBuffer { blockBuffer in
+                return CMVideoFormatDescriptionCreateFromBigEndianImageDescriptionBlockBuffer(
+                    allocator: kCFAllocatorDefault,
+                    bigEndianImageDescriptionBlockBuffer: blockBuffer,
+                    stringEncoding: CFStringGetSystemEncoding(),
+                    flavor: isQuickTime ? .quickTimeMovie : .isoFamily,
+                    formatDescriptionOut: &formatDescriptionOut
+                )
             }.validate()
 
             guard let formatDescriptionOut else { return false }

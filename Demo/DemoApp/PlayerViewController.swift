@@ -9,6 +9,7 @@ import AVFAudio
 import UIKit
 import SEPlayer
 import MediaPlayer
+import DataSource
 
 class PlayerViewController: UIViewController {
     var seekParameters: SeekParameters = .default
@@ -64,17 +65,38 @@ class PlayerViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = false
     }
 
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
         player.stop()
         player.release()
         timer?.invalidate()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+
+//        let queue = SignalQueue()
+//        let actorTest = queue.playerActor()
+//        let dataSource2 = HTTPDataSource2(
+//            dataSpec: .spec(
+//                from: URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4")!
+//            ),
+//            queue: queue,
+//            transportFactory: DefaultHTTPTransportFactory()
+//        )
+//
+//        Task {
+//            let blockBuffer = try await dataSource2.read(range: 0..<100, isolation: actorTest)
+//            print(blockBuffer)
+//        }
+//        return;
+
         view.insertSubview(playerView, at: 0)
         view.addSubview(controlsContainerView)
         controlsContainerView.addSubview(currentTimeLabel)
@@ -147,7 +169,7 @@ class PlayerViewController: UIViewController {
 
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
         if videoUrls.count == 1 {
-//            player.repeatMode = .one
+            player.repeatMode = .one
             backwardsButton.isHidden = true
             forwardsButton.isHidden = true
         }
@@ -195,6 +217,7 @@ class PlayerViewController: UIViewController {
             durationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             durationLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
         ])
+        hideControls()
     }
 
     @objc private func hideControls() {
@@ -305,18 +328,18 @@ class PlayerViewController: UIViewController {
     }
 
     private func updateTime() {
-        timer?.invalidate()
-
-        let timer = Timer(timeInterval: 1/30, repeats: true, block: { [weak self] _ in
-            self?.handleTimer()
-        })
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        let duration = player.duration
-        if duration.isValid {
-            durationLabel.text = "\(player.duration.seconds)"
-            seekSlider.maximumValue = Float(player.duration.seconds)
-        }
+//        timer?.invalidate()
+//
+//        let timer = Timer(timeInterval: 1/30, repeats: true, block: { [weak self] _ in
+//            self?.handleTimer()
+//        })
+//        self.timer = timer
+//        RunLoop.main.add(timer, forMode: .common)
+//        let duration = player.duration
+//        if duration.isValid {
+//            durationLabel.text = "\(duration.seconds)"
+//            seekSlider.maximumValue = Float(duration.seconds)
+//        }
     }
 
     private func handleTimer() {

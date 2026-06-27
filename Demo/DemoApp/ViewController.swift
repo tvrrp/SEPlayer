@@ -188,7 +188,7 @@ struct UrlListScreen: View {
         ]
 
         for vc in vcs {
-            vc.repeatMode = .all
+//            vc.repeatMode = .all
             vc.seekParameters = seekParameters.seekParameters
             vc.videoUrls = urls.map { URL(string: $0)! }
         }

@@ -533,8 +533,8 @@ final class AVFAudioRenderer: AVFBaseRenderer<AudioConverterDecoder> {
 
         renderSynchronizer.addRenderer(audioRenderer)
         renderSynchronizer.delaysRateChangeUntilHasSufficientMediaData = false
-        lowWaterMark = .sampleCount(60)
-        highWaterMark = .sampleCount(240)
+        lowWaterMark = .cmTime(.init(seconds: 0.5, preferredTimescale: 48000))
+        highWaterMark = .cmTime(.init(seconds: 2, preferredTimescale: 48000))
     }
 
 //    override func handleMessage(_ message: RendererMessage) throws {

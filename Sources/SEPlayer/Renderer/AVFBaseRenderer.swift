@@ -57,7 +57,7 @@
 //        firstStreamSampleRead = false
 //        feedInputBuffer2()
 //        requestOutputMediaDataWhenReady {
-//            print("requestOutputMediaDataWhenReady onStreamChanged")
+//            customDebug("requestOutputMediaDataWhenReady onStreamChanged")
 //            self.drainOutputBuffer2()
 //        }
 //    }
@@ -67,10 +67,10 @@
 //        outputStreamEnded = false
 //        firstStreamSampleRead = false
 //        if decoder != nil { try flushDecoder() }
-//        print("ON POSITION RESETTTT")
+//        customDebug("ON POSITION RESETTTT")
 //        feedInputBuffer2()
 //        requestOutputMediaDataWhenReady {
-//            print("requestOutputMediaDataWhenReady from POS RESET")
+//            customDebug("requestOutputMediaDataWhenReady from POS RESET")
 //            self.drainOutputBuffer2()
 //        }
 //    }
@@ -112,7 +112,7 @@
 //        guard decoder == nil, let inputFormat else { return }
 //        decoder = try createDecoder(format: inputFormat)
 //        decoder?.setOutputStartTimeUs(getLastResetPosition())
-//        print("MAYBE INIT DECODER")
+//        customDebug("MAYBE INIT DECODER")
 //        try waitForDecoderOutputBuffer()
 //    }
 //
@@ -233,8 +233,8 @@
 //                  !inputStreamEnded else { return }
 //
 //            var counter = 0
-//            print(""); print("--------------")
-//            print("FEED INPUT BUFFER LOOP")
+//            customDebug(""); customDebug("--------------")
+//            customDebug("FEED INPUT BUFFER LOOP")
 //            while decoder.testTrigger(decoderHighWaterMarkToken) == false {
 //                if inputBuffer == nil {
 //                    inputBuffer = try decoder.dequeueInputBuffer()
@@ -244,10 +244,10 @@
 //                       decoder.testTrigger(decoderLowWaterMarkToken) == false {
 //                        return
 //                    }
-//                    print("FINISH FEEDD INPUT BUFFER NO BUFFER, enqueued = \(counter)")
-//                    print("--------------"); print("")
+//                    customDebug("FINISH FEEDD INPUT BUFFER NO BUFFER, enqueued = \(counter)")
+//                    customDebug("--------------"); customDebug("")
 //                    decoder.onInputBufferAvailable = { [unowned self] in
-//                        print("DECODER ON INPUT BUFFER AVAILABLE")
+//                        customDebug("DECODER ON INPUT BUFFER AVAILABLE")
 //                        queue.async {
 //                            decoder.onInputBufferAvailable = nil
 //                            feedInputBuffer2()
@@ -272,32 +272,32 @@
 //                    }
 //                    if sampleQueueAvailabilityToken == nil {
 //                        if let sampleStream = getStream() {
-//                            print("INSTALL SAMPLE QUEUE TRIGGER")
+//                            customDebug("INSTALL SAMPLE QUEUE TRIGGER")
 //                            sampleQueueAvailabilityToken = sampleStream.installTrigger(
 //                                condition: .whenDataBecomesReady
 //                            ) { [unowned self] token in
 //                                queue.justDispatch {
-////                                    print("SAMPLE QUEUEU NEW SAMPLE!!!!")
+////                                    customDebug("SAMPLE QUEUEU NEW SAMPLE!!!!")
 //                                    sampleStream.removeTrigger(token)
 //                                    sampleQueueAvailabilityToken = nil
 //                                    feedInputBuffer2()
 //                                }
 //                            }
 //                        } else {
-//                            print("DID NOT INSTALL SAMPLE QUEUE TRIGGER, NO SAMPLE STREAM")
+//                            customDebug("DID NOT INSTALL SAMPLE QUEUE TRIGGER, NO SAMPLE STREAM")
 //                        }
 //                    } else {
-//                        print("DID NOT INSTALL SAMPLE QUEUE TRIGGER, ALREADY INSTALLED")
+//                        customDebug("DID NOT INSTALL SAMPLE QUEUE TRIGGER, ALREADY INSTALLED")
 //                    }
 //
-//                    print("FINISH FEEDD INPUT BUFFER NO DATA, enqueued = \(counter)")
-//                    print("--------------"); print("")
+//                    customDebug("FINISH FEEDD INPUT BUFFER NO DATA, enqueued = \(counter)")
+//                    customDebug("--------------"); customDebug("")
 //                    return
 //                case let .didReadFormat(format):
 //                    try onInputFormatChanged(format)
 //                    break
 //                case .didReadBuffer:
-////                    print("didReadBuffer, timeUs = \(inputBuffer.timeUs), last = \(getLastResetPosition())")
+////                    customDebug("didReadBuffer, timeUs = \(inputBuffer.timeUs), last = \(getLastResetPosition())")
 //                    if inputBuffer.flags.contains(.endOfStream) {
 //                        inputStreamEnded = true
 //                        try decoder.queueInputBuffer(inputBuffer)
@@ -320,8 +320,8 @@
 //                }
 //            }
 //
-//            print("FINISH FEEDD INPUT BUFFER enqueued = \(counter)")
-//            print("--------------"); print("")
+//            customDebug("FINISH FEEDD INPUT BUFFER enqueued = \(counter)")
+//            customDebug("--------------"); customDebug("")
 //        } catch {
 //            delegate?.onRendererError(self, error: createRendererError(error: error))
 //        }
@@ -339,8 +339,8 @@
 //            defer { workingInOutputDataLoop = false }
 //            stopRequestingOutputMediaData()
 //
-//            print("📹📹📹📹📹"); print("--------------")
-//            print("DRAIN RENDER LOOP")
+//            customDebug("📹📹📹📹📹"); customDebug("--------------")
+//            customDebug("DRAIN RENDER LOOP")
 //            var counter = 0
 //            while isReadyForMoreMediaData() {
 //                if outputBuffer == nil {
@@ -348,7 +348,7 @@
 //                }
 //
 //                guard let outputBuffer else {
-//                    print("DRAIN NO BUFFER, did enqueue = \(counter)")
+//                    customDebug("DRAIN NO BUFFER, did enqueue = \(counter)")
 //                    try waitForDecoderOutputBuffer()
 //                    break
 //                }
@@ -374,11 +374,11 @@
 //                let consumed = try renderOutputBuffer(outputBuffer)
 //                if consumed {
 //                    counter += 1
-////                    print("😊 did render frame = \(outputBuffer.timeUs)")
+////                    customDebug("😊 did render frame = \(outputBuffer.timeUs)")
 //                    self.outputBuffer = nil
 //                } else {
-//                    print("DRAIN RENDER LOOP ENDED, RENDERER IS FULL, consume = \(counter)")
-////                    print("😊 did NOTTTT render frame = \(outputBuffer.timeUs)")
+//                    customDebug("DRAIN RENDER LOOP ENDED, RENDERER IS FULL, consume = \(counter)")
+////                    customDebug("😊 did NOTTTT render frame = \(outputBuffer.timeUs)")
 //
 //                    break
 //                }
@@ -386,18 +386,18 @@
 //
 //            if !isReadyForMoreMediaData() {
 //                requestOutputMediaDataWhenReady {
-//                    print("requestOutputMediaDataWhenReady DRAIN BUFFER")
+//                    customDebug("requestOutputMediaDataWhenReady DRAIN BUFFER")
 //                    self.drainOutputBuffer2()
 //                }
 //            }
 //
 //            if isReady() {
-//                print("DRAIN RENDER LOOP ENDED, RENDERER IS READY, consume = \(counter)")
-//                print("--------------"); print("📹📹📹📹")
+//                customDebug("DRAIN RENDER LOOP ENDED, RENDERER IS READY, consume = \(counter)")
+//                customDebug("--------------"); customDebug("📹📹📹📹")
 //                delegate?.rendererReportsReady(self)
 //            } else {
-//                print("DRAIN RENDER LOOP ENDED, RENDERER IS NOTTTT!!!!! READY, consume = \(counter)")
-//                print("--------------"); print("📹📹📹📹")
+//                customDebug("DRAIN RENDER LOOP ENDED, RENDERER IS NOTTTT!!!!! READY, consume = \(counter)")
+//                customDebug("--------------"); customDebug("📹📹📹📹")
 //                delegate?.rendererNeedsMoreData(self)
 //            }
 //        } catch {
@@ -408,11 +408,11 @@
 //    private func waitForDecoderOutputBuffer() throws {
 //        guard decoderOutputBufferAvailable == nil else { return }
 //        stopRequestingOutputMediaData()
-//        print("WAIT FOR DECODER OUPUT BUFFER, decoder is nil = \(decoder == nil)")
+//        customDebug("WAIT FOR DECODER OUPUT BUFFER, decoder is nil = \(decoder == nil)")
 //        decoderOutputBufferAvailable = try decoder?.installTrigger(condition: .whenDataBecomesReady) { [unowned self] token in
 //            queue.justDispatch {
 //                do {
-//                    print("DECODER OUTPUT BUFFER AVAILABLE")
+//                    customDebug("DECODER OUTPUT BUFFER AVAILABLE")
 //                    try decoder?.removeTrigger(token)
 //                    decoderOutputBufferAvailable = nil
 //                    drainOutputBuffer2()
@@ -444,7 +444,7 @@
 //        }
 //
 //        let condition: (CMBufferQueue.TriggerToken) -> Void = { [unowned self] _ in
-//            print("DECODER LOW WATER MARK")
+//            customDebug("DECODER LOW WATER MARK")
 //            queue.justDispatch { feedInputBuffer2() }
 //        }
 //
@@ -488,6 +488,7 @@ class AVFBaseRenderer<D: AVFDecoder>: BaseSERenderer {
 
     var lowWaterMark: WaterMark = .sampleCount(2)
     var highWaterMark: WaterMark = .sampleCount(10)
+    var debugEnabled = false
 
     // MARK: - Public read-only state
 
@@ -551,7 +552,8 @@ class AVFBaseRenderer<D: AVFDecoder>: BaseSERenderer {
     }
 
     func stopRequestingOutputMediaData() {}
-    func onFirstOutputSample() {}
+    func onSampleQueuedToDecoder(timingInfo: CMSampleTimingInfo, flags: SampleFlags) {}
+    func rendererIsReady() -> Bool { false }
 
     // MARK: - BaseSERenderer overrides
 
@@ -700,13 +702,13 @@ private extension AVFBaseRenderer {
     /// Single entry point that kicks both the feed and drain loops.
     func scheduleFeedAndDrain() {
         feedInputBuffer()
-        print("")
-        print("📹 scheduleFeedAndDrain requestOutputMediaDataWhenReady")
+        customDebug("")
+        customDebug("📹 scheduleFeedAndDrain requestOutputMediaDataWhenReady")
         requestOutputMediaDataWhenReady { [weak self] in
-            print("📹 requestOutputMediaDataWhenReady scheduleFeedAndDrain")
+            self?.customDebug("📹 requestOutputMediaDataWhenReady scheduleFeedAndDrain")
             self?.drainOutputBuffer()
         }
-        print("")
+        customDebug("")
     }
 }
 
@@ -811,6 +813,7 @@ private extension AVFBaseRenderer {
 
             buffer.format = inputFormat
             try decoder.queueInputBuffer(buffer)
+            onSampleQueuedToDecoder(timingInfo: buffer.time, flags: buffer.flags)
             decoderReceivedBuffers = true
             inputBuffer = nil
 
@@ -837,22 +840,21 @@ private extension AVFBaseRenderer {
                 isDrainingOutput = false
                 reportReadinessToDelegate()
             }
-            stopRequestingOutputMediaData()
 
             var counter = 0
-            print()
-            print("------------- time = \(getClock().milliseconds)")
-            print("📹📹📹📹📹📹")
+            customDebug()
+            customDebug("------------- time = \(getClock().milliseconds)")
+            customDebug("📹📹📹📹📹📹")
 //            while isReadyForMoreMediaData() {
 //                if outputBuffer == nil {
 //                    outputBuffer = try decoder?.dequeueOutputBuffer()
 //                }
 //                guard let buffer = outputBuffer else {
 //                    try installOutputAvailableTrigger()
-//                    print("📹📹📹📹📹📹")
-//                    print("No available buffer, counter = \(counter)")
-//                    print("-------------")
-//                    print()
+//                    customDebug("📹📹📹📹📹📹")
+//                    customDebug("No available buffer, counter = \(counter)")
+//                    customDebug("-------------")
+//                    customDebug()
 //                    return
 //                }
 //
@@ -873,14 +875,18 @@ private extension AVFBaseRenderer {
                     }
                     guard let buffer = outputBuffer else {
                         try installOutputAvailableTrigger()
-                        print("📹📹📹📹📹📹")
-                        print("No available buffer, isReady = \(isReadyForMoreMediaData()), counter = \(counter)")
-                        print("-------------")
-                        print()
+                        stopRequestingOutputMediaData()
+                        customDebug("📹📹📹📹📹📹")
+                        customDebug("No available buffer, isReadyForMore? = \(isReadyForMoreMediaData()), isReady = \(rendererIsReady()), counter = \(counter)")
+                        customDebug("-------------")
+                        customDebug()
                         return
                     }
 
-                    if try handleSpecialOutputFlags(buffer) { break }
+                    if try handleSpecialOutputFlags(buffer) {
+                        stopRequestingOutputMediaData()
+                        break
+                    }
 
                     let consumed = try renderOutputBuffer(buffer)
                     if consumed {
@@ -890,12 +896,15 @@ private extension AVFBaseRenderer {
                         break // back-pressure from the downstream renderer
                     }
                 } else {
-                    print("STOPPED BEING READY FOR MORE MEDIA DATA, counter = \(counter)")
+                    customDebug("STOPPED BEING READY FOR MORE MEDIA DATA, isReady = \(rendererIsReady()), counter = \(counter)")
                     break
                 }
             }
 
-            scheduleNextDrain(counter)
+            customDebug("📹📹📹📹📹📹 counter = \(counter), isReady = \(rendererIsReady())")
+            customDebug("-------------")
+            customDebug()
+//            scheduleNextDrain(counter)
         } catch {
             delegate?.onRendererError(self, error: createRendererError(error: error))
         }
@@ -903,10 +912,6 @@ private extension AVFBaseRenderer {
 
     /// Returns `true` if the buffer was a special (first/EOS) buffer that terminates the loop.
     func handleSpecialOutputFlags(_ buffer: D.OutputBuffer) throws -> Bool {
-        if buffer.sampleFlags.contains(.firstSample) {
-            onFirstOutputSample()
-        }
-
         guard buffer.sampleFlags.contains(.endOfStream) else { return false }
 
         if decoderReinitState == .waitEndOfStream {
@@ -924,14 +929,12 @@ private extension AVFBaseRenderer {
 
     func scheduleNextDrain(_ counter: Int) {
 //        guard !isReadyForMoreMediaData() else { return }
-        print("📹 2 scheduleNextDrain requestOutputMediaDataWhenReady")
+        customDebug("📹 2 scheduleNextDrain requestOutputMediaDataWhenReady")
         requestOutputMediaDataWhenReady { [weak self] in
-            print("📹 requestOutputMediaDataWhenReady scheduleNextDrain 2")
+//            self?.customDebug("📹 requestOutputMediaDataWhenReady scheduleNextDrain 2")
             self?.drainOutputBuffer()
         }
-        print("📹📹📹📹📹📹 counter = \(counter)")
-        print("-------------")
-        print()
+        
     }
 
     func reportReadinessToDelegate() {
@@ -980,13 +983,13 @@ private extension AVFBaseRenderer {
         ) { [weak self] token in
             guard let self else { return }
             queue.justDispatchWithQoS(qos: .userInteractive) {
-                print(); print(); print()
-                print("📹📹📹 NEW DECODER OUTPUT BUFFER IS AVAILABLE 📹📹📹")
-                print(); print(); print()
+                self.customDebug(); self.customDebug(); self.customDebug()
+                self.customDebug("📹📹📹 NEW DECODER OUTPUT BUFFER IS AVAILABLE 📹📹📹")
+                self.customDebug(); self.customDebug(); self.customDebug()
                 do {
                     try self.decoder?.removeTrigger(token)
                     self.outputAvailableToken = nil
-                    self.drainOutputBuffer()
+                    self.scheduleNextDrain(0)
                 } catch {
                     self.deferredError = error
                 }
@@ -1043,6 +1046,12 @@ private extension AVFBaseRenderer {
 
         for token in tokens.compactMap({ $0 }) {
             try? decoder?.removeTrigger(token)
+        }
+    }
+
+    func customDebug(_ items: Any...) {
+        if debugEnabled {
+            print(items)
         }
     }
 }

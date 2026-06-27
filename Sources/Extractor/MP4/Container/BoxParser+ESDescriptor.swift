@@ -16,9 +16,9 @@ extension BoxParser {
         public let peakBitrate: Int
         private let formatDescription: CMAudioFormatDescription
 
-        public init(parent: inout ByteBuffer, position: Int, size: Int) throws {
+        public init(parent: inout BlockBufferReader, position: Int, size: Int) throws {
             parent.moveReaderIndex(to: position + MP4Box.headerSize + 4)
-            let data = try parent.slice(at: parent.readerIndex, length: size - MP4Box.fullHeaderSize)
+            let data = try parent.getSlice(at: parent.readerIndex, length: size - MP4Box.fullHeaderSize)
 
             // Start of the ES_Descriptor (defined in ISO/IEC 14496-1)
             parent.moveReaderIndex(forwardBy: 1) // ES_Descriptor tag
@@ -52,7 +52,7 @@ extension BoxParser {
             // Start of the DecoderSpecificInfo.
             parent.moveReaderIndex(forwardBy: 1) // DecoderSpecificInfo tag
             let initializationDataSize = try EsdsData.parseExpandableClassSize(data: &parent)
-            let initializationData = try parent.readData(count: initializationDataSize)
+            let initializationData = try parent.readData(length: initializationDataSize)
 
             formatDescription = try ESDescriptor(esdt: Data(buffer: data)).codecInfo
         }
@@ -62,7 +62,7 @@ extension BoxParser {
         }
 
         @discardableResult
-        private static func parseExpandableClassSize(data: inout ByteBuffer) throws -> Int {
+        private static func parseExpandableClassSize(data: inout BlockBufferReader) throws -> Int {
             var currentByte = try data.readInt(as: UInt8.self)
             var size = currentByte & 0x7F
             while (currentByte & 0x80) == 0x80 {

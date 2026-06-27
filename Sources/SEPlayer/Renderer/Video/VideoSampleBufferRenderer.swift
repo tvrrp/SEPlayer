@@ -68,26 +68,25 @@ extension AVSampleBufferDisplayLayer {
         return service
     }
 
-    @MainActor
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
 //        TODO: think about this
-//        switch expectation {
-//        case let .minimumUpcoming(time):
-//            let selector = Selector("expectMinimumUpcomingSampleBufferPresentationTime:")
-//            if responds(to: selector) {
-//                perform(selector, with: time)
-//            }
-//        case .monotonicallyIncreasing:
-//            let selector = Selector("expectMonotonicallyIncreasingUpcomingSampleBufferPresentationTimes")
-//            if responds(to: selector) {
-//                perform(selector)
-//            }
-//        case .none:
-//            let selector = Selector("resetUpcomingSampleBufferPresentationTimeExpectations")
-//            if responds(to: selector) {
-//                perform(selector)
-//            }
-//        }
+        switch expectation {
+        case let .minimumUpcoming(time):
+            let selector = Selector("expectMinimumUpcomingSampleBufferPresentationTime:")
+            if responds(to: selector) {
+                perform(selector, with: time)
+            }
+        case .monotonicallyIncreasing:
+            let selector = Selector("expectMonotonicallyIncreasingUpcomingSampleBufferPresentationTimes")
+            if responds(to: selector) {
+                perform(selector)
+            }
+        case .none:
+            let selector = Selector("resetUpcomingSampleBufferPresentationTimeExpectations")
+            if responds(to: selector) {
+                perform(selector)
+            }
+        }
     }
 }
 
@@ -105,7 +104,7 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     }
 
     private let lock = UnfairLock()
-    @MainActor private let layer: AVSampleBufferDisplayLayer
+    private let layer: AVSampleBufferDisplayLayer
     private nonisolated(unsafe) let renderer: AVSampleBufferVideoRenderer
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
@@ -141,16 +140,12 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
                 renderer.presentationTimeExpectation = .minimumUpcoming(time)
             }
         } else {
-            DispatchQueue.main.async {
-                self.layer.setPresentationTimeExpectation(expectation)
-            }
+            layer.setPresentationTimeExpectation(expectation)
         }
     }
 
     func setControlTimebase(_ timebase: CMTimebase?) {
-        Task { @MainActor in
-            layer.controlTimebase = timebase
-        }
+        layer.controlTimebase = timebase
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
@@ -190,25 +185,23 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
 
     var timebase: CMTimebase? {
         get { nil }
-        set { DispatchQueue.main.async { self.layer.controlTimebase = newValue } }
+        set { layer.controlTimebase = newValue }
     }
 
     var isReadyForMoreMediaData: Bool {
-        lock.withLock { _isReadyForMoreMediaData }
+        layer.isReadyForMoreMediaData
     }
 
     var hasSufficientMediaDataForReliablePlaybackStart: Bool {
-        DispatchQueue.main.sync { self.layer.hasSufficientMediaDataForReliablePlaybackStart }
+        self.layer.hasSufficientMediaDataForReliablePlaybackStart
     }
 
-    @MainActor private let layer: AVSampleBufferDisplayLayer
+    private let layer: AVSampleBufferDisplayLayer
     private let lock = UnfairLock()
 
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
-    private nonisolated(unsafe) var _isReadyForMoreMediaData = true // guarded by lock
-    @MainActor private weak var previosRenderSynchronizer: AVSampleBufferRenderSynchronizer?
-    @MainActor private var requestMediaDataInfo: (DispatchQueue, () -> Void)?
+    private weak var previosRenderSynchronizer: AVSampleBufferRenderSynchronizer?
 
     @MainActor
     init(layer: AVSampleBufferDisplayLayer) {
@@ -225,8 +218,6 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
                     }
                 }
             }
-
-            registerForReadyNotifications()
         }
     }
 
@@ -235,100 +226,52 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     }
 
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
-        DispatchQueue.main.async { self.layer.setPresentationTimeExpectation(expectation) }
+        layer.setPresentationTimeExpectation(expectation)
     }
 
     func setControlTimebase(_ timebase: CMTimebase?) {
-        Task { @MainActor in
-            layer.controlTimebase = timebase
-        }
+        layer.controlTimebase = timebase
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        let isReadyForMoreMediaData = DispatchQueue.main.sync {
-            layer.enqueue(sampleBuffer)
-            return layer.isReadyForMoreMediaData
-        }
-        lock.withLock { _isReadyForMoreMediaData = isReadyForMoreMediaData }
-        DispatchQueue.main.async { [self] in
-            if !isReadyForMoreMediaData {
-                registerForReadyNotifications()
-            }
-        }
+        layer.enqueue(sampleBuffer)
     }
 
     func flush() {
-        DispatchQueue.main.async {
-            self.layer.flush()
-            self.setPresentationTimeExpectation(.none)
-        }
+        layer.flush()
     }
 
     func flush(removeImage: Bool) {
-        DispatchQueue.main.async { [self] in
-            if removeImage {
-                layer.flushAndRemoveImage()
-            } else {
-                layer.flush()
-            }
-
-            setPresentationTimeExpectation(.none)
+        if removeImage {
+            layer.flushAndRemoveImage()
+        } else {
+            layer.flush()
         }
     }
 
     @available(iOS 17.0, *)
     func flushAsync(removeImage: Bool) async {
-        await MainActor.run {
-            if removeImage {
-                layer.flushAndRemoveImage()
-            } else {
-                layer.flush()
-            }
-
-            setPresentationTimeExpectation(.none)
+        if removeImage {
+            layer.flushAndRemoveImage()
+        } else {
+            layer.flush()
         }
     }
 
     @available(iOS 17.0, *)
     func flush(removeImage: Bool, completion: @escaping () -> Void) {
-        Task { @MainActor in
-            if removeImage {
-                self.layer.flushAndRemoveImage()
-            } else {
-                self.layer.flush()
-            }
-
-            completion()
-            setPresentationTimeExpectation(.none)
+        if removeImage {
+            self.layer.flushAndRemoveImage()
+        } else {
+            self.layer.flush()
         }
     }
 
     func requestMediaDataWhenReady(on queue: DispatchQueue, using block: @escaping () -> Void) {
-        DispatchQueue.main.async {
-            self.requestMediaDataInfo = (queue, block)
-        }
+        layer.requestMediaDataWhenReady(on: queue, using: block)
     }
 
     func stopRequestingMediaData() {
-        DispatchQueue.main.async { self.requestMediaDataInfo = nil }
-    }
-
-    @MainActor
-    private func registerForReadyNotifications() {
-        layer.requestMediaDataWhenReady(on: .main) { [weak self] in
-            guard let self else { return }
-
-            MainActor.assumeIsolated {
-                self.layer.stopRequestingMediaData()
-
-                self.lock.withLock {
-                    self._isReadyForMoreMediaData = self.layer.isReadyForMoreMediaData
-                }
-
-                if let (queue, block) = self.requestMediaDataInfo {
-                    queue.async { block() }
-                }
-            }
-        }
+        layer.stopRequestingMediaData()
     }
 }

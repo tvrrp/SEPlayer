@@ -10,31 +10,45 @@ import CoreMedia
 public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
     /// Accesses buffers in a `CMBufferQueue`.
     public var buffers: CMBufferQueue.Buffers { bufferQueue.buffers }
+
     /// Returns whether or not the `CMBufferQueue` is empty.
-    public var isEmpty: Bool { return bufferQueue.isEmpty }
+    public var isEmpty: Bool { bufferQueue.isEmpty }
+
     /// Gets the number of buffers in the queue.
-    public var bufferCount: CMItemCount { return bufferQueue.bufferCount }
+    public var bufferCount: CMItemCount { bufferQueue.bufferCount }
+
     /// Returns whether or not the `CMBufferQueue` is full.
     public var isFull: Bool { bufferCount == capacity}
+
+    /// Returns whether or not the `CMBufferQueue` has been marked with EOD.
+    public var containsEndOfData: Bool { bufferQueue.containsEndOfData }
+
+    /// Returns whether or not the `CMBufferQueue` has been marked with EOD, and
+    /// is now empty.
+    public var isAtEndOfData: Bool { bufferQueue.isAtEndOfData }
+
     /// Gets the total size.
     ///
     /// The total size of the `CMBufferQueue` is the sum of all the individual
     /// buffer sizes, as reported by the `getTotalSize` handler. If there are no
     /// buffers in the queue, `0` will be returned.
     public var totalSize: Int { bufferQueue.totalSize }
+
     /// Gets the duration.
     ///
     /// The duration of the `CMBufferQueue` is the sum of all the individual
     /// buffer durations, as reported by the `getDuration` handler. If there are no
     /// buffers in the queue, `CMTime.zero` will be returned.
-    public var duration: CMTime { return bufferQueue.duration }
+    public var duration: CMTime { bufferQueue.duration }
+
     /// Gets the earliest decode timestamp.
     ///
     /// The search for earliest decode timstamp is performed in this API.
     /// If you know your queue is in decode order, `firstDecodeTimeStamp` is a
     /// faster alternative. If the `getDecodeTimeStamp` handler is `nil`,
     /// `CMTime.invalid` will be returned.
-    public var minDecodeTimeStamp: CMTime { return bufferQueue.minDecodeTimeStamp }
+    public var minDecodeTimeStamp: CMTime { bufferQueue.minDecodeTimeStamp }
+
     /// Gets the decode timestamp of the first buffer.
     ///
     /// This API is is a faster alternative to `minDecodeTimeStamp`, but only
@@ -42,7 +56,8 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
     ///
     /// If the `getDecodeTimeStamp` handler is `nil`, `CMTime.invalid` will be
     /// returned.
-    public var firstDecodeTimeStamp: CMTime { return bufferQueue.firstDecodeTimeStamp }
+    public var firstDecodeTimeStamp: CMTime { bufferQueue.firstDecodeTimeStamp }
+
     /// Gets the earliest presentation timestamp.
     ///
     /// The search for earliest presentation timstamp is performed in this API. If
@@ -50,30 +65,40 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
     /// `firstPresentationTimeStamp` is a faster alternative. If the
     /// `getPresentationTimeStamp` handler is `nil`, `CMTime.invalid` will be
     /// returned.
-    public var minPresentationTimeStamp: CMTime { return bufferQueue.minPresentationTimeStamp }
+    public var minPresentationTimeStamp: CMTime { bufferQueue.minPresentationTimeStamp }
+
     /// Gets the presentation timestamp of the first buffer.
     ///
     /// This API is is a faster alternative to `minPresentationTimeStamp`, but
     /// only  works if you know your queue is sorted by presentation timestamp. If
     /// the `getPresentationTimeStamp` handler is `nil`, `CMTime.invalid` will be
     /// returned.
-    public var firstPresentationTimeStamp: CMTime { return bufferQueue.firstPresentationTimeStamp }
+    public var firstPresentationTimeStamp: CMTime { bufferQueue.firstPresentationTimeStamp }
+
     /// Gets the greatest presentation timestamp.
     ///
     /// If the `getPresentationTimeStamp` handler is `nil`, `CMTime.invalid` will
     /// be returned.
-    public var maxPresentationTimeStamp: CMTime { return bufferQueue.maxPresentationTimeStamp }
+    public var maxPresentationTimeStamp: CMTime { bufferQueue.maxPresentationTimeStamp }
+
     /// Gets the greatest end presentation timestamp.
     ///
     /// This is the maximum end time (PTS + duration) of buffers in the queue.
     /// If the `getPresentationTimeStamp` handler is `nil`, `CMTime.invalid` will
     /// be returned.
-    public var endPresentationTimeStamp: CMTime { return bufferQueue.endPresentationTimeStamp }
+    public var endPresentationTimeStamp: CMTime { bufferQueue.endPresentationTimeStamp }
+
+    /// Retrieves the next-to-dequeue buffer but leaves it in the queue.
+    ///
+    /// Note that with non-FIFO queues it's not guaranteed that the next dequeue
+    /// will return this particular buffer (if an intervening enqueue adds a
+    /// buffer that will dequeue next).
+    public var head: T? { bufferQueue.head as? T }
 
     private let bufferQueue: CMBufferQueue
     private let capacity: CMItemCount
 
-    public init(capacity: CMItemCount = 120, handlers: CMBufferQueue.Handlers = .outputPTSSortedSampleBuffers) throws {
+    public init(capacity: CMItemCount = 0, handlers: CMBufferQueue.Handlers = .outputPTSSortedSampleBuffers) throws {
         self.capacity = capacity
         bufferQueue = try CMBufferQueue(
             capacity: capacity,
@@ -110,24 +135,52 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
         )
     }
 
+    /// Installs a trigger.
+    ///
+    /// The returned trigger token can be passed to `testTrigger` and
+    /// `removeTrigger`.
+    ///
+    /// The returned trigger can be discarded (client doesn't need to test or
+    /// remove trigger), and the body parameter can be `nil` (client doesn't need
+    /// callbacks, but rather will explicitly test the trigger). One of these two
+    /// parameters must be non-`nil`, however, since an untestable trigger that
+    /// does not perform a callback is meaningless. If the trigger condition is
+    /// already true, `installTrigger` will call the `body`.
+    ///
+    /// - Parameters:
+    ///   - condition: The condition to be tested when evaluating the trigger.
+    ///   - body: Closure to be called when the trigger condition becomes true.
+    ///     Can be `nil`, if client intends only to explicitly test the condition.
+    /// - Returns: Trigger token which can be used with `testTrigger` and
+    ///   `removeTrigger`. Can be discarded if client has no need to explicitly
+    ///   test or remove the trigger.
     public func installTrigger(condition: CMBufferQueue.TriggerCondition, _ body: CMBufferQueueTriggerHandler? = nil) throws -> CMBufferQueue.TriggerToken {
         try bufferQueue.installTrigger(condition: condition, body)
     }
 
+    /// Removes a previously installed trigger.
+    ///
+    /// Triggers will automatically be removed when a queue is finalized.
+    /// However, if more than one module has access to a queue, it may be hard
+    /// for an individual module to know when the queue is finalized since other
+    /// modules may retain it. To address this concern, modules should remove
+    /// their triggers before they themselves are finalized.
+    ///
+    /// - Parameter triggerToken: Trigger to remove from the queue
     public func removeTrigger(_ triggerToken: CMBufferQueue.TriggerToken) throws {
         try bufferQueue.removeTrigger(triggerToken)
     }
 
+    /// Tests whether the trigger condition is true.
+    ///
+    /// Whereas the trigger callback will only be called when the condition goes
+    /// from `false` to `true`, `testTrigger` always returns the condition's
+    /// current status.
+    /// The `triggerToken` must be one that has been installed on this queue.
+    ///
+    /// - Parameter triggerToken: Trigger to test.
     public func testTrigger(_ triggerToken: CMBufferQueue.TriggerToken) -> Bool {
         bufferQueue.testTrigger(triggerToken)
-    }
-
-    public func head() -> T? {
-        return if #available(iOS 17, *) {
-            CMBufferQueueCopyHead(bufferQueue) as! T?
-        } else {
-            CMBufferQueueGetHead(bufferQueue) as! T?
-        }
     }
 
     /// Enqueues a buffer.

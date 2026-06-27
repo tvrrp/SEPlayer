@@ -131,6 +131,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
             case false:
                 guard let pixelBuffer else { fallthrough }
 
+                let _ = CVBufferCopyAttachments(pixelBuffer, .shouldPropagate)
                 outputBuffer.initialise(
                     pixelBuffer: pixelBuffer,
                     time: .init(duration: duration, presentationTimeStamp: pts, decodeTimeStamp: .invalid)

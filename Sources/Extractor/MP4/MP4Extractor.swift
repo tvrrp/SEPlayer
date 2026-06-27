@@ -265,7 +265,18 @@ private extension MP4Extractor {
                 seenFtypAtom = true
                 fileType = try processFtypAtom(atomData: &atomData)
             } else if !containerAtoms.isEmpty {
-                containerAtoms[0].add(LeafBox(type: atomType, data: atomData))
+                // TODO: remove with new data source
+                let blockBuffer = try atomData.withUnsafeReadableBytesWithStorageManagement { ptr, storageReference in
+                    storageReference.retain()
+                    return try CMBlockBuffer(
+                        buffer: UnsafeMutableRawBufferPointer(mutating: ptr),
+                        deallocator: { _, _ in
+                            storageReference.release()
+                        }
+                    )
+                }
+
+                containerAtoms[0].add(LeafBox(type: atomType, data: .init(blockBuffer)))
             }
         } else {
             if !seenFtypAtom, atomType == MP4Box.BoxType.mdat.rawValue {

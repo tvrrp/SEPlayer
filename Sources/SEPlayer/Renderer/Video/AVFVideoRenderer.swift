@@ -607,6 +607,7 @@ final class AVFVideoRenderer: AVFBaseRenderer<VTDecoder> {
 
         lowWaterMark = .cmTime(CMTime(value: 3, timescale: 30)) // 3 frames @ 30fps = 100ms
         highWaterMark = .cmTime(CMTime(value: 5, timescale: 30)) // 5 frames @ 30fps = 167ms
+//        debugEnabled = true
     }
 
     override func handleMessage(_ message: RendererMessage) throws {
@@ -646,6 +647,10 @@ final class AVFVideoRenderer: AVFBaseRenderer<VTDecoder> {
         removeEndOfStreamTimer()
     }
 
+    override func rendererIsReady() -> Bool {
+        renderersStorage.hasSufficientMediaDataForReliablePlaybackStart
+    }
+
     override func isEnded() -> Bool {
         super.isEnded() && streamRenderingEnded
     }
@@ -682,6 +687,10 @@ final class AVFVideoRenderer: AVFBaseRenderer<VTDecoder> {
 
     override func createDecoder(format: Format) throws -> VTDecoder {
         try VTDecoder(format: format)
+    }
+
+    override func onSampleQueuedToDecoder(timingInfo: CMSampleTimingInfo, flags: SampleFlags) {
+        renderersStorage.setPresentationTimeExpectation(.minimumUpcoming(timingInfo.presentationTimeStamp))
     }
 
     override func renderOutputBuffer(_ buffer: VTDecoderOutputBuffer) throws -> Bool {
@@ -797,7 +806,8 @@ final class AVFVideoRenderer: AVFBaseRenderer<VTDecoder> {
     }
 
     private func attachEndOfStreamTimerHandler(for time: CMTime) throws {
-        guard !streamRenderingEnded, streamRenderingEndingTimer == nil else {
+        guard let timebase = renderersStorage.controlTimebase,
+              !streamRenderingEnded, streamRenderingEndingTimer == nil else {
             return
         }
 
@@ -810,13 +820,13 @@ final class AVFVideoRenderer: AVFBaseRenderer<VTDecoder> {
         timer.activate()
         streamRenderingEndingTimer = timer
 
-        try renderersStorage.controlTimebase.addTimer(timer)
-        try renderersStorage.controlTimebase.setTimerNextFireTime(timer, fireTime: time)
+        try timebase.addTimer(timer)
+        try timebase.setTimerNextFireTime(timer, fireTime: time)
     }
 
     private func removeEndOfStreamTimer() {
         if let streamRenderingEndingTimer {
-            try? renderersStorage.controlTimebase.removeTimer(streamRenderingEndingTimer)
+            try? renderersStorage.controlTimebase?.removeTimer(streamRenderingEndingTimer)
         }
         streamRenderingEndingTimer?.cancel()
         streamRenderingEndingTimer = nil

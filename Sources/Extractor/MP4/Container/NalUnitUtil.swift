@@ -30,7 +30,7 @@ public enum NalUnitUtil {
         public let colorTransfer: ColorTransfer?
         public let maxNumReorderFrames: Int
 
-        public init(data: ByteBufferView, nalOffset: Int, nalLimit: Int) throws {
+        public init(data: [UInt8], nalOffset: Int, nalLimit: Int) throws {
             var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset + 1, limit: nalLimit)
             profileIdc = try data.readBits(8)
             let constraintsFlagsAndReservedZero2Bits = try data.readBits(8)

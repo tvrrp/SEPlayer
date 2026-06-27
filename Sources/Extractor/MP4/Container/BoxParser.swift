@@ -136,7 +136,7 @@ public struct BoxParser {
     }
 
     private func parseStsd(
-        stsd: ByteBuffer,
+        stsd: BlockBufferReader,
         tkhdData: TkhdData,
         language: String,
         isQuickTime: Bool
@@ -246,7 +246,7 @@ public struct BoxParser {
     }
 
     private func parseTextSampleEntry(
-        parent: inout ByteBuffer,
+        parent: inout BlockBufferReader,
         atomType: MP4Box.BoxType,
         position: Int,
         atomSize: Int,
@@ -266,7 +266,7 @@ public struct BoxParser {
         } else if atomType == .tx3g {
             mimeType = .applicationTX3G
             let sampleDescriptionLength = atomSize - MP4Box.headerSize - 8
-            let slice = try parent.slice(length: sampleDescriptionLength)
+            let slice = try parent.getSlice(at: parent.readerIndex, length: sampleDescriptionLength)
             initializationData = Format.ByteBufferInitializationData(byteBuffer: [slice])
         } else if atomType == .wvtt {
             mimeType = .applicationMP4VTT
@@ -302,7 +302,7 @@ public struct BoxParser {
     }
 
     private func parseVideoSampleEntry(
-        parent: inout ByteBuffer,
+        parent: inout BlockBufferReader,
         atomType: MP4Box.BoxType,
         position: Int,
         size: Int,
@@ -350,7 +350,7 @@ public struct BoxParser {
                 throw BoxParserErrors.badBoxContent(type: atomType, reason: "childAtomSize must be positive")
             }
 
-            let bmffBox = try parent.getSliceIgnoringReaderOffset(at: childStartPosition, length: childAtomSize)
+            let bmffBox = try parent.getSlice(at: childStartPosition, length: childAtomSize)
             let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
 
             switch childAtomType {
@@ -406,7 +406,7 @@ public struct BoxParser {
         out.format = formatBuilder.build()
     }
 
-    private func parsePaspFrom(_ parent: inout ByteBuffer, position: Int) throws -> Float {
+    private func parsePaspFrom(_ parent: inout BlockBufferReader, position: Int) throws -> Float {
         parent.moveReaderIndex(to: position + MP4Box.headerSize)
         let hSpacing = try parent.readInt(as: UInt32.self)
         let vSpacing = try parent.readInt(as: UInt32.self)
@@ -414,7 +414,7 @@ public struct BoxParser {
     }
 
     private func parseAudioSampleEntry(
-        parent: inout ByteBuffer,
+        parent: inout BlockBufferReader,
         atomType: MP4Box.BoxType,
         position: Int,
         size: Int,
@@ -473,7 +473,7 @@ public struct BoxParser {
                 throw BoxParserErrors.badBoxContent(type: atomType, reason: "childAtomSize must be positive")
             }
 
-            let bmffBox = try parent.getSliceIgnoringReaderOffset(at: childPosition, length: childAtomSize)
+            let bmffBox = try parent.getSlice(at: childPosition, length: childAtomSize)
             let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
 
             if childAtomType == .esds || isQuickTime && childAtomType == .wave {
@@ -525,7 +525,7 @@ public struct BoxParser {
         }
     }
 
-    private func parseHdlr(hdlr: ByteBuffer) throws -> UInt32 {
+    private func parseHdlr(hdlr: BlockBufferReader) throws -> UInt32 {
         var hdlr = hdlr
         hdlr.moveReaderIndex(to: Int(MP4Box.fullHeaderSize) + 4)
         return try! hdlr.readInt(as: UInt32.self)
@@ -538,7 +538,7 @@ extension BoxParser {
         let modificationTimestampSeconds: Int64
         let timescale: CMTimeScale
 
-        init(mvhd: ByteBuffer?) throws {
+        init(mvhd: BlockBufferReader?) throws {
             guard var mvhd else { throw BoxParserErrors.missingBox(type: .mvhd) }
             mvhd.moveReaderIndex(to: Int(MP4Box.headerSize))
             let (version, _) = try BoxParser.readFullboxExtra(reader: &mvhd)
@@ -559,7 +559,7 @@ extension BoxParser {
         let rotationDegrees: CGFloat
         let transform3D: CATransform3D
 
-        init(tkhd: ByteBuffer, movieTimescale: CMTimeScale) throws {
+        init(tkhd: BlockBufferReader, movieTimescale: CMTimeScale) throws {
             var tkhd = tkhd
             tkhd.moveReaderIndex(to: Int(MP4Box.headerSize))
             let (version, _) = try BoxParser.readFullboxExtra(reader: &tkhd)
@@ -570,7 +570,7 @@ extension BoxParser {
             var durationUnknown = true
             let durationPosition = tkhd.readerIndex
             let durationByteCount = version == 0 ? 4 : 8
-            let view = tkhd.readableBytesView
+            let view = try tkhd.getBytes(at: tkhd.readerIndex, length: tkhd.readableBytes)
             for index in 0..<durationByteCount {
                 if view[durationPosition + index] != 0xFF { // != -1
                     durationUnknown = false
@@ -658,7 +658,7 @@ extension BoxParser {
         let mediaDuration: CMTime
         let language: String
 
-        init(mdhd: ByteBuffer) throws {
+        init(mdhd: BlockBufferReader) throws {
             var mdhd = mdhd
             mdhd.moveReaderIndex(to: MP4Box.headerSize)
             let (version, _) = try BoxParser.readFullboxExtra(reader: &mdhd)
@@ -668,7 +668,7 @@ extension BoxParser {
             var mediaDurationUnknown = true
             let mediaDurationPosition = mdhd.readerIndex
             let mediaDurationByteCount = version == 0 ? 4 : 8
-            let view = mdhd.readableBytesView
+            let view = try mdhd.getBytes(at: mdhd.readerIndex, length: mdhd.readableBytes)
             for index in 0..<mediaDurationByteCount {
                 if view[mediaDurationPosition + index] != 0xFF { // != -1
                     mediaDurationUnknown = false
@@ -763,18 +763,18 @@ extension BoxParser {
 extension BoxParser {
     /// Parse the extra header fields for a full box.
     @discardableResult
-    static func readFullboxExtra(reader: inout ByteBuffer) throws -> (version: UInt8, flags: UInt32) {
-        guard let version = reader.readInteger(as: UInt8.self),
-              let flagsA = reader.readInteger(as: UInt8.self),
-              let flagsB = reader.readInteger(as: UInt8.self),
-              let flagsC = reader.readInteger(as: UInt8.self) else { throw BoxParserErrors.badBoxExtra }
+    static func readFullboxExtra(reader: inout BlockBufferReader) throws -> (version: UInt8, flags: UInt32) {
+        let version = try reader.readInt(as: UInt8.self)
+        let flagsA = try reader.readInt(as: UInt8.self)
+        let flagsB = try reader.readInt(as: UInt8.self)
+        let flagsC = try reader.readInt(as: UInt8.self)
 
         let flags = (UInt32(flagsA) << 16) | (UInt32(flagsB) << 8) | UInt32(flagsC)
 
         return (version: version, flags: flags)
     }
 
-    static func readFullboxVersionNoFlags(reader: inout ByteBuffer) throws -> UInt8 {
+    static func readFullboxVersionNoFlags(reader: inout BlockBufferReader) throws -> UInt8 {
         let (version, flags) = try! readFullboxExtra(reader: &reader)
 
         if flags != 0 {
@@ -789,7 +789,7 @@ extension BoxParser {
     }
 
     private func findBoxPosition(
-        parent: inout ByteBuffer, boxType: MP4Box.BoxType, parentBoxPosition: Int, parentBoxSize: Int
+        parent: inout BlockBufferReader, boxType: MP4Box.BoxType, parentBoxPosition: Int, parentBoxSize: Int
     ) throws -> (position: Int?, atomSize: Int?) {
         var childAtomPosition = parent.readerIndex
         try checkContainerInput(childAtomPosition >= parentBoxPosition)

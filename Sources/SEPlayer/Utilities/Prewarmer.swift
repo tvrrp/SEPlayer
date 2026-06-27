@@ -55,6 +55,10 @@ final class Prewarmer {
 
     private func prewarmVideo() {
         DispatchQueue.global(qos: .background).async { [self] in
+            if #available(iOS 26.2, *) {
+                VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
+            }
+
             guard let format = try? CMFormatDescription(h264ParameterSets: [avcSpsData, avcPpsData], nalUnitHeaderLength: 4) else {
                 return
             }

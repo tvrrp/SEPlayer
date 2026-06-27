@@ -70,7 +70,7 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
                     if rhs.sampleFlags.contains(.endOfStream) {
                         return .compareLessThan
                     }
-                    if lhs.time.presentationTimeStamp != rhs.time.presentationTimeStamp {
+                    if lhs.time.presentationTimeStamp == rhs.time.presentationTimeStamp {
                         return .compareEqualTo
                     }
 

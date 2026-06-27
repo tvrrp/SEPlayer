@@ -15,14 +15,15 @@ public extension Format {
         func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription
     }
 
-    struct ByteBufferInitializationData: InitializationData {
-        public let byteBuffer: [ByteBuffer]
+    // TODO: make real sendable
+    struct ByteBufferInitializationData: InitializationData, @unchecked Sendable {
+        public let byteBuffer: [BlockBufferReader]
 
-        public init(byteBuffer: [ByteBuffer]) {
+        public init(byteBuffer: [BlockBufferReader]) {
             self.byteBuffer = byteBuffer
         }
 
-        public func getInitializationData() throws -> [ByteBuffer] {
+        public func getInitializationData() throws -> [BlockBufferReader] {
             byteBuffer
         }
     }

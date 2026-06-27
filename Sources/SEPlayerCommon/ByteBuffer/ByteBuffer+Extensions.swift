@@ -126,3 +126,41 @@ public extension Int {
         }
     }
 }
+
+public extension BlockBufferReader {
+    mutating func readFixedPoint16_16() throws -> Int {
+        let firstValue = try readInt(as: UInt8.self)
+        let secondValue = try readInt(as: UInt8.self)
+        let result = (UInt16(firstValue) << 8) | UInt16(secondValue)
+
+        moveReaderIndex(forwardBy: 2)
+        return Int(result)
+    }
+
+    mutating func readUtfCharsetFromBom() throws -> String.Encoding? {
+        if readableBytes >= 3 {
+            let b0: UInt8 = try getInt(at: readerIndex)
+            let b1: UInt8 = try getInt(at: readerIndex + 1)
+            let b2: UInt8 = try getInt(at: readerIndex + 2)
+            if b0 == 0xEF, b1 == 0xBB, b2 == 0xBF {
+                moveReaderIndex(forwardBy: 3)
+                return .utf8
+            }
+        }
+
+        if readableBytes >= 2 {
+            let b0: UInt8 = try getInt(at: readerIndex)
+            let b1: UInt8 = try getInt(at: readerIndex + 1)
+
+            if b0 == 0xFE, b1 == 0xFF {
+                moveReaderIndex(forwardBy: 2)
+                return .utf16BigEndian
+            } else if b0 == 0xFF, b1 == 0xFE {
+                moveReaderIndex(forwardBy: 2)
+                return .utf16LittleEndian
+            }
+        }
+
+        return nil
+    }
+}

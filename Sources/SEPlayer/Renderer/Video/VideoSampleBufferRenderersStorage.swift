@@ -10,38 +10,34 @@ import SEPlayerCommon
 
 final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
     nonisolated(unsafe) weak var delegate: VideoSampleBufferRendererDelegate? {
-        didSet { renderers.forEach { $0.delegate = delegate } }
+        didSet { renderers.forEach { $0.value.delegate = delegate } }
     }
 
     var isReadyForMoreMediaData: Bool {
-        renderers.allSatisfy(\.isReadyForMoreMediaData)
+        renderers.allSatisfy(\.value.isReadyForMoreMediaData)
     }
 
     var hasSufficientMediaDataForReliablePlaybackStart: Bool {
-        renderers.allSatisfy(\.hasSufficientMediaDataForReliablePlaybackStart)
+        renderers.allSatisfy(\.value.hasSufficientMediaDataForReliablePlaybackStart)
     }
 
-    var hasOutput: Bool { renderersStorage.count != 0 }
-
-    private var renderers: [VideoSampleBufferRenderer] {
-        renderersStorage.allObjects as! [VideoSampleBufferRenderer]
-    }
-
-    nonisolated(unsafe) var controlTimebase: CMTimebase
-    nonisolated(unsafe) private var presentationTimeExpectation = PresentationTimeExpectation.none
+    var hasOutput: Bool { renderers.count != 0 }
 
     private let queue: Queue
-    nonisolated(unsafe) private let renderersStorage = NSHashTable<AnyObject>()
+    private var renderers = Set<Box>()
+
+    nonisolated(unsafe) var controlTimebase: CMTimebase?
+    nonisolated(unsafe) private var presentationTimeExpectation = PresentationTimeExpectation.none
 
     init(queue: Queue) throws {
         self.queue = queue
 
-        controlTimebase = try CMTimebase(sourceClock: .hostTimeClock)
+//        controlTimebase = try CMTimebase(sourceClock: .hostTimeClock)
     }
 
     func addRenderer(_ renderer: VideoSampleBufferRenderer) {
         assert(queue.isCurrent())
-        renderersStorage.add(renderer)
+        renderers.insert(.init(renderer))
         renderer.delegate = delegate
         renderer.setControlTimebase(controlTimebase)
         renderer.setPresentationTimeExpectation(presentationTimeExpectation)
@@ -49,93 +45,113 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
 
     func removeRenderer(_ renderer: VideoSampleBufferRenderer) {
         assert(queue.isCurrent())
-        renderersStorage.remove(renderer)
+        renderers.remove(.init(renderer))
     }
 
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
         assert(queue.isCurrent())
         presentationTimeExpectation = expectation
-        renderers.forEach { $0.setPresentationTimeExpectation(expectation) }
+        renderers.forEach { $0.value.setPresentationTimeExpectation(expectation) }
     }
 
     func setControlTimebase(_ timebase: CMTimebase?) {
         assert(queue.isCurrent())
-        if let timebase {
-            controlTimebase.source = timebase
-            updateControlTimebase(from: timebase)
-            setupTimebaseNotifications(timebase: timebase)
-        } else {
-            controlTimebase.source = CMClock.hostTimeClock
-        }
+        self.controlTimebase = timebase
+        renderers.forEach { $0.value.setControlTimebase(timebase) }
+//        if let timebase {
+//            controlTimebase.source = timebase
+//            updateControlTimebase(from: timebase)
+//            setupTimebaseNotifications(timebase: timebase)
+//        } else {
+//            controlTimebase.source = CMClock.hostTimeClock
+//        }
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
 //        assert(queue.isCurrent())
-        renderers.forEach { $0.enqueue(sampleBuffer) }
+        renderers.forEach { $0.value.enqueue(sampleBuffer) }
     }
 
     func flush() {
         assert(queue.isCurrent())
-        renderers.forEach { $0.flush() }
+        renderers.forEach { $0.value.flush() }
     }
 
     func flush(removeImage: Bool) {
         assert(queue.isCurrent())
-        renderers.forEach { $0.flush(removeImage: removeImage) }
+        renderers.forEach { $0.value.flush(removeImage: removeImage) }
     }
 
     @available(iOS 17.0, *)
     func flushAsync(removeImage: Bool) async {
         assert(queue.isCurrent())
-        for renderer in renderers {
-            await renderer.flushAsync(removeImage: removeImage)
+        for box in renderers {
+            await box.value.flushAsync(removeImage: removeImage)
         }
     }
 
     @available(iOS 17.0, *)
     func flush(removeImage: Bool, completion: @escaping () -> Void) {
         assert(queue.isCurrent())
-        renderers.forEach { $0.flush(removeImage: removeImage, completion: completion) }
+        renderers.forEach { $0.value.flush(removeImage: removeImage, completion: completion) }
     }
 
     func requestMediaDataWhenReady(on queue: DispatchQueue, using block: @escaping @Sendable () -> Void) {
 //        assert(self.queue.isCurrent())
-        renderers.forEach { $0.requestMediaDataWhenReady(on: queue, using: block) }
+        renderers.forEach { $0.value.requestMediaDataWhenReady(on: queue, using: block) }
     }
 
     func stopRequestingMediaData() {
 //        assert(queue.isCurrent())
-        renderers.forEach { $0.stopRequestingMediaData() }
+        renderers.forEach { $0.value.stopRequestingMediaData() }
     }
 
-    private func setupTimebaseNotifications(timebase: CMTimebase) {
-        NotificationCenter.default.removeObserver(self)
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(timbasePropertyChanged),
-                                               name: CMTimebase.effectiveRateChanged,
-                                               object: timebase)
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(timbasePropertyChanged),
-                                               name: CMTimebase.timeJumped,
-                                               object: timebase)
-    }
+//    private func setupTimebaseNotifications(timebase: CMTimebase) {
+//        NotificationCenter.default.removeObserver(self)
+//        NotificationCenter.default.addObserver(self,
+//                                               selector: #selector(timbasePropertyChanged),
+//                                               name: CMTimebase.effectiveRateChanged,
+//                                               object: timebase)
+//        NotificationCenter.default.addObserver(self,
+//                                               selector: #selector(timbasePropertyChanged),
+//                                               name: CMTimebase.timeJumped,
+//                                               object: timebase)
+//    }
+//
+//    @objc
+//    private func timbasePropertyChanged(_ notification: Notification) {
+//        guard CMTimebaseGetTypeID() == CFGetTypeID(notification.object as CFTypeRef) else {
+//            return
+//        }
+//
+//        updateControlTimebase(from: notification.object as! CMTimebase)
+//    }
+//
+//    private func updateControlTimebase(from timebase: CMTimebase) {
+//        print("👠 RESET TIMEBASE, time = \(timebase.time.microseconds), rate = \(timebase.rate)")
+//
+//        if timebase.time.microseconds < 1000000000000 {
+//            print()
+//        }
+//        try? controlTimebase.setTime(timebase.time)
+//        try? controlTimebase.setRate(timebase.rate)
+//    }
+}
 
-    @objc
-    private func timbasePropertyChanged(_ notification: Notification) {
-        guard CMTimebaseGetTypeID() == CFGetTypeID(notification.object as CFTypeRef) else {
-            return
+private extension VideoSampleBufferRenderersStorage {
+    struct Box: Hashable {
+        let value: VideoSampleBufferRenderer
+
+        init(_ value: VideoSampleBufferRenderer) {
+            self.value = value
         }
 
-        updateControlTimebase(from: notification.object as! CMTimebase)
-    }
-
-    private func updateControlTimebase(from timebase: CMTimebase) {
-        print("👠 RESET TIMEBASE, time = \(timebase.time.microseconds), rate = \(timebase.rate)")
-
-        if timebase.time.microseconds < 1000000000000 {
-            print()
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(ObjectIdentifier(value))
         }
-        try? controlTimebase.setTime(timebase.time)
-        try? controlTimebase.setRate(timebase.rate)
+
+        static func == (lhs: VideoSampleBufferRenderersStorage.Box, rhs: VideoSampleBufferRenderersStorage.Box) -> Bool {
+            lhs.value === rhs.value
+        }
     }
 }

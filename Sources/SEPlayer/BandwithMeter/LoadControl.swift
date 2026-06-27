@@ -212,7 +212,7 @@ extension DefaultLoadControl {
     public enum DefaultConstants {
         public static let minBuffer: CMTime = CMTime(seconds: 20, preferredTimescale: 1000)
         public static let maxBuffer: CMTime = CMTime(seconds: 50, preferredTimescale: 1000)
-        public static let bufferForPlayback: CMTime = CMTime(seconds: 5, preferredTimescale: 1000)
+        public static let bufferForPlayback: CMTime = CMTime(seconds: 10, preferredTimescale: 1000)
         public static let bufferForPlaybackAfterRebuffer: CMTime = CMTime(seconds: 10, preferredTimescale: 1000)
         public static let backBufferDuration: CMTime = .zero
         public static let retainBackBufferFromKeyframe: Bool = true

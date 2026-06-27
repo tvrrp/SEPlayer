@@ -30,16 +30,13 @@ extension BoxParser {
             return try .empty(track: track)
         }
 
-        let trackTimescale = CMTimeScale(track.timescale)
-        let movieTimescale = CMTimeScale(track.movieTimescale)
-
         /// Create a CMTime in track timescale from raw time-units.
         func trackTime(_ value: CMTimeValue) -> CMTime {
-            CMTime(value: value, timescale: trackTimescale)
+            CMTime(value: value, timescale: track.timescale)
         }
         /// Create a CMTime in movie timescale from raw time-units.
         func movieTime(_ value: CMTimeValue) -> CMTime {
-            CMTime(value: value, timescale: movieTimescale)
+            CMTime(value: value, timescale: track.movieTimescale)
         }
 
         if track.type == .video, track.mediaDuration.isValid, track.mediaDurationUs > 0 {
@@ -365,7 +362,7 @@ extension BoxParser {
             let editStartTime = trackTime(editListMediaTimes[0])
             let editListDuration = movieTime(editListDurations[0])
             let editEndTime = editStartTime + CMTimeConvertScale(
-                editListDuration, timescale: trackTimescale, method: .default
+                editListDuration, timescale: track.timescale, method: .default
             )
 
             if canApplyEditWithGaplessInfo(
@@ -457,7 +454,7 @@ extension BoxParser {
             guard editMediaTimeRaw != -1 else { continue }
 
             let editDuration = CMTimeConvertScale(
-                movieTime(editListDurationRaw), timescale: trackTimescale, method: .default
+                movieTime(editListDurationRaw), timescale: track.timescale, method: .default
             )
             let editEndTimeRaw = editMediaTimeRaw + editDuration.value
 
@@ -638,7 +635,7 @@ private extension BoxParser {
     struct StszSampleSizeBox: SampleSizeBox {
         let fixedSampleSize: Int?
         let sampleCount: Int
-        private var data: ByteBuffer
+        private var data: BlockBufferReader
 
         init(stszAtom: LeafBox) throws {
             data = stszAtom.data
@@ -661,7 +658,7 @@ private extension BoxParser {
         let fixedSampleSize: Int?
         let sampleCount: Int
         private let fieldSize: Int
-        private var data: ByteBuffer
+        private var data: BlockBufferReader
 
         private var sampleIndex = 0
         private var currentByte = 0
@@ -703,14 +700,14 @@ private extension BoxParser {
         var offset = 0
         var numberOfSamples = 0
 
-        private var stsc: ByteBuffer
-        private var chunkOffsets: ByteBuffer
+        private var stsc: BlockBufferReader
+        private var chunkOffsets: BlockBufferReader
         private let chunkOffsetsType: any FixedWidthInteger.Type
 
         private var remainingSamplesPerChunkChanges: Int
         private var nextSamplesPerChunkChangeIndex: Int? = 0
 
-        init(stsc: ByteBuffer, chunkOffsets: ByteBuffer, chunkOffsetsType: any FixedWidthInteger.Type) throws {
+        init(stsc: BlockBufferReader, chunkOffsets: BlockBufferReader, chunkOffsetsType: any FixedWidthInteger.Type) throws {
             self.stsc = stsc
             self.chunkOffsets = chunkOffsets
             self.chunkOffsetsType = chunkOffsetsType

@@ -13,9 +13,12 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
     private let audioConverter: AVAudioConverter
     private let inputFormat: AVAudioFormat
     private let outputFormat: AVAudioFormat
+    private let outputFormatDescription: CMAudioFormatDescription
     private let decompressedBuffer: AVAudioPCMBuffer
     private let maximumPacketSize: Int
     private let memoryPool: CMMemoryPool
+    private let outputNumberOfBytes: UInt32
+    private let fakeAudioBufferList: UnsafeMutableAudioBufferListPointer
 
     init(
         decodeQueue: Queue = Queues.sharedAudioDecodeQueue,
@@ -27,7 +30,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
             AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: inputFormat.sampleRate,
-                interleaved: inputFormat.isInterleaved,
+                interleaved: true,
                 channelLayout: channelLayout
             )
         } else {
@@ -35,11 +38,15 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: inputFormat.sampleRate,
                 channels: inputFormat.channelCount,
-                interleaved: inputFormat.isInterleaved
+                interleaved: true
             )
         }
         guard let outputFormat else { throw ACDecoderError.formatNotSupported }
         self.outputFormat = outputFormat
+        outputFormatDescription = outputFormat.formatDescription
+
+        fakeAudioBufferList = AudioBufferList.allocate(maximumBuffers: 1)
+        outputNumberOfBytes = 4096 * outputFormatDescription.audioStreamBasicDescription!.mBytesPerPacket
 
         guard let audioConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
             throw ACDecoderError.formatNotSupported
@@ -99,6 +106,10 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
         try setInitialInputBufferSize(maximumPacketSize)
     }
 
+    deinit {
+        fakeAudioBufferList.unsafeMutablePointer.deallocate()
+    }
+
     static func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support.FormatSupport {
         let formatDescription = try format.buildFormatDescription()
         guard formatDescription.mediaType == .audio else { return .unsupportedType }
@@ -107,7 +118,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
             AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: inputFormat.sampleRate,
-                interleaved: inputFormat.isInterleaved,
+                interleaved: true,
                 channelLayout: channelLayout
             )
         } else {
@@ -115,7 +126,7 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: inputFormat.sampleRate,
                 channels: inputFormat.channelCount,
-                interleaved: inputFormat.isInterleaved
+                interleaved: true
             )
         }
 
@@ -156,44 +167,92 @@ final class AudioConverterDecoder: SimpleDecoder<ACDecoderInputBuffer, ACDecoder
         do {
             if reset { audioConverter.reset() }
 
-            var error: NSError?
             var needToProvideData = true
 
-            struct UncheckedSendable<T>: @unchecked Sendable { let value: T }
-            let boxed = UncheckedSendable(value: inputBuffer) // audioConverter.convert will synchronously execute closure
-            audioConverter.convert(to: decompressedBuffer, error: &error) { _, status in
+//            struct UncheckedSendable<T>: @unchecked Sendable { let value: T }
+//            let boxed = UncheckedSendable(value: inputBuffer)  audioConverter.convert will synchronously execute closure'
+
+//            let outputBlockBuffer = try! CMBlockBuffer(
+//                length: Int(outputNumberOfBytes),
+//                allocator: CMMemoryPoolGetAllocator(memoryPool),
+//                flags: [.assureMemoryNow]
+//            )
+//
+//            let frameLength = try! outputBlockBuffer.withUnsafeMutableBytes { bufferPointer in
+//                fakeAudioBufferList[0].mData = bufferPointer.baseAddress
+//                fakeAudioBufferList[0].mDataByteSize = UInt32(bufferPointer.count)
+//                fakeAudioBufferList[0].mNumberChannels = outputFormat.channelCount
+//
+//                let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, bufferListNoCopy: fakeAudioBufferList.unsafePointer)!
+//                audioConverter.convert(to: outputBuffer, error: &error) { packetCount, status in
+//                    guard needToProvideData else {
+//                        status.pointee = .noDataNow
+//                        return nil
+//                    }
+//
+//                    if boxed.value.flags.contains(.endOfStream) {
+//                        status.pointee = .endOfStream
+//                        return nil
+//                    }
+//
+//                    needToProvideData = false
+//                    status.pointee = .haveData
+//                    return boxed.value.audioBuffer
+//                }
+//
+//                return outputBuffer.frameLength
+//            }
+            let block: AVAudioConverterInputBlock = { packetCount, status in
                 guard needToProvideData else {
                     status.pointee = .noDataNow
                     return nil
                 }
 
-                if boxed.value.flags.contains(.endOfStream) {
+                if inputBuffer.flags.contains(.endOfStream) {
                     status.pointee = .endOfStream
                     return nil
                 }
 
                 needToProvideData = false
                 status.pointee = .haveData
-                return boxed.value.audioBuffer
+                return inputBuffer.audioBuffer
             }
 
-            if let error { throw error }
+            try withoutActuallyEscaping(block) { escapingClosure in
+                var error: NSError?
+                audioConverter.convert(to: decompressedBuffer, error: &error, withInputFrom: escapingClosure)
+                if let error { throw error }
+            }
+
+//            guard frameLength > 0 else {
+//                outputBuffer.shouldBeSkipped = true
+//                return
+//            }
 
             guard decompressedBuffer.frameLength > 0 else {
                 outputBuffer.shouldBeSkipped = true
                 return
             }
 
-            let sampleBuffer = try CMSampleBuffer(
+            let sampleBuffer = try! CMSampleBuffer(
                 dataBuffer: nil,
                 dataReady: false,
-                formatDescription: outputFormat.formatDescription,
+                formatDescription: outputFormatDescription,
                 numSamples: CMItemCount(decompressedBuffer.frameLength),
                 presentationTimeStamp: inputBuffer.time.presentationTimeStamp,
                 packetDescriptions: [],
                 makeDataReadyHandler: { _ in return noErr }
             )
-
+//            var sampleBuffer: CMSampleBuffer!
+//            let result = try! CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+//                allocator: nil,
+//                dataBuffer: outputBlockBuffer,
+//                formatDescription: outputFormatDescription,
+//                sampleCount: CMItemCount(frameLength),
+//                presentationTimeStamp: inputBuffer.time.presentationTimeStamp,
+//                packetDescriptions: nil,
+//                sampleBufferOut: &sampleBuffer
+//            )
             try sampleBuffer.setDataBuffer(
                 fromAudioBufferList: decompressedBuffer.audioBufferList,
                 blockBufferMemoryAllocator: CMMemoryPoolGetAllocator(memoryPool),
@@ -301,4 +360,21 @@ final class ACDecoderOutputBuffer: SimpleDecoderOutputBuffer {
 
 private extension Int {
     static let defaultInputBufferSize: Int = 10 * 1024
+}
+
+private func inputDataProc(
+    inAudioConverter: AudioConverterRef,
+    ioNumberDataPackets: UnsafeMutablePointer<UInt32>,
+    ioData: UnsafeMutablePointer<AudioBufferList>,
+    outDataPacketDescription: UnsafeMutablePointer<UnsafeMutablePointer<AudioStreamPacketDescription>?>?,
+    inUserData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    outDataPacketDescription?.pointee = .allocate(capacity: Int(ioNumberDataPackets.pointee))
+
+    let blockBuffer = try! CMBlockBuffer().makeContiguous()
+    let bufferList = UnsafeMutableAudioBufferListPointer(ioData)
+    bufferList[0].mData = try! blockBuffer.withUnsafeMutableBytes { $0.baseAddress }
+    bufferList[0].mDataByteSize = UInt32(blockBuffer.dataLength)
+
+    return noErr
 }

@@ -910,8 +910,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
         handler.sendEmptyMessageAtTime(
             SEPlayerMessageImpl.doSomeWork,
-            timeNs: operationStartTime.advanced(by: .milliseconds(1000))
-//            timeNs: operationStartTime.advanced(by: .milliseconds(wakeUpTimeIntervalMs))
+//            timeNs: operationStartTime.advanced(by: .milliseconds(1000))
+            timeNs: operationStartTime.advanced(by: .milliseconds(wakeUpTimeIntervalMs))
         )
     }
 

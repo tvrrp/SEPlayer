@@ -21,7 +21,7 @@ extension BoxParser {
 
         private let codecInfo: CMVideoFormatDescription
 
-        init(data: inout ByteBuffer) throws {
+        init(data: inout BlockBufferReader) throws {
             do {
                 // Skip avvC config version, profile compatibility, level indication
                 data.moveReaderIndex(forwardBy: 4)
@@ -32,9 +32,9 @@ extension BoxParser {
                     throw ErrorBuilder.illegalState
                 }
 
-                func readNalUnit(reader: inout ByteBuffer) throws -> ByteBuffer {
+                func readNalUnit(reader: inout BlockBufferReader) throws -> BlockBufferReader {
                     let length = try reader.readInt(as: Int16.self)
-                    return try reader.readThrowingSlice(length: Int(length))
+                    return try reader.readSlice(length: Int(length))
                 }
 
                 let numbOfSpss = try data.readInt(as: Int8.self) & 0x1F
@@ -44,7 +44,7 @@ extension BoxParser {
                 let pictureParameterSets = try (0..<numOfPpss).map { _ in try readNalUnit(reader: &data) }
 
                 codecInfo = try CMVideoFormatDescription(
-                    h264ParameterSets: (sequenceParameterSets + pictureParameterSets).map { Data(buffer: $0) },
+                    h264ParameterSets: (sequenceParameterSets + pictureParameterSets).map { try Data(buffer: $0) },
                     nalUnitHeaderLength: nalUnitLengthFieldLength
                 )
 
@@ -58,7 +58,8 @@ extension BoxParser {
                 var codecs: String?
 
                 if numbOfSpss > 0 {
-                    let sps = sequenceParameterSets[0].readableBytesView
+                    let reader = sequenceParameterSets[0]
+                    let sps = try reader.getBytes(at: reader.readerIndex, length: reader.readableBytes)
                     let spsData = try NalUnitUtil.SpsData(data: sps, nalOffset: 0, nalLimit: sps.count)
 
                     width = spsData.width
