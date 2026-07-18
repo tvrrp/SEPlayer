@@ -6,6 +6,7 @@
 //
 
 import AudioToolbox
+import CoreAudio
 import CoreMedia
 import SEPlayerCommon
 
@@ -28,7 +29,6 @@ final class AudioConverterDecoder2 {
     private var packetDescriptions: UnsafeMutableBufferPointer<AudioStreamPacketDescription>
     private var currentSampleBuffer: CMSampleBuffer?
     private var referenceBlockBuffer: CMBlockBuffer?
-    private var offsetInCurrentSampleBuffer: Int?
     private var currentSamplePts: CMTime = .invalid
     private var previousError: Error?
 
@@ -37,7 +37,7 @@ final class AudioConverterDecoder2 {
         decodeQueue: Queue = Queues.sharedAudioDecodeQueue,
         inputBufferQueue: TypedCMBufferQueue<CMSampleBuffer>,
         outputBufferQueue: TypedCMBufferQueue<CMSampleBuffer>? = nil,
-        maxOutputSampleDuration: CMTime = .init(value: 1, timescale: 2) // 500ms
+        maxOutputSampleDuration: CMTime = .init(value: 150, timescale: 1000) // 150ms
     ) throws {
         self.decodeQueue = decodeQueue
         self.inputBufferQueue = inputBufferQueue
@@ -109,7 +109,7 @@ final class AudioConverterDecoder2 {
     }
 
     func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
-        guard var newInputFormat = try? newFormat.buildFormatDescription() else {
+        guard let newInputFormat = try? newFormat.buildFormatDescription() else {
             return false
         }
 
@@ -124,10 +124,10 @@ final class AudioConverterDecoder2 {
             }
         }
 
-        let triggerToken = try outputBufferQueue.installTrigger(condition: .whenDurationBecomesGreaterThanOrEqualTo(highWaterMark))
         decodeQueue.async { [self] in
-            defer { try? outputBufferQueue.removeTrigger(triggerToken) }
             do {
+                let triggerToken = try outputBufferQueue.installTrigger(condition: .whenDurationBecomesGreaterThanOrEqualTo(highWaterMark))
+                defer { try? outputBufferQueue.removeTrigger(triggerToken) }
                 var isDataAvailable = true
                 while isDataAvailable, !outputBufferQueue.testTrigger(triggerToken) {
                     isDataAvailable = try decodeInternal()
@@ -145,7 +145,6 @@ final class AudioConverterDecoder2 {
             currentSampleBuffer = nil
             referenceBlockBuffer = nil
             currentSamplePts = .invalid
-            offsetInCurrentSampleBuffer = nil
             try? outputBufferQueue.reset()
         }
     }
@@ -164,7 +163,7 @@ final class AudioConverterDecoder2 {
             flags: [.assureMemoryNow]
         )
 
-        let (packetsProduced, isDataAvailable) = try outputBlockBuffer.withUnsafeMutableBytes { bufferPointer in
+        let packetsProduced = try outputBlockBuffer.withUnsafeMutableBytes { bufferPointer in
             outputAudioBufferList[0].mDataByteSize = UInt32(bufferPointer.count)
             outputAudioBufferList[0].mData = bufferPointer.baseAddress
             let packetsPerLoop = UInt32(bufferPointer.count) / outputFormatBasicDescription.mBytesPerPacket
@@ -192,13 +191,10 @@ final class AudioConverterDecoder2 {
                 }
             }
 
-            return (decodedPackets, status != AudioConverterErrors.Status.customNoMoreData.rawValue)
+            return decodedPackets
         }
 
-        guard packetsProduced > 0 else {
-            // We may run out of space in current blockBuffer and should continue decoding
-            return isDataAvailable ? try decodeInternal() : false
-        }
+        guard packetsProduced > 0 else { return false }
 
         let outputSampleBuffer = try CMSampleBuffer(
             dataBuffer: outputBlockBuffer,
@@ -215,9 +211,8 @@ final class AudioConverterDecoder2 {
             sampleSizes: [Int(packetsProduced * outputFormatBasicDescription.mBytesPerFrame)]
         )
 
-        clenupPreviousSampleBufferIfNeeded()
         try outputBufferQueue.enqueue(outputSampleBuffer)
-        return isDataAvailable
+        return true
     }
 
     fileprivate func decodeLoop(
@@ -236,41 +231,27 @@ final class AudioConverterDecoder2 {
             currentSamplePts = sampleBuffer.presentationTimeStamp
 
             return try sampleBuffer.withUnsafeAudioStreamPacketDescriptions { descriptions in
-                let startOffset = offsetInCurrentSampleBuffer ?? .zero
-                let remaining = descriptions.count - startOffset
-
                 return try sampleBuffer.withAudioBufferList(blockBufferMemoryAllocator: CMMemoryPoolGetAllocator(memoryPool)) { bufferListPointer, blockBuffer in
                     referenceBlockBuffer = blockBuffer
 
                     if doesInputUsesPacketDescriptions {
-                        resizePacketDescriptionsArray(remaining)
+                        resizePacketDescriptionsArray(descriptions.count)
                         outDataPacketDescription?.pointee = packetDescriptions.baseAddress
+                        _ = packetDescriptions.update(from: descriptions)
                     }
-
-                    let packetsRange = Range(uncheckedBounds: (startOffset, startOffset + remaining))
-                    packetDescriptions.update(fromContentsOf: descriptions[packetsRange])
-                    packetDescriptions.initialize(fromContentsOf: descriptions[packetsRange])
 
                     let ioData = UnsafeMutableAudioBufferListPointer(ioData)
                     ioData.unsafeMutablePointer.pointee.mNumberBuffers = 1
                     ioData[0].mNumberChannels = inputFormatBasicDescription.mChannelsPerFrame
                     ioData[0].mDataByteSize = bufferListPointer[0].mDataByteSize
                     ioData[0].mData = bufferListPointer[0].mData
-                    ioNumberDataPackets.pointee = UInt32(remaining)
-
-                    let newOffset = startOffset + remaining
-                    if newOffset >= descriptions.count {
-                        self.offsetInCurrentSampleBuffer = nil
-                    } else {
-                        self.offsetInCurrentSampleBuffer = newOffset
-                    }
+                    ioNumberDataPackets.pointee = UInt32(descriptions.count)
 
                     return noErr
                 }
             }
         } catch {
             ioNumberDataPackets.pointee = 0
-            offsetInCurrentSampleBuffer = nil
             previousError = error
             return AudioConverterErrors.Status.customError.rawValue
         }
@@ -278,39 +259,29 @@ final class AudioConverterDecoder2 {
 
     private func dequeueSamples() throws -> CMSampleBuffer? {
         assert(decodeQueue.isCurrent())
-        clenupPreviousSampleBufferIfNeeded()
 
-        let sampleBuffer: CMSampleBuffer?
         if let currentSampleBuffer {
-            sampleBuffer = currentSampleBuffer
-        } else {
-            guard nextFormatDescription() == nil else { return nil }
-            sampleBuffer = inputBufferQueue.dequeueIfDataReady()
-        }
-
-        return (sampleBuffer?.numSamples ?? .zero) > 0 ? sampleBuffer : nil
-    }
-
-    private func clenupPreviousSampleBufferIfNeeded() {
-        assert(decodeQueue.isCurrent())
-        if offsetInCurrentSampleBuffer == nil {
-            if let currentSampleBuffer {
-                if currentSampleBuffer.attachments[.postNotificationWhenConsumed] != nil {
-                    NotificationCenter.default.post(
-                        name: .init(kCMSampleBufferConsumerNotification_BufferConsumed as String),
-                        object: currentSampleBuffer
-                    )
-                }
-
-                if let audioConverter, currentSampleBuffer.attachments[.drainAfterDecoding] != nil {
-                    AudioConverterReset(audioConverter)
-                }
+            if currentSampleBuffer.attachments[.postNotificationWhenConsumed] != nil {
+                NotificationCenter.default.post(
+                    name: .init(kCMSampleBufferConsumerNotification_BufferConsumed as String),
+                    object: currentSampleBuffer
+                )
             }
 
-            currentSampleBuffer = nil
-            referenceBlockBuffer = nil
-            currentSamplePts = .invalid
+            if let audioConverter, currentSampleBuffer.attachments[.drainAfterDecoding] != nil {
+                AudioConverterReset(audioConverter)
+            }
         }
+
+        currentSampleBuffer = nil
+        referenceBlockBuffer = nil
+        currentSamplePts = .invalid
+
+        guard nextFormatDescription() == nil else { return nil }
+        let sampleBuffer = inputBufferQueue.dequeue()
+        try sampleBuffer?.makeDataReady()
+
+        return (sampleBuffer?.numSamples ?? .zero) > 0 ? sampleBuffer : nil
     }
 
     private func resizePacketDescriptionsArray(_ newCapacity: Int) {
@@ -360,7 +331,7 @@ final class AudioConverterDecoder2 {
             self.audioConverter = nil
         }
 
-        let result = try AudioConverterNew(
+        let result = AudioConverterNew(
             &inputBasicDescription,
             &outputBasicDescription,
             &audioConverter

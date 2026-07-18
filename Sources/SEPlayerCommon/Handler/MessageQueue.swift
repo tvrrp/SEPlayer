@@ -613,7 +613,7 @@ public final class MessageQueue: @unchecked Sendable {
                 let deadline = now.advanced(by: .nanoseconds(Int(timeoutNs)))
 
                 do {
-                    if #available(iOS 16, *) {
+                    if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                         try await Task.sleep(
                             for: .nanoseconds(deadline.uptimeNanoseconds - now.uptimeNanoseconds),
                             tolerance: .nanoseconds(0),

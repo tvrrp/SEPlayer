@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Foundation
 
 public struct MediaItem: Hashable, Sendable {
@@ -31,22 +32,22 @@ public extension MediaItem {
     }
 
     struct LiveConfiguration: Hashable, Sendable {
-        public let targetOffsetMs: Int64
-        public let minOffsetMs: Int64
-        public let maxOffsetMs: Int64
+        public let targetOffset: CMTime
+        public let minOffset: CMTime
+        public let maxOffset: CMTime
         public let minPlaybackSpeed: Float
         public let maxPlaybackSpeed: Float
 
         init(
-            targetOffsetMs: Int64 = .timeUnset,
-            minOffsetMs: Int64 = .timeUnset,
-            maxOffsetMs: Int64 = .timeUnset,
+            targetOffset: CMTime = .invalid,
+            minOffset: CMTime = .invalid,
+            maxOffset: CMTime = .invalid,
             minPlaybackSpeed: Float = 1.0,
             maxPlaybackSpeed: Float = 1.0
         ) {
-            self.targetOffsetMs = targetOffsetMs
-            self.minOffsetMs = minOffsetMs
-            self.maxOffsetMs = maxOffsetMs
+            self.targetOffset = targetOffset
+            self.minOffset = minOffset
+            self.maxOffset = maxOffset
             self.minPlaybackSpeed = minPlaybackSpeed
             self.maxPlaybackSpeed = maxPlaybackSpeed
         }

@@ -11,7 +11,7 @@ import SEPlayerCommon
 public final class BlockBufferCacheHandler: @unchecked Sendable {
     public var totalBytes: Int {
         assert(queue.isCurrent())
-        return blocks.reduce(into: 0) { $0 + $1.byteRange.count }
+        return blocks.reduce(into: 0) { $0 += $1.byteRange.count }
     }
 
     public var availableDataRanges: [Range<Int>] {
@@ -19,7 +19,7 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
         return blocks.map { $0.filledRange }
     }
 
-    private let queue: Queue
+    private let queue: any Queue
     private let blockSize: Int
     private let memoryPool: CMMemoryPool
     private let allocator: CFAllocator
@@ -27,7 +27,7 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
     private var blocks: [Block] = []
 
     public init(
-        queue: Queue,
+        queue: any Queue,
         blockSize: Int = (Int(getpagesize()) * 25),
         memoryPool: CMMemoryPool = CMMemoryPoolCreate(options: nil)
     ) {
@@ -50,7 +50,7 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
         return nil
     }
 
-    public func append(_ data: Data, at offset: Int) throws {
+    public func append(_ data: DispatchData, at offset: Int) throws {
         assert(queue.isCurrent())
         guard !data.isEmpty else { return }
 
@@ -92,11 +92,16 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
         blocks.removeAll()
     }
 
-    private func extend(_ block: Block, with data: Data, blockOffset: inout Int, position: inout Int, endOffset: Int) throws {
+    private func extend(_ block: Block, with data: DispatchData, blockOffset: inout Int, position: inout Int, endOffset: Int) throws {
         // Don't grow this block's valid bytes into another block's territory.
         let writeCeiling = nextBlockLowerBound(after: block).map { min(endOffset, $0) } ?? endOffset
-        let remainingNow = writeCeiling - blockOffset
-        guard remainingNow > 0 else { throw IOError(message: nil, cause: nil) }
+        var remainingNow = writeCeiling - blockOffset
+        guard remainingNow > 0 else {
+            blockOffset += writeCeiling
+            position += writeCeiling
+            return
+//            throw IOError(message: nil, cause: nil)
+        }
 
         if block.freeCapacity < remainingNow {
             try block.appendBuffer(
@@ -108,30 +113,33 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
             )
         }
 
-        let writeStart = blockOffset - block.byteRange.lowerBound
-        try data[position..<(position + remainingNow)].withUnsafeBytes {
-            try block.buffer[writeStart...].replaceDataBytes(with: $0)
-        }
+        while remainingNow > 0 {
+            let writeStart = blockOffset - block.byteRange.lowerBound
 
-        block.filledBytes += remainingNow
-        blockOffset += remainingNow
-        position += remainingNow
+            try block.buffer.withUnsafeMutableBytes(atOffset: writeStart) { bufferPointer in
+                let toCopy = min(remainingNow, bufferPointer.count)
+
+                data.copyBytes(to: bufferPointer, from: position..<(position + toCopy))
+
+                remainingNow -= toCopy
+                block.filledBytes += toCopy
+                blockOffset += toCopy
+                position += toCopy
+            }
+        }
     }
 
-    private func createBlock(at blockOffset: inout Int, position: inout Int, endOffset: Int, data: Data) throws {
+    private func createBlock(at blockOffset: inout Int, position: inout Int, endOffset: Int, data: DispatchData) throws {
         let writeCeiling = nextBlockLowerBound(after: blockOffset).map { min(endOffset, $0) } ?? endOffset
         let remainingNow = writeCeiling - blockOffset
-        guard remainingNow > 0 else { throw IOError(message: nil, cause: nil) }
-
-        let blockBuffer = try CMBlockBuffer(
-            length: max(remainingNow, blockSize),
-            allocator: allocator,
-            flags: .assureMemoryNow
-        )
-
-        try data[position..<(position + remainingNow)].withUnsafeBytes {
-            try blockBuffer.replaceDataBytes(with: $0)
+        guard remainingNow > 0 else {
+            throw IOError(message: nil, cause: nil)
         }
+
+        let blockBuffer = try createBlockBuffer(
+            backededBy: data,
+            range: position..<(position + remainingNow)
+        )
 
         let block = Block(
             offsetInData: blockOffset,
@@ -139,7 +147,7 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
             buffer: blockBuffer
         )
 
-        if let insertIdx = blocks.firstIndex { $0.byteRange.lowerBound > blockOffset } {
+        if let insertIdx = blocks.firstIndex(where: { $0.byteRange.lowerBound > blockOffset }) {
             blocks.insert(block, at: insertIdx)
         } else {
             blocks.append(block)
@@ -171,6 +179,44 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
             last.filledBytes += block.filledBytes
         }
     }
+
+    private func createBlockBuffer(backededBy data: DispatchData, range: Range<Int>) throws -> CMBlockBuffer {
+        let doCopy = if data.count <= 256 * 1024 {
+            true
+        } else {
+            data.regions.count != 1
+        }
+
+        switch doCopy {
+        case true:
+            let result = try data.withContiguousStorageIfAvailable { ptr in
+                try CMBlockBuffer(
+                    length: range.count,
+                    allocator: { _ in
+                        return UnsafeMutableRawPointer(mutating: ptr.baseAddress)
+                    },
+                    deallocator: { _, _ in
+                        withExtendedLifetime(data, {})
+                    }
+                )
+            }
+
+            guard let result else { fallthrough }
+            return result
+        case false:
+            let blockBuffer = try CMBlockBuffer(
+                length: max(range.count, blockSize),
+                allocator: allocator,
+                flags: .assureMemoryNow
+            )
+
+            try blockBuffer.withUnsafeMutableBytes { bufferPointer in
+                data.copyBytes(to: bufferPointer, from: range)
+            }
+
+            return blockBuffer
+        }
+    }
 }
 
 private extension BlockBufferCacheHandler {
@@ -184,7 +230,7 @@ private extension BlockBufferCacheHandler {
         fileprivate let buffer: CMBlockBuffer
 
         init(offsetInData: Int, filledBytes: Int, buffer: CMBlockBuffer) {
-            self.byteRange = offsetInData..<buffer.dataLength
+            self.byteRange = offsetInData..<(offsetInData + buffer.dataLength)
             self.filledBytes = filledBytes
             self.buffer = buffer
         }

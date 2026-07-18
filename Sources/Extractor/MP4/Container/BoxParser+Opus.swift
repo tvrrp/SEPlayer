@@ -8,6 +8,7 @@
 import AudioToolbox
 import CoreMedia
 import SEPlayerCommon
+import CoreAudio
 
 extension BoxParser {
     struct OpusData: Format.InitializationData {

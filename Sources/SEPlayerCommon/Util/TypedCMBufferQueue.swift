@@ -9,7 +9,7 @@ import CoreMedia
 
 public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
     /// Accesses buffers in a `CMBufferQueue`.
-    public var buffers: CMBufferQueue.Buffers { bufferQueue.buffers }
+    public var buffers: Buffers { Buffers(bufferQueue.buffers) }
 
     /// Returns whether or not the `CMBufferQueue` is empty.
     public var isEmpty: Bool { bufferQueue.isEmpty }
@@ -233,6 +233,35 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
 }
 
 public extension TypedCMBufferQueue {
+    struct Buffers: Sequence {
+        public typealias Element = T
+
+        private let base: CMBufferQueue.Buffers
+
+        fileprivate init(_ base: CMBufferQueue.Buffers) {
+            self.base = base
+        }
+
+        public struct Iterator: IteratorProtocol {
+            public typealias Element = T
+
+            private var base: CMBufferQueue.Buffers.Iterator
+
+            fileprivate init(base: CMBufferQueue.Buffers.Iterator) {
+                self.base = base
+            }
+
+            public mutating func next() -> T? {
+                guard let next = base.next() else { return nil }
+                return (next as! T)
+            }
+        }
+
+        public func makeIterator() -> Iterator {
+            Iterator(base: base.makeIterator())
+        }
+    }
+
     enum Errors: OSStatus, Error {
         case allocationFailed = -12760
         case requiredParameterMissing = -12761

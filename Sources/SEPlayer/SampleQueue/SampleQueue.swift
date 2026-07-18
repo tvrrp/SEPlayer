@@ -1,5 +1,5 @@
 //
-//  SampleQueue2.swift
+//  SampleQueue.swift
 //  SEPlayer
 //
 //  Created by Damir Yackupov on 07.04.2025.

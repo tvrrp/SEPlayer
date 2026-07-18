@@ -71,7 +71,7 @@ final class HTTPDataSourceLoadHandler {
         readContinuation = nil
     }
 
-    func consumeData(data: Data) {
+    func consumeData(data: DispatchData) {
         assert(queue.isCurrent())
         byteBuffer.writeBytes(data)
         readContinuation?.resume()

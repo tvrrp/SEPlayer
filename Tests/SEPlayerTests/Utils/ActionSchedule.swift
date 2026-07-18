@@ -209,7 +209,7 @@ final class ActionNode {
             try await self.run(isolation: isolation)
             await Task.yield()
         } else {
-            if #available(iOS 16, *) {
+            if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                 try await Task.sleep(for: .milliseconds(delayMs))
             } else {
                 try await Task.sleep(for: .milliseconds(Int(delayMs)), leeway: .zero)
@@ -229,7 +229,7 @@ final class ActionNode {
         )
 
         if let repeatIntervalMs {
-            if #available(iOS 16, *) {
+            if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                 try await Task.sleep(for: .milliseconds(repeatIntervalMs))
             } else {
                 try await Task.sleep(for: .milliseconds(Int(repeatIntervalMs)), leeway: .zero)

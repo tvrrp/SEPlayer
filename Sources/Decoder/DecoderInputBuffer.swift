@@ -22,6 +22,7 @@ open class DecoderInputBuffer: Buffer {
     public var format: Format?
     public var time: CMSampleTimingInfo = .invalid
     public var size: Int = 0
+    public private(set) var sampleBuffer: CMSampleBuffer?
 
     public let bufferReplacementMode: BufferReplacementMode
     private let paddingSize: Int
@@ -36,12 +37,24 @@ open class DecoderInputBuffer: Buffer {
         self.paddingSize = paddingSize
     }
 
+    public func setBuffer(_ sampleBuffer: CMSampleBuffer) throws {
+        self.sampleBuffer = sampleBuffer
+        time = try sampleBuffer.sampleTimingInfo(at: 0)
+        size = sampleBuffer.totalSampleSize
+        flags = sampleBuffer.flags
+    }
+
     public final func dequeue() throws -> UnsafeMutableRawBufferPointer {
-        guard let buffer = try getData(), buffer.count > 0 else {
+//        guard let buffer = try getData(), buffer.count > 0 else {
+//            throw BufferErrors.insufficientCapacity
+//        }
+//
+//        return buffer
+        guard let buffer = sampleBuffer?.dataBuffer, buffer.dataLength > 0 else {
             throw BufferErrors.insufficientCapacity
         }
 
-        return buffer
+        return try buffer.withUnsafeMutableBytes { $0 }
     }
 
     public final func ensureSpaceForWrite(_ size: Int) throws {
@@ -64,6 +77,7 @@ open class DecoderInputBuffer: Buffer {
         flags = []
         time = .invalid
         size = 0
+        sampleBuffer = nil
     }
 
     open func createReplacementBuffer(requiredCapacity: Int) throws {

@@ -323,16 +323,34 @@ extension BoxParser {
             )
         }
 
+        // Convert each edit list entry into a CMTimeMapping.
+        // source: time range in the track (media) timescale.
+        // target: time range in the movie (presentation) timescale.
+        // Dwell edits (mediaTime == -1) produce an empty mapping with an invalid source.
+        var targetStart = CMTime.zero
+        var editMappings = [CMTimeMapping]()
+        editMappings.reserveCapacity(editListDurations.count)
+        for (mediaTimeRaw, durationRaw) in zip(editListMediaTimes, editListDurations) {
+            let targetDuration = movieTime(durationRaw)
+            let targetRange = CMTimeRange(start: targetStart, duration: targetDuration)
+            targetStart = targetStart + targetDuration
+            if mediaTimeRaw == -1 {
+                editMappings.append(CMTimeMappingMakeEmpty(target: targetRange))
+            } else {
+                let sourceDuration = CMTimeConvertScale(targetDuration, timescale: track.timescale, method: .default)
+                let sourceRange = CMTimeRange(start: trackTime(mediaTimeRaw), duration: sourceDuration)
+                editMappings.append(CMTimeMappingMake(source: sourceRange, target: targetRange))
+            }
+        }
+
         if omitTrackSampleTable {
             let editedDuration: CMTime
-            if editListDurations.count == 1 && editListDurations[0] == 0 {
-                let editStartTime = trackTime(editListMediaTimes[0])
-                editedDuration = totalDuration - editStartTime
+            if editMappings.count == 1 && editListDurations[0] == 0 {
+                editedDuration = totalDuration - trackTime(editListMediaTimes[0])
             } else {
-                let movieTicks = editListDurations.indices
-                    .filter { editListMediaTimes[$0] != -1 }
-                    .reduce(Int64.zero) { $0 + editListDurations[$1] }
-                editedDuration = movieTime(movieTicks)
+                editedDuration = editMappings
+                    .filter { $0.source.isValid }
+                    .reduce(CMTime.zero) { $0 + $1.target.duration }
             }
 
             return try TrackSampleTable(
@@ -358,23 +376,21 @@ extension BoxParser {
         // handles simple discarding/delaying of samples. The extractor may place further restrictions
         // on what edited streams are playable.
 
-        if editListDurations.count == 1, track.type == .audio, ptsValues.count >= 2 {
-            let editStartTime = trackTime(editListMediaTimes[0])
-            let editListDuration = movieTime(editListDurations[0])
-            let editEndTime = editStartTime + CMTimeConvertScale(
-                editListDuration, timescale: track.timescale, method: .default
-            )
+        if editMappings.count == 1, track.type == .audio, ptsValues.count >= 2,
+           editMappings[0].source.isValid
+        {
+            let mapping = editMappings[0]
 
             if canApplyEditWithGaplessInfo(
                 pts: ptsValues,
                 duration: totalDuration,
-                editStartTime: editStartTime,
-                editEndTime: editEndTime
+                editStartTime: mapping.source.start,
+                editEndTime: mapping.source.end
             ) {
-                let paddingDuration = totalDuration - editEndTime
+                let paddingDuration = totalDuration - mapping.source.end
                 let sampleRateTimescale = CMTimeScale(track.format.sampleRate)
 
-                let encoderDelay = (editStartTime - ptsValues[0])
+                let encoderDelay = (mapping.source.start - ptsValues[0])
                     .convertScale(sampleRateTimescale, method: .default).value
                 let encoderPadding = paddingDuration
                     .convertScale(sampleRateTimescale, method: .default).value
@@ -394,7 +410,7 @@ extension BoxParser {
                         pts: ptsValues,
                         dts: dtsValues,
                         durations: sampleDurations,
-                        duration: editListDuration,
+                        duration: mapping.target.duration,
                         flags: samplesFlags,
                         syncSampleIndices: syncSampleIndicesList,
                         hasOnlySyncSamples: hasOnlySyncSamples,
@@ -404,7 +420,7 @@ extension BoxParser {
             }
         }
 
-        if editListDurations.count == 1, editListDurations[0] == 0 {
+        if editMappings.count == 1, editListDurations[0] == 0 {
             // The current version of the spec leaves handling of an edit with zero segment_duration in
             // unfragmented files open to interpretation. We handle this as a special case and include all
             // samples in the edit.
@@ -437,26 +453,21 @@ extension BoxParser {
         // there is no partial audio in this case.
         let omitZeroDurationClippedSample = track.type == .audio
 
-        // We need a comparable Int64 array for binary searches during edit list application.
-        // All PTS share trackTimescale, so raw .value comparison is valid.
+        // All PTS share trackTimescale, so raw .value comparison is valid for binary search.
         let ptsRawValues = ptsValues.map { $0.value }
 
         // Count the number of samples after applying edits.
         var editedSampleCount = 0
         var nextSampleIndex = 0
         var copyMetadata = false
-        var startIndices = Array(repeating: 0, count: editListDurations.count)
-        var endIndices = Array(repeating: 0, count: editListDurations.count)
+        var startIndices = Array(repeating: 0, count: editMappings.count)
+        var endIndices = Array(repeating: 0, count: editMappings.count)
 
-        for (index, (editMediaTimeRaw, editListDurationRaw)) in
-            zip(editListMediaTimes, editListDurations).enumerated()
-        {
-            guard editMediaTimeRaw != -1 else { continue }
+        for (index, mapping) in editMappings.enumerated() {
+            guard mapping.source.isValid else { continue }
 
-            let editDuration = CMTimeConvertScale(
-                movieTime(editListDurationRaw), timescale: track.timescale, method: .default
-            )
-            let editEndTimeRaw = editMediaTimeRaw + editDuration.value
+            let editMediaTimeRaw = mapping.source.start.value
+            let editEndTimeRaw = mapping.source.end.value
 
             // The timestamps array is in the order read from the media, which might not be strictly
             // sorted. However, all sync frames are guaranteed to be in order. The logic below
@@ -488,13 +499,10 @@ extension BoxParser {
             var maxValidIndexInWindow = firstSampleAfterEdit - 1
             for j in firstSampleAfterEdit..<ptsRawValues.count {
                 if ptsRawValues[j] < editEndTimeRaw {
-                    // This is an out-of-order frame that belongs in the edit. Update our max index.
                     maxValidIndexInWindow = j
                 } else {
-                    // This frame is outside the edit. Increment our counter of seen "post-roll" frames.
                     samplesSeenAfterEnd += 1
                     if samplesSeenAfterEnd > track.format.maxNumReorderSamples {
-                        // We've exhausted our search budget. We can be sure no more valid frames will appear.
                         break
                     }
                 }
@@ -536,17 +544,12 @@ extension BoxParser {
         var editedDurations = copyMetadata
             ? Array(repeating: CMTime.zero, count: editedSampleCount) : sampleDurations
 
-        var moviePtsAccumulator = CMTime.zero
         var sampleIndex = 0
         var hasPrerollSamples = false
 
-        for (index, editMediaTimeRaw) in editListMediaTimes.enumerated() {
-            guard editMediaTimeRaw != -1 else {
-                moviePtsAccumulator = moviePtsAccumulator + movieTime(editListDurations[index])
-                continue
-            }
+        for (index, mapping) in editMappings.enumerated() {
+            guard mapping.source.isValid else { continue }
 
-            let editMediaTime = trackTime(editMediaTimeRaw)
             let startIndex = startIndices[index]
             let endIndex = endIndices[index]
 
@@ -563,15 +566,14 @@ extension BoxParser {
             }
 
             for j in startIndex..<endIndex {
-                // PTS in edit timeline = movie_pts_offset + (original_pts - edit_media_time)
-                let timeInSegment = ptsValues[j] - editMediaTime
-                editedPts[sampleIndex] = moviePtsAccumulator + timeInSegment
+                editedPts[sampleIndex] = CMTimeMapTimeFromRangeToRange(
+                    ptsValues[j], fromRange: mapping.source, toRange: mapping.target
+                )
+                editedDts[sampleIndex] = CMTimeMapTimeFromRangeToRange(
+                    dtsValues[j], fromRange: mapping.source, toRange: mapping.target
+                )
 
-                // DTS in edit timeline = movie_pts_offset + (original_dts - edit_media_time)
-                let dtsInSegment = dtsValues[j] - editMediaTime
-                editedDts[sampleIndex] = moviePtsAccumulator + dtsInSegment
-
-                if timeInSegment < .zero { hasPrerollSamples = true }
+                if ptsValues[j] < mapping.source.start { hasPrerollSamples = true }
 
                 if copyMetadata, editedSizes[sampleIndex] > editedMaximumSize {
                     editedMaximumSize = sizes[j]
@@ -581,10 +583,9 @@ extension BoxParser {
                 }
                 sampleIndex += 1
             }
-            moviePtsAccumulator = moviePtsAccumulator + movieTime(editListDurations[index])
         }
 
-        let editedDuration = moviePtsAccumulator
+        let editedDuration = targetStart
         if hasPrerollSamples {
             let newFormat = track.format.buildUpon().setHasPrerollSamples(true).build()
             track.format = newFormat

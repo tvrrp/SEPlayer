@@ -34,7 +34,10 @@ final class RangeRequestHTTPDataSource: DataSource {
     func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
         syncActor.assertIsolated()
         self.originalDataSpec = dataSpec
-        let currentDataSpec = dataSpec.length(defaultSegmentLenght)
+        let currentDataSpec = dataSpec
+            .buildUpon()
+            .setLength(defaultSegmentLenght)
+            .build()
         self.currentDataSpec = currentDataSpec
         return try await openConnection(dataSpec: currentDataSpec, isolation: isolation)
     }
@@ -58,8 +61,10 @@ final class RangeRequestHTTPDataSource: DataSource {
         case .endOfInput:
             guard bytesRemaining > 0 else { return .endOfInput }
             let newDataSpec = currentDataSpec
-                .offset(currentDataSpec.range.upperBound + 1)
-                .length(min(bytesRemaining, max(length, .defaultSegmentLenght)))
+                .buildUpon()
+                .setPosition(currentDataSpec.range.upperBound + 1)
+                .setLength(min(bytesRemaining, max(length, .defaultSegmentLenght)))
+                .build()
 
             self.currentDataSpec = newDataSpec
             try await requestHandler.open(dataSpec: newDataSpec)
@@ -79,8 +84,10 @@ final class RangeRequestHTTPDataSource: DataSource {
         case .endOfInput:
             guard bytesRemaining > 0 else { return .endOfInput }
             let newDataSpec = currentDataSpec
-                .offset(currentDataSpec.range.upperBound + 1)
-                .length(min(bytesRemaining, max(length, .defaultSegmentLenght)))
+                .buildUpon()
+                .setPosition(currentDataSpec.range.upperBound + 1)
+                .setLength(min(bytesRemaining, max(length, .defaultSegmentLenght)))
+                .build()
 
             self.currentDataSpec = newDataSpec
             try await openConnection(dataSpec: newDataSpec, isolation: isolation)
@@ -96,7 +103,7 @@ final class RangeRequestHTTPDataSource: DataSource {
         self.requestHandler = requestHandler
         let result = try await requestHandler.open(dataSpec: dataSpec, isolation: isolation)
         guard let urlResponse else { throw URLSessionDataSourceError(failedURL: currentDataSpec?.url, errorReason: .badServerResponse) }
-        bytesRemaining = contentLength(from: urlResponse) - dataSpec.offset
+        bytesRemaining = contentLength(from: urlResponse) - dataSpec.position
         return result
     }
 }

@@ -87,7 +87,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
         isolation: isolated PlayerActor = #isolation
     ) async throws(VTDecoderErrors) {
         do {
-            let formatDescription = try format.buildFormatDescription()
+            let formatDescription = try! format.buildFormatDescription()
             guard let decompressionSession,
                   let sampleBuffer = try inputBuffer.sampleBuffer(formatDescription: formatDescription) else {
                 throw VTDecoderErrors.missingData
@@ -98,7 +98,7 @@ final class VTDecoder: SimpleDecoder<DecoderInputBuffer, VTDecoderOutputBuffer, 
             }
 
             self.currentInputFormatDescription = formatDescription
-            let shouldNotProduceFrame = !isAtLeastOutputStartTime(inputBuffer.time.presentationTimeStamp)
+            let shouldNotProduceFrame = false//!isAtLeastOutputStartTime(inputBuffer.time.presentationTimeStamp)
             let (pixelBuffer, pts, duration) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(CVPixelBuffer?, CMTime, CMTime), Error>) in
                 var flags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
 
@@ -245,21 +245,22 @@ enum VTDecoderErrors: Error {
 
 extension DecoderInputBuffer {
     func sampleBuffer(formatDescription: CMFormatDescription) throws -> CMSampleBuffer? {
-        let data = try dequeue()
-        guard size > 0 else { return nil }
-
-        let blockBuffer = try CMBlockBuffer(buffer: data[0..<size], deallocator: { _, _ in })
-
-        let sampleTimings = !flags.contains(.endOfStream) ? [time] : []
-        let sampleSizes = !flags.contains(.endOfStream) ? [size] : []
-
-        return try CMSampleBuffer(
-            dataBuffer: blockBuffer,
-            formatDescription: formatDescription,
-            numSamples: 1,
-            sampleTimings: sampleTimings,
-            sampleSizes: sampleSizes
-        )
+        return sampleBuffer
+//        let data = try dequeue()
+//        guard size > 0 else { return nil }
+//
+//        let blockBuffer = try CMBlockBuffer(buffer: data[0..<size], deallocator: { _, _ in })
+//
+//        let sampleTimings = !flags.contains(.endOfStream) ? [time] : []
+//        let sampleSizes = !flags.contains(.endOfStream) ? [size] : []
+//
+//        return try CMSampleBuffer(
+//            dataBuffer: blockBuffer,
+//            formatDescription: formatDescription,
+//            numSamples: 1,
+//            sampleTimings: sampleTimings,
+//            sampleSizes: sampleSizes
+//        )
     }
 }
 

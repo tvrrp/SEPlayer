@@ -9,19 +9,19 @@
 import Foundation.NSURLSession
 import SEPlayerCommon
 
-public protocol IPlayerSessionLoader {
-    func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask
+public protocol IPlayerSessionLoader: Sendable {
+    func createTask(request: URLRequest, delegate: any PlayerSessionDelegate) -> URLSessionDataTask
 }
 
 public protocol PlayerSessionDelegate: AnyObject {
-    var queue: Queue { get }
-    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void)
-    func didReciveBuffer(_ buffer: Data, task: URLSessionTask)
+    var queue: any Queue { get }
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void)
+    func didReciveBuffer(_ buffer: DispatchData, task: URLSessionTask)
     func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask)
-    func didFinishTask(_ task: URLSessionTask, error: Error?)
+    func didFinishTask(_ task: URLSessionTask, error: (any Error)?)
 }
 
-public final class PlayerSessionLoader: IPlayerSessionLoader {
+public final class PlayerSessionLoader: IPlayerSessionLoader, @unchecked Sendable {
     private let queue: OperationQueue
     private let session: URLSession
     private let impl = _DataLoader()
@@ -48,7 +48,7 @@ public final class PlayerSessionLoader: IPlayerSessionLoader {
         session.invalidateAndCancel()
     }
 
-    public func createTask(request: URLRequest, delegate: PlayerSessionDelegate) -> URLSessionDataTask {
+    public func createTask(request: URLRequest, delegate: any PlayerSessionDelegate) -> URLSessionDataTask {
         impl.createTask(session, request: request, delegate: delegate)
     }
 
@@ -59,8 +59,8 @@ public final class PlayerSessionLoader: IPlayerSessionLoader {
     }
 }
 
-private final class _DataLoader: NSObject, URLSessionDataDelegate {
-    private var handlers = [URLSessionTask: PlayerSessionDelegate]()
+private final class _DataLoader: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private var handlers = [URLSessionTask: any PlayerSessionDelegate]()
 
     func createTask(
         _ session: URLSession,
@@ -84,26 +84,6 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
         }
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void) {
-        guard let handler = handlers[dataTask] else {
-            completionHandler(.cancel); return
-        }
-
-        handler.queue.async {
-            handler.didRecieveResponse(response, task: dataTask, completionHandler: completionHandler)
-        }
-    }
-
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let handler = handlers[dataTask] else {
-            return
-        }
-
-        handler.queue.async {
-            handler.didReciveBuffer(data, task: dataTask)
-        }
-    }
-
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         guard let handler = handlers[task] else { return }
         handlers[task] = nil
@@ -120,6 +100,50 @@ private final class _DataLoader: NSObject, URLSessionDataDelegate {
 
         handler.queue.async {
             handler.didFinishCollectingMetrics(metrics, task: task)
+        }
+    }
+}
+
+extension _DataLoader {
+    // Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
+    @objc(URLSession:dataTask:didReceiveResponse:completionHandler:)
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let handler = handlers[dataTask] else {
+            completionHandler(.cancel); return
+        }
+
+        handler.queue.async {
+            handler.didRecieveResponse(response, task: dataTask, completionHandler: completionHandler)
+        }
+    }
+
+    // Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
+    @objc(URLSession:dataTask:didReceiveData:)
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: NSData) {
+        guard let handler = handlers[dataTask] else {
+            return
+        }
+
+        let buffer: DispatchData
+        if let dispatchData = data as AnyObject as? __DispatchData {
+            buffer = dispatchData as DispatchData
+        } else {
+            nonisolated(unsafe) let data = data.copy() as! NSData
+            buffer = unsafe DispatchData(
+                bytesNoCopy: UnsafeRawBufferPointer(start: data.bytes, count: data.count),
+                deallocator: .custom(nil) {
+                    withExtendedLifetime(data) {}
+                }
+            )
+        }
+
+        handler.queue.async {
+            handler.didReciveBuffer(buffer, task: dataTask)
         }
     }
 }

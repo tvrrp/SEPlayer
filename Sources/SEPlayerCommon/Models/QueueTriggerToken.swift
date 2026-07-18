@@ -33,12 +33,12 @@ public struct QueueTriggerToken: Hashable {
     public let id: Identifier
 
     public enum Identifier: Hashable {
-        case intId(Int)
+        case intId(UUID)
         case cmTrigger(CMBufferQueueTriggerToken)
     }
 
     public init() {
-        id = .intId(UUID().hashValue)
+        id = .intId(UUID())
     }
 
     public init(cmTrigger: CMBufferQueueTriggerToken) {

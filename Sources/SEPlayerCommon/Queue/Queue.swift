@@ -26,7 +26,6 @@ public protocol Queue: AnyObject, Sendable {
     func async(_ f: @escaping @Sendable () -> Void)
     func execute(_ f: @escaping @Sendable () async -> Void)
 
-    func sync<T>(_ f: () -> T) -> T
     func sync<T>(_ f: () throws -> T) rethrows -> T
 
     func justDispatch(_ f: @escaping @Sendable () -> Void)

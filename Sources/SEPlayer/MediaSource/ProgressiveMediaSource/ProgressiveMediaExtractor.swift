@@ -12,11 +12,12 @@ import SEPlayerCommon
 
 protocol ProgressiveMediaExtractor {
     func prepare(
-        dataReader: DataReader,
+        dataReader: DataReader2,
         url: URL,
-        response: URLResponse?,
-        range: NSRange,
-        output: ExtractorOutput,
+        response: HTTPURLResponse?,
+        position: Int,
+        lenght: Int?,
+        output: ExtractorOutput2,
         isolation: isolated any Actor
     ) async throws
     func release()

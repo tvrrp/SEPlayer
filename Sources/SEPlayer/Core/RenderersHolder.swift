@@ -220,6 +220,49 @@ final class RenderersHolder {
         }
     }
 
+    func enable2(
+        trackSelection: SETrackSelection,
+        stream: SampleStream2,
+        position: CMTime,
+        joining: Bool,
+        mayRenderStartOfStream: Bool,
+        startPosition: CMTime,
+        offset: CMTime,
+        mediaPeriodId: MediaPeriodId,
+        mediaClock: DefaultMediaClock
+    ) throws {
+        let formats = formats(from: trackSelection)
+        let enablePrimary = [.notPrewarmingUsingPrimary, .prewarmingPrimary, .transitioningToPrimary].contains(prewarmingState)
+
+        if enablePrimary {
+            primaryRequiresReset = true
+            try! primaryRenderer.enable2(
+                formats: formats,
+                stream: stream,
+                position: position,
+                joining: joining,
+                mayRenderStartOfStream: mayRenderStartOfStream,
+                startPosition: startPosition,
+                offset: offset,
+                mediaPeriodId: mediaPeriodId
+            )
+            try mediaClock.onRendererEnabled(renderer: primaryRenderer)
+        } else if let secondaryRenderer {
+            secondaryRequiresReset = true
+            try! secondaryRenderer.enable2(
+                formats: formats,
+                stream: stream,
+                position: position,
+                joining: joining,
+                mayRenderStartOfStream: mayRenderStartOfStream,
+                startPosition: startPosition,
+                offset: offset,
+                mediaPeriodId: mediaPeriodId
+            )
+            try mediaClock.onRendererEnabled(renderer: secondaryRenderer)
+        }
+    }
+
     func handleMessage(_ message: RendererMessage, mediaPeriod: MediaPeriodHolder) throws {
         try rendererReading(from: mediaPeriod)?.handleMessage(message)
     }
@@ -277,6 +320,31 @@ final class RenderersHolder {
 
         if let secondaryRenderer {
             try! maybeDisableOrResetPositionInternal(
+                renderer: secondaryRenderer,
+                sampleStream: sampleStream,
+                mediaClock: mediaClock,
+                rendererPosition: rendererPosition,
+                streamReset: streamReset
+            )
+        }
+    }
+
+    func maybeDisableOrResetPosition2(
+        sampleStream: SampleStream2,
+        mediaClock: DefaultMediaClock,
+        rendererPosition: CMTime,
+        streamReset: Bool
+    ) throws {
+        try! maybeDisableOrResetPositionInternal2(
+            renderer: primaryRenderer,
+            sampleStream: sampleStream,
+            mediaClock: mediaClock,
+            rendererPosition: rendererPosition,
+            streamReset: streamReset
+        )
+
+        if let secondaryRenderer {
+            try! maybeDisableOrResetPositionInternal2(
                 renderer: secondaryRenderer,
                 sampleStream: sampleStream,
                 mediaClock: mediaClock,
@@ -469,6 +537,22 @@ private extension RenderersHolder {
     ) throws {
         guard isRendererEnabled(renderer: renderer) else { return }
 
+        if sampleStream !== renderer.getStream2() {
+            disableRenderer(renderer: renderer, mediaClock: mediaClock)
+        } else {
+            try! renderer.resetPosition(new: rendererPosition)
+        }
+    }
+
+    func maybeDisableOrResetPositionInternal2(
+        renderer: SERenderer,
+        sampleStream: SampleStream2,
+        mediaClock: DefaultMediaClock,
+        rendererPosition: CMTime,
+        streamReset: Bool
+    ) throws {
+        guard isRendererEnabled(renderer: renderer) else { return }
+
         if sampleStream !== renderer.getStream() {
             disableRenderer(renderer: renderer, mediaClock: mediaClock)
         } else {
@@ -523,7 +607,7 @@ private extension RenderersHolder {
 
         if !renderer.isCurrentStreamFinal(), let sampleStream = readingPeriodHolder.sampleStreams[index] {
             let formats = formats(from: newTrackSelectorResult.selections[index])
-            try! renderer.replaceStream(
+            try! renderer.replaceStream2(
                 formats: formats,
                 stream: sampleStream,
                 startPosition: readingPeriodHolder.getStartPositionRendererTime(),

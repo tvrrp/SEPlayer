@@ -12,7 +12,7 @@ public class DataSourceError: IOError, @unchecked Sendable {
 
     public init(reason: Reason, message: String = "") {
         self.reason = reason
-        let cause: Error? = if case let .customError(error) = reason {
+        let cause: (any Error)? = if case let .customError(error) = reason {
             error
         } else {
             nil
@@ -23,8 +23,9 @@ public class DataSourceError: IOError, @unchecked Sendable {
 
 public extension DataSourceError {
     enum Reason {
+        case alreadyOpened
         case connectionNotOpened
-        case customError(Error)
+        case customError(any Error)
         case unknown
     }
 }

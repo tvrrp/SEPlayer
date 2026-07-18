@@ -80,13 +80,13 @@ extension DefautlHTTPDataSource {
     ) async throws -> Int {
         assert(queue.isCurrent())
         let request = dataSpec.createURLRequest()
-        loadHandler.willOpenConnection(with: dataSpec.length)
+        loadHandler.willOpenConnection(with: dataSpec.length!)
 
         let task = networkLoader.createTask(request: request, delegate: self)
         self.currentTask = task
 
         let openTask = Task<HTTPURLResponse, Error> {
-            try await withCheckedThrowingContinuation(isolation: syncActor) { continuation in
+            try await withCheckedThrowingContinuation { continuation in
                 self.openContinuation = continuation
                 task.resume()
             }
@@ -104,7 +104,7 @@ extension DefautlHTTPDataSource {
 extension DefautlHTTPDataSource: PlayerSessionDelegate {
     var queue: Queue { syncActor.executor.queue }
 
-    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping @Sendable(URLSession.ResponseDisposition) -> Void) {
+    func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         assert(queue.isCurrent())
         guard let response = response as? HTTPURLResponse else {
             openContinuation?.resume(throwing: URLSessionDataSourceError(failedURL: url, errorReason: .cannotParseResponse))
@@ -126,7 +126,7 @@ extension DefautlHTTPDataSource: PlayerSessionDelegate {
         completionHandler(.allow)
     }
 
-    func didReciveBuffer(_ buffer: Data, task: URLSessionTask) {
+    func didReciveBuffer(_ buffer: DispatchData, task: URLSessionTask) {
         assert(queue.isCurrent())
         loadHandler.consumeData(data: buffer)
     }
@@ -169,5 +169,11 @@ extension HTTPURLResponse {
         value(forHeaderKey: "Content-Length")?
             .components(separatedBy: "/").last
             .flatMap(Int.init) ?? 0
+    }
+
+    var contentLength2: Int? {
+        value(forHeaderKey: "Content-Length")?
+            .components(separatedBy: "/").last
+            .flatMap(Int.init)
     }
 }

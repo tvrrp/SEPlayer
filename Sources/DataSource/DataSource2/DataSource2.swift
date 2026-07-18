@@ -31,19 +31,22 @@ public struct ResourceInfo: Sendable, Equatable {
 }
 
 public protocol DataSource2: DataReader2 {
-    @discardableResult func probe(isolation: isolated any Actor) async throws -> ResourceInfo
-    @discardableResult func close(isolation: isolated any Actor) async throws
+    func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int?
+    func close(isolation: isolated any Actor) async throws
+    func getUrlResponse() -> HTTPURLResponse?
 //    func setFetchPolicy(_ policy: FetchPolicy, isolation: isolated PlayerActor) async
 }
 
-public protocol DataReader2 {
-    func read(range: Range<Int>, readPolicy: ReadPolicy, isolation: isolated any Actor) async throws -> CMBlockBuffer
+public protocol DataSource3: DataReader3 {
+    var urlResponse: HTTPURLResponse? { get async }
+    func open(dataSpec: DataSpec) async throws -> Int?
+    func close() async
+//    func getUrlResponse() async -> HTTPURLResponse?
+//    func setFetchPolicy(_ policy: FetchPolicy, isolation: isolated PlayerActor) async
 }
 
-public extension DataReader2 {
-    func read(range: Range<Int>, isolation: isolated any Actor) async throws -> CMBlockBuffer {
-        try await read(range: range, readPolicy: .contigious, isolation: isolation)
-    }
+public extension DataSource2 {
+    func getUrlResponse() -> HTTPURLResponse? { nil }
 }
 
 public protocol FetchPolicy: Sendable {
@@ -56,9 +59,4 @@ struct DefaultFetchPolicy: FetchPolicy {
     let fetchUpTo: Int = .max
     let keepBytesFrom: Int = 0
     let maxCachedBytes: Int = 32 * 1024 * 1024
-}
-
-public enum ReadPolicy {
-    case contigious
-    case oneShot
 }

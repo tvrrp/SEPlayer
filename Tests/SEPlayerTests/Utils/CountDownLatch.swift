@@ -22,7 +22,7 @@ final class CountDownLatch {
         guard count > 0 else { return } 
         let timeoutTask = Task {
             try Task.checkCancellation()
-            if #available(iOS 16, *) {
+            if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                 try await Task.sleep(for: .milliseconds(timeoutMs))
             } else {
                 try await Task.sleep(for: .milliseconds(Int(timeoutMs)), leeway: .zero)
@@ -61,7 +61,7 @@ final class TimeoutChecker {
         task = Task {
             do {
                 try Task.checkCancellation()
-                if #available(iOS 16, *) {
+                if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                     try await Task.sleep(for: .milliseconds(timeoutMs))
                 } else {
                     try await Task.sleep(for: .milliseconds(Int(timeoutMs)), leeway: .zero)

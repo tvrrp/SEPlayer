@@ -22,7 +22,7 @@ public struct BoxParser {
         return try moov.containerChildren
             .filter { $0.type == .trak }
             .compactMap { atom in
-                guard var track = try? parseTrak(
+                guard var track = try! parseTrak(
                     trak: atom,
                     mvhd: moov.getLeafBoxOfType(type: .mvhd)
                         .checkNotNil(BoxParserErrors.missingBox(type: .mvhd)),
@@ -76,8 +76,8 @@ public struct BoxParser {
 
         guard trackType != .unknown else { return nil }
 
-        let movieTimescale = try Mp4TimestampData(mvhd: mvhd.data).timescale
-        let tkhdData = try TkhdData(
+        let movieTimescale = try! Mp4TimestampData(mvhd: mvhd.data).timescale
+        let tkhdData = try! TkhdData(
             tkhd: trak
                 .getLeafBoxOfType(type: .tkhd)
                 .checkNotNil(BoxParserErrors.missingBox(type: .tkhd)).data,
@@ -88,12 +88,12 @@ public struct BoxParser {
             duration = tkhdData.duration
         }
 
-        let stbl = try mdia.getContainerBoxOfType(type: .minf)
+        let stbl = try! mdia.getContainerBoxOfType(type: .minf)
             .checkNotNil(BoxParserErrors.missingBox(type: .minf))
             .getContainerBoxOfType(type: .stbl)
             .checkNotNil(BoxParserErrors.missingBox(type: .stbl))
 
-        let mdhdData = try MdhdData(mdhd: mdia
+        let mdhdData = try! MdhdData(mdhd: mdia
             .getLeafBoxOfType(type: .mdhd)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdhd)).data
         )
@@ -102,7 +102,7 @@ public struct BoxParser {
             throw BoxParserErrors.badBoxContent(type: .stbl, reason: "Sample table (stbl) missing sample description (stsd)")
         }
 
-        let stsdData = try parseStsd(
+        let stsdData = try! parseStsd(
             stsd: stsd.data,
             tkhdData: tkhdData,
             language: mdhdData.language,
@@ -112,7 +112,7 @@ public struct BoxParser {
         var editListDurations: [Int64]?
         var editListMediaTimes: [Int64]?
 
-        if !ignoreEditLists, let edtsData = try EdtsData(edtsData: trak.getContainerBoxOfType(type: .edts)) {
+        if !ignoreEditLists, let edtsData = try! EdtsData(edtsData: trak.getContainerBoxOfType(type: .edts)) {
             editListDurations = edtsData.editListDurations
             editListMediaTimes = edtsData.editListMediaTimes
         }
@@ -188,7 +188,7 @@ public struct BoxParser {
 //                            entryIndex: index
 //                        )
 //                    }
-                    try parseVideoSampleEntry(
+                    try! parseVideoSampleEntry(
                         parent: &stsd,
                         atomType: childAtomType,
                         position: childStartPosition,
@@ -200,7 +200,7 @@ public struct BoxParser {
                         entryIndex: index
                     )
                 } else if audioSampleEntries.contains(childAtomType) {
-                    let coreMediaParserResult = try CoreMediaParsedAudio.create(
+                    let coreMediaParserResult = try! CoreMediaParsedAudio.create(
                         parent: &stsd,
                         position: childStartPosition,
                         size: childAtomSize,
@@ -212,7 +212,7 @@ public struct BoxParser {
                     )
 
                     if !coreMediaParserResult {
-                        try parseAudioSampleEntry(
+                        try! parseAudioSampleEntry(
                             parent: &stsd,
                             atomType: childAtomType,
                             position: childStartPosition,
@@ -225,7 +225,7 @@ public struct BoxParser {
                         )
                     }
                 } else if textSampleEntries.contains(childAtomType) {
-                    try parseTextSampleEntry(
+                    try! parseTextSampleEntry(
                         parent: &stsd,
                         atomType: childAtomType,
                         position: childStartPosition,
@@ -350,7 +350,7 @@ public struct BoxParser {
                 throw BoxParserErrors.badBoxContent(type: atomType, reason: "childAtomSize must be positive")
             }
 
-            let bmffBox = try parent.getSlice(at: childStartPosition, length: childAtomSize)
+            let bmffBox = try parent.getSliceIgnoringReaderOffset(at: childStartPosition, length: childAtomSize)
             let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
 
             switch childAtomType {
@@ -570,7 +570,7 @@ extension BoxParser {
             var durationUnknown = true
             let durationPosition = tkhd.readerIndex
             let durationByteCount = version == 0 ? 4 : 8
-            let view = try tkhd.getBytes(at: tkhd.readerIndex, length: tkhd.readableBytes)
+            let view = tkhd.blockBufferView
             for index in 0..<durationByteCount {
                 if view[durationPosition + index] != 0xFF { // != -1
                     durationUnknown = false
@@ -668,7 +668,7 @@ extension BoxParser {
             var mediaDurationUnknown = true
             let mediaDurationPosition = mdhd.readerIndex
             let mediaDurationByteCount = version == 0 ? 4 : 8
-            let view = try mdhd.getBytes(at: mdhd.readerIndex, length: mdhd.readableBytes)
+            let view = mdhd.blockBufferView
             for index in 0..<mediaDurationByteCount {
                 if view[mediaDurationPosition + index] != 0xFF { // != -1
                     mediaDurationUnknown = false

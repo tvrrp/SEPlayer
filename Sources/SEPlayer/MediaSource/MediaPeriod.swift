@@ -12,17 +12,17 @@ public protocol MediaPeriod: SequenceableLoader, AnyObject {
 
     func prepare(callback: any MediaPeriodCallback, on time: CMTime)
     func maybeThrowPrepareError() throws
-    func discardBuffer(position: CMTime, toKeyframe: Bool)
+    func discardBuffer(position: CMTime, toKeyframe: Bool) throws
     func readDiscontinuity() -> CMTime
-    func seek(position: CMTime) -> CMTime
+    func seek(position: CMTime) throws -> CMTime
     func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime
     func selectTrack(
         selections: [SETrackSelection?],
         mayRetainStreamFlags: [Bool],
-        streams: inout [TriggerableSampleStream?],
+        streams: inout [SampleStream2?],
         streamResetFlags: inout [Bool],
         position: CMTime
-    ) -> CMTime
+    ) throws -> CMTime
 }
 
 public protocol MediaPeriodCallback: SequenceableLoaderCallback where Source == any MediaPeriod {

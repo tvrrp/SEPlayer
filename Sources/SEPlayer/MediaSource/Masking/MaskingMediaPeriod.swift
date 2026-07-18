@@ -84,15 +84,15 @@ final class MaskingMediaPeriod: MediaPeriod {
     func selectTrack(
         selections: [SETrackSelection?],
         mayRetainStreamFlags: [Bool],
-        streams: inout [TriggerableSampleStream?],
+        streams: inout [SampleStream2?],
         streamResetFlags: inout [Bool],
         position: CMTime
-    ) -> CMTime {
+    ) throws -> CMTime {
         let position = (preparePositionOverride.isValid && position == preparePosition)
             ? preparePositionOverride
             : position
         preparePositionOverride = .invalid
-        return mediaPeriod?.selectTrack(
+        return try mediaPeriod?.selectTrack(
             selections: selections,
             mayRetainStreamFlags: mayRetainStreamFlags,
             streams: &streams,
@@ -101,8 +101,8 @@ final class MaskingMediaPeriod: MediaPeriod {
         ) ?? .invalid
     }
 
-    func discardBuffer(position: CMTime, toKeyframe: Bool) {
-        mediaPeriod?.discardBuffer(position: position, toKeyframe: toKeyframe)
+    func discardBuffer(position: CMTime, toKeyframe: Bool) throws {
+        try mediaPeriod?.discardBuffer(position: position, toKeyframe: toKeyframe)
     }
 
     func readDiscontinuity() -> CMTime {
@@ -113,8 +113,8 @@ final class MaskingMediaPeriod: MediaPeriod {
         mediaPeriod?.getBufferedPosition() ?? .zero
     }
 
-    func seek(position: CMTime) -> CMTime {
-        mediaPeriod?.seek(position: position) ?? .zero
+    func seek(position: CMTime) throws -> CMTime {
+        try mediaPeriod?.seek(position: position) ?? .zero
     }
 
     func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime {

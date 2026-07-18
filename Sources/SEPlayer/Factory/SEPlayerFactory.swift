@@ -12,7 +12,7 @@ import Extractor
 import SEPlayerCommon
 
 public final class SEPlayerFactory {
-    private let sessionLoader: IPlayerSessionLoader
+    private let sessionLoader: PlayerSessionLoader
     private let bandwidthMeter: BandwidthMeter
     private let trackSelector: TrackSelector
     private let audioSessionManager: IAudioSessionManager

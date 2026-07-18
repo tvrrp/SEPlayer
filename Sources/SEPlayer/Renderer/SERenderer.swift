@@ -36,6 +36,16 @@ public protocol SERenderer: AnyObject {
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws
+    func enable2(
+        formats: [Format],
+        stream: SampleStream2,
+        position: CMTime,
+        joining: Bool,
+        mayRenderStartOfStream: Bool,
+        startPosition: CMTime,
+        offset: CMTime,
+        mediaPeriodId: MediaPeriodId
+    ) throws
 
     func start() throws
 
@@ -46,7 +56,15 @@ public protocol SERenderer: AnyObject {
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws
+    func replaceStream2(
+        formats: [Format],
+        stream: SampleStream2,
+        startPosition: CMTime,
+        offset: CMTime,
+        mediaPeriodId: MediaPeriodId
+    ) throws
     func getStream() -> TriggerableSampleStream?
+    func getStream2() -> SampleStream2?
     func didReadStreamToEnd() -> Bool
     func getReadingPosition() -> CMTime
     func setStreamFinal()

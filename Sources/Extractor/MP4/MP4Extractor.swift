@@ -10,8 +10,8 @@ import SEPlayerCommon
 
 final class MP4Extractor: Extractor {
     public struct Flags: OptionSet {
-        let rawValue: UInt8
-        init(rawValue: UInt8) { self.rawValue = rawValue }
+        public let rawValue: UInt8
+        public init(rawValue: UInt8) { self.rawValue = rawValue }
 
         public static let workaroundIgnoreEditLists = Flags(rawValue: 1)
         public static let markFirstVideoTrackWithMainRole = Flags(rawValue: 1 << 2)
@@ -91,10 +91,11 @@ final class MP4Extractor: Extractor {
 
     func initialize(output: ExtractorOutput, isolation: isolated any Actor) throws {
         assert(queue.isCurrent())
-        extractorOutput = SubtitleTranscodingExtractorOutput(
-            delegate: output,
-            subtitleParserFactory: subtitleParserFactory
-        )
+//        extractorOutput = SubtitleTranscodingExtractorOutput(
+//            delegate: output,
+//            subtitleParserFactory: subtitleParserFactory
+//        )
+        extractorOutput = output
     }
 
     func shiff(input: any ExtractorInput, isolation: isolated any Actor) async throws -> Bool {
@@ -267,7 +268,7 @@ private extension MP4Extractor {
             } else if !containerAtoms.isEmpty {
                 // TODO: remove with new data source
                 let blockBuffer = try atomData.withUnsafeReadableBytesWithStorageManagement { ptr, storageReference in
-                    storageReference.retain()
+                    _ = storageReference.retain()
                     return try CMBlockBuffer(
                         buffer: UnsafeMutableRawBufferPointer(mutating: ptr),
                         deallocator: { _, _ in
@@ -276,7 +277,9 @@ private extension MP4Extractor {
                     )
                 }
 
-                containerAtoms[0].add(LeafBox(type: atomType, data: .init(blockBuffer)))
+                var blockBufferReader = BlockBufferReader(blockBuffer)
+                blockBufferReader.moveReaderIndex(to: atomData.readerIndex)
+                containerAtoms[0].add(LeafBox(type: atomType, data: blockBufferReader))
             }
         } else {
             if !seenFtypAtom, atomType == MP4Box.BoxType.mdat.rawValue {

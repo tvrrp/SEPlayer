@@ -234,7 +234,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
                 player.play()
 
                 if let actionSchedule {
-                    if #available(iOS 26, *) {
+                    if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                         Task.immediate {
                             try await actionSchedule.start(
                                 player: player,

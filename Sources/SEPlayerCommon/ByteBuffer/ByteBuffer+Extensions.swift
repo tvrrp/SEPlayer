@@ -128,6 +128,14 @@ public extension Int {
 }
 
 public extension BlockBufferReader {
+    mutating func getSliceIgnoringReaderOffset(at offset: Int, length: Int) throws -> BlockBufferReader {
+        let currentOffset = readerIndex
+        moveReaderIndex(to: offset)
+        let slice = try getSlice(at: offset, length: length)
+        moveReaderIndex(to: currentOffset)
+        return slice
+    }
+
     mutating func readFixedPoint16_16() throws -> Int {
         let firstValue = try readInt(as: UInt8.self)
         let secondValue = try readInt(as: UInt8.self)

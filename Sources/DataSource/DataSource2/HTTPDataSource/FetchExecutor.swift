@@ -7,123 +7,300 @@
 
 import Foundation
 import SEPlayerCommon
-import Playgrounds
 
 public final class FetchExecutor: @unchecked Sendable {
-    var runningFetches: [Fetch] {
-        assert(queue.isCurrent())
-        return Array(fetches.values)
-    }
+    private let queue: any Queue
+    private let factory: any HTTPTransportFactory
 
-    private let queue: Queue
-    private let dataSpec: DataSpec
-    private let factory: HTTPTransportFactory
-    private let eventSink: @Sendable (UUID, TransportEvent) -> Void
-
-    private(set) var fetches: [UUID: Fetch] = [:]
+    private var sourceLenght: Int?
+    private var fetches = [UUID: FetchesStorage]()
 
     init(
-        queue: Queue,
-        dataSpec: DataSpec,
-        factory: HTTPTransportFactory,
-        eventSink: @escaping @Sendable (UUID, TransportEvent) -> Void
+        queue: any Queue,
+        factory: any HTTPTransportFactory,
     ) {
         self.queue = queue
-        self.dataSpec = dataSpec
         self.factory = factory
-        self.eventSink = eventSink
     }
 
-    func ensureFetch(covering range: Range<Int>, policy: FetchPolicy) throws {
-        assert(queue.isCurrent())
-        if findAttachable(for: range) != nil { return }
-        let planned = plannedRange(for: range, policy: policy)
-        guard !planned.isEmpty else { throw IOError(message: nil, cause: nil) }
-        startFetch(range: planned)
-    }
+    @discardableResult
+    func register(dataSpec: DataSpec, transportDelegate: any TransportEventDelegate) -> Fetch2 {
+        let fetchesForAttaching = fetches.values.filter { $0.canHandle(spec: dataSpec) }
 
-    func fetch(byID id: UUID) -> Fetch? {
-        assert(queue.isCurrent())
-        return fetches[id]
-    }
+        guard !fetchesForAttaching.isEmpty else {
+            let storage = createNewFetchRequest(dataSpec: dataSpec, transportDelegate: transportDelegate)
+            let fetch = Fetch2(
+                parentId: storage.id,
+                readOffset: dataSpec.position,
+                readLenght: dataSpec.length
+            )
+            storage.registerFetch(fetch: fetch)
+            fetches[storage.id] = storage
+            return fetch
+        }
 
-    func cancel(id: UUID) {
-        assert(queue.isCurrent())
-        guard let fetch = fetches.removeValue(forKey: id) else { return }
-        fetch.transport.cancel()
-    }
+        let fetchForAttaching: FetchesStorage
 
-    func cancelAll() {
-        assert(queue.isCurrent())
-        for fetch in fetches.values { fetch.transport.cancel() }
-        fetches.removeAll()
+        if fetchesForAttaching.count == 1 {
+            fetchForAttaching = fetchesForAttaching[0]
+        } else {
+            fetchForAttaching = fetchesForAttaching.min(by: {
+                abs($0.offset - dataSpec.position) < abs($1.offset - dataSpec.position)
+            }) ?? fetchesForAttaching[0]
+        }
+
+        switch fetchForAttaching.lenght {
+        case .none:
+            // HTTP Response without Content-Lenght header or Chunked transfer encoding
+            let fetch = Fetch2(
+                parentId: fetchForAttaching.id,
+                readOffset: dataSpec.position,
+                readLenght: dataSpec.length
+            )
+            fetchForAttaching.registerFetch(fetch: fetch)
+            return fetch
+        case .some(_):
+            if abs(dataSpec.range2.lowerBound - fetchForAttaching.loadingPosition) > 50000 {
+                fallthrough
+            }
+
+            // TODO: calculate based on network speed
+            let fetch = Fetch2(
+                parentId: fetchForAttaching.id,
+                readOffset: dataSpec.position,
+                readLenght: dataSpec.length
+            )
+            fetchForAttaching.registerFetch(fetch: fetch)
+            return fetch
+        default:
+            let storage = createNewFetchRequest(
+                dataSpec: dataSpec.buildUpon().setLength(nil).build(),
+                transportDelegate: transportDelegate
+            )
+            let fetch = Fetch2(
+                parentId: storage.id,
+                readOffset: dataSpec.position,
+                readLenght: dataSpec.length
+            )
+            storage.registerFetch(fetch: fetch)
+            fetches[storage.id] = storage
+            return fetch
+        }
     }
 
     func recordBytesReceived(fetchID: UUID, count: Int) {
-        assert(queue.isCurrent())
-        guard let fetch = fetches[fetchID] else { return }
-        fetch.bytesReceived += count
-        fetch.lastBytesAt = DispatchTime.now()
+        guard let storage = fetches[fetchID] else { return }
+        storage.registerBytesReceived(count: count)
     }
 
     func recordStatusChange(fetchID: UUID, status: TransportStatus) {
-        assert(queue.isCurrent())
-        guard let fetch = fetches[fetchID] else { return }
-        fetch.status = status
+        guard let storage = fetches[fetchID] else { return }
+
         switch status {
-        case .completed, .failed, .cancelled:
-            fetches.removeValue(forKey: fetchID)
-        case .pending, .running:
-            break
+        case .pending:
+            return
+        case let .running(readLenght):
+            storage.lenght = readLenght
+
+            let fetches = storage.runningFetches.values.filter { $0.readRange.isEmpty }
+            fetches.forEach {
+                $0.continuation?.resume()
+                $0.continuation = nil
+                storage.runningFetches.removeValue(forKey: $0.requestId)
+            }
+
+            return
+        case .completed:
+            storage.finishAll()
+            fetches.removeValue(forKey: storage.id)
+        case .cancelled:
+            storage.finishAll()
+            fetches.removeValue(forKey: storage.id)
+        case let .failed(error):
+            storage.finishAll(with: error)
+            fetches.removeValue(forKey: storage.id)
         }
     }
 
-    private func findAttachable(for range: Range<Int>) -> Fetch? {
-        for fetch in fetches.values where fetch.range.contains(range) {
-            // TODO: integrate download-speed-based stall prediction here.
-            return fetch
+    func cancel(fetch: Fetch2) {
+        guard let storage = fetches[fetch.parentId] else {
+            return
         }
-        return nil
+
+        fetch.continuation?.resume(throwing: CancellationError())
+        fetch.continuation = nil
+        storage.runningFetches.removeValue(forKey: fetch.requestId)
     }
 
-    private func plannedRange(for range: Range<Int>, policy: FetchPolicy) -> Range<Int> {
-        let upper = max(range.upperBound, policy.fetchUpTo)
-        return range.lowerBound..<upper
+    func cancelAll() {
+        fetches.values.forEach { $0.cancelAll() }
+        fetches.removeAll()
     }
 
-    private func startFetch(range: Range<Int>) {
-        let id = UUID()
-        let sink = self.eventSink
-        let transport = factory.makeTransport(
-            dataSpec: dataSpec,
-            rangeID: id,
-            eventSink: { event in sink(id, event) }
+    private func createNewFetchRequest(dataSpec: DataSpec, transportDelegate: any TransportEventDelegate) -> FetchesStorage {
+        let fetchId = UUID()
+        let transport = factory.makeTransport(dataSpec: dataSpec, rangeID: fetchId, delegate: transportDelegate)
+        defer { transport.start() }
+
+        let defaultCanclBytes = Int(getpagesize() * 5)
+        return FetchesStorage(
+            id: fetchId,
+            offset: dataSpec.position,
+            lenght: dataSpec.length,
+            transport: transport,
+            bytesDownloadedForTaskCancellation: defaultCanclBytes
         )
-        let fetch = Fetch(id: id, range: range, transport: transport)
-        fetches[id] = fetch
-        transport.start()
     }
 }
 
 extension FetchExecutor {
-    public final class Fetch {
-        public let id: UUID
-        public let range: Range<Int>
-        public let transport: HTTPTransport
-        public let startedAt: DispatchTime
-        public fileprivate(set) var status: TransportStatus
-        public fileprivate(set) var bytesReceived: Int
-        public fileprivate(set) var lastBytesAt: DispatchTime
+    final class Fetch2 {
+        let parentId: UUID
+        let requestId: UUID
+        let readRange: Range<Int>
+        fileprivate var continuation: CheckedContinuation<(), any Error>?
 
-        init(id: UUID, range: Range<Int>, transport: HTTPTransport) {
+        init(parentId: UUID, readOffset: Int, readLenght: Int?) {
+            self.parentId = parentId
+            self.readRange = if let readLenght {
+                readOffset..<(readOffset + readLenght)
+            } else {
+                readOffset..<readOffset
+            }
+
+            requestId = UUID()
+        }
+
+        func waitForResult() async throws {
+            return try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+    }
+
+    final class FetchesStorage {
+        let id: UUID
+        let offset: Int
+        let transport: any HTTPTransport
+//        let startedAt: DispatchTime
+//        let idleIntervalForTaskCancellation: DispatchTimeInterval
+
+        var bytesRecieved = 0
+        var lenght: Int? {
+            didSet {
+                if let lenght {
+                    bytesUntilTaskCancelation = min(bytesUntilTaskCancelation, lenght)
+                }
+            }
+        }// TODO: change to empty range (3..<3)
+        var status: TransportStatus
+        var bytesUntilTaskCancelation: Int
+//        var deadlineUntilTaskCancelation: DispatchTime
+        var runningFetches = [UUID: Fetch2]()
+
+        var loadingPosition: Int {
+            offset + bytesRecieved
+        }
+
+        var range: Range<Int> {
+            if let lenght {
+                offset..<(offset + lenght)
+            } else {
+                offset..<offset
+            }
+        }
+
+        init(
+            id: UUID,
+            offset: Int,
+            lenght: Int?,
+            transport: any HTTPTransport,
+            bytesDownloadedForTaskCancellation: Int,
+//            idleIntervalForTaskCancellation: DispatchTimeInterval
+        ) {
             self.id = id
-            self.range = range
+            self.offset = offset
+            self.lenght = lenght
             self.transport = transport
-            let now = DispatchTime.now()
-            self.startedAt = now
-            self.lastBytesAt = now
-            self.status = .pending
-            self.bytesReceived = 0
+            self.bytesUntilTaskCancelation = bytesDownloadedForTaskCancellation
+//            self.idleIntervalForTaskCancellation = idleIntervalForTaskCancellation
+
+//            startedAt = .now()
+            status = .pending
+//            deadlineUntilTaskCancelation = .distantFuture
+        }
+
+        func canHandle(spec: DataSpec) -> Bool {
+            guard offset <= spec.position else {
+                return false
+            }
+
+            switch (lenght, spec.length) {
+            case (let .some(lenght), .some(_)):
+                let fetchRange = offset..<(offset + lenght)
+                return fetchRange.contains(spec.range2)
+            case (_, .none):
+                return true
+            case (.none, _):
+                return true
+            default:
+                return false
+            }
+        }
+
+        func updateStatus(_ transportStatus: TransportStatus) {
+//            switch transportStatus {
+//            case .running:
+//                deadlineUntilTaskCancelation = .now().advanced(by: idleIntervalForTaskCancellation)
+//            default:
+//                return
+//            }
+        }
+
+        func registerFetch(fetch: Fetch2) {
+            runningFetches[fetch.requestId] = fetch
+            if !fetch.readRange.isEmpty {
+                bytesUntilTaskCancelation += fetch.readRange.count
+            }
+        }
+
+        func registerBytesReceived(count: Int) {
+            bytesUntilTaskCancelation -= count
+
+            if bytesUntilTaskCancelation <= 0 && runningFetches.isEmpty {
+//                print("❤️ CANCEL for request = \(range)")
+//                transport.cancel()
+            }
+
+            bytesRecieved += count
+            let availableRange = offset..<(offset + bytesRecieved)
+            for (id, fetch) in runningFetches {
+                guard !fetch.readRange.isEmpty else { continue }
+
+                if availableRange.contains(fetch.readRange) {
+                    fetch.continuation?.resume()
+                    runningFetches.removeValue(forKey: id)
+                }
+            }
+        }
+
+        func finishAll(with error: (any Error)? = nil) {
+            print("❤️ FINISH for request = \(range)")
+            runningFetches.values.forEach {
+                if let error {
+                    $0.continuation?.resume(throwing: error)
+                } else {
+                    $0.continuation?.resume()
+                }
+            }
+            runningFetches.removeAll()
+        }
+
+        func cancelAll() {
+            runningFetches.values.forEach {
+                $0.continuation?.resume(throwing: CancellationError())
+            }
+            runningFetches.removeAll()
         }
     }
 }

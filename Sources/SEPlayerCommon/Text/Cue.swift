@@ -5,6 +5,7 @@
 //  Created by tvrrp on 23.02.2026.
 //
 
+import CoreMedia
 import Foundation
 
 public struct Cue: Codable, @unchecked Sendable {
@@ -20,6 +21,11 @@ public struct Cue: Codable, @unchecked Sendable {
 
     func buildUpon() -> Builder {
         Builder(cue: self)
+    }
+
+    public func encode() throws -> CMBlockBuffer {
+
+        fatalError()
     }
 
 //    public init(from decoder: any Decoder) throws {

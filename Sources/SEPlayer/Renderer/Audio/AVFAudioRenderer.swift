@@ -598,6 +598,12 @@ final class AVFAudioRenderer: AVFBaseRenderer<AudioConverterDecoder> {
         renderSynchronizer.setRate(renderSynchronizer.rate, time: position)
     }
 
+    override func renderOutputBuffer(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
+        lastSampleTimingInfos = try sampleBuffer.sampleTimingInfos()
+        audioRenderer.enqueue(sampleBuffer)
+        return true
+    }
+
     override func renderOutputBuffer(_ buffer: ACDecoderOutputBuffer) throws -> Bool {
 //        guard audioRenderer.isReadyForMoreMediaData else {
 //            return false

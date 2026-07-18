@@ -252,12 +252,12 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
             }
         }
 
-        if resetDecoder {
-            outputBuffer.release()
-        } else if outputBuffer.shouldBeSkipped {
-            lock.withLock { skippedOutputBufferCount += 1 }
-            outputBuffer.release()
-        } else {
+//        if resetDecoder {
+//            outputBuffer.release()
+//        } else if outputBuffer.shouldBeSkipped {
+//            lock.withLock { skippedOutputBufferCount += 1 }
+//            outputBuffer.release()
+//        } else {
             outputBuffer.skippedOutputBufferCount = skippedOutputBufferCount
             lock.withLock { skippedOutputBufferCount = 0 }
 
@@ -267,7 +267,7 @@ open class SimpleDecoder<I: DecoderInputBuffer, O: SimpleDecoderOutputBuffer, E:
                 lock.withLock { decodeError = createDecodeError(error) }
                 return false
             }
-        }
+//        }
 
         lock.withLock { releaseInputBufferInternal(inputBuffer) }
         onInputBufferAvailable?()

@@ -693,6 +693,13 @@ final class AVFVideoRenderer: AVFBaseRenderer<VTDecoder> {
         renderersStorage.setPresentationTimeExpectation(.minimumUpcoming(timingInfo.presentationTimeStamp))
     }
 
+    override func renderOutputBuffer(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
+        renderersStorage.enqueue(sampleBuffer)
+//        outputBuffer.release()
+        firstFrameState = .rendered
+        return true
+    }
+
     override func renderOutputBuffer(_ buffer: VTDecoderOutputBuffer) throws -> Bool {
 //        let positionUs = renderersStorage.controlTimebase.time.microseconds
 //        let earlyUs = buffer.timeUs - positionUs

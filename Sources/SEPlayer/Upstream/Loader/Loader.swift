@@ -6,6 +6,7 @@
 //
 
 import Dispatch
+import Foundation
 import SEPlayerCommon
 
 public protocol Loadable {

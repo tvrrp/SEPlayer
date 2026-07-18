@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 23.11.2025.
 //
 
-import Dispatch
+import Foundation
 import SEPlayerCommon
 
 public protocol HandlerWrapperMessage: AnyObject {

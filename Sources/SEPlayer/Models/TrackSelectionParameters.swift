@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import SEPlayerCommon
 
 // TODO: RoleFlags setters
@@ -590,7 +591,11 @@ public extension TrackSelectionParameters {
         }
 
         private func normalizeLanguageCode(_ s: String) -> String {
-            s.replacingOccurrences(of: "_", with: "-").lowercased()
+            if #available(iOS 16, *) {
+                s.replacing("_", with: "-").lowercased()
+            } else {
+                s.replacingOccurrences(of: "_", with: "-").lowercased()
+            }
         }
 
         private func normalizeLanguageCodes(_ languages: [String]) -> [String] {

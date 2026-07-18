@@ -20,7 +20,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     var volume: Float {
         get { _volume }
         set {
-            _volume = volume
+            _volume = newValue
             // TODO: add ability to change volume renderers.forEach { $0.volume = newValue }
         }
     }
@@ -335,7 +335,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             case let .periodPrepared(mediaPeriod):
                 try handlePeriodPrepared(mediaPeriod: mediaPeriod)
             case let .sourceContinueLoadingRequested(mediaPeriod):
-                handleContinueLoadingRequested(mediaPeriod: mediaPeriod)
+                try handleContinueLoadingRequested(mediaPeriod: mediaPeriod)
             case .trackSelectionInvalidated:
                 try reselectTracksInternal()
             case let .playbackParametersChangedInternal(parameters):
@@ -716,7 +716,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             if !playingPeriodHolder.isFullyBuffered() {
                 periodQueue.removeAfter(mediaPeriodHolder: playingPeriodHolder)
                 handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
-                maybeContinueLoading()
+                try maybeContinueLoading()
             }
             try! resetRendererPosition(periodPosition: discontinuityPosition)
             if discontinuityPosition != playbackInfo.position {
@@ -777,7 +777,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
         if playingPeriodHolder.isPrepared {
             rendererPositionElapsedRealtime = clock.time
-            playingPeriodHolder.mediaPeriod.discardBuffer(
+            try playingPeriodHolder.mediaPeriod.discardBuffer(
                 position: playbackInfo.position - backBufferDuration,
                 toKeyframe: retainBackBufferFromKeyframe
             )
@@ -1099,15 +1099,15 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             if !newPlayingPeriodHolder.isPrepared {
                 newPlayingPeriodHolder.info = newPlayingPeriodHolder.info.copyWithStartPosition(periodPosition)
             } else if newPlayingPeriodHolder.hasEnabledTracks {
-                periodPosition = newPlayingPeriodHolder.mediaPeriod.seek(position: periodPosition)
-                newPlayingPeriodHolder.mediaPeriod.discardBuffer(
+                periodPosition = try newPlayingPeriodHolder.mediaPeriod.seek(position: periodPosition)
+                try newPlayingPeriodHolder.mediaPeriod.discardBuffer(
                     position: periodPosition - backBufferDuration,
                     toKeyframe: retainBackBufferFromKeyframe
                 )
             }
 
             try! resetRendererPosition(periodPosition: periodPosition)
-            maybeContinueLoading()
+            try maybeContinueLoading()
         } else {
             periodQueue.clear()
             try! resetRendererPosition(periodPosition: periodPosition)
@@ -1526,7 +1526,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             let recreateStreams = removeAfterResult.contains(.alteredReadingPeriod)
             var streamResetFlags = Array(repeating: false, count: renderers.count)
 
-            let periodPosition = playingPeriodHolder.applyTrackSelection(
+            let periodPosition = try playingPeriodHolder.applyTrackSelection(
                 newTrackSelectorResult: newPlayingPeriodTrackSelectorResult,
                 position: playbackInfo.position,
                 forceRecreateStreams: recreateStreams,
@@ -1558,7 +1558,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                     continue
                 }
 
-                try renderer.maybeDisableOrResetPosition(
+                try renderer.maybeDisableOrResetPosition2(
                     sampleStream: sampleStream,
                     mediaClock: mediaClock,
                     rendererPosition: rendererPosition,
@@ -1592,7 +1592,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                     disableAndResetPrewarmingRenderers()
                 }
 
-                periodHolder.applyTrackSelection(
+                try periodHolder.applyTrackSelection(
                     trackSelectorResult: newTrackSelectorResult,
                     position: loadingPeriodPosition,
                     forceRecreateStreams: false
@@ -1602,7 +1602,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
         handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: true)
         if playbackInfo.state != .ended {
-            maybeContinueLoading()
+            try maybeContinueLoading()
             try updatePlaybackPositions()
             handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
         }
@@ -1849,7 +1849,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             shouldContinueLoading = isLoadingPossible(mediaPeriodHolder: periodQueue.loading)
             updateIsLoading()
         } else {
-            maybeContinueLoading()
+            try maybeContinueLoading()
         }
 
         return loadingPeriodChanged
@@ -1898,7 +1898,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             if !prewarmingPeriod.isFullyBuffered() {
                 periodQueue.removeAfter(mediaPeriodHolder: prewarmingPeriod)
                 handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
-                maybeContinueLoading()
+                try maybeContinueLoading()
             }
         }
     }
@@ -1979,7 +1979,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 if !readingPeriodHolder.isFullyBuffered() {
                     periodQueue.removeAfter(mediaPeriodHolder: readingPeriodHolder)
                     handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
-                    maybeContinueLoading()
+                    try maybeContinueLoading()
                 }
                 
                 return
@@ -2216,12 +2216,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 discontinuityReason: .internal
             )
         }
-        maybeContinueLoading()
+        try maybeContinueLoading()
     }
 
-    private func handleContinueLoadingRequested(mediaPeriod: MediaPeriod) {
+    private func handleContinueLoadingRequested(mediaPeriod: MediaPeriod) throws {
         if periodQueue.isLoading(mediaPeriod: mediaPeriod) {
-            maybeContinueLoading()
+            try maybeContinueLoading()
         } else if periodQueue.isPreloading(mediaPeriod: mediaPeriod) {
             maybeContinuePreloading()
         }
@@ -2254,8 +2254,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         }
     }
 
-    private func maybeContinueLoading() {
-        shouldContinueLoading = shouldContinueLoadingPeriod()
+    private func maybeContinueLoading() throws {
+        shouldContinueLoading = try shouldContinueLoadingPeriod()
         if shouldContinueLoading, let loadingPeriod = periodQueue.loading {
             loadingPeriod.continueLoading(loadingInfo: .init(
                 playbackPosition: loadingPeriod.toPeriodTime(rendererTime: rendererPosition),
@@ -2266,7 +2266,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         updateIsLoading()
     }
 
-    private func shouldContinueLoadingPeriod() -> Bool {
+    private func shouldContinueLoadingPeriod() throws -> Bool {
         guard let loadingPeriod = periodQueue.loading, isLoadingPossible(mediaPeriodHolder: loadingPeriod) else {
             return false
         }
@@ -2299,7 +2299,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         if let playing = periodQueue.playing, !shouldContinueLoading,
            playing.isPrepared, bufferedDuration < .from(microseconds: 500_000), // TODO: conts
            backBufferDuration > .zero || retainBackBufferFromKeyframe {
-            playing.mediaPeriod.discardBuffer(position: playbackInfo.position, toKeyframe: false)
+            try playing.mediaPeriod.discardBuffer(position: playbackInfo.position, toKeyframe: false)
             shouldContinueLoading = loadControl.shouldContinueLoading(with: loadParameters)
         }
 
@@ -2422,7 +2422,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         let joining = !wasRendererEnabled && playing
         enabledRendererCount += 1
 
-        try! renderer.enable(
+        try! renderer.enable2(
             trackSelection: newSelection,
             stream: sampleStream,
             position: rendererPosition,

@@ -18,7 +18,7 @@ final class MediaPeriodHolder {
     let id: AnyHashable
     let rendererCapabilities: [RendererCapabilitiesResolver]
 
-    var sampleStreams: [TriggerableSampleStream?]
+    var sampleStreams: [SampleStream2?]
     let targetPreloadBufferDuration: CMTime
     var info: MediaPeriodInfo
 
@@ -111,9 +111,9 @@ final class MediaPeriodHolder {
         if info.duration.isValid && requestedStartPosition >= info.duration {
             requestedStartPosition = max(.zero, CMTime(value: info.duration.value - 1, timescale: info.duration.timescale))
         }
-        let newStartPosition = applyTrackSelection(trackSelectorResult: selectorResult,
-                                                   position: requestedStartPosition,
-                                                   forceRecreateStreams: false)
+        let newStartPosition = try applyTrackSelection(trackSelectorResult: selectorResult,
+                                                       position: requestedStartPosition,
+                                                       forceRecreateStreams: false)
         renderPositionOffset = renderPositionOffset + info.startPosition - newStartPosition
         info = info.copyWithStartPosition(newStartPosition)
     }
@@ -143,10 +143,10 @@ final class MediaPeriodHolder {
         trackSelectorResult: TrackSelectorResult,
         position: CMTime,
         forceRecreateStreams: Bool
-    ) -> CMTime {
+    ) throws -> CMTime {
         assert(queue.isCurrent())
         var streamResetFlags = Array(repeating: false, count: rendererCapabilities.count)
-        return applyTrackSelection(
+        return try applyTrackSelection(
             newTrackSelectorResult: trackSelectorResult,
             position: position,
             forceRecreateStreams: forceRecreateStreams,
@@ -159,7 +159,7 @@ final class MediaPeriodHolder {
         position: CMTime,
         forceRecreateStreams: Bool,
         streamResetFlags: inout [Bool]
-    ) -> CMTime {
+    ) throws -> CMTime {
         for index in 0..<newTrackSelectorResult.selections.count {
             mayRetainStreamFlags[index] = !forceRecreateStreams
                 && trackSelectorResults == newTrackSelectorResult
@@ -170,7 +170,7 @@ final class MediaPeriodHolder {
         self.trackSelectorResults = newTrackSelectorResult
         enableTrackSelectionsInResult()
 
-        let position = mediaPeriod.selectTrack(
+        let position = try mediaPeriod.selectTrack(
             selections: newTrackSelectorResult.selections,
             mayRetainStreamFlags: mayRetainStreamFlags,
             streams: &sampleStreams,
@@ -238,7 +238,7 @@ final class MediaPeriodHolder {
         }
     }
 
-    func disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [TriggerableSampleStream?]) {
+    func disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream2?]) {
         for (index, capability) in rendererCapabilities.enumerated() {
             if capability.trackType == .unknown {
                 sampleStreams[index] = nil
@@ -246,10 +246,10 @@ final class MediaPeriodHolder {
         }
     }
 
-    func associateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [TriggerableSampleStream?]) {
+    func associateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream2?]) {
         for (index, capability) in rendererCapabilities.enumerated() {
             if capability.trackType == .unknown, trackSelectorResults.isRendererEnabled(for: index) {
-                sampleStreams[index] = EmptySampleStream()
+                sampleStreams[index] = EmptySampleStream2()
             }
         }
     }

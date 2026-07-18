@@ -22,6 +22,19 @@ public protocol SampleStream: AnyObject {
     case didReadBuffer
 }
 
+public protocol SampleStream2: AnyObject, TriggerableSampleStream2 {
+    func isReady() -> Bool
+    func maybeThrowError() throws
+    func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult2
+    func skipData(position: CMTime) throws -> Int
+}
+
+@frozen public enum SampleStreamReadResult2: Equatable {
+    case nothingRead
+    case didReadFormat(format: Format)
+    case didReadBuffer(_ buffer: CMSampleBuffer)
+}
+
 public struct ReadFlags: OptionSet {
     public let rawValue: UInt8
 

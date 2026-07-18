@@ -57,7 +57,7 @@ extension AVSampleBufferDisplayLayer {
             return service
         }
 
-        let service: VideoSampleBufferRenderer = if #available(iOS 17, *) {
+        let service: VideoSampleBufferRenderer = if #available(macOS 14.4, iOS 17.4, tvOS 17.4, visionOS 1.1, *) {
             AVSBVideoRenderer(renderer: self.sampleBufferRenderer, layer: self)
         } else {
             AVSBDLVideoRenderer(layer: self)
@@ -72,17 +72,17 @@ extension AVSampleBufferDisplayLayer {
 //        TODO: think about this
         switch expectation {
         case let .minimumUpcoming(time):
-            let selector = Selector("expectMinimumUpcomingSampleBufferPresentationTime:")
+            let selector = NSSelectorFromString("expectMinimumUpcomingSampleBufferPresentationTime:")
             if responds(to: selector) {
                 perform(selector, with: time)
             }
         case .monotonicallyIncreasing:
-            let selector = Selector("expectMonotonicallyIncreasingUpcomingSampleBufferPresentationTimes")
+            let selector = NSSelectorFromString("expectMonotonicallyIncreasingUpcomingSampleBufferPresentationTimes")
             if responds(to: selector) {
                 perform(selector)
             }
         case .none:
-            let selector = Selector("resetUpcomingSampleBufferPresentationTimeExpectations")
+            let selector = NSSelectorFromString("resetUpcomingSampleBufferPresentationTimeExpectations")
             if responds(to: selector) {
                 perform(selector)
             }
@@ -104,11 +104,10 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     }
 
     private let lock = UnfairLock()
-    private let layer: AVSampleBufferDisplayLayer
+    private nonisolated(unsafe) let layer: AVSampleBufferDisplayLayer
     private nonisolated(unsafe) let renderer: AVSampleBufferVideoRenderer
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
-    private nonisolated(unsafe) weak var previosRenderSynchronizer: AVSampleBufferRenderSynchronizer?
 
     @MainActor
     init(renderer: AVSampleBufferVideoRenderer, layer: AVSampleBufferDisplayLayer) {
@@ -130,7 +129,7 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     }
 
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
-        if #available(iOS 17.4, *) {
+        if #available(macOS 14.4, iOS 17.4, tvOS 17.4, visionOS 1.1, *) {
             switch expectation {
             case .none:
                 renderer.presentationTimeExpectation = .none
@@ -196,12 +195,11 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
         self.layer.hasSufficientMediaDataForReliablePlaybackStart
     }
 
-    private let layer: AVSampleBufferDisplayLayer
+    private nonisolated(unsafe) let layer: AVSampleBufferDisplayLayer
     private let lock = UnfairLock()
 
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
-    private weak var previosRenderSynchronizer: AVSampleBufferRenderSynchronizer?
 
     @MainActor
     init(layer: AVSampleBufferDisplayLayer) {
@@ -252,9 +250,9 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     @available(iOS 17.0, *)
     func flushAsync(removeImage: Bool) async {
         if removeImage {
-            layer.flushAndRemoveImage()
+            await layer.flushAndRemoveImage()
         } else {
-            layer.flush()
+            await layer.flush()
         }
     }
 

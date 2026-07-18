@@ -71,10 +71,11 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         allocator: Allocator,
         startPosition: CMTime
     ) throws -> MediaPeriod {
-        let dataSource = dataSourceFactory.createDataSource()
-        if let mediaTransferListener {
-            dataSource.addTransferListener(mediaTransferListener)
-        }
+        let dataSource2  = dataSourceFactory.createDataSource2()
+//        TODO: return
+//        if let mediaTransferListener {
+//            dataSource.addTransferListener(mediaTransferListener)
+//        }
 
         guard let localConfiguration = mediaItem.localConfiguration else {
             throw ErrorBuilder.illegalState
@@ -84,7 +85,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
             url: localConfiguration.url,
             queue: queue,
             loadQueue: loaderQueue,
-            dataSource: dataSource,
+            dataSource: dataSource2,
             progressiveMediaExtractor: BundledMediaExtractor(
                 syncActor: loaderQueue.playerActor(),
                 extractorsFactory: extractorsFactory

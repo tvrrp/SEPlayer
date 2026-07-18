@@ -7,6 +7,7 @@
 
 import AVFoundation
 import SEPlayerCommon
+import VideoToolbox
 
 public protocol RenderersFactory {
     func createRenderers(
@@ -17,6 +18,21 @@ public protocol RenderersFactory {
 }
 
 struct DefaultRenderersFactory: RenderersFactory {
+    init() {
+#if os(macOS)
+        VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
+#elseif targetEnvironment(macCatalyst)
+        typealias RegisterFn = @convention(c) (CMVideoCodecType) -> Void
+        if let sym = dlsym(dlopen(nil, RTLD_NOW), "VTRegisterSupplementalVideoDecoderIfAvailable") {
+            unsafeBitCast(sym, to: RegisterFn.self)(kCMVideoCodecType_VP9)
+        }
+#else
+        if #available(iOS 26.2, tvOS 26.2, visionOS 26.2, *) {
+            VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
+        }
+#endif
+    }
+
     func createRenderers(
         queue: Queue,
         clock: SEClock,

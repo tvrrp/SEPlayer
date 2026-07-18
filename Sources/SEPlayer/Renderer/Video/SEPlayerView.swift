@@ -5,18 +5,28 @@
 //  Created by Damir Yackupov on 25.01.2025.
 //
 
-import AVFoundation
+#if canImport(UIKit)
 import UIKit
+public typealias SEPlatformView = UIView
+#elseif canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AppKit
+public typealias SEPlatformView = NSView
+#endif
+
+#if canImport(UIKit) || canImport(AppKit)
+import AVFoundation
 import SEPlayerCommon
 
 public protocol SEPlayerViewDelegate: AnyObject {
     func willRenderNewBuffer(_ view: SEPlayerView, of size: CGSize)
 }
 
-public final class SEPlayerView: UIView {
+public final class SEPlayerView: SEPlatformView {
+#if canImport(UIKit)
     public override class var layerClass: AnyClass {
         AVSampleBufferDisplayLayer.self
     }
+#endif
 
     @MainActor public weak var delegate: SEPlayerViewDelegate?
 
@@ -42,11 +52,11 @@ public final class SEPlayerView: UIView {
 
     private weak var _player: SEPlayer?
 
-    private var oldIsReadyForMoreMediaData: Bool = true
-    private let lock = UnfairLock()
-
     public init() {
         super.init(frame: .zero)
+#if canImport(AppKit) && !targetEnvironment(macCatalyst)
+        wantsLayer = true
+#endif
         displayLayer.preventsDisplaySleepDuringVideoPlayback = true
     }
 
@@ -54,6 +64,12 @@ public final class SEPlayerView: UIView {
     public required init?(coder: NSCoder) {
         fatalError()
     }
+
+#if canImport(AppKit) && !targetEnvironment(macCatalyst)
+    public override func makeBackingLayer() -> CALayer {
+        AVSampleBufferDisplayLayer()
+    }
+#endif
 }
 
 private extension SEPlayerView {
@@ -65,3 +81,5 @@ private extension SEPlayerView {
         _player = player
     }
 }
+
+#endif

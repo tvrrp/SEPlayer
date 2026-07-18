@@ -91,14 +91,6 @@ public final class SignalQueue: Queue, Sendable {
         Task { await executeInternally(f, isolation: playerActor()) }
     }
 
-    public func sync<T>(_ f: () -> T) -> T {
-        if isCurrent() {
-            return f()
-        } else {
-            return nativeQueue.sync(execute: f)
-        }
-    }
-    
     public func sync<T>(_ f: () throws -> T) rethrows -> T {
         if isCurrent() {
             return try! f()

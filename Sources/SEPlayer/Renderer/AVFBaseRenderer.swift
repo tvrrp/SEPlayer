@@ -544,6 +544,10 @@ class AVFBaseRenderer<D: AVFDecoder>: BaseSERenderer {
         fatalError("Subclasses must override renderOutputBuffer(_:)")
     }
 
+    func renderOutputBuffer(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
+        fatalError("Subclasses must override renderOutputBuffer(_:)")
+    }
+
     func onOutputStreamEnded() throws {}
     func isReadyForMoreMediaData() -> Bool { false }
 
@@ -753,13 +757,13 @@ private extension AVFBaseRenderer {
     /// Reads the first format from the source when `inputFormat` is still nil.
     func ensureInputFormat() throws {
         guard inputFormat == nil else { return }
-        flagsOnlyBuffer.clear()
-        let result = try readSource(to: flagsOnlyBuffer, readFlags: .requireFormat)
+//        flagsOnlyBuffer.clear()
+        let result = try readSource2(readFlags: .requireFormat)
 
         switch result {
         case let .didReadFormat(format):
             try onInputFormatChanged(format)
-        case .didReadBuffer:
+        case let .didReadBuffer(flagsOnlyBuffer):
             assert(flagsOnlyBuffer.flags.contains(.endOfStream))
             inputStreamEnded = true
             outputStreamEnded = true
@@ -788,7 +792,7 @@ private extension AVFBaseRenderer {
         }
 
         // 3. Read from the sample source.
-        switch try readSource(to: buffer) {
+        switch try readSource2() {
         case .nothingRead:
 //            installSampleQueueTrigger()
             return false
@@ -796,7 +800,8 @@ private extension AVFBaseRenderer {
         case let .didReadFormat(format):
             try onInputFormatChanged(format)
             return true
-        case .didReadBuffer:
+        case let .didReadBuffer(sampleBuffer):
+            try buffer.setBuffer(sampleBuffer)
             if buffer.flags.contains(.endOfStream) {
                 inputStreamEnded = true
                 try decoder.queueInputBuffer(buffer)
@@ -806,18 +811,19 @@ private extension AVFBaseRenderer {
                 return false
             }
 
-            if !firstStreamSampleRead {
-                firstStreamSampleRead = true
-                buffer.flags.insert(.firstSample)
-            }
-
-            buffer.format = inputFormat
-            try decoder.queueInputBuffer(buffer)
+//            if !firstStreamSampleRead {
+//                firstStreamSampleRead = true
+//                buffer.flags.insert(.firstSample)
+//            }
+//
+//            buffer.format = inputFormat
+//            try decoder.queueInputBuffer(buffer)
+            try renderOutputBuffer(sampleBuffer)
             onSampleQueuedToDecoder(timingInfo: buffer.time, flags: buffer.flags)
             decoderReceivedBuffers = true
-            inputBuffer = nil
+//            inputBuffer = nil
 
-            return true
+            return isReadyForMoreMediaData()
         }
     }
 
@@ -998,7 +1004,7 @@ private extension AVFBaseRenderer {
     }
 
     func installSampleQueueTrigger() {
-        guard sampleQueueToken == nil, let stream = getStream() else { return }
+        guard sampleQueueToken == nil, let stream = getStream2() else { return }
 
         sampleQueueToken = stream.installTrigger(
             condition: .whenDataBecomesReady
@@ -1017,7 +1023,7 @@ private extension AVFBaseRenderer {
     }
 
     func removeSampleQueueTrigger() {
-        guard let token = sampleQueueToken, let stream = getStream() else { return }
+        guard let token = sampleQueueToken, let stream = getStream2() else { return }
         stream.removeTrigger(token)
         sampleQueueToken = nil
     }

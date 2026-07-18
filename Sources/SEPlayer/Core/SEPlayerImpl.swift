@@ -380,7 +380,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             let oldTimeline = timeline
             pendingOperationAcks += 1
             let finalInsertIndex = adjustedNewIndex > fromIndex ? adjustedNewIndex - itemCount : adjustedNewIndex
-            if #available(iOS 18.0, *) {
+            if #available(macOS 15.0, iOS 18.0, tvOS 18.0, visionOS 2.0, *) {
                 mediaSourceHolderSnapshots.moveSubranges(.init(clampedRange), to: finalInsertIndex)
             } else {
                 let itemsToMove = Array(mediaSourceHolderSnapshots[clampedRange])

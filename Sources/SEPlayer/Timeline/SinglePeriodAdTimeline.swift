@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 14.11.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 public final class SinglePeriodAdTimeline: ForwardingTimeline, @unchecked Sendable {

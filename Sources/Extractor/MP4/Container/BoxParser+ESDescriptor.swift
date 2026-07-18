@@ -8,6 +8,7 @@
 import AudioToolbox.AudioFormat
 import CoreMedia.CMFormatDescription
 import SEPlayerCommon
+import CoreAudio
 
 extension BoxParser {
     public struct EsdsData: Format.InitializationData {

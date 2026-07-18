@@ -22,6 +22,13 @@ struct Sniffer {
         try await sniffInternal(input: input, fragmented: false, isolation: isolation)
     }
 
+    func sniffUnfragmented2(
+        input: ExtractorInput2,
+        isolation: isolated any Actor
+    ) async throws -> SniffFailure? {
+        try await sniffInternal2(input: input, fragmented: false, isolation: isolation)
+    }
+
     private func sniffInternal(
         input: ExtractorInput,
         fragmented: Bool,
@@ -146,6 +153,154 @@ struct Sniffer {
                 }
             } else if atomDataSize != 0 {
                 try await input.advancePeekPosition(length: atomDataSize, isolation: isolation)
+            }
+        }
+
+        if !foundGoodFileType {
+            return NoDeclaredBrandSniffFailure()
+        } else if fragmented != isFragmented {
+            return isFragmented ? IncorrectFragmentationSniffFailure.fileFragmented() : IncorrectFragmentationSniffFailure.fileNotFragmented()
+        } else {
+            return nil
+        }
+    }
+
+    private func sniffInternal2(
+        input: ExtractorInput2,
+        fragmented: Bool,
+        isolation: isolated any Actor
+    ) async throws -> SniffFailure? {
+        let inputLength = input.getLength(isolation: isolation)
+        var bytesToSearch: Int = if let inputLength {
+            min(inputLength, .searchLenght)
+        } else {
+            .searchLenght
+        }
+
+//        var buffer = try BlockBufferReader()
+        var bytesSearched = 0
+        var foundGoodFileType = false
+        var isFragmented = false
+
+        while bytesSearched < bytesToSearch {
+            var headerSize = MP4Box.headerSize
+//            buffer.clear()
+//            let success = try await input.peekFully(
+//                to: &buffer,
+//                offset: 0,
+//                length: headerSize,
+//                allowEndOfInput: true,
+//                isolation: isolation
+//            )
+            let (blockBuffer, success) = try await input.readFully(
+                lenght: headerSize,
+                allowEndOfInput: true,
+                isolation: isolation
+            )
+            if !success { break }
+            var buffer = BlockBufferReader(blockBuffer)
+
+            var atomSize = try UInt64(buffer.readInt(as: UInt32.self))
+            let atomType = try buffer.readInt(as: UInt32.self)
+            if Int(atomSize) == MP4Box.definesLargeSize {
+                headerSize = MP4Box.longHeaderSize
+//                try await input.peekFully(
+//                    to: &buffer,
+//                    offset: MP4Box.headerSize,
+//                    length: MP4Box.longHeaderSize - MP4Box.headerSize,
+//                    isolation: isolation
+//                )
+                try await buffer.extend(with: input.readFully(
+                    lenght: MP4Box.longHeaderSize - MP4Box.headerSize,
+                    isolation: isolation
+                ))
+                atomSize = try buffer.readInt(as: UInt64.self)
+            } else if atomSize == MP4Box.extendsToEndSize {
+                if let fileEndPosition = input.getLength(isolation: isolation) {
+                    atomSize = UInt64(fileEndPosition - input.getPosition(isolation: isolation) + headerSize)
+                }
+            }
+
+            if atomSize < headerSize {
+                return AtomSizeTooSmallSniffFailure(
+                    atomType: .init(rawValue: atomType),
+                    atomSize: Int(atomSize),
+                    minimumHeaderSize: headerSize
+                )
+            }
+            bytesSearched += headerSize
+
+            if atomType == MP4Box.BoxType.moov.rawValue {
+                // We have seen the moov atom. We increase the search size to make sure we don't miss an
+                // mvex atom because the moov's size exceeds the search length.
+                bytesToSearch += Int(atomSize)
+                if let inputLength, bytesToSearch > inputLength {
+                    bytesToSearch = inputLength
+                }
+                // Check for an mvex atom inside the moov atom to identify whether the file is fragmented.
+                continue
+            }
+
+            if atomType == MP4Box.BoxType.moov.rawValue || atomType == MP4Box.BoxType.mvex.rawValue {
+                // The movie is fragmented. Stop searching as we must have read any ftyp atom already.
+                isFragmented = true
+                break
+            }
+
+            if atomType == MP4Box.BoxType.mdat.rawValue {
+                // The original QuickTime specification did not require files to begin with the ftyp atom.
+                // See https://developer.apple.com/standards/qtff-2001.pdf.
+                foundGoodFileType = true
+            }
+
+            if bytesSearched + Int(atomSize) - headerSize >= bytesToSearch {
+                // Stop searching as peeking this atom would exceed the search limit.
+                break
+            }
+
+            let atomDataSize = Int(atomSize) - headerSize
+            bytesSearched += atomDataSize
+
+            if atomType == MP4Box.BoxType.ftyp.rawValue {
+                guard atomSize > 8 else {
+                    return AtomSizeTooSmallSniffFailure(
+                        atomType: .ftyp,
+                        atomSize: Int(atomSize),
+                        minimumHeaderSize: 8
+                    )
+                }
+
+                buffer = try await BlockBufferReader(input.readFully(lenght: atomDataSize, isolation: isolation))
+//                buffer.clear(minimumCapacity: atomDataSize)
+//                try await input.peekFully(to: &buffer, offset: 0, length: atomDataSize, isolation: isolation)
+                let majorBrand = try buffer.readInt(as: UInt32.self)
+                if isCompatibleBrand(majorBrand) {
+                    foundGoodFileType = true
+                }
+                buffer.moveReaderIndex(forwardBy: 4) // Skip the minorVersion
+                let compatibleBrandsCount = buffer.readableBytes / 4
+
+                var compatibleBrands = [UInt32]()
+                if !foundGoodFileType, compatibleBrandsCount > 0 {
+                    for _ in 0..<compatibleBrandsCount {
+                        let compatibleBrand = try buffer.readInt(as: UInt32.self)
+                        compatibleBrands.append(compatibleBrand)
+                        if isCompatibleBrand(compatibleBrand) {
+                            foundGoodFileType = true
+                            break
+                        }
+                    }
+                }
+
+                if !foundGoodFileType {
+                    return UnsupportedBrandsSniffFailure(
+                        majorBrand: majorBrand,
+                        compatibleBrands: compatibleBrands
+                    )
+                }
+            } else if atomDataSize != 0 {
+                try input.skip(length: atomDataSize, isolation: isolation)
+//                try await input.advancePeekPosition(length: atomDataSize, isolation: isolation)
             }
         }
 

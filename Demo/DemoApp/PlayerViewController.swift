@@ -82,19 +82,37 @@ class PlayerViewController: UIViewController {
         super.viewDidLoad()
 
 //        let queue = SignalQueue()
-//        let actorTest = queue.playerActor()
-//        let dataSource2 = HTTPDataSource2(
-//            dataSpec: .spec(
-//                from: URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4")!
-//            ),
+//        let playerActor = queue.playerActor()
+//        let operationQueue = OperationQueue()
+//        operationQueue.maxConcurrentOperationCount = 1
+//        operationQueue.underlyingQueue = queue.queue
+//
+//        let dataSource2 = HTTPDataSource2<DefaultHTTPTransportFactory>(
 //            queue: queue,
-//            transportFactory: DefaultHTTPTransportFactory()
+//            transportFactory: DefaultHTTPTransportFactory(
+//                loadQueue: queue,
+//                sessionLoader: PlayerSessionLoader(queue: operationQueue)
+//            )
 //        )
 //
+//        let url = URL(string: "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4")!
+//        let dataSpec = DataSpec.Builder(url: url).build()
+//
 //        Task {
-//            let blockBuffer = try await dataSource2.read(range: 0..<100, isolation: actorTest)
-//            print(blockBuffer)
+//            do {
+//                let count = try await dataSource2.open(dataSpec: dataSpec, isolation: playerActor)!
+//                async let blockBuffer1 = try await dataSource2.read(range: 0..<100, isolation: playerActor)
+//                async let blockBuffer2 = try await dataSource2.read(range: (count - 1000)..<count, isolation: playerActor)
+//
+//                let blockBuffers = try await (blockBuffer1, blockBuffer2)
+//                try await Task.sleep(for: .seconds(5))
+//                let blockBuffer3 = try await dataSource2.read(range: 0..<100, isolation: playerActor)
+//                print()
+//            } catch {
+//                print(error)
+//            }
 //        }
+//
 //        return;
 
         view.insertSubview(playerView, at: 0)
