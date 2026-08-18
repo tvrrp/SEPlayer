@@ -9,15 +9,19 @@ import CoreMedia
 
 public protocol SequenceableLoaderCallback {
     associatedtype Source
+
     func continueLoadingRequested(with source: Source)
 }
 
 public protocol SequenceableLoader {
     var isLoading: Bool { get }
+
     func getBufferedPosition() -> CMTime
     func getNextLoadPosition() -> CMTime
+
     @discardableResult
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool
+    func stopLoading()
     func reevaluateBuffer(position: CMTime)
 }
 

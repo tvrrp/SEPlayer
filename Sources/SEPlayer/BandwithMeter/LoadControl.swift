@@ -17,6 +17,10 @@ public protocol LoadControl {
     func onReleased(playerId: UUID)
     func getAllocator() -> Allocator
     func getBackBufferDuration(playerId: UUID) -> CMTime
+    func getBufferForPlayback(playerId: UUID) -> CMTime
+    func getBufferForPlaybackAfterRebuffer(playerId: UUID) -> CMTime
+    func getMinBufferDuration(playerId: UUID) -> CMTime
+    func getMaxBufferDuration(playerId: UUID) -> CMTime
     func retainBackBufferFromKeyframe(playerId: UUID) -> Bool
     func shouldContinueLoading(with parameters: LoadControlParams) -> Bool
     func shouldContinuePreloading(timeline: Timeline, mediaPeriodId: MediaPeriodId, bufferedDuration: CMTime) -> Bool
@@ -115,6 +119,22 @@ final class DefaultLoadControl: LoadControl {
         return backBufferDuration
     }
 
+    func getBufferForPlayback(playerId: UUID) -> CMTime {
+        return bufferForPlayback
+    }
+
+    func getBufferForPlaybackAfterRebuffer(playerId: UUID) -> CMTime {
+        bufferForPlaybackAfterRebuffer
+    }
+
+    func getMinBufferDuration(playerId: UUID) -> CMTime {
+        return minBuffer
+    }
+
+    func getMaxBufferDuration(playerId: UUID) -> CMTime {
+        return maxBuffer
+    }
+
     func retainBackBufferFromKeyframe(playerId: UUID) -> Bool {
         return retainBackBufferFromKeyframe
     }
@@ -210,11 +230,11 @@ final class DefaultLoadControl: LoadControl {
 
 extension DefaultLoadControl {
     public enum DefaultConstants {
-        public static let minBuffer: CMTime = CMTime(seconds: 20, preferredTimescale: 1000)
+        public static let minBuffer: CMTime = CMTime(seconds: 2, preferredTimescale: 1000)
         public static let maxBuffer: CMTime = CMTime(seconds: 50, preferredTimescale: 1000)
-        public static let bufferForPlayback: CMTime = CMTime(seconds: 10, preferredTimescale: 1000)
-        public static let bufferForPlaybackAfterRebuffer: CMTime = CMTime(seconds: 10, preferredTimescale: 1000)
-        public static let backBufferDuration: CMTime = .zero
+        public static let bufferForPlayback: CMTime = CMTime(seconds: 1.5, preferredTimescale: 1000)
+        public static let bufferForPlaybackAfterRebuffer: CMTime = CMTime(seconds: 3, preferredTimescale: 1000)
+        public static let backBufferDuration: CMTime = CMTime(seconds: 3, preferredTimescale: 1000)
         public static let retainBackBufferFromKeyframe: Bool = true
     }
 

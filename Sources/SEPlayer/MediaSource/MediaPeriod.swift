@@ -19,7 +19,7 @@ public protocol MediaPeriod: SequenceableLoader, AnyObject {
     func selectTrack(
         selections: [SETrackSelection?],
         mayRetainStreamFlags: [Bool],
-        streams: inout [SampleStream2?],
+        streams: inout [SampleStream?],
         streamResetFlags: inout [Bool],
         position: CMTime
     ) throws -> CMTime

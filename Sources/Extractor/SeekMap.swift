@@ -7,17 +7,17 @@
 
 import CoreMedia
 
-public protocol SeekMap: AnyObject {
+public protocol SeekMap {
     func isSeekable() -> Bool
     func getDuration() -> CMTime
     func getSeekPoints(for time: CMTime) -> SeekPoints
 }
 
-public final class Unseekable: SeekMap {
+public struct Unseekable: SeekMap {
     private let duration: CMTime
     private let startSeekPoints: SeekPoints
 
-    public init(duration: CMTime, startPosition: Int) {
+    public init(duration: CMTime, startPosition: Int = 0) {
         self.duration = duration
         self.startSeekPoints = SeekPoints(
             first: startPosition == 0 ? .start : .init(time: .zero, position: startPosition)

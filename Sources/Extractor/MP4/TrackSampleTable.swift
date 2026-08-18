@@ -169,6 +169,15 @@ public struct TrackSampleTable {
         return syncSampleIndices[index]
     }
 
+    @inline(__always)
+    func timingInfo(at index: Int) -> CMSampleTimingInfo {
+        CMSampleTimingInfo(
+            duration: durations[index],
+            presentationTimeStamp: pts[index],
+            decodeTimeStamp: dts[index]
+        )
+    }
+
 //    func earlierOrEqualSyncSample(for timeUs: Int64) -> Int? {
 //        if hasOnlySyncSamples {
 //            return Util.binarySearch(

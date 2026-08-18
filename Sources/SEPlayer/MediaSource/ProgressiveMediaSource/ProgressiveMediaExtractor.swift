@@ -12,16 +12,16 @@ import SEPlayerCommon
 
 protocol ProgressiveMediaExtractor {
     func prepare(
-        dataReader: DataReader2,
+        dataReader: DataReader,
         url: URL,
         response: HTTPURLResponse?,
         position: Int,
         lenght: Int?,
-        output: ExtractorOutput2,
-        isolation: isolated any Actor
+        output: ExtractorOutput,
+        _ isolation: isolated any Actor
     ) async throws
     func release()
-    func getCurrentInputPosition(isolation: isolated any Actor) -> Int?
-    func seek(position: Int, time: CMTime, isolation: isolated any Actor) throws
-    func read(isolation: isolated any Actor) async throws -> ExtractorReadResult
+    func getCurrentInputPosition(_ isolation: isolated any Actor) -> Int?
+    func seek(position: Int, time: CMTime, _ isolation: isolated any Actor) throws
+    func read(_ isolation: isolated any Actor) async throws -> ExtractorReadResult
 }

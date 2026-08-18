@@ -721,7 +721,8 @@ final class MediaPeriodQueue {
         let duration = period.duration
         var startPosition = startPosition
         if duration.isValid && startPosition >= duration {
-            startPosition = max(.zero, duration - CMTime(value: isLastInTimeline ? 1 : 0, timescale: duration.timescale))
+            // TODO: check startPosition = max(.zero, duration - CMTime(value: isLastInTimeline ? 1 : 0, timescale: duration.timescale))
+            startPosition = max(.zero, duration)
         }
         return MediaPeriodInfo(
             id: id,

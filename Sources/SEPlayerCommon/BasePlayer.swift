@@ -9,23 +9,30 @@ import CoreMedia
 
 public protocol BasePlayer: Player {
     var window: Window { get set }
-    func seek(to mediaItemIndex: Int?, position: CMTime, isRepeatingCurrentItem: Bool)
+
+    func seek(
+        to mediaItemIndex: Int?,
+        position: CMTime,
+        isRepeatingCurrentItem: Bool,
+        seekParameters: SeekParameters,
+        completion: ((Bool) -> Void)?
+    )
 }
 
-extension BasePlayer {
-    public var isPlaying: Bool {
+public extension BasePlayer {
+    var isPlaying: Bool {
         playbackState == .ready && playWhenReady
     }
 
-    public var hasPreviousMediaItem: Bool {
+    var hasPreviousMediaItem: Bool {
         previousMediaItemIndex != nil
     }
 
-    public var hasNextMediaItem: Bool {
+    var hasNextMediaItem: Bool {
         nextMediaItemIndex != nil
     }
 
-    public var nextMediaItemIndex: Int? {
+    var nextMediaItemIndex: Int? {
         timeline.isEmpty ? nil : timeline.nextWindowIndex(
             windowIndex: currentMediaItemIndex,
             repeatMode: repeatModeForNavigation,
@@ -33,7 +40,7 @@ extension BasePlayer {
         )
     }
 
-    public var previousMediaItemIndex: Int? {
+    var previousMediaItemIndex: Int? {
         timeline.isEmpty ? nil : timeline.previousWindowIndex(
             windowIndex: currentMediaItemIndex,
             repeatMode: repeatModeForNavigation,
@@ -41,19 +48,18 @@ extension BasePlayer {
         )
     }
 
-    public var currentMediaItem: MediaItem? {
+    var currentMediaItem: MediaItem? {
         timeline.isEmpty ? nil : timeline.getWindow(
             windowIndex: currentMediaItemIndex,
             window: window
         ).mediaItem
     }
 
-    public var numberOfMediaItemsInPlaylist: Int {
+    var numberOfMediaItemsInPlaylist: Int {
         timeline.windowCount()
     }
 
-    public var bufferedPercentage: Int {
-        let position = bufferedPosition
+    var bufferedPercentage: Int {
         let duration = duration
         if !bufferedPosition.isValid || !duration.isValid {
             return .zero
@@ -64,15 +70,15 @@ extension BasePlayer {
         }
     }
 
-    public var isCurrentMediaItemDynamic: Bool {
+    var isCurrentMediaItemDynamic: Bool {
         !timeline.isEmpty && timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).isDynamic
     }
 
-    public var isCurrentMediaItemSeekable: Bool {
+    var isCurrentMediaItemSeekable: Bool {
         !timeline.isEmpty && timeline.getWindow(windowIndex: currentPeriodIndex ?? .zero, window: window).isSeekable
     }
 
-    public var contentDuration: CMTime {
+    var contentDuration: CMTime {
         if timeline.isEmpty {
             return .invalid
         } else {
@@ -84,36 +90,36 @@ extension BasePlayer {
     }
 }
 
-extension BasePlayer {
-    public func set(mediaItem: MediaItem) {
+public extension BasePlayer {
+    func set(mediaItem: MediaItem) {
         set(mediaItems: [mediaItem])
     }
 
-    public func set(mediaItem: MediaItem, startPosition: CMTime) {
+    func set(mediaItem: MediaItem, startPosition: CMTime) {
         set(mediaItems: [mediaItem], startIndex: 0, startPosition: startPosition)
     }
 
-    public func set(mediaItem: MediaItem, resetPosition: Bool) {
+    func set(mediaItem: MediaItem, resetPosition: Bool) {
         set(mediaItems: [mediaItem], resetPosition: resetPosition)
     }
 
-    public func set(mediaItems: [MediaItem]) {
+    func set(mediaItems: [MediaItem]) {
         set(mediaItems: mediaItems, resetPosition: true)
     }
 
-    public func insert(mediaItem: MediaItem, at position: Int) {
+    func insert(mediaItem: MediaItem, at position: Int) {
         insert(mediaItems: [mediaItem], at: position)
     }
 
-    public func append(mediaItem: MediaItem) {
+    func append(mediaItem: MediaItem) {
         append(mediaItems: [mediaItem])
     }
 
-    public func append(mediaItems: [MediaItem]) {
+    func append(mediaItems: [MediaItem]) {
         insert(mediaItems: mediaItems, at: .max)
     }
 
-    public func moveMediaItem(from index: Int, to newIndex: Int) {
+    func moveMediaItem(from index: Int, to newIndex: Int) {
         if index != newIndex {
             moveMediaItems(
                 range: Range<Int>(index...index + 1),
@@ -122,97 +128,110 @@ extension BasePlayer {
         }
     }
 
-    public func replace(mediaItem: MediaItem, at index: Int) {
+    func replace(mediaItem: MediaItem, at index: Int) {
         replace(mediaItems: [mediaItem], at: Range<Int>(index...index + 1))
     }
 
-    public func removeMediaItem(at index: Int) {
+    func removeMediaItem(at index: Int) {
         removeMediaItems(at: Range(index...index + 1))
     }
 
-    public func clearMediaItems() {
+    func clearMediaItems() {
         removeMediaItems(at: Range(0...Int.max - 1))
     }
 
-    public func play() {
+    func play() {
         playWhenReady = true
     }
 
-    public func pause() {
+    func pause() {
         playWhenReady = false
     }
 
-    public func seekToDefaultPosition() {
-        seekToDefaultPositionInternal(mediaItemIndex: currentMediaItemIndex)
+    func release() {
+        Task { await releaseAsync() }
     }
 
-    public func seekToDefaultPosition(of mediaItemIndex: Int) {
-        seekToDefaultPositionInternal(mediaItemIndex: mediaItemIndex)
+    func setPlaybackSpeed(new playbackSpeed: Float) {
+        playbackParameters.newSpeed(playbackSpeed)
     }
 
-    public func seekBack() {
-        seekTo(offset: CMTimeMultiply(seekBackIncrement, multiplier: -1))
+    func mediaItem(at index: Int) -> MediaItem {
+        timeline.getWindow(windowIndex: index, window: window).mediaItem
+    }
+}
+
+public extension BasePlayer {
+    func seekToDefaultPosition(completion: ((Bool) -> Void)?) {
+        seekToDefaultPositionInternal(mediaItemIndex: currentMediaItemIndex, completion: completion)
     }
 
-    public func seekForward() {
-        seekTo(offset: seekForwardIncrement)
+    func seekToDefaultPosition(of mediaItemIndex: Int, completion: ((Bool) -> Void)?) {
+        seekToDefaultPositionInternal(mediaItemIndex: mediaItemIndex, completion: completion)
     }
 
-    public func seekToPreviousMediaItem() {
-        seekToPreviousMediaItemInternal()
+    func seekBack(seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
+        seekTo(
+            offset: CMTimeMultiply(
+                seekBackIncrement,
+                multiplier: -1
+            ),
+            seekParameters: seekParameters,
+            completion: completion
+        )
     }
 
-    public func seekToPrevious() {
+    func seekForward(seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
+        seekTo(
+            offset: seekForwardIncrement,
+            seekParameters: seekParameters,
+            completion: completion
+        )
+    }
+
+    func seekToPreviousMediaItem(completion: ((Bool) -> Void)?) {
+        seekToPreviousMediaItemInternal(completion: completion)
+    }
+
+    func seekToPrevious(completion: ((Bool) -> Void)?) {
         let timeline = timeline
         if timeline.isEmpty {
-            ignoreSeek()
+            ignoreSeek(completion: completion)
             return
         }
 
         let hasPreviousMediaItem = hasPreviousMediaItem
         if hasPreviousMediaItem, currentPosition <= maxSeekToPreviousPosition {
-            seekToPreviousMediaItemInternal()
+            seekToPreviousMediaItemInternal(completion: completion)
         } else {
-            seekToCurrentItem(position: .zero)
+            seekToCurrentItem(position: .zero, seekParameters: .exact, completion: completion)
         }
     }
 
-    public func seekToNextMediaItem() {
-        seekToNextMediaItemInternal()
+    func seekToNextMediaItem(completion: ((Bool) -> Void)?) {
+        seekToNextMediaItemInternal(completion: completion)
     }
 
-    public func seekToNext() {
+    func seekToNext(completion: ((Bool) -> Void)?) {
         let timeline = timeline
         if timeline.isEmpty {
-            ignoreSeek()
+            ignoreSeek(completion: completion)
             return
         }
 
         if hasNextMediaItem {
-            seekToNextMediaItemInternal()
+            seekToNextMediaItemInternal(completion: completion)
         } else {
-            ignoreSeek()
+            ignoreSeek(completion: completion)
         }
     }
 
-    public func seek(to position: CMTime) {
-        seekToCurrentItem(position: position)
+    func seek(to position: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
+        seekToCurrentItem(position: position, seekParameters: seekParameters, completion: completion)
     }
 
-    public func seek(to position: CMTime, of mediaItemIndex: Int) {
-        seek(to: mediaItemIndex, position: position, isRepeatingCurrentItem: false)
-    }
-
-    public func setPlaybackSpeed(new playbackSpeed: Float) {
-        playbackParameters.newSpeed(playbackSpeed)
-    }
-
-    public func mediaItem(at index: Int) -> MediaItem {
-        timeline.getWindow(windowIndex: index, window: window).mediaItem
-    }
-
-    public func release() {
-        Task { await releaseAsync() }
+    func seek(to position: CMTime, of mediaItemIndex: Int, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
+        seek(to: position, of: mediaItemIndex, seekParameters: seekParameters, completion: completion)
     }
 }
 
@@ -221,54 +240,81 @@ private extension BasePlayer {
         repeatMode == .one ? .off : repeatMode
     }
 
-    func ignoreSeek() {
-        seek(to: nil, position: .invalid, isRepeatingCurrentItem: false)
+    func ignoreSeek(completion: ((Bool) -> Void)?) {
+        seek(
+            to: nil,
+            position: .invalid,
+            isRepeatingCurrentItem: false,
+            seekParameters: .default,
+            completion: completion
+        ) 
     }
 
-    func seekToCurrentItem(position: CMTime) {
-        seek(to: currentMediaItemIndex, position: position, isRepeatingCurrentItem: false)
+    func seekToCurrentItem(position: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
+        seek(
+            to: currentMediaItemIndex,
+            position: position,
+            isRepeatingCurrentItem: false,
+            seekParameters: seekParameters,
+            completion: completion
+        )
     }
 
-    func seekTo(offset: CMTime) {
+    func seekTo(offset: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
         var position = currentPosition + offset
         let duration = duration
         if duration.isValid {
             position = min(position, duration)
         }
         position = max(position, .zero)
-        seekToCurrentItem(position: position)
+        seekToCurrentItem(position: position, seekParameters: seekParameters, completion: completion)
     }
 
-    func seekToDefaultPositionInternal(mediaItemIndex: Int) {
-        seek(to: mediaItemIndex, position: .invalid, isRepeatingCurrentItem: false)
+    func seekToDefaultPositionInternal(
+        mediaItemIndex: Int,
+        completion: ((Bool) -> Void)?
+    ) {
+        seek(
+            to: mediaItemIndex,
+            position: .invalid,
+            isRepeatingCurrentItem: false,
+            seekParameters: .default,
+            completion: completion
+        )
     }
 
-    func seekToNextMediaItemInternal() {
+    func seekToNextMediaItemInternal(completion: ((Bool) -> Void)?) {
         guard let nextMediaItemIndex else {
-            ignoreSeek()
+            ignoreSeek(completion: completion)
             return
         }
         if nextMediaItemIndex == currentMediaItemIndex {
-            repeatCurrentMediaItem()
+            repeatCurrentMediaItem(completion: completion)
         } else {
-            seekToDefaultPositionInternal(mediaItemIndex: nextMediaItemIndex)
+            seekToDefaultPositionInternal(mediaItemIndex: nextMediaItemIndex, completion: completion)
         }
     }
 
-    func seekToPreviousMediaItemInternal() {
+    func seekToPreviousMediaItemInternal(completion: ((Bool) -> Void)?) {
         guard let previousMediaItemIndex else {
-            ignoreSeek()
+            ignoreSeek(completion: completion)
             return
         }
         
         if previousMediaItemIndex == currentMediaItemIndex {
-            repeatCurrentMediaItem();
+            repeatCurrentMediaItem(completion: completion)
         } else {
-            seekToDefaultPositionInternal(mediaItemIndex: previousMediaItemIndex);
+            seekToDefaultPositionInternal(mediaItemIndex: previousMediaItemIndex, completion: completion)
         }
     }
 
-    private func repeatCurrentMediaItem() {
-        seek(to: currentMediaItemIndex, position: .invalid, isRepeatingCurrentItem: true)
+    private func repeatCurrentMediaItem(completion: ((Bool) -> Void)?) {
+        seek(
+            to: currentMediaItemIndex,
+            position: .invalid,
+            isRepeatingCurrentItem: true,
+            seekParameters: .default,
+            completion: completion
+        )
     }
 }

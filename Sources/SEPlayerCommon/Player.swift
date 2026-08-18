@@ -63,22 +63,96 @@ public protocol Player: AnyObject, Sendable {
     func prepare()
     func play()
     func pause()
-    func seekToDefaultPosition()
-    func seekToDefaultPosition(of mediaItemIndex: Int)
-    func seek(to position: CMTime)
-    func seek(to position: CMTime, of mediaItemIndex: Int)
-    func seekBack()
-    func seekForward()
-    func seekToPreviousMediaItem()
-    func seekToPrevious()
-    func seekToNextMediaItem()
-    func seekToNext()
+    func seekToDefaultPosition(completion: ((Bool) -> Void)?)
+    func seekToDefaultPosition(of mediaItemIndex: Int, completion: ((Bool) -> Void)?)
+    func seek(to position: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?)
+    func seek(to position: CMTime, of mediaItemIndex: Int, seekParameters: SeekParameters, completion: ((Bool) -> Void)?)
+    func seekBack(seekParameters: SeekParameters, completion: ((Bool) -> Void)?)
+    func seekForward(seekParameters: SeekParameters, completion: ((Bool) -> Void)?)
+    func seekToPreviousMediaItem(completion: ((Bool) -> Void)?)
+    func seekToPrevious(completion: ((Bool) -> Void)?)
+    func seekToNextMediaItem(completion: ((Bool) -> Void)?)
+    func seekToNext(completion: ((Bool) -> Void)?)
     func setPlaybackSpeed(new playbackSpeed: Float)
     func stop()
     func release()
     func releaseAsync() async
 
     func mediaItem(at index: Int) -> MediaItem
+}
+
+public extension Player {
+    func seekToDefaultPosition() {
+        seekToDefaultPosition(completion: nil)
+    }
+
+    func seekToDefaultPosition(of mediaItemIndex: Int) {
+        seekToDefaultPosition(of: mediaItemIndex, completion: nil)
+    }
+
+    func seek(to position: CMTime) {
+        seek(to: position, seekParameters: .default, completion: nil)
+    }
+
+    func seek(to position: CMTime, completion: @escaping ((Bool) -> Void)) {
+        seek(to: position, seekParameters: .default, completion: completion)
+    }
+
+    func seek(to position: CMTime, seekParameters: SeekParameters) {
+        seek(to: position, seekParameters: seekParameters, completion: nil)
+    }
+
+    func seek(to position: CMTime, of mediaItemIndex: Int) {
+        seek(to: position, of: mediaItemIndex, seekParameters: .default, completion: nil)
+    }
+
+    func seek(to position: CMTime, of mediaItemIndex: Int, completion: @escaping ((Bool) -> Void)) {
+        seek(to: position, of: mediaItemIndex, seekParameters: .default, completion: completion)
+    }
+
+    func seek(to position: CMTime, of mediaItemIndex: Int, seekParameters: SeekParameters) {
+        seek(to: position, of: mediaItemIndex, seekParameters: seekParameters, completion: nil)
+    }
+
+    func seekBack() {
+        seekBack(seekParameters: .default, completion: nil)
+    }
+
+    func seekBack(completion: @escaping ((Bool) -> Void)) {
+        seekBack(seekParameters: .default, completion: completion)
+    }
+
+    func seekBack(seekParameters: SeekParameters) {
+        seekBack(seekParameters: seekParameters, completion: nil)
+    }
+
+    func seekForward() {
+        seekForward(seekParameters: .default, completion: nil)
+    }
+
+    func seekForward(completion: @escaping ((Bool) -> Void)) {
+        seekForward(seekParameters: .default, completion: completion)
+    }
+
+    func seekForward(seekParameters: SeekParameters) {
+        seekForward(seekParameters: seekParameters, completion: nil)
+    }
+
+    func seekToPreviousMediaItem() {
+        seekToPreviousMediaItem(completion: nil)
+    }
+
+    func seekToPrevious() {
+        seekToPrevious(completion: nil)
+    }
+
+    func seekToNextMediaItem() {
+        seekToNextMediaItem(completion: nil)
+    }
+
+    func seekToNext() {
+        seekToNext(completion: nil)
+    }
 }
 
 @frozen public enum PlayerState: Equatable {

@@ -7,7 +7,7 @@
 
 import CoreMedia
 
-public struct SeekParameters: Hashable {
+public struct SeekParameters: Hashable, Sendable {
     public let toleranceBefore: CMTime
     public let toleranceAfter: CMTime
 

@@ -10,7 +10,7 @@ import DataSource
 import Extractor
 import SEPlayerCommon
 
-final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.Listener {
+final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Listener {
     protocol Listener: AnyObject {
         func onSeekMap(source: MediaSource, seekMap: SeekMap)
     }
@@ -71,8 +71,8 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
         allocator: Allocator,
         startPosition: CMTime
     ) throws -> MediaPeriod {
-        let dataSource2  = dataSourceFactory.createDataSource2()
-//        TODO: return
+        print("👹 CREATE PERIOD , self = \(ObjectIdentifier(self)), id = \(id), startPosition = \(startPosition.seconds)")
+        // TODO: return
 //        if let mediaTransferListener {
 //            dataSource.addTransferListener(mediaTransferListener)
 //        }
@@ -81,11 +81,11 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
             throw ErrorBuilder.illegalState
         }
 
-        return ProgressiveMediaPeriod(
+        return ProgressiveMediaPeriod2(
             url: localConfiguration.url,
             queue: queue,
             loadQueue: loaderQueue,
-            dataSource: dataSource2,
+            dataSourceFactory: dataSourceFactory,
             progressiveMediaExtractor: BundledMediaExtractor(
                 syncActor: loaderQueue.playerActor(),
                 extractorsFactory: extractorsFactory
@@ -97,7 +97,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
     }
 
     override func release(mediaPeriod: MediaPeriod) {
-        (mediaPeriod as! ProgressiveMediaPeriod).release()
+        (mediaPeriod as! ProgressiveMediaPeriod2).release()
     }
 
     func sourceInfoRefreshed(duration: CMTime, seekMap: SeekMap, isLive: Bool) {

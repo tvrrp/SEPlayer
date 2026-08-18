@@ -28,7 +28,6 @@ public protocol MediaSource: AnyObject {
     func release(mediaPeriod: MediaPeriod)
     func disable(delegate: MediaSourceDelegate)
     func releaseSource(delegate: MediaSourceDelegate)
-    func continueLoadingRequested(with source: any MediaSource)
 }
 
 //protocol MediaSourceEventListener: AnyObject {
@@ -87,7 +86,6 @@ class BaseMediaSource: MediaSource {
     }
     func release(mediaPeriod: MediaPeriod) { fatalError("To override") }
     func disableInternal() {}
-    func continueLoadingRequested(with source: any MediaSource) { fatalError("To override") }
 
     final func refreshSourceInfo(timeline: Timeline) throws {
         assert(queue.isCurrent())

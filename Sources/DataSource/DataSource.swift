@@ -8,12 +8,28 @@
 import Foundation.NSURLSession
 import SEPlayerCommon
 
-public protocol DataSource: DataReader {
-    var url: URL? { get }
-    var urlResponse: HTTPURLResponse? { get }
+public protocol DataSource: DataReader, AnyObject {
     nonisolated var components: DataSourceOpaque { get }
-    @discardableResult func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int
-    @discardableResult func close(isolation: isolated any Actor) async throws -> ByteBuffer?
+    func getContentLenght(dataSpec: DataSpec, _ isolation: isolated any Actor) -> Int?
+    func close(_ isolation: isolated any Actor) async throws
+    func getURLResponse(_ isolation: isolated any Actor) -> HTTPURLResponse?
+    func canHandle(new dataSpec: DataSpec, _ isolation: isolated any Actor) -> Bool
+}
+
+public extension DataSource {
+    func getURLResponse(_ isolation: isolated any Actor) -> HTTPURLResponse? { nil }
+
+    func getContentLenght(dataSpec: DataSpec, _ isolation: isolated any Actor) -> Int? {
+        guard let contentLenght = getURLResponse(isolation)?.contentLength else {
+            return nil
+        }
+
+        if let length = dataSpec.length {
+            return max(length, contentLenght - dataSpec.position)
+        } else {
+            return contentLenght - dataSpec.position
+        }
+    }
 }
 
 public extension DataSource {
@@ -34,7 +50,7 @@ public extension DataSource {
     }
 }
 
-public final class DataSourceOpaque {
+public final class DataSourceOpaque: @unchecked Sendable {
     fileprivate let isNetwork: Bool
     fileprivate let transferListeners = MulticastDelegate<TransferListener>(isThreadSafe: true)
 

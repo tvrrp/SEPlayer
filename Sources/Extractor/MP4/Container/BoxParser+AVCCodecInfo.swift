@@ -60,7 +60,7 @@ extension BoxParser {
                 if numbOfSpss > 0 {
                     let reader = sequenceParameterSets[0]
                     let sps = try reader.getBytes(at: reader.readerIndex, length: reader.readableBytes)
-                    let spsData = try NalUnitUtil.SpsData(data: sps, nalOffset: 0, nalLimit: sps.count)
+                    let spsData = try NalUnitUtil.parseSpsNalUnit(nalData: sps, nalOffset: 0, nalLimit: sps.count)
 
                     width = spsData.width
                     height = spsData.height

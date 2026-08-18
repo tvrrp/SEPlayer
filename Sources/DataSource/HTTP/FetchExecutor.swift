@@ -8,7 +8,14 @@
 import Foundation
 import SEPlayerCommon
 
+public protocol FetchExecutorDelegate: AnyObject {
+    func runEventStream(_ stream: AsyncStream<TransportStatus>, fetchId: UUID)
+    func runSessionStream(_ stream: AsyncStream<TransportEvent>, fetchId: UUID)
+}
+
 public final class FetchExecutor: @unchecked Sendable {
+    public weak var delegate: FetchExecutorDelegate?
+
     private let queue: any Queue
     private let factory: any HTTPTransportFactory
 
@@ -24,11 +31,11 @@ public final class FetchExecutor: @unchecked Sendable {
     }
 
     @discardableResult
-    func register(dataSpec: DataSpec, transportDelegate: any TransportEventDelegate) -> Fetch2 {
+    func register(dataSpec: DataSpec) -> Fetch2 {
         let fetchesForAttaching = fetches.values.filter { $0.canHandle(spec: dataSpec) }
 
         guard !fetchesForAttaching.isEmpty else {
-            let storage = createNewFetchRequest(dataSpec: dataSpec, transportDelegate: transportDelegate)
+            let storage = createNewFetchRequest(dataSpec: dataSpec)
             let fetch = Fetch2(
                 parentId: storage.id,
                 readOffset: dataSpec.position,
@@ -48,6 +55,14 @@ public final class FetchExecutor: @unchecked Sendable {
                 abs($0.offset - dataSpec.position) < abs($1.offset - dataSpec.position)
             }) ?? fetchesForAttaching[0]
         }
+
+//        let fetch = Fetch2(
+//            parentId: fetchForAttaching.id,
+//            readOffset: dataSpec.position,
+//            readLenght: dataSpec.length
+//        )
+//        fetchForAttaching.registerFetch(fetch: fetch)
+//        return fetch
 
         switch fetchForAttaching.lenght {
         case .none:
@@ -74,8 +89,7 @@ public final class FetchExecutor: @unchecked Sendable {
             return fetch
         default:
             let storage = createNewFetchRequest(
-                dataSpec: dataSpec.buildUpon().setLength(nil).build(),
-                transportDelegate: transportDelegate
+                dataSpec: dataSpec.buildUpon().setLength(nil).build()
             )
             let fetch = Fetch2(
                 parentId: storage.id,
@@ -84,6 +98,7 @@ public final class FetchExecutor: @unchecked Sendable {
             )
             storage.registerFetch(fetch: fetch)
             fetches[storage.id] = storage
+//            fetchForAttaching.bytesToLoadMax = dataSpec.range2.upperBound
             return fetch
         }
     }
@@ -137,10 +152,12 @@ public final class FetchExecutor: @unchecked Sendable {
         fetches.removeAll()
     }
 
-    private func createNewFetchRequest(dataSpec: DataSpec, transportDelegate: any TransportEventDelegate) -> FetchesStorage {
+    private func createNewFetchRequest(dataSpec: DataSpec) -> FetchesStorage {
         let fetchId = UUID()
-        let transport = factory.makeTransport(dataSpec: dataSpec, rangeID: fetchId, delegate: transportDelegate)
-        defer { transport.start() }
+        let transport = factory.makeTransport(dataSpec: dataSpec, rangeID: fetchId)
+        let (event, session) = transport.start()
+        delegate?.runEventStream(event, fetchId: transport.rangeID)
+        delegate?.runSessionStream(session, fetchId: transport.rangeID)
 
         let defaultCanclBytes = Int(getpagesize() * 5)
         return FetchesStorage(
@@ -186,6 +203,8 @@ extension FetchExecutor {
 //        let idleIntervalForTaskCancellation: DispatchTimeInterval
 
         var bytesRecieved = 0
+        var bytesToLoadMax: Int?
+
         var lenght: Int? {
             didSet {
                 if let lenght {
@@ -273,11 +292,19 @@ extension FetchExecutor {
             }
 
             bytesRecieved += count
+
+//            if let bytesToLoadMax, bytesRecieved >= bytesToLoadMax  {
+//                transport.cancel()
+//                finishAll()
+//                return
+//            }
+
             let availableRange = offset..<(offset + bytesRecieved)
             for (id, fetch) in runningFetches {
                 guard !fetch.readRange.isEmpty else { continue }
 
                 if availableRange.contains(fetch.readRange) {
+//                    print("✅ resuming fetch = \(fetch.readRange), available = \(availableRange)")
                     fetch.continuation?.resume()
                     runningFetches.removeValue(forKey: id)
                 }
@@ -301,6 +328,7 @@ extension FetchExecutor {
                 $0.continuation?.resume(throwing: CancellationError())
             }
             runningFetches.removeAll()
+            transport.cancel()
         }
     }
 }

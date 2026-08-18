@@ -59,10 +59,10 @@ final class RenderersHolder {
             assertionFailure()
             return
         }
-        
+
         setCurrentStreamFinalInternal(renderer: renderer, streamEndPosition: streamEndPosition)
     }
-    
+
     func maybeSetOldStreamToFinal(
         oldTrackSelectorResult: TrackSelectorResult,
         newTrackSelectorResult: TrackSelectorResult,
@@ -155,6 +155,7 @@ final class RenderersHolder {
             return true
         }
 
+        print("Renderer = \(String(describing: renderer)) didReadStreamToEnd = \(renderer.didReadStreamToEnd()), isReady = \(renderer.isReady()), isEnded - \(renderer.isEnded())")
         return renderer.didReadStreamToEnd() || renderer.isReady() || renderer.isEnded()
     }
 
@@ -179,14 +180,15 @@ final class RenderersHolder {
 
     func enable(
         trackSelection: SETrackSelection,
-        stream: TriggerableSampleStream,
+        stream: SampleStream,
         position: CMTime,
         joining: Bool,
         mayRenderStartOfStream: Bool,
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId,
-        mediaClock: DefaultMediaClock
+        mediaClock: DefaultMediaClock,
+        delegate: any SERendererDelegate
     ) throws {
         let formats = formats(from: trackSelection)
         let enablePrimary = [.notPrewarmingUsingPrimary, .prewarmingPrimary, .transitioningToPrimary].contains(prewarmingState)
@@ -201,7 +203,8 @@ final class RenderersHolder {
                 mayRenderStartOfStream: mayRenderStartOfStream,
                 startPosition: startPosition,
                 offset: offset,
-                mediaPeriodId: mediaPeriodId
+                mediaPeriodId: mediaPeriodId,
+                delegate: delegate
             )
             try mediaClock.onRendererEnabled(renderer: primaryRenderer)
         } else if let secondaryRenderer {
@@ -214,50 +217,8 @@ final class RenderersHolder {
                 mayRenderStartOfStream: mayRenderStartOfStream,
                 startPosition: startPosition,
                 offset: offset,
-                mediaPeriodId: mediaPeriodId
-            )
-            try mediaClock.onRendererEnabled(renderer: secondaryRenderer)
-        }
-    }
-
-    func enable2(
-        trackSelection: SETrackSelection,
-        stream: SampleStream2,
-        position: CMTime,
-        joining: Bool,
-        mayRenderStartOfStream: Bool,
-        startPosition: CMTime,
-        offset: CMTime,
-        mediaPeriodId: MediaPeriodId,
-        mediaClock: DefaultMediaClock
-    ) throws {
-        let formats = formats(from: trackSelection)
-        let enablePrimary = [.notPrewarmingUsingPrimary, .prewarmingPrimary, .transitioningToPrimary].contains(prewarmingState)
-
-        if enablePrimary {
-            primaryRequiresReset = true
-            try! primaryRenderer.enable2(
-                formats: formats,
-                stream: stream,
-                position: position,
-                joining: joining,
-                mayRenderStartOfStream: mayRenderStartOfStream,
-                startPosition: startPosition,
-                offset: offset,
-                mediaPeriodId: mediaPeriodId
-            )
-            try mediaClock.onRendererEnabled(renderer: primaryRenderer)
-        } else if let secondaryRenderer {
-            secondaryRequiresReset = true
-            try! secondaryRenderer.enable2(
-                formats: formats,
-                stream: stream,
-                position: position,
-                joining: joining,
-                mayRenderStartOfStream: mayRenderStartOfStream,
-                startPosition: startPosition,
-                offset: offset,
-                mediaPeriodId: mediaPeriodId
+                mediaPeriodId: mediaPeriodId,
+                delegate: delegate
             )
             try mediaClock.onRendererEnabled(renderer: secondaryRenderer)
         }
@@ -330,7 +291,7 @@ final class RenderersHolder {
     }
 
     func maybeDisableOrResetPosition2(
-        sampleStream: SampleStream2,
+        sampleStream: SampleStream,
         mediaClock: DefaultMediaClock,
         rendererPosition: CMTime,
         streamReset: Bool
@@ -508,7 +469,8 @@ private extension RenderersHolder {
             (sampleStream != nil && !renderer.didReadStreamToEnd()) {
             let followingPeriod = readingPeriodHolder.next
 
-            return followingPeriod != nil && followingPeriod?.sampleStreams[index] === renderer.getStream()
+            guard let rendererStream = renderer.getStream() else { return false }
+            return followingPeriod?.sampleStreams[index]?.isEqual(to: rendererStream) == true
         }
 
         return true
@@ -537,7 +499,7 @@ private extension RenderersHolder {
     ) throws {
         guard isRendererEnabled(renderer: renderer) else { return }
 
-        if sampleStream !== renderer.getStream2() {
+        if sampleStream !== renderer.getStream() {
             disableRenderer(renderer: renderer, mediaClock: mediaClock)
         } else {
             try! renderer.resetPosition(new: rendererPosition)
@@ -546,7 +508,7 @@ private extension RenderersHolder {
 
     func maybeDisableOrResetPositionInternal2(
         renderer: SERenderer,
-        sampleStream: SampleStream2,
+        sampleStream: SampleStream,
         mediaClock: DefaultMediaClock,
         rendererPosition: CMTime,
         streamReset: Bool
@@ -607,7 +569,7 @@ private extension RenderersHolder {
 
         if !renderer.isCurrentStreamFinal(), let sampleStream = readingPeriodHolder.sampleStreams[index] {
             let formats = formats(from: newTrackSelectorResult.selections[index])
-            try! renderer.replaceStream2(
+            try! renderer.replaceStream(
                 formats: formats,
                 stream: sampleStream,
                 startPosition: readingPeriodHolder.getStartPositionRendererTime(),
@@ -641,9 +603,9 @@ private extension RenderersHolder {
     private func rendererReading(from period: MediaPeriodHolder?) -> SERenderer? {
         guard let period, let stream = period.sampleStreams[index] else { return nil }
 
-        if primaryRenderer.getStream() === stream {
+        if primaryRenderer.getStream()?.isEqual(to: stream) == true {
             return primaryRenderer
-        } else if let secondaryRenderer, secondaryRenderer.getStream() === stream {
+        } else if let secondaryRenderer, secondaryRenderer.getStream()?.isEqual(to: stream) == true {
             return secondaryRenderer
         }
 

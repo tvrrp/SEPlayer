@@ -9,40 +9,36 @@ import Foundation.NSURL
 import SEPlayerCommon
 
 public protocol ExtractorsFactory {
-    func createExtractors() -> [Extractor]
-    func createExtractors2() -> [Extractor2]
-    func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) -> [Extractor]
-    func createExtractors2(url: URL?, httpHeaders: [AnyHashable : Any]) -> [Extractor2]
+    func createExtractors() throws -> [Extractor]
+    func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) throws -> [Extractor]
 }
 
 public extension ExtractorsFactory {
-    func createExtractors() -> [Extractor] {
-        createExtractors(url: nil, httpHeaders: [:])
-    }
-    func createExtractors2() -> [Extractor2] {
-        createExtractors2(url: nil, httpHeaders: [:])
+    func createExtractors() throws -> [Extractor] {
+        try createExtractors(url: nil, httpHeaders: [:])
     }
 }
 
 public struct DefaultExtractorFactory: ExtractorsFactory {
     private let queue: Queue
-    private let subtitleParserFactory: SubtitleParserFactory
+//    private let subtitleParserFactory: SubtitleParserFactory
 
     public init(queue: Queue) {
         self.queue = queue
-        self.subtitleParserFactory = DefaultSubtitleParserFactory()
+//        self.subtitleParserFactory = DefaultSubtitleParserFactory()
     }
 
-    public func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) -> [Extractor] {
-        [
-            MP4Extractor(queue: queue, subtitleParserFactory: subtitleParserFactory),
-//            FragmentedMp4Extractor(queue: queue, extractorOutput: output)
-        ]
-    }
-
-    public func createExtractors2(url: URL?, httpHeaders: [AnyHashable : Any]) -> [any Extractor2] {
-        [
-            MP4Extractor2(queue: queue, subtitleParserFactory: subtitleParserFactory),
-        ]
+    public func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) throws -> [Extractor] {
+        var extractors = [Extractor]()
+//#if ExtractorMP4
+        extractors.append(MP4Extractor(queue: queue))
+//#endif
+//#if ExtractorFMP4
+        extractors.append(FragmentedMp4Extractor(queue: queue))
+//#endif
+//#if ExtractorTS
+        try extractors.append(TsExtractor(queue: queue, subtitleParserFactory: ()))
+//#endif
+        return extractors
     }
 }

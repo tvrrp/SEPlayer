@@ -16,14 +16,22 @@ enum SEPlayerMessageImpl: MessageKind {
         _ playbackSuppressionReason: PlaybackSuppressionReason
     )
     case doSomeWork
-    case seekTo(_ timeline: Timeline, _ windowIndex: Int, _ position: CMTime)
+    case maybeUpdatePeriods
+    case seekTo(
+        _ timeline: Timeline,
+        _ windowIndex: Int,
+        _ position: CMTime,
+        _ seekParameters: SeekParameters,
+        _ completion: ((Bool) -> Void)?
+    )
     case setPlaybackParameters(_ playbackParameters: PlaybackParameters)
-    case setSeekParameters(_ seekParameters: SeekParameters)
     case setVideoOutput(_ output: VideoSampleBufferRenderer)
     case removeVideoOutput(_ output: VideoSampleBufferRenderer)
     case stop
     case release(_ continuation: CheckedContinuation<Void, Never>)
     case periodPrepared(_ mediaPeriod: any MediaPeriod)
+//    case sourceAboveHighWaterMark(_ mediaPeriod: any MediaPeriod)
+//    case sourceBelowLowWaterMark(_ mediaPeriod: any MediaPeriod)
     case sourceContinueLoadingRequested(_ source: any MediaPeriod)
     case trackSelectionInvalidated
     case setRepeatMode(_ repeatMode: RepeatMode)
@@ -47,7 +55,8 @@ enum SEPlayerMessageImpl: MessageKind {
     case setShuffleOrder(_ shuffleOrder: ShuffleOrder)
     case playlistUpdateRequested
     case setPauseAtEndOfWindow(_ pauseAtEndOfWindow: Bool)
-    case attemptRendererErrorRecovery
+    case errorDelivery(Error)
+    case attemptRendererErrorRecovery(_ rendererRequiresFlush: Bool)
     case rendererCapabilitiesChanged
     case updateMediaSourcesWithMediaItems(_ mediaItems: [MediaItem], _ range: Range<Int>)
     case setPreloadConfiguration(_ preloadConfiguration: PreloadConfiguration)
@@ -70,7 +79,6 @@ extension SEPlayerMessageImpl: Equatable {
              (.doSomeWork, .doSomeWork),
              (.seekTo, .seekTo),
              (.setPlaybackParameters, .setPlaybackParameters),
-             (.setSeekParameters, .setSeekParameters),
              (.stop, .stop),
              (.release, .release),
              (.periodPrepared, .periodPrepared),

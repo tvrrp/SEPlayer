@@ -10,7 +10,7 @@ import Foundation
 import SEPlayerCommon
 
 public protocol Loadable {
-    func load(isolation: isolated any Actor) async throws
+    func load(_ isolation: isolated any Actor) async throws
 }
 
 public final class Loader {
@@ -264,10 +264,10 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         }
     }
 
-    func run(isolation: isolated PlayerActor) async {
+    func run(_ isolation: isolated PlayerActor) async {
         do {
             if lock.withLock({ canceled == false }) {
-                try await loadable.load(isolation: isolation)
+                try await loadable.load(isolation)
             }
         } catch {
             if !Task.isCancelled {
@@ -352,7 +352,7 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         currentError = nil
 
         let currentTask = Task<Void, Never> {
-            await run(isolation: syncActor)
+            await run(syncActor)
         }
         self.currentTask = currentTask
 

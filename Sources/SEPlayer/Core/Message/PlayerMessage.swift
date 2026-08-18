@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 26.12.2025.
 //
 
-import Atomics
+//import Atomics
 import CoreMedia
 import SEPlayerCommon
 
@@ -26,11 +26,15 @@ public final class PlayerMessage {
     public private(set) var position: CMTime
     public private(set) var deleteAfterDelivery: Bool
     private var isSent = false
-    private let _isDelivered: UnsafeAtomic<Bool> = .create(false)
-    private let _isProcessed: UnsafeAtomic<Bool> = .create(false)
-    private let _isCanceled: UnsafeAtomic<Bool> = .create(false)
+//    private let _isDelivered: UnsafeAtomic<Bool> = .create(false)
+//    private let _isProcessed: UnsafeAtomic<Bool> = .create(false)
+//    private let _isCanceled: UnsafeAtomic<Bool> = .create(false)
+    @UnfairLocked private var _isDelivered = false
+    @UnfairLocked private var _isProcessed = false
+    @UnfairLocked private var _isCanceled = false
 
-    public var isCanceled: Bool { _isCanceled.load(ordering: .sequentiallyConsistent) }
+//    public var isCanceled: Bool { _isCanceled.load(ordering: .sequentiallyConsistent) }
+    public var isCanceled: Bool { _isCanceled }
 
     @UnfairLocked private var continuations = [CheckedContinuation<Void, Never>]()
 
@@ -52,11 +56,11 @@ public final class PlayerMessage {
         self.deleteAfterDelivery = true
     }
 
-    deinit {
-        _isDelivered.destroy()
-        _isProcessed.destroy()
-        _isCanceled.destroy()
-    }
+//    deinit {
+//        _isDelivered.destroy()
+//        _isProcessed.destroy()
+//        _isCanceled.destroy()
+//    }
 
     @discardableResult
     public func setType(_ messageType: Int) -> PlayerMessage {
@@ -119,16 +123,19 @@ public final class PlayerMessage {
     @discardableResult
     public func cancel() -> PlayerMessage {
         assert(isSent)
-        _isCanceled.store(true, ordering: .sequentiallyConsistent)
+//        _isCanceled.store(true, ordering: .sequentiallyConsistent)
+        _isCanceled = true
         markAsProcessed(isDelivered: false)
         return self
     }
 
     public func markAsProcessed(isDelivered: Bool) {
         if isDelivered {
-            _isDelivered.store(true, ordering: .sequentiallyConsistent)
+//            _isDelivered.store(true, ordering: .sequentiallyConsistent)
+            _isDelivered = true
         }
-        _isProcessed.store(true, ordering: .sequentiallyConsistent)
+        _isProcessed = true
+//        _isProcessed.store(true, ordering: .sequentiallyConsistent)
         continuations.forEach { $0.resume() }
         continuations.removeAll(keepingCapacity: true)
     }
@@ -139,6 +146,7 @@ public final class PlayerMessage {
             self.continuations.append(continuation)
         }
 
-        return _isDelivered.load(ordering: .sequentiallyConsistent)
+        return _isDelivered
+//        return _isDelivered.load(ordering: .sequentiallyConsistent)
     }
 }

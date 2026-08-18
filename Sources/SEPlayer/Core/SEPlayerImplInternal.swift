@@ -12,7 +12,7 @@ protocol SEPlayerImplInternalDelegate: AnyObject {
     func onPlaybackInfoUpdate(playbackInfoUpdate: SEPlayerImplInternal.PlaybackInfoUpdate)
 }
 
-final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSourceList.Delegate, MediaPeriodCallback, PlayerMessage.Sender, TrackSelector.InvalidationListener {
+final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSourceList.Delegate, MediaPeriodCallback, PlayerMessage.Sender, TrackSelector.InvalidationListener, SERendererDelegate {
     weak var playbackInfoUpdateListener: SEPlayerImplInternalDelegate?
 
     let identifier: UUID
@@ -44,6 +44,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
     let queue: Queue
     let playerActor: PlayerActor
+    private let eventTimer: DispatchSourceTimer
     private let handler: HandlerWrapper
     private let renderers: [RenderersHolder]
     private let rendererCapabilities: [RendererCapabilitiesResolver]
@@ -58,6 +59,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     private let retainBackBufferFromKeyframe: Bool
     private let mediaClock: DefaultMediaClock
     private let clock: SEClock
+    private let outboundTimebase: CMTimebase
     private let periodQueue: MediaPeriodQueue
     private let mediaSourceList: MediaSourceList
     private let audioSessionManager: IAudioSessionManager
@@ -66,7 +68,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     private var pendingMessages = [PendingMessageInfo]()
     private var _volume: Float = 1.0
     private var _isMuted: Bool = false
-    private var seekParameters: SeekParameters
     private var playbackInfo: PlaybackInfo
     private var playbackInfoUpdate: PlaybackInfoUpdate
     private var released: Bool = false
@@ -91,6 +92,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     private var isPrewarmingDisabledUntilNextTransition: Bool = false
     private var timerIsSuspended: Bool = false
     private var ignoreAudioSinkFlushError = false
+    private var seekCompletion: ((Bool) -> Void)? // TODO: clean on different paths
 
     init(
         queue: Queue,
@@ -101,9 +103,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         bandwidthMeter: BandwidthMeter,
         repeatMode: RepeatMode,
         shuffleModeEnabled: Bool,
-        seekParameters: SeekParameters,
         pauseAtEndOfWindow: Bool,
         clock: SEClock,
+        outboundTimebase: CMTimebase,
         mediaClock: DefaultMediaClock,
         identifier: UUID,
         preloadConfiguration: PreloadConfiguration,
@@ -111,6 +113,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     ) throws {
         self.queue = queue
         self.playerActor = queue.playerActor()
+        eventTimer = DispatchSource.makeTimerSource(queue: queue.queue)
         self.handler = clock.createHandler(queue: queue, looper: nil)
         self.identifier = identifier
         self.trackSelector = trackSelector
@@ -119,9 +122,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         self.bandwidthMeter = bandwidthMeter
         self.repeatMode = repeatMode
         self.shuffleModeEnabled = shuffleModeEnabled
-        self.seekParameters = seekParameters
         self.pauseAtEndOfWindow = pauseAtEndOfWindow
         self.clock = clock
+        self.outboundTimebase = outboundTimebase
         self.mediaClock = mediaClock
         self.preloadConfiguration = preloadConfiguration
         self.audioSessionManager = audioSessionManager
@@ -168,6 +171,11 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 //            .addObserver(self, selector: #selector(didGoBS), name: UIApplication.didEnterBackgroundNotification, object: nil)
 //        NotificationCenter.default
 //            .addObserver(self, selector: #selector(didgoFromBg), name: UIApplication.didBecomeActiveNotification, object: nil)
+
+        eventTimer.setEventHandler { [weak self] in
+            self?.handler.sendEmptyMessage(SEPlayerMessageImpl.maybeUpdatePeriods)
+        }
+        eventTimer.resume()
     }
 
     nonisolated func prepare() {
@@ -203,18 +211,20 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         handler.obtainMessage(what: SEPlayerMessageImpl.setPreloadConfiguration(preloadConfiguration)).sendToTarget()
     }
 
-    nonisolated func seekTo(timeline: Timeline, windowIndex: Int, position: CMTime) {
+    nonisolated func seekTo(
+        timeline: Timeline,
+        windowIndex: Int,
+        position: CMTime,
+        seekParameters: SeekParameters,
+        completion: ((Bool) -> Void)?
+    ) {
         handler.obtainMessage(what: SEPlayerMessageImpl.seekTo(
-            timeline, windowIndex, position
+            timeline, windowIndex, position, seekParameters, completion
         )).sendToTarget()
     }
 
     nonisolated func setPlaybackParameters(_ playbackParameters: PlaybackParameters) {
         handler.obtainMessage(what: SEPlayerMessageImpl.setPlaybackParameters(playbackParameters)).sendToTarget()
-    }
-
-    nonisolated func setSeekParameters(_ seekParameters: SeekParameters) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.setSeekParameters(seekParameters)).sendToTarget()
     }
 
     nonisolated func stop() { handler.obtainMessage(what: SEPlayerMessageImpl.stop).sendToTarget() }
@@ -282,7 +292,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     }
 
     func continueLoadingRequested(with source: any MediaPeriod) {
-        handler.obtainMessage(what: SEPlayerMessageImpl.sourceContinueLoadingRequested(source)).sendToTarget()
+//        let message = handler.obtainMessage(what: SEPlayerMessageImpl.sourceContinueLoadingRequested(source))
+//        message.sendToTarget()
     }
 
     func onTrackSelectionsInvalidated() {
@@ -313,19 +324,21 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 try setPreloadConfigurationInternal(preloadConfiguration)
             case .doSomeWork:
                 try doSomeWork()
-            case let .seekTo(timeline, windowIndex, position):
+            case .maybeUpdatePeriods:
+                try updatePeriods()
+            case let .seekTo(timeline, windowIndex, position, seekParameters, completion):
                 try seekToInternal(
                     seekPosition: .init(
                         timeline: timeline,
                         windowIndex: windowIndex,
                         windowPosition: position
                     ),
-                    incrementAcks: true
+                    incrementAcks: true,
+                    seekParameters: seekParameters,
+                    completion: completion
                 )
             case let .setPlaybackParameters(playbackParameters):
                 try setPlaybackParametersInternal(playbackParameters)
-            case let .setSeekParameters(seekParameters):
-                setSeekParametersInternal(seekParameters)
             case let .setVideoOutput(output):
                 try setVideoOutputInternal(output)
             case let .removeVideoOutput(output):
@@ -336,6 +349,10 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 try handlePeriodPrepared(mediaPeriod: mediaPeriod)
             case let .sourceContinueLoadingRequested(mediaPeriod):
                 try handleContinueLoadingRequested(mediaPeriod: mediaPeriod)
+//            case let .sourceAboveHighWaterMark(mediaPeriod):
+//                try handleSourceAboveHighWaterMark(mediaPeriod: mediaPerod)
+//            case let .sourceBelowLowWaterMark(mediaPerod)
+//                try handleSourceBelowLowWaterMark(mediaPerod: mediaPerod)
             case .trackSelectionInvalidated:
                 try reselectTracksInternal()
             case let .playbackParametersChangedInternal(parameters):
@@ -363,8 +380,16 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 try mediaSourceListUpdateRequestedInternal()
             case let .setPauseAtEndOfWindow(pauseAtEndOfWindow):
                 try setPauseAtEndOfWindowInternal(pauseAtEndOfWindow)
-            case .attemptRendererErrorRecovery:
-                try attemptRendererErrorRecovery()
+            case let .errorDelivery(error):
+                throw error
+            case let .attemptRendererErrorRecovery(rendererRequiresFlush):
+                if rendererRequiresFlush {
+                    try updatePlaybackPositionsInternal()
+                    try seekToCurrentPosition(sendDiscontinuity: true, forceDisableRenderers: false)
+                    handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+                } else {
+                    try attemptRendererErrorRecovery()
+                }
             case .rendererCapabilitiesChanged:
                 try reselectTracksInternalAndSeek()
             case let .updateMediaSourcesWithMediaItems(mediaItems, range):
@@ -376,6 +401,21 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 return false
             }
         } catch {
+            if let error = error as? SEPlaybackError, error.isRecoverable {
+                let what: SEPlayerMessageImpl
+                if case let .renderer(rendererError) = error.type,
+                   case .rendererRequiresFlush = rendererError {
+                    what = .attemptRendererErrorRecovery(true)
+                } else {
+                    what = .attemptRendererErrorRecovery(false)
+                }
+
+                handler.sendMessageAtFrontOfQueue(
+                    handler.obtainMessage(what: what)
+                )
+
+                return true
+            }
             print("❌❌❌❌ ERROR")
             print(error)
 //            handler.sendMessageAtFrontOfQueue(
@@ -425,7 +465,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         loadControl.onPrepared(playerId: identifier)
         setState(playbackInfo.timeline.isEmpty ? .ended : .buffering)
         try! mediaSourceList.prepare(mediaTransferListener: bandwidthMeter.transferListener)
+        try mediaClock.getTimebase().addTimer(eventTimer)
         try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
+        try outboundTimebase.setRate(1.0)
         handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
     }
 
@@ -597,16 +639,16 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         notifyTrackSelectionPlayWhenReadyChanged(playWhenReady)
         if !shouldPlayWhenReady() {
             stopRenderers()
-            try! updatePlaybackPositions()
+            try! updatePlaybackPositionsInternal()
             periodQueue.reevaluateBuffer(rendererPosition: rendererPosition)
         } else {
             if playbackInfo.state == .ready {
 //                try renderers.forEach { try $0.setControlTimebase(mediaClock.getTimebase()) }
                 mediaClock.start()
                 try! startRenderers()
-                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+//                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
             } else if playbackInfo.state == .buffering {
-                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+//                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
             }
         }
     }
@@ -654,7 +696,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         )
     }
 
-    private func seekToCurrentPosition(sendDiscontinuity: Bool) throws {
+    private func seekToCurrentPosition(sendDiscontinuity: Bool, forceDisableRenderers: Bool = true) throws {
         guard let playingPeriod = periodQueue.playing else {
             return
         }
@@ -663,7 +705,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         let newPosition = try! seekToPeriodPosition(
             periodId: periodId,
             periodPosition: playbackInfo.position,
-            forceDisableRenderers: true,
+            forceDisableRenderers: forceDisableRenderers,
             forceBufferingState: false
         )
 
@@ -703,7 +745,38 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         try reselectTracksInternalAndSeek()
     }
 
-    private func updatePlaybackPositions() throws {
+    func rendererFinishedPreroll(_ renderer: any SERenderer) {
+        print("RENDERER REPORTS READY")
+        handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork).sendToTarget()
+    }
+
+    func rendererPipelineStalled(_ renderer: any SERenderer) {
+        print("RENDERER REPORTS STALLED")
+        handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork).sendToTarget()
+    }
+
+    func rendererDidFinishReading(_ renderer: any SERenderer) {
+        print("👹 RENDERER FINISHED READING")
+        handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork).sendToTarget()
+    }
+
+    @objc
+    func rendererDidReadSampleAtBoundaries(notification: Notification) {
+        handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork).sendToTarget()
+    }
+
+    func rendererDidFinishRendering(_ renderer: any SERenderer) {
+        handler.obtainMessage(what: SEPlayerMessageImpl.doSomeWork).sendToTarget()
+    }
+
+    func onRendererError(_ renderer: any SERenderer, error: SEPlaybackError) {
+        handler.sendMessageAtFrontOfQueue(
+            handler.obtainMessage(what: SEPlayerMessageImpl.errorDelivery(error))
+        )
+//        fatalError()
+    }
+
+    private func updatePlaybackPositionsInternal() throws {
         guard let playingPeriodHolder = periodQueue.playing else {
             return
         }
@@ -712,7 +785,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             ? playingPeriodHolder.mediaPeriod.readDiscontinuity()
             : .invalid
 
-        if discontinuityPosition.isValid {
+        if discontinuityPosition.isNumeric {
             if !playingPeriodHolder.isFullyBuffered() {
                 periodQueue.removeAfter(mediaPeriodHolder: playingPeriodHolder)
                 handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
@@ -732,9 +805,24 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         } else {
             rendererPosition = mediaClock
                 .syncAndGetPosition(isReadingAhead: playingPeriodHolder !== periodQueue.reading)
-            let periodPosition = playingPeriodHolder.toPeriodTime(rendererTime: rendererPosition)
+            var periodPosition = playingPeriodHolder.toPeriodTime(rendererTime: rendererPosition)
+
+
+            if playingPeriodHolder.info.duration.isValid {
+                periodPosition = periodPosition.convertScale(
+                    playingPeriodHolder.info.duration.timescale,
+                    method: .roundTowardZero
+                )
+            }
+
             try maybeTriggerPendingMessages(oldPeriodPosition: playbackInfo.position, newPeriodPosition: periodPosition)
             playbackInfo = playbackInfo.setPosition(periodPosition)
+//            if !periodPosition.isNumeric || !periodPosition.isValid || pe {
+//                print()
+//            }
+//            print("🌈 Set outboundTimebase time = \(periodPosition.seconds), rate = \(outboundTimebase.rate)")
+//            print("🌈 Set outboundTimebase = \(periodPosition)")
+//            try outboundTimebase.setTime(periodPosition)
         }
 
         if let loading = periodQueue.loading {
@@ -766,11 +854,11 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         }
 
         guard let playingPeriodHolder = periodQueue.playing else {
-            scheduleNextWork(operationStartTime: currentTime)
+//            scheduleNextWork(operationStartTime: currentTime)
             return
         }
 
-        try updatePlaybackPositions()
+        try updatePlaybackPositionsInternal()
 
         var renderersEnded = true
         var renderersAllowPlayback = true
@@ -819,6 +907,11 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             )
         }
 
+        if renderersEnded {
+            let currentTime = mediaClock.getTimebase().time
+            print("CurrentTime = \(currentTime)")
+        }
+
         if finishedRendering, playingPeriodHolder.info.isFinal {
             print("🫟 ENDED")
             setState(.ended)
@@ -826,6 +919,13 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         } else if playbackInfo.state == .buffering,
                   shouldTransitionToReadyState(renderersReadyOrEnded: renderersAllowPlayback) {
             print("🫟 READY")
+            print("❤️❤️❤️❤️❤️❤️❤️❤️❤️")
+            print("❤️❤️❤️❤️❤️❤️❤️❤️❤️")
+            print("❤️❤️❤️❤️❤️❤️❤️❤️❤️")
+            seekCompletion?(true)
+            seekCompletion = nil
+
+//            playingPeriodHolder.changeDurationForPlaybackTriggerTokens(nil)
             setState(.ready)
             pendingRecoverableRendererError = nil
 
@@ -843,6 +943,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                   !(enabledRendererCount == 0 ? isTimelineReady() : renderersAllowPlayback) {
             print("🫟 BUFFERING STATE")
             updateRebufferingState(isRebuffering: shouldPlayWhenReady(), resetLastRebufferRealtime: false)
+
             setState(.buffering)
             if isRebuffering {
                 notifyTrackSelectionRebuffer()
@@ -855,7 +956,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         if playbackInfo.state == .buffering {
             for renderer in renderers {
                 if renderer.isReading(from: playingPeriodHolder) {
-                    try  maybeThrowRendererStreamError()
+                    try maybeThrowRendererStreamError()
                 }
             }
 
@@ -876,10 +977,14 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             print("playbackMaybeStuck!!!")
         }
 
-        let isPlaying = shouldPlayWhenReady() && playbackInfo.state == .ready
-        if (isPlaying || playbackInfo.state == .buffering) || (playbackInfo.state == .ready && enabledRendererCount != 0) {
-            scheduleNextWork(operationStartTime: currentTime)
-        }
+//        let isPlaying = shouldPlayWhenReady() && playbackInfo.state == .ready
+//        if (isPlaying || playbackInfo.state == .buffering) || (playbackInfo.state == .ready && enabledRendererCount != 0) {
+//            handler.sendEmptyMessageDelayed(
+//                SEPlayerMessageImpl.doSomeWork,
+//                delayMs: Int(currentTime.advanced(by: .milliseconds(10)).milliseconds)
+//            )
+////            scheduleNextWork(operationStartTime: currentTime)
+//        }
     }
 
     private func maybeTriggerOnRendererReadyChanged(rendererIndex: Int, allowsPlayback: Bool) {
@@ -901,24 +1006,18 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         // TODO: make
     }
 
-    private func scheduleNextWork(operationStartTime: DispatchTime) {
-        let wakeUpTimeIntervalMs: Int = if playbackInfo.state == .ready, !shouldPlayWhenReady() {
-            1000 // TODO: conts
-        } else {
-            Int(Time.usToMs(timeUs: 10_000)) // TODO: conts
-        }
-
-        handler.sendEmptyMessageAtTime(
-            SEPlayerMessageImpl.doSomeWork,
-//            timeNs: operationStartTime.advanced(by: .milliseconds(1000))
-            timeNs: operationStartTime.advanced(by: .milliseconds(wakeUpTimeIntervalMs))
-        )
-    }
-
-    private func seekToInternal(seekPosition: SeekPosition, incrementAcks: Bool) throws {
+    private func seekToInternal(
+        seekPosition: SeekPosition,
+        incrementAcks: Bool,
+        seekParameters: SeekParameters,
+        completion: ((Bool) -> Void)?
+    ) throws {
         assert(queue.isCurrent())
+        seekCompletion?(false)
+        seekCompletion = completion
+
         playbackInfoUpdate.incrementPendingOperationAcks(incrementAcks ? 1 : 0)
-        print("🫟 seek position = \(seekPosition.windowPosition), timeline = \(seekPosition.timeline), windowIndex = \(seekPosition.windowIndex)")
+        print("🫟 seek position = \(seekPosition.windowPosition.seconds), timeline = \(seekPosition.timeline), windowIndex = \(seekPosition.windowIndex)")
 
         let periodId: MediaPeriodId
         var periodPosition: CMTime
@@ -1126,10 +1225,11 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         } else {
             MediaPeriodQueue.initialRendererPositionOffset + periodPosition
         }
-        mediaClock.resetPosition(position: rendererPosition)
+
         try! renderers.forEach {
             try! $0.resetPosition(for: playingMediaPeriod, position: rendererPosition)
         }
+        mediaClock.resetPosition(position: rendererPosition)
         notifyTrackSelectionDiscontinuity()
     }
 
@@ -1142,23 +1242,18 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         )
     }
 
-    private func setSeekParametersInternal(_ seekParameters: SeekParameters) {
-        assert(queue.isCurrent())
-        self.seekParameters = seekParameters
-    }
-
     private func setVideoOutputInternal(_ output: VideoSampleBufferRenderer) throws {
         try renderers.forEach { try $0.setVideoOutput(output) }
-        if [.ready, .buffering].contains(playbackInfo.state) {
-            handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
-        }
+//        if [.ready, .buffering].contains(playbackInfo.state) {
+//            handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+//        }
     }
 
     private func removeVideoOutputInternal(_ output: VideoSampleBufferRenderer) throws {
         try renderers.forEach { try $0.removeVideoOutput(output) }
-        if [.ready, .buffering].contains(playbackInfo.state) {
-            handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
-        }
+//        if [.ready, .buffering].contains(playbackInfo.state) {
+//            handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+//        }
     }
 
     private func stopInternal(forceResetRenderers: Bool, acknowledgeStop: Bool) {
@@ -1188,6 +1283,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 releaseMediaSourceList: true,
                 resetError: false
             )
+            try outboundTimebase.setRate(1.0)
             releaseRenderers()
             loadControl.onReleased(playerId: identifier)
             audioSessionManager.removePlayer(self, playerId: identifier)
@@ -1378,7 +1474,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
         var oldPeriodPosition = oldPeriodPosition
         if deliverPendingMessageAtStartPositionRequired {
-            oldPeriodPosition = oldPeriodPosition - CMTime(value: -1, timescale: oldPeriodPosition.timescale)
+//            TODO: check oldPeriodPosition = oldPeriodPosition - CMTime(value: -1, timescale: oldPeriodPosition.timescale)
             deliverPendingMessageAtStartPositionRequired = false
         }
 
@@ -1476,8 +1572,11 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
     }
 
     private func reselectTracksInternalAndSeek() throws {
+        try updatePlaybackPositionsInternal()
+//        rendererPosition = mediaClock.syncAndGetPosition(isReadingAhead: false)
         try reselectTracksInternal()
         try seekToCurrentPosition(sendDiscontinuity: true)
+        try updatePeriods()
     }
 
     private func reselectTracksInternal() throws {
@@ -1603,7 +1702,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: true)
         if playbackInfo.state != .ended {
             try maybeContinueLoading()
-            try updatePlaybackPositions()
+            try updatePlaybackPositionsInternal()
             handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
         }
     }
@@ -1623,13 +1722,21 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         guard let playingPeriodHolder = periodQueue.playing,
               let loadingHolder = periodQueue.loading else { return false }
 
+        // TODO: targetLiveOffset
         let isBufferedToEnd = loadingHolder.isFullyBuffered() && loadingHolder.info.isFinal
-        guard !isBufferedToEnd else { return true }
+        if isBufferedToEnd { // TODO: isAdPendingPreparation
+            return true
+        }
 
-        let bufferedDuration = getTotalBufferedDuration(
-            bufferedPositionInLoadingPeriod: loadingHolder.getBufferedPosition()
-        )
+//        let bufferedDuration = getTotalBufferedDuration(
+//            bufferedPositionInLoadingPeriod: loadingHolder.getBufferedPosition()
+//        )
+        let bufferedDuration = loadingHolder.sampleStreams
+            .compactMap { $0 }
+            .min(by: { $0.bufferedAheadDuration < $1.bufferedAheadDuration })?
+            .bufferedAheadDuration ?? .zero
 
+        print("🌈 shouldTransitionToReadyState, bufferedDuration = \(bufferedDuration.seconds)")
         return loadControl.shouldStartPlayback(
             parameters: LoadControlParams(
                 playerId: identifier,
@@ -1817,12 +1924,18 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             return
         }
 
+        rendererPosition = mediaClock
+            .syncAndGetPosition(
+                isReadingAhead: periodQueue.playing !== periodQueue.reading
+            )
+
         let loadingPeriodChanged = try! maybeUpdateLoadingPeriod()
         try! maybeUpdatePrewarmingPeriod()
         try! maybeUpdateReadingPeriod()
         try! maybeUpdateReadingRenderers()
         try! maybeUpdatePlayingPeriod()
         try! maybeUpdatePreloadPeriods(loadingPeriodChanged: loadingPeriodChanged)
+        try updateTriggersForPeriods()
     }
 
     private func maybeUpdateLoadingPeriod() throws -> Bool {
@@ -1981,7 +2094,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                     handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
                     try maybeContinueLoading()
                 }
-                
+
                 return
             }
         }
@@ -2077,6 +2190,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                     lastRebufferRealtime: lastRebufferRealtime
                 )
             )
+
+            preloading.changeDurationToStopLoadingTriggerTokens(
+                loadControl.getMaxBufferDuration(playerId: identifier)
+            ) { [weak self] _ in
+                self?.handler.sendEmptyMessage(SEPlayerMessageImpl.maybeUpdatePeriods)
+            }
         }
     }
 
@@ -2103,7 +2222,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             )
 
             resetPendingPauseAtEndOfPeriod()
-            try! updatePlaybackPositions()
+            try! updatePlaybackPositionsInternal()
             if areRenderersPrewarming(), newPlayingPeriodHolder == periodQueue.prewarming {
                 try! maybeHandlePrewarmingTransition()
             }
@@ -2114,6 +2233,19 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
             allowRenderersToRenderStartOfStreams()
             advancedPlayingPeriod = true
+        }
+
+        if !advancedPlayingPeriod {
+            guard !pendingPauseAtEndOfPeriod,
+                  let playingPeriodHolder = periodQueue.playing,
+                  let nextPlayingPeriodHolder = playingPeriodHolder.next,
+                  nextPlayingPeriodHolder.getStartPositionRendererTime().isValid else {
+                return
+            }
+
+            let nextPeriodTime = nextPlayingPeriodHolder.getStartPositionRendererTime()
+            let timebase = mediaClock.getTimebase()
+            try! timebase.setTimerNextFireTime(eventTimer, fireTime: nextPeriodTime)
         }
     }
 
@@ -2145,9 +2277,14 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
               let playingPeriodHolder = periodQueue.playing,
               let nextPlayingPeriodHolder = playingPeriodHolder.next else { return false }
 
+        // TODO:
+//        let result = rendererPosition >= nextPlayingPeriodHolder.getStartPositionRendererTime()
+//            && nextPlayingPeriodHolder.allRenderersInCorrectState
+        rendererPosition = mediaClock.syncAndGetPosition(isReadingAhead: false)
         let result = rendererPosition >= nextPlayingPeriodHolder.getStartPositionRendererTime()
             && nextPlayingPeriodHolder.allRenderersInCorrectState
 
+        print("👹 advance = \(result), rendererPosition = \(rendererPosition.seconds) next = \(nextPlayingPeriodHolder.getStartPositionRendererTime().seconds)")
         return result
     }
 
@@ -2176,7 +2313,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                   preloadHolder.isPrepared else {
                 return
             }
-            
+
             try preloadHolder.handlePrepared(
                 playbackSpeed: playbackInfo.playbackParameters.playbackRate,
                 timeline: playbackInfo.timeline,
@@ -2195,6 +2332,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 timeline: playbackInfo.timeline,
                 playWhenReady: playbackInfo.playWhenReady
             )
+
+            loadingPeriodHolder.changeDurationToStopLoadingTriggerTokens(
+                loadControl.getMaxBufferDuration(playerId: identifier)
+            ) { [weak self] _ in
+                self?.handler.sendEmptyMessage(SEPlayerMessageImpl.maybeUpdatePeriods)
+            }
         }
 
         updateLoadControlTrackSelection(
@@ -2216,6 +2359,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 discontinuityReason: .internal
             )
         }
+
         try maybeContinueLoading()
     }
 
@@ -2226,6 +2370,71 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             maybeContinuePreloading()
         }
     }
+
+    private func updateTriggersForPeriods() throws {
+        if let loadingPeriod = periodQueue.loading {
+            if shouldContinueLoading {
+                let currentPosition = loadingPeriod.sampleStreams
+                    .compactMap { $0 }
+                    .min(by: { $0.bufferedAheadDuration < $1.bufferedAheadDuration })?
+                    .bufferedAheadDuration
+                print("❤️ SEEEEET SHOULD CONT. CURRENT == \(currentPosition?.seconds)")
+
+                // TODO: don't do if duration is unknown
+                loadingPeriod.changeDurationToStopLoadingTriggerTokens(
+                    loadControl.getMaxBufferDuration(playerId: identifier)
+                ) { [weak self] loadingPeriod in
+                    print("❤️ DID LOAD TILL MAX BUFFER")
+                    self?.queue.async { self?.shouldContinueLoading = false }
+                    self?.handler.sendEmptyMessage(SEPlayerMessageImpl.maybeUpdatePeriods)
+                }
+            } else if !loadingPeriod.isFullyBuffered() {
+                print("❤️❤️❤️❤️❤️❤️❤️❤️❤️")
+                print("❤️❤️❤️❤️❤️❤️❤️❤️❤️")
+                print("❤️❤️❤️❤️❤️❤️❤️❤️❤️")
+
+                loadingPeriod.changeDurationToStopLoadingTriggerTokens(nil)
+                loadingPeriod.mediaPeriod.stopLoading()
+
+                loadingPeriod.changeDurationForStartLoadingTriggerTokens(
+                    loadControl.getMinBufferDuration(playerId: identifier)
+                ) {  [weak self] period in
+                    print("❤️ BELOW MIN BUFFER!!!!!!!!!!!!")
+                    self?.queue.justDispatch { period.changeDurationForStartLoadingTriggerTokens(nil) }
+                    self?.handler.sendEmptyMessage(SEPlayerMessageImpl.maybeUpdatePeriods)
+                }
+            }
+        }
+
+        if let playingPeriod = periodQueue.playing {
+            if playbackInfo.state == .ready {
+                playingPeriod.changeDurationForPlaybackTriggerTokens(nil)
+            } else if playbackInfo.state == .buffering {
+                let playbackBuffer = if lastRebufferRealtime.isValid {
+                    loadControl.getBufferForPlaybackAfterRebuffer(playerId: identifier)
+                } else {
+                    loadControl.getBufferForPlayback(playerId: identifier)
+                }
+
+                playingPeriod.changeDurationForPlaybackTriggerTokens(playbackBuffer) { [weak self] _ in
+                    print("❤️ BUFFER AT PLAYBACK LEVEL")
+                    self?.handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
+                }
+            }
+        }
+    }
+
+//    private func handleSourceAboveHighWaterMark(mediaPeriod: any MediaPeriod) throws {
+//
+//    }
+//
+//    private func handleSourceBelowLowWaterMark(mediaPeriod: any MediaPeriod) throws {
+//        if periodQueue.isLoading(mediaPeriod: mediaPeriod) {
+//            try maybeContinueLoading()
+//        } else if periodQueue.isPreloading(mediaPeriod: mediaPeriod) {
+//            maybeContinuePreloading()
+//        }
+//    }
 
     private func handlePlaybackParameters(playbackParameters: PlaybackParameters, acknowledgeCommand: Bool) throws {
         try! handlePlaybackParameters(
@@ -2256,6 +2465,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
 
     private func maybeContinueLoading() throws {
         shouldContinueLoading = try shouldContinueLoadingPeriod()
+        print("❤️ SHOULD CONTINIUEU LOADING = \(shouldContinueLoading)")
         if shouldContinueLoading, let loadingPeriod = periodQueue.loading {
             loadingPeriod.continueLoading(loadingInfo: .init(
                 playbackPosition: loadingPeriod.toPeriodTime(rendererTime: rendererPosition),
@@ -2263,6 +2473,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
                 lastRebufferRealtime: lastRebufferRealtime
             ))
         }
+
         updateIsLoading()
     }
 
@@ -2271,9 +2482,25 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             return false
         }
 
-        let bufferedDuration = getTotalBufferedDuration(
-            bufferedPositionInLoadingPeriod: loadingPeriod.getNextLoadPosition()
-        )
+        rendererPosition = mediaClock
+            .syncAndGetPosition(isReadingAhead: loadingPeriod !== periodQueue.playing)
+
+        // TODO: need to compare with current position of sample queues
+        let currentPosition = loadingPeriod.sampleStreams
+            .compactMap { $0 }
+            .min(by: { $0.bufferedAheadDuration < $1.bufferedAheadDuration })?
+            .bufferedAheadDuration
+//        let bufferedDuration = getTotalBufferedDuration(
+//            bufferedPositionInLoadingPeriod: loadingPeriod.getNextLoadPosition()
+//        )
+        guard let currentPosition, currentPosition.isNumeric, currentPosition > .zero else {
+            return true
+        }
+
+        // TODO: think about max compare. RendererPosition can be before currentPosition
+//        let bufferedDuration = loadingPeriod.getNextLoadPosition() - max(currentPosition, loadingPeriod.toPeriodTime(rendererTime: rendererPosition))
+        let bufferedDuration = currentPosition //min(currentPosition, loadingPeriod.toPeriodTime(rendererTime: rendererPosition))
+        print("❤️❤️❤️ bufferedDuration = \(bufferedDuration.seconds), pos = \(currentPosition.seconds)")
 
         let playbackPosition = if loadingPeriod == periodQueue.playing {
             loadingPeriod.toPeriodTime(rendererTime: rendererPosition)
@@ -2294,7 +2521,13 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             lastRebufferRealtime: lastRebufferRealtime
         )
 
-        var shouldContinueLoading = loadControl.shouldContinueLoading(with: loadParameters)
+        // TODO: return
+//        var shouldContinueLoading = loadControl.shouldContinueLoading(with: loadParameters)
+        var shouldContinueLoading = if loadControl.getMinBufferDuration(playerId: identifier) >= bufferedDuration {
+            true
+        } else {
+            false
+        }
 
         if let playing = periodQueue.playing, !shouldContinueLoading,
            playing.isPrepared, bufferedDuration < .from(microseconds: 500_000), // TODO: conts
@@ -2422,7 +2655,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
         let joining = !wasRendererEnabled && playing
         enabledRendererCount += 1
 
-        try! renderer.enable2(
+        try! renderer.enable(
             trackSelection: newSelection,
             stream: sampleStream,
             position: rendererPosition,
@@ -2431,15 +2664,17 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             startPosition: startPosition,
             offset: periodHolder.renderPositionOffset,
             mediaPeriodId: periodHolder.info.id,
-            mediaClock: mediaClock
+            mediaClock: mediaClock,
+            delegate: self
         )
 
-//        try renderer.handleMessage(
-//            .requestMediaDataWhenReady(queue: queue, block: { [self] in
-////                handler.sendEmptyMessage(SEPlayerMessageImpl.doSomeWork)
-//            }),
-//            mediaPeriod: periodHolder
-//        )
+        NotificationCenter.default
+            .addObserver(
+                self,
+                selector: #selector(rendererDidReadSampleAtBoundaries),
+                name: .init(kCMSampleBufferConsumerNotification_BufferConsumed as String),
+                object: nil
+            )
 
         if playing, playingAndReadingTheSamePeriod {
             try! renderer.start()
@@ -2766,7 +3001,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, Handler.Callback, MediaSo
             return
         }
 
-        let position = period.duration.isValid ? period.duration - CMTime(value: 1, timescale: period.duration.timescale) : .positiveInfinity
+//        TODO: check
+//        let position = period.duration.isValid ? period.duration - CMTime(value: 1, timescale: period.duration.timescale) : .positiveInfinity
+        let position = period.duration.isValid ? period.duration : .positiveInfinity
         messageInfo.setResolvedPosition(periodIndex: lastPeriodIndex, periodTime: position, periodUid: lastPeriodUid)
     }
 
@@ -2940,6 +3177,32 @@ extension SEPlayerImplInternal {
 
     func removeVideoOutput(_ output: VideoSampleBufferRenderer) {
         handler.obtainMessage(what: SEPlayerMessageImpl.removeVideoOutput(output)).sendToTarget()
+    }
+
+    func addPeriodicTimeObserver(for interval: CMTime, queue: DispatchQueue, block: @escaping (CMTime) -> Void) throws -> AnyObject {
+        try self.queue.sync {
+            try mediaClock.addPeriodicTimeObserver(for: interval, queue: queue) { [weak self] timebaseTime in
+                guard let self, let time = convertTime(timebaseTime) else { return }
+                block(time)
+            }
+        }
+    }
+
+    func addBoundaryTimeObserver(for times: [CMTime], queue: DispatchQueue, block: @escaping (CMTime) -> Void) throws -> AnyObject {
+        try self.queue.sync {
+            try mediaClock.addBoundaryTimeObserver(for: times, queue: queue) { [weak self] timebaseTime in
+                guard let self, let time = convertTime(timebaseTime) else { return }
+                block(time)
+            }
+        }
+    }
+
+    func removeTimeObserver(_ observer: AnyObject) {
+        queue.sync { mediaClock.removeTimeObserver(observer) }
+    }
+
+    private func convertTime(_ timebaseTime: CMTime) -> CMTime? {
+        periodQueue.playing?.toPeriodTime(rendererTime: timebaseTime)
     }
 }
 

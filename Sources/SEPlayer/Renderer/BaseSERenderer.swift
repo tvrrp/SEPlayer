@@ -21,11 +21,11 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     let queue: Queue
     private let lock: UnfairLock
     private let clock: SEClock
+    private var timebase: CMTimebase?
 
     private weak var _listener: RendererCapabilitiesListener?
     private var state: SERendererState = .disabled
-    private var sampleStream: TriggerableSampleStream?
-    private var sampleStream2: SampleStream2?
+    private var sampleStream: SampleStream?
     private var formats: [Format] = []
 
     private var streamIsFinal: Bool = false
@@ -51,43 +51,26 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     final func getState() -> SERendererState { state }
 
-    final func enable(
+    func enable(
         formats: [Format],
-        stream: TriggerableSampleStream,
+        stream: any SampleStream,
         position: CMTime,
         joining: Bool,
         mayRenderStartOfStream: Bool,
         startPosition: CMTime,
         offset: CMTime,
-        mediaPeriodId: MediaPeriodId
+        mediaPeriodId: MediaPeriodId,
+        delegate: any SERendererDelegate
     ) throws {
         assert(queue.isCurrent() && state == .disabled)
-        try willChangeStream()
+        self.delegate = delegate
+        var stream = stream
+        try willChangeStream(oldStream: sampleStream, newStream: &stream)
         state = .enabled
         self.sampleStream = stream
         self.formats = formats
         try! onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
         try! replaceStream(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-        try! resetPosition(new: startPosition, joining: joining)
-    }
-
-    func enable2(
-        formats: [Format],
-        stream: any SampleStream2,
-        position: CMTime,
-        joining: Bool,
-        mayRenderStartOfStream: Bool,
-        startPosition: CMTime,
-        offset: CMTime,
-        mediaPeriodId: MediaPeriodId
-    ) throws {
-        assert(queue.isCurrent() && state == .disabled)
-        try willChangeStream()
-        state = .enabled
-        self.sampleStream2 = stream
-        self.formats = formats
-        try! onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
-        try! replaceStream2(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
         try! resetPosition(new: startPosition, joining: joining)
     }
 
@@ -97,14 +80,15 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         try! onStarted()
     }
 
-    final func replaceStream(
+    func replaceStream(
         formats: [Format],
-        stream: TriggerableSampleStream,
+        stream: any SampleStream,
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws {
-        try willChangeStream()
+        var stream = stream
+        try willChangeStream(oldStream: sampleStream, newStream: &stream)
         self.sampleStream = stream
         if readingPosition.isPositiveInfinity {
             readingPosition = startPosition
@@ -114,28 +98,10 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         try! onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
     }
 
-    func replaceStream2(
-        formats: [Format],
-        stream: any SampleStream2,
-        startPosition: CMTime,
-        offset: CMTime,
-        mediaPeriodId: MediaPeriodId
-    ) throws {
-        try willChangeStream()
-        self.sampleStream2 = stream
-        if readingPosition.isPositiveInfinity {
-            readingPosition = startPosition
-        }
-        self.formats = formats
-        streamOffset = offset
-        try! onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-    }
-
-    final func getStream() -> TriggerableSampleStream? { sampleStream }
-    final func getStream2() -> SampleStream2? { sampleStream2 }
+    final func getStream() -> SampleStream? { sampleStream }
     final func didReadStreamToEnd() -> Bool { return readingPosition.isPositiveInfinity }
     final func getReadingPosition() -> CMTime { return readingPosition }
-    final func setStreamFinal() { streamIsFinal = true }
+    func setStreamFinal() { streamIsFinal = true }
     final func isCurrentStreamFinal() -> Bool { streamIsFinal }
 
     func getTimeline() -> Timeline { timeline }
@@ -200,7 +166,8 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {}
 
-    func willChangeStream() throws {}
+    func willChangeStream(oldStream: SampleStream?, newStream: inout SampleStream) throws {}
+
     func onStreamChanged(
         formats: [Format],
         startPosition: CMTime,
@@ -221,33 +188,15 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     final func getStreamFormats() -> [Format] { formats }
     final func getClock() -> SEClock { clock }
 
-    final func readSource(to buffer: DecoderInputBuffer, readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
+    final func readSource(readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {
         guard let sampleStream else { return .nothingRead }
-
-        let result = try sampleStream.readData(to: buffer, readFlags: readFlags)
-        if case .didReadBuffer = result {
-            if buffer.flags.contains(.endOfStream) {
-                readingPosition = .positiveInfinity
-                return streamIsFinal ? .didReadBuffer : .nothingRead
-            }
-//            buffer.time = buffer.time + streamOffset
-            buffer.time = CMSampleTimingInfo(
-                duration: buffer.time.duration,
-                presentationTimeStamp: buffer.time.presentationTimeStamp + streamOffset,
-                decodeTimeStamp: buffer.time.decodeTimeStamp + streamOffset
-            )
-            readingPosition = max(readingPosition, buffer.time.presentationTimeStamp)
-        }
-
-        return result
-    }
-
-    final func readSource2(readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult2 {
-        guard let sampleStream2 else { return .nothingRead }
-        let result = try sampleStream2.readData(readFlags: readFlags)
+        let result = try sampleStream.readData(readFlags: readFlags)
         if case let .didReadBuffer(buffer) = result {
             if buffer.flags.contains(.endOfStream) {
-                readingPosition = .positiveInfinity
+                if !readingPosition.isPositiveInfinity {
+                    readingPosition = .positiveInfinity
+                    delegate?.rendererDidFinishReading(self)
+                }
                 return streamIsFinal ? .didReadBuffer(buffer) : .nothingRead
             }
 
@@ -258,20 +207,12 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         return result
     }
 
-    final func skipSource(position: CMTime) -> Int {
-        sampleStream?.skipData(position: position - streamOffset) ?? 0
-    }
-
-    final func skipSource2(position: CMTime) throws -> Int {
-        try sampleStream2?.skipData(position: position - streamOffset) ?? 0
+    final func skipSource(position: CMTime) throws -> Int {
+        try sampleStream?.skipData(position: position - streamOffset) ?? 0
     }
 
     final func isSourceReady() -> Bool {
         didReadStreamToEnd() ? streamIsFinal : sampleStream?.isReady() ?? false
-    }
-
-    final func isSourceReady2() -> Bool {
-        didReadStreamToEnd() ? streamIsFinal : sampleStream2?.isReady() ?? false
     }
 
     final func onRendererCapabilitiesChanged() {

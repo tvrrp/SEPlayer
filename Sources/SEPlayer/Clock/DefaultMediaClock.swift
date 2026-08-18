@@ -19,16 +19,59 @@ final class DefaultMediaClock: MediaClock {
     private var isUsingStandaloneClock: Bool = false
     private var standaloneClockIsStarted: Bool = false
 
-    init(clock: SEClock) throws {
+    private var baselineTime: CMTime = .zero
+    private var timeObservers = Set<TimebaseTimeObserver>()
+
+    init(clock: SEClock, outboundTimebase: CMTimebase) throws {
         standaloneClock = try StandaloneClock(clock: clock)
         rendererTimebase = try CMTimebase(sourceTimebase: standaloneClock.timebase)
+        outboundTimebase.source = rendererTimebase
     }
 
-    func getTimebase() -> CMTimebase? {
+    func addPeriodicTimeObserver(
+        for interval: CMTime,
+        queue: DispatchQueue,
+        block: @escaping (CMTime) -> Void
+    ) throws -> AnyObject {
+        let observer = try TimebaseTimeObserver(
+            queue: queue,
+            timebase: rendererTimebase,
+            sourceType: .periodic(interval),
+            block: block
+        )
+        timeObservers.insert(observer)
+        return observer
+    }
+
+    func addBoundaryTimeObserver(
+        for times: [CMTime],
+        queue: DispatchQueue,
+        block: @escaping (CMTime) -> Void
+    ) throws -> AnyObject {
+        let observer = try TimebaseTimeObserver(
+            queue: queue,
+            timebase: rendererTimebase,
+            sourceType: .boundary(times),
+            block: block
+        )
+        timeObservers.insert(observer)
+        return observer
+    }
+
+    func removeTimeObserver(_ observer: AnyObject) {
+        guard let observer = observer as? TimebaseTimeObserver else {
+            return
+        }
+
+        timeObservers.remove(observer)
+    }
+
+    func getTimebase() -> CMTimebase {
         rendererTimebase
     }
 
     func start() {
+//        try! rendererTimebase.setTime(baselineTime)
         try! rendererTimebase.setRate(Double(playbackParameters.playbackRate))
         standaloneClockIsStarted = true
         standaloneClock.start()
@@ -36,12 +79,17 @@ final class DefaultMediaClock: MediaClock {
 
     func stop() {
         try! rendererTimebase.setRate(.zero)
+//        resetPosition(position: rendererTimebase.time)
         standaloneClockIsStarted = false
         standaloneClock.stop()
     }
 
     func resetPosition(position: CMTime) {
+//        baselineTime = position
         try! rendererTimebase.setTime(position)
+//        if rendererTimebase.rate != 0 {
+//            try! rendererTimebase.setTime(baselineTime)
+//        }
         standaloneClock.resetPosition(position: position)
     }
 
@@ -75,6 +123,9 @@ final class DefaultMediaClock: MediaClock {
     func getPosition() -> CMTime {
         return rendererClock?.getPosition() ?? standaloneClock.getPosition()
     }
+//    func getPosition() -> CMTime {
+//        return isUsingStandaloneClock ? standaloneClock.getPosition() : (rendererClock?.getPosition() ?? .invalid)
+//    }
 
     func setPlaybackParameters(new playbackParameters: PlaybackParameters) throws {
         self.playbackParameters = playbackParameters
@@ -86,8 +137,58 @@ final class DefaultMediaClock: MediaClock {
         rendererClock?.getPlaybackParameters() ?? standaloneClock.getPlaybackParameters()
     }
 
+//    private func syncClock(isReadingAhead: Bool) {
+//        if shouldUseStandaloneClock(isReadingAhead: isReadingAhead) {
+//            isUsingStandaloneClock = true
+//            if standaloneClockIsStarted {
+//                standaloneClock.start()
+//            }
+//            return
+//        }
+//
+//        guard let rendererClock else { return }
+//        let rendererClockPosition = rendererClock.getPosition()
+//
+//        if isUsingStandaloneClock {
+//            if rendererClockPosition < standaloneClock.getPosition() {
+//                standaloneClock.stop()
+//                return
+//            }
+//
+//            isUsingStandaloneClock = false
+//            if standaloneClockIsStarted {
+//                standaloneClock.start()
+//            }
+//        }
+//
+//        standaloneClock.resetPosition(position: rendererClockPosition)
+////        standaloneClock.resetPosition(position: rendererClock.getPosition())
+////        let rendererClockPosition = rendererClock.getPositionUs()
+////        if isUsingStandaloneClock {
+////            if rendererClockPosition < standaloneClock.getPositionUs() {
+////                standaloneClock.stop()
+////                return
+////            }
+////            isUsingStandaloneClock = false
+////            if standaloneClockIsStarted {
+////                standaloneClock.start()
+////            }
+////        }
+//
+////        standaloneClock.resetPosition(positionUs: rendererClockPosition)
+////        try! rendererTimebase.setTime(.from(microseconds: rendererClockPosition))
+//        let playbackParameters = rendererClock.getPlaybackParameters()
+//        if playbackParameters != standaloneClock.getPlaybackParameters() {
+//            standaloneClock.setPlaybackParameters(new: playbackParameters)
+//        }
+//    }
+
     private func syncClock(isReadingAhead: Bool) {
         if shouldUseStandaloneClock(isReadingAhead: isReadingAhead) {
+            if let rendererClock {
+                standaloneClock.resetPosition(position: rendererClock.getPosition())
+            }
+
             isUsingStandaloneClock = true
             if standaloneClockIsStarted {
                 standaloneClock.start()

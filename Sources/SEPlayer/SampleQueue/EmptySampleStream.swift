@@ -8,30 +8,13 @@
 import CoreMedia
 import Decoder
 
-final class EmptySampleStream: TriggerableSampleStream {
+final class EmptySampleStream: SampleStream {
+    var bufferedAheadDuration: CMTime { .invalid }
+
     func isReady() -> Bool { true }
     func maybeThrowError() throws {}
 
-    func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult {
-        buffer.flags.insert(.endOfStream)
-        return .didReadBuffer
-    }
-
-    func skipData(position: CMTime) -> Int { .zero }
-
-    func installTrigger(condition: TriggerCondition, _ body: ((QueueTriggerToken) -> Void)?) -> QueueTriggerToken {
-        QueueTriggerToken()
-    }
-
-    func removeTrigger(_ token: QueueTriggerToken) {}
-    func testTrigger(_ token: QueueTriggerToken) -> Bool { false }
-}
-
-final class EmptySampleStream2: SampleStream2 {
-    func isReady() -> Bool { true }
-    func maybeThrowError() throws {}
-
-    func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult2 {
+    func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult {
         let sampleBuffer = try CMSampleBuffer.createEndOfStream()
         return .didReadBuffer(sampleBuffer)
     }

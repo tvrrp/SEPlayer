@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 16.12.2025.
 //
 
-import CoreMedia
+import AVFoundation
 import SEPlayerCommon
 
 open class ForwardingRenderer: SERenderer {
@@ -42,15 +42,16 @@ open class ForwardingRenderer: SERenderer {
         renderer.getState()
     }
 
-    open func enable(
+    public func enable(
         formats: [Format],
-        stream: TriggerableSampleStream,
+        stream: any SampleStream,
         position: CMTime,
         joining: Bool,
         mayRenderStartOfStream: Bool,
         startPosition: CMTime,
         offset: CMTime,
-        mediaPeriodId: MediaPeriodId
+        mediaPeriodId: MediaPeriodId,
+        delegate: any SERendererDelegate
     ) throws {
         try renderer.enable(
             formats: formats,
@@ -60,29 +61,8 @@ open class ForwardingRenderer: SERenderer {
             mayRenderStartOfStream: mayRenderStartOfStream,
             startPosition: startPosition,
             offset: offset,
-            mediaPeriodId: mediaPeriodId
-        )
-    }
-
-    public func enable2(
-        formats: [Format],
-        stream: any SampleStream2,
-        position: CMTime,
-        joining: Bool,
-        mayRenderStartOfStream: Bool,
-        startPosition: CMTime,
-        offset: CMTime,
-        mediaPeriodId: MediaPeriodId
-    ) throws {
-        try renderer.enable2(
-            formats: formats,
-            stream: stream,
-            position: position,
-            joining: joining,
-            mayRenderStartOfStream: mayRenderStartOfStream,
-            startPosition: startPosition,
-            offset: offset,
-            mediaPeriodId: mediaPeriodId
+            mediaPeriodId: mediaPeriodId,
+            delegate: delegate
         )
     }
 
@@ -92,7 +72,7 @@ open class ForwardingRenderer: SERenderer {
 
     open func replaceStream(
         formats: [Format],
-        stream: TriggerableSampleStream,
+        stream: SampleStream,
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
@@ -106,28 +86,8 @@ open class ForwardingRenderer: SERenderer {
         )
     }
 
-    open func replaceStream2(
-        formats: [Format],
-        stream: SampleStream2,
-        startPosition: CMTime,
-        offset: CMTime,
-        mediaPeriodId: MediaPeriodId
-    ) throws {
-        try renderer.replaceStream2(
-            formats: formats,
-            stream: stream,
-            startPosition: startPosition,
-            offset: offset,
-            mediaPeriodId: mediaPeriodId
-        )
-    }
-
-    open func getStream() -> TriggerableSampleStream? {
+    open func getStream() -> SampleStream? {
         renderer.getStream()
-    }
-
-    open func getStream2() -> SampleStream2? {
-        renderer.getStream2()
     }
 
     open func didReadStreamToEnd() -> Bool {

@@ -11,7 +11,7 @@ import QuartzCore
 
 public extension Format {
     protocol InitializationData: Hashable, Sendable {
-        func getInitializationData() throws -> [ByteBuffer]
+        func getInitializationData() throws -> [BlockBufferReader]
         func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription
     }
 
@@ -30,7 +30,7 @@ public extension Format {
 }
 
 public extension Format.InitializationData {
-    func getInitializationData() throws -> [ByteBuffer] {
+    func getInitializationData() throws -> [BlockBufferReader] {
         throw UnsupportedOperationError()
     }
 
@@ -121,7 +121,7 @@ public final class Format: Sendable {
         return try initializationData.buildCMFormatDescription(using: self)
     }
 
-    public func getInitializationData() throws -> [ByteBuffer] {
+    public func getInitializationData() throws -> [BlockBufferReader] {
         guard let initializationData else {
             throw Error.initializationDataIsEmpty
         }

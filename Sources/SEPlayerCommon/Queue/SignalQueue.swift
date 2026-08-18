@@ -93,9 +93,9 @@ public final class SignalQueue: Queue, Sendable {
 
     public func sync<T>(_ f: () throws -> T) rethrows -> T {
         if isCurrent() {
-            return try! f()
+            return try f()
         } else {
-            return try! nativeQueue.sync(execute: f)
+            return try nativeQueue.sync(execute: f)
         }
     }
 

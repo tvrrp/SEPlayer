@@ -10,8 +10,8 @@ import CoreMedia
 
 public protocol SEPlayer: Player {
     var clock: SEClock { get }
+    var timebase: CMTimebase { get }
     var preloadConfiguration: PreloadConfiguration { get set }
-    var seekParameters: SeekParameters { get set }
     var pauseAtTheEndOfMediaItem: Bool { get set }
 
     func set(mediaSources: [MediaSource])
@@ -27,7 +27,35 @@ public protocol SEPlayer: Player {
 
     func set(shuffleOrder: ShuffleOrder)
 
+    func addPeriodicTimeObserver(for interval: CMTime, queue: DispatchQueue, block: @escaping (CMTime) -> Void) throws -> AnyObject
+    func addBoundaryTimeObserver(for times: [CMTime], queue: DispatchQueue, block: @escaping (CMTime) -> Void) throws -> AnyObject
+    func removeTimeObserver(_ observer: AnyObject)
+
     func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage
     func setVideoOutput(_ output: VideoSampleBufferRenderer)
     func removeVideoOutput(_ output: VideoSampleBufferRenderer)
+}
+
+public extension SEPlayer {
+    func addPeriodicTimeObserver(for interval: CMTime) throws -> AsyncStream<CMTime> {
+        let (stream, continuation) = AsyncStream<CMTime>.makeStream()
+        let token = try addPeriodicTimeObserver(for: interval, queue: .main) { time in
+            continuation.yield(time)
+        }
+        continuation.onTermination = { _ in
+            self.removeTimeObserver(token)
+        }
+        return stream
+    }
+
+    func addBoundaryTimeObserver(for times: [CMTime]) throws -> AsyncStream<CMTime> {
+        let (stream, continuation) = AsyncStream<CMTime>.makeStream()
+        let token = try addBoundaryTimeObserver(for: times, queue: .main) { time in
+            continuation.yield(time)
+        }
+        continuation.onTermination = { _ in
+            self.removeTimeObserver(token)
+        }
+        return stream
+    }
 }

@@ -184,7 +184,8 @@ final class MaskingMediaSource: WrappingMediaSource {
 
         let periodDuration = timeline.getPeriod(periodIndex: maskingPeriodIndex, period: period).duration
         if periodDuration.isValid, preparePositionOverride >= periodDuration {
-            preparePositionOverride = max(.zero, CMTime(value: periodDuration.value - 1, timescale: periodDuration.timescale))
+//            TODO: check preparePositionOverride = max(.zero, CMTime(value: periodDuration.value - 1, timescale: periodDuration.timescale))
+            preparePositionOverride = max(.zero, periodDuration)
         }
         maskingPeriod?.preparePositionOverride = preparePositionOverride
         return true

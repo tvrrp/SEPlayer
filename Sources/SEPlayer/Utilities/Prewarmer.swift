@@ -41,15 +41,15 @@ final class Prewarmer {
 
     private func prewarmAudio() {
         DispatchQueue.global(qos: .background).async { [self] in
-            guard let codecInfo = try? BoxParser.ESDescriptor(esdt: esDescriptorAacAudio).codecInfo else {
-                return
-            }
+//            guard let codecInfo = try? BoxParser.ESDescriptor(esdt: esDescriptorAacAudio).codecInfo else {
+//                return
+//            }
+//
+//            let format = Format.Builder()
+//                .setInitializationData(PrewarmerInitializationData(formatDescription: codecInfo))
+//                .build()
 
-            let format = Format.Builder()
-                .setInitializationData(PrewarmerInitializationData(formatDescription: codecInfo))
-                .build()
-
-            _ = try? AudioConverterDecoder.supportsFormat(format)
+            // TODO: enable_ = try? AudioConverterDecoder.supportsFormat(format)
         }
     }
 

@@ -333,10 +333,11 @@ public final class MessageQueue: @unchecked Sendable {
     private var lastMessage: Message?
     private var idleHandlers = NSHashTable<AnyObject>()
 
-    private var quiting = false
+    private var quitting = false
     private var blocked = false
     private var awaitingContinuation: CheckedContinuation<Void, Error>?
     private var awaitingTimerTask: Task<Void, Error>?
+    private var pendingWake = false
 
     deinit {
         awaitingContinuation?.resume(throwing: CancellationError())
@@ -364,17 +365,76 @@ public final class MessageQueue: @unchecked Sendable {
         lock.withLock { idleHandlers.remove(handler) }
     }
 
+//    public func enqueueMessage(
+//        _ message: Message,
+//        whenNs: UInt64
+//    ) -> Bool {
+//        precondition(message.target != nil)
+//
+//        lock.lock(); defer { lock.unlock() }
+//        precondition(!message.inUse)
+//
+//        if quiting {
+//            message.recycle()
+//            return false
+//        }
+//
+//        message.inUse = true
+//        message.whenNs = whenNs
+//        message.next = nil
+//
+//        let head = messages
+//        var needWake = false
+//
+//        switch head {
+//        case .some(let p) where whenNs != 0 && whenNs >= p.whenNs:
+//            var current: Message? = p
+//            var prev: Message?
+//
+//            while let c = current {
+//                if whenNs < c.whenNs { break }
+//                prev = c
+//                current = c.next
+//            }
+//
+//            message.next = current
+//            prev!.next = message
+//
+//            if message.next == nil {
+//                lastMessage = message
+//            }
+//
+//        default:
+//            message.next = head
+//            messages = message
+//            if head == nil {
+//                lastMessage = message
+//            }
+//            needWake = blocked
+//        }
+//
+//        if needWake {
+//            awaitingContinuation?.resume()
+//            awaitingContinuation = nil
+//            awaitingTimerTask?.cancel()
+//            awaitingTimerTask = nil
+//        }
+//
+//        return true
+//    }
+
     public func enqueueMessage(
         _ message: Message,
         whenNs: UInt64
     ) -> Bool {
         precondition(message.target != nil)
 
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         precondition(!message.inUse)
 
-        if quiting {
+        if quitting {
             message.recycle()
+            lock.unlock()
             return false
         }
 
@@ -382,42 +442,58 @@ public final class MessageQueue: @unchecked Sendable {
         message.whenNs = whenNs
         message.next = nil
 
-        let head = messages
         var needWake = false
 
-        switch head {
-        case .some(let p) where whenNs != 0 && whenNs >= p.whenNs:
-            var current: Message? = p
-            var prev: Message?
-
-            while let c = current {
-                if whenNs < c.whenNs { break }
-                prev = c
-                current = c.next
-            }
-
-            message.next = current
-            prev!.next = message
-
-            if message.next == nil {
+        if let head = messages {
+            if whenNs == 0 || whenNs < head.whenNs {
+                // New head: consumer's current wait target is now stale.
+                message.next = head
+                messages = message
+                needWake = blocked
+            } else if let tail = lastMessage, whenNs >= tail.whenNs {
+                // Fast path: append. `>=` (not `>`) keeps FIFO for equal whenNs.
+                tail.next = message
                 lastMessage = message
-            }
+                // needWake stays false — head is unchanged.
+            } else {
+                // General insert. The branch above guarantees whenNs >= head.whenNs,
+                // so starting at head.next with prev = head is always valid.
+                var prev: Message = head
+                var current = head.next
 
-        default:
-            message.next = head
+                while let c = current, whenNs >= c.whenNs {
+                    prev = c
+                    current = c.next
+                }
+
+                message.next = current
+                prev.next = message
+                if current == nil { lastMessage = message }   // defensive
+            }
+        } else {
             messages = message
-            if head == nil {
-                lastMessage = message
-            }
+            lastMessage = message
             needWake = blocked
         }
 
+        // NOTE: AOSP additionally gates the mid-queue wake on
+        //   mBlocked && p.target == null && msg.isAsynchronous()
+        // plus the in-loop `if (needWake && p.isAsynchronous()) needWake = false`.
+        // Both are unreachable here: `precondition(message.target != nil)` means
+        // no sync barriers can exist in the queue. If postSyncBarrier is ever
+        // added, this branch must be revisited.
+
+        let continuation = needWake ? awaitingContinuation : nil
+        let timerTask = needWake ? awaitingTimerTask : nil
         if needWake {
-            awaitingContinuation?.resume()
+            pendingWake = true
             awaitingContinuation = nil
-            awaitingTimerTask?.cancel()
             awaitingTimerTask = nil
         }
+        lock.unlock()
+
+        continuation?.resume()
+        timerTask?.cancel()
 
         return true
     }
@@ -479,29 +555,89 @@ public final class MessageQueue: @unchecked Sendable {
         }
     }
 
+//    public func next() async throws -> Message? {
+//        var pendingIdleHandlerCount = -1
+//        var nextPollTimeoutNs: Int64 = 0
+//
+//        while true {
+//            try await poolOnce(timeoutNs: nextPollTimeoutNs)
+//
+//            lock.lock()
+//
+//            let now = DispatchTime.now().uptimeNanoseconds
+//            let msg = messages
+//
+//            if let m = msg {
+//                if now < m.whenNs {
+//                    nextPollTimeoutNs = Int64(
+//                        min(m.whenNs &- now, UInt64(UInt32.max))
+//                    )
+//                } else {
+//                    blocked = false
+//                    messages = m.next
+//                    if messages == nil {
+//                        lastMessage = nil
+//                    }
+//                    m.next = nil
+//                    m.inUse = true
+//                    lock.unlock()
+//                    return m
+//                }
+//            } else {
+//                nextPollTimeoutNs = -1
+//            }
+//
+//            if quitting {
+//                lock.unlock()
+//                return nil
+//            }
+//
+//            let shouldRunIdle = messages.map {
+//                now < $0.whenNs
+//            } ?? true
+//
+//            if pendingIdleHandlerCount < 0, shouldRunIdle {
+//                pendingIdleHandlerCount = idleHandlers.count
+//            }
+//
+//            if pendingIdleHandlerCount <= 0 {
+//                blocked = true
+//                lock.unlock()
+//                continue
+//            }
+//
+//            let handlers = idleHandlers.allObjects as! [IdleHandler]
+//            lock.unlock()
+//
+//            handlers.forEach { handler in
+//                if !handler.queueIdle() {
+//                    lock.withLock { idleHandlers.remove(handler) }
+//                }
+//            }
+//
+//            pendingIdleHandlerCount = 0
+//            nextPollTimeoutNs = 0
+//        }
+//    }
     public func next() async throws -> Message? {
         var pendingIdleHandlerCount = -1
         var nextPollTimeoutNs: Int64 = 0
 
-        while true {
-            try await poolOnce(timeoutNs: nextPollTimeoutNs)
+        lock.lock()
 
+        while true {
+            try await parkLocked(timeoutNs: nextPollTimeoutNs)   // consumes the lock
             lock.lock()
 
             let now = DispatchTime.now().uptimeNanoseconds
-            let msg = messages
 
-            if let m = msg {
+            if let m = messages {
                 if now < m.whenNs {
-                    nextPollTimeoutNs = Int64(
-                        min(m.whenNs &- now, UInt64(UInt32.max))
-                    )
+                    nextPollTimeoutNs = Int64(min(m.whenNs &- now, UInt64(UInt32.max)))
                 } else {
                     blocked = false
                     messages = m.next
-                    if messages == nil {
-                        lastMessage = nil
-                    }
+                    if messages == nil { lastMessage = nil }
                     m.next = nil
                     m.inUse = true
                     lock.unlock()
@@ -511,43 +647,38 @@ public final class MessageQueue: @unchecked Sendable {
                 nextPollTimeoutNs = -1
             }
 
-            if quiting {
+            if quitting {
                 lock.unlock()
                 return nil
             }
 
-            let shouldRunIdle = messages.map {
-                now < $0.whenNs
-            } ?? true
-
+            let shouldRunIdle = messages.map { now < $0.whenNs } ?? true
             if pendingIdleHandlerCount < 0, shouldRunIdle {
                 pendingIdleHandlerCount = idleHandlers.count
             }
 
             if pendingIdleHandlerCount <= 0 {
                 blocked = true
-                lock.unlock()
-                continue
+                continue                       // keep the lock — parkLocked needs it
             }
 
             let handlers = idleHandlers.allObjects as! [IdleHandler]
             lock.unlock()
 
-            handlers.forEach { handler in
-                if !handler.queueIdle() {
-                    lock.withLock { idleHandlers.remove(handler) }
-                }
+            for handler in handlers where !handler.queueIdle() {
+                lock.withLock { idleHandlers.remove(handler) }
             }
 
             pendingIdleHandlerCount = 0
             nextPollTimeoutNs = 0
+            lock.lock()                        // re-acquire before parking
         }
     }
 
     public func quit(safe: Bool) {
         lock.withLock {
-            guard !quiting else { return }
-            quiting = true
+            guard !quitting else { return }
+            quitting = true
 
             if safe {
                 removeAllFutureMessagesLocked()
@@ -600,18 +731,57 @@ public final class MessageQueue: @unchecked Sendable {
         }
     }
 
-    private func poolOnce(timeoutNs: Int64) async throws {
-        if timeoutNs < 0 {
-            return try await withCheckedThrowingContinuation { cont in
-                lock.withLock { awaitingContinuation = cont }
-            }
-        } else if timeoutNs == 0 {
+//    private func poolOnce(timeoutNs: Int64) async throws {
+//        if timeoutNs < 0 {
+//            return try await withCheckedThrowingContinuation { cont in
+//                lock.withLock { awaitingContinuation = cont }
+//            }
+//        } else if timeoutNs == 0 {
+//            return
+//        } else {
+//            let timerTask = Task {
+//                let now = DispatchTime.now()
+//                let deadline = now.advanced(by: .nanoseconds(Int(timeoutNs)))
+//
+//                do {
+//                    if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
+//                        try await Task.sleep(
+//                            for: .nanoseconds(deadline.uptimeNanoseconds - now.uptimeNanoseconds),
+//                            tolerance: .nanoseconds(0),
+//                            clock: .continuous
+//                        )
+//                    } else {
+//                        try await Task.sleep(for: now.distance(to: deadline), queue: timerQueue)
+//                    }
+//                } catch {
+//                    if error is CancellationError { return }
+//                    throw error
+//                }
+//            }
+//
+//            lock.withLock { awaitingTimerTask = timerTask }
+//            try await timerTask.value
+//        }
+//    }
+    private func parkLocked(timeoutNs: Int64) async throws {
+        if timeoutNs == 0 || pendingWake {
+            pendingWake = false
+            blocked = false
+            lock.unlock()
             return
-        } else {
-            let timerTask = Task {
-                let now = DispatchTime.now()
-                let deadline = now.advanced(by: .nanoseconds(Int(timeoutNs)))
+        }
 
+        if timeoutNs < 0 {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                awaitingContinuation = cont
+                lock.unlock()          // atomic w.r.t. enqueueMessage: a producer
+            }                          // cannot observe `blocked` without also
+                                       // observing `awaitingContinuation`
+        } else {
+            let now = DispatchTime.now()
+            let deadline = now.advanced(by: .nanoseconds(Int(timeoutNs)))
+
+            let timerTask = Task {
                 do {
                     if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                         try await Task.sleep(
@@ -627,9 +797,16 @@ public final class MessageQueue: @unchecked Sendable {
                     throw error
                 }
             }
-
-            lock.withLock { awaitingTimerTask = timerTask }
+            awaitingTimerTask = timerTask   // assigned before unlocking: no lost cancel
+            lock.unlock()
             try await timerTask.value
+        }
+
+        lock.withLock {
+            pendingWake = false
+            blocked = false
+            awaitingContinuation = nil
+            awaitingTimerTask = nil
         }
     }
 }

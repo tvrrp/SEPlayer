@@ -29,19 +29,16 @@ public typealias TriggerCondition = CMBufferQueue.TriggerCondition
 //    case whenSampleCountBecomesGreaterThan(Int)
 //}
 
-public struct QueueTriggerToken: Hashable {
-    public let id: Identifier
+public typealias QueueTriggerToken = UUID
 
-    public enum Identifier: Hashable {
-        case intId(UUID)
-        case cmTrigger(CMBufferQueueTriggerToken)
-    }
-
-    public init() {
-        id = .intId(UUID())
-    }
-
-    public init(cmTrigger: CMBufferQueueTriggerToken) {
-        id = .cmTrigger(cmTrigger)
-    }
-}
+//public struct QueueTriggerToken: Hashable, Sendable {
+//    public let id: UUID
+//
+//    public init() {
+//        id = UUID()
+//    }
+//
+////    public init(cmTrigger: CMBufferQueueTriggerToken) {
+////        id = .cmTrigger(cmTrigger)
+////    }
+//}

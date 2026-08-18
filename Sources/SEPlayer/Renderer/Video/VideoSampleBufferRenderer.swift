@@ -10,14 +10,18 @@ import SEPlayerCommon
 
 public protocol VideoSampleBufferRendererDelegate: AnyObject {
     nonisolated var isolation: any Actor { get }
-    func renderer(_ renderer: VideoSampleBufferRenderer, didFailedRenderingWith error: Error?, isolation: isolated any Actor)
+    func renderer(_ renderer: VideoSampleBufferRenderer, didFailedRenderingWith error: Error, isolation: isolated any Actor)
+    func renderer(_ renderer: VideoSampleBufferRenderer, didChangeReadyForDisplay: Bool, isolation: isolated any Actor)
 }
 
 public protocol VideoSampleBufferRenderer: VideoSampleBufferRendererPerformance, Sendable {
     nonisolated var delegate: VideoSampleBufferRendererDelegate? { get set }
+    var isReadyForDisplay: Bool { get }
     var isReadyForMoreMediaData: Bool { get }
     var hasSufficientMediaDataForReliablePlaybackStart: Bool { get }
+    var requiresFlushToResumeDecoding: Bool { get }
 
+    func setIsHidden(_ isHidden: Bool)
     func setControlTimebase(_ timebase: CMTimebase?)
     func enqueue(_ sampleBuffer: CMSampleBuffer)
     func flush()
@@ -99,8 +103,20 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
 
     var timebase: CMTimebase { renderer.timebase }
     var isReadyForMoreMediaData: Bool { renderer.isReadyForMoreMediaData }
+    var isReadyForDisplay: Bool {
+        if #available(iOS 17.4, macCatalyst 17.4, *) {
+            layer.isReadyForDisplay
+        } else {
+            true
+        }
+    }
+
     var hasSufficientMediaDataForReliablePlaybackStart: Bool {
         renderer.hasSufficientMediaDataForReliablePlaybackStart
+    }
+
+    var requiresFlushToResumeDecoding: Bool {
+        renderer.requiresFlushToResumeDecoding
     }
 
     private let lock = UnfairLock()
@@ -116,11 +132,20 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
 
         observer = renderer.observe(\.status) { [weak self] renderer, _ in
             guard let self else { return }
-            if renderer.status == .failed, let delegate {
+            if renderer.status == .failed, let error = renderer.error, let delegate {
                 Task {
-                    await delegate.renderer(self, didFailedRenderingWith: renderer.error, isolation: delegate.isolation)
+                    await delegate.renderer(self, didFailedRenderingWith: error, isolation: delegate.isolation)
                 }
             }
+        }
+
+        if #available(iOS 17.4, *) {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(readyForDisplayDidChange),
+                name: .AVSampleBufferDisplayLayerReadyForDisplayDidChange,
+                object: layer
+            )
         }
     }
 
@@ -144,7 +169,15 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     }
 
     func setControlTimebase(_ timebase: CMTimebase?) {
-        layer.controlTimebase = timebase
+        if layer.controlTimebase !== timebase {
+            layer.controlTimebase = timebase
+        }
+    }
+
+    func setIsHidden(_ isHidden: Bool) {
+        DispatchQueue.main.async {
+            self.layer.isHidden = isHidden
+        }
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
@@ -174,6 +207,16 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     func stopRequestingMediaData() {
         renderer.stopRequestingMediaData()
     }
+
+    @objc
+    private func readyForDisplayDidChange() {
+        if #available(iOS 17.4, *) {
+            Task {
+                guard let delegate else { return }
+                await delegate.renderer(self, didChangeReadyForDisplay: layer.isReadyForDisplay, isolation: delegate.isolation)
+            }
+        }
+    }
 }
 
 final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
@@ -191,8 +234,20 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
         layer.isReadyForMoreMediaData
     }
 
+    var isReadyForDisplay: Bool {
+        if #available(iOS 17.4, macCatalyst 17.4, *) {
+            layer.isReadyForDisplay
+        } else {
+            true
+        }
+    }
+
     var hasSufficientMediaDataForReliablePlaybackStart: Bool {
-        self.layer.hasSufficientMediaDataForReliablePlaybackStart
+        layer.hasSufficientMediaDataForReliablePlaybackStart
+    }
+
+    var requiresFlushToResumeDecoding: Bool {
+        layer.requiresFlushToResumeDecoding
     }
 
     private nonisolated(unsafe) let layer: AVSampleBufferDisplayLayer
@@ -208,14 +263,21 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
         DispatchQueue.main.async { [self] in
             observer = layer.observe(\.status) { [weak self] layer, _ in
                 guard let self else { return }
-                if layer.status == .failed, let delegate {
-                    let error = layer.error
-
+                if layer.status == .failed, let error = layer.error, let delegate {
                     Task {
                         await delegate.renderer(self, didFailedRenderingWith: error, isolation: delegate.isolation)
                     }
                 }
             }
+        }
+
+        if #available(iOS 17.4, *) {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(readyForDisplayDidChange),
+                name: .AVSampleBufferDisplayLayerReadyForDisplayDidChange,
+                object: layer
+            )
         }
     }
 
@@ -228,7 +290,15 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     }
 
     func setControlTimebase(_ timebase: CMTimebase?) {
-        layer.controlTimebase = timebase
+        if layer.controlTimebase !== timebase {
+            layer.controlTimebase = timebase
+        }
+    }
+
+    func setIsHidden(_ isHidden: Bool) {
+        DispatchQueue.main.async {
+            self.layer.isHidden = isHidden
+        }
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
@@ -271,5 +341,15 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
 
     func stopRequestingMediaData() {
         layer.stopRequestingMediaData()
+    }
+
+    @objc
+    private func readyForDisplayDidChange() {
+        if #available(iOS 17.4, *) {
+            Task {
+                guard let delegate else { return }
+                await delegate.renderer(self, didChangeReadyForDisplay: layer.isReadyForDisplay, isolation: delegate.isolation)
+            }
+        }
     }
 }

@@ -14,20 +14,30 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
     }
 
     var isReadyForMoreMediaData: Bool {
-        renderers.allSatisfy(\.value.isReadyForMoreMediaData)
+        renderers.last?.value.isReadyForMoreMediaData ?? false
+    }
+
+    var isReadyForDisplay: Bool {
+        renderers.last?.value.isReadyForDisplay ?? false
     }
 
     var hasSufficientMediaDataForReliablePlaybackStart: Bool {
-        renderers.allSatisfy(\.value.hasSufficientMediaDataForReliablePlaybackStart)
+        renderers.last?.value.hasSufficientMediaDataForReliablePlaybackStart ?? false
+    }
+
+    var requiresFlushToResumeDecoding: Bool {
+        renderers.first(where: { $0.value.requiresFlushToResumeDecoding }) != nil
     }
 
     var hasOutput: Bool { renderers.count != 0 }
 
     private let queue: Queue
-    private var renderers = Set<Box>()
+    // TODO: OrderedSet
+    private var renderers = [Box]()
 
     nonisolated(unsafe) var controlTimebase: CMTimebase?
     nonisolated(unsafe) private var presentationTimeExpectation = PresentationTimeExpectation.none
+    private var requestOutputCallback: (DispatchQueue, @Sendable () -> Void)?
 
     init(queue: Queue) throws {
         self.queue = queue
@@ -37,15 +47,27 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
 
     func addRenderer(_ renderer: VideoSampleBufferRenderer) {
         assert(queue.isCurrent())
-        renderers.insert(.init(renderer))
+        let box = Box(renderer)
+        guard renderers.first(where: { $0 == box }) == nil else {
+            return
+        }
+
         renderer.delegate = delegate
         renderer.setControlTimebase(controlTimebase)
         renderer.setPresentationTimeExpectation(presentationTimeExpectation)
+
+        renderers.forEach { $0.value.stopRequestingMediaData() }
+//        renderers.insert(.init(renderer))
+        renderers.append(box)
+        if let (queue, callback) = requestOutputCallback {
+            renderer.requestMediaDataWhenReady(on: queue, using: callback)
+        }
     }
 
     func removeRenderer(_ renderer: VideoSampleBufferRenderer) {
         assert(queue.isCurrent())
-        renderers.remove(.init(renderer))
+        let box = Box(renderer)
+        renderers.removeAll(where: { $0 == box })
     }
 
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
@@ -65,6 +87,10 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
 //        } else {
 //            controlTimebase.source = CMClock.hostTimeClock
 //        }
+    }
+
+    func setIsHidden(_ isHidden: Bool) {
+        renderers.forEach { $0.value.setIsHidden(isHidden) }
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
@@ -98,11 +124,13 @@ final class VideoSampleBufferRenderersStorage: VideoSampleBufferRenderer {
 
     func requestMediaDataWhenReady(on queue: DispatchQueue, using block: @escaping @Sendable () -> Void) {
 //        assert(self.queue.isCurrent())
-        renderers.forEach { $0.value.requestMediaDataWhenReady(on: queue, using: block) }
+        requestOutputCallback = (queue, block)
+        renderers.last?.value.requestMediaDataWhenReady(on: queue, using: block)
     }
 
     func stopRequestingMediaData() {
 //        assert(queue.isCurrent())
+        requestOutputCallback = nil
         renderers.forEach { $0.value.stopRequestingMediaData() }
     }
 

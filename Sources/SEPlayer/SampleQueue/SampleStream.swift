@@ -9,27 +9,22 @@ import CoreMedia
 import Decoder
 import SEPlayerCommon
 
-public protocol SampleStream: AnyObject {
+public protocol SampleStream: AnyObject, TriggerableSampleStream {
+    var bufferedAheadDuration: CMTime { get }
     func isReady() -> Bool
     func maybeThrowError() throws
-    func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult
-    func skipData(position: CMTime) -> Int
+    func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult
+    func skipData(position: CMTime) throws -> Int
+    func isEqual(to other: any SampleStream) -> Bool
+}
+
+extension SampleStream {
+    func isEqual(to other: any SampleStream) -> Bool {
+        self === other
+    }
 }
 
 @frozen public enum SampleStreamReadResult: Equatable {
-    case nothingRead
-    case didReadFormat(format: Format)
-    case didReadBuffer
-}
-
-public protocol SampleStream2: AnyObject, TriggerableSampleStream2 {
-    func isReady() -> Bool
-    func maybeThrowError() throws
-    func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult2
-    func skipData(position: CMTime) throws -> Int
-}
-
-@frozen public enum SampleStreamReadResult2: Equatable {
     case nothingRead
     case didReadFormat(format: Format)
     case didReadBuffer(_ buffer: CMSampleBuffer)

@@ -152,7 +152,8 @@ public extension Timeline {
         getPeriod(periodIndex: periodIndex, period: period, setIds: true)
         var periodPosition = windowPosition - period.positionInWindow
         if period.duration.isValid == false {
-            periodPosition = min(periodPosition, CMTime(value: period.duration.value - 1, timescale: period.duration.timescale))
+//          TODO: check  periodPosition = min(periodPosition, CMTime(value: period.duration.value - 1, timescale: period.duration.timescale))
+            periodPosition = min(periodPosition, period.duration)
         }
         periodPosition = max(.zero, periodPosition)
         guard let periodId = period.uid else { return nil }

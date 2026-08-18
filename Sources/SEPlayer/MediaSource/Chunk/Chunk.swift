@@ -46,7 +46,7 @@ public class Chunk: Loadable {
         loadTaskId = LoadEventInfo.nextLoadId()
     }
 
-    public func load(isolation: isolated any Actor) async throws {
+    public func load(_ isolation: isolated any Actor) async throws {
         fatalError()
     }
 }

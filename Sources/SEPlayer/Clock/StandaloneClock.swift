@@ -16,6 +16,7 @@ final class StandaloneClock: MediaClock {
     private var started: Bool = false
     private var baseElapsedUs: Int64 = 0
     private var baseUs: Int64 = 0
+    private var baselineTime: CMTime = .zero
 
     init(clock: SEClock) throws {
         self.clock = clock
@@ -27,6 +28,7 @@ final class StandaloneClock: MediaClock {
         guard !started else { return }
 
         do {
+//            try timebase.setTime(baselineTime)
             try timebase.setRate(Double(playbackParameters.playbackRate))
         } catch {
             print(error)
@@ -50,6 +52,8 @@ final class StandaloneClock: MediaClock {
     func resetPosition(position: CMTime) {
         do {
             try timebase.setTime(position)
+//            baselineTime = position
+//            if timebase.rate != 0 { try timebase.setTime(position) }
         } catch {
             print(error)
         }

@@ -8,18 +8,21 @@
 import CoreMedia
 
 public struct BlockBufferReader: Hashable {
-    @inlinable
     public var readerIndex: Int {
         Int(self._readerIndex)
     }
 
-    @inlinable public var readableBytes: Int {
+    public var readableBytes: Int {
         // this cannot under/overflow because both are positive and writer >= reader (checked on ingestion of bytes).
         Int(blockBuffer.endIndex &- self._readerIndex)
     }
 
-    @usableFromInline internal var blockBuffer: CMBlockBuffer
-    @usableFromInline internal var _readerIndex: Int
+    public var capacity: Int {
+        blockBuffer.dataLength
+    }
+
+    public var blockBuffer: CMBlockBuffer
+    internal var _readerIndex: Int
 
     public init() throws {
         do {
@@ -37,11 +40,14 @@ public struct BlockBufferReader: Hashable {
         _readerIndex = .zero
     }
 
-    public init(reader: sending BlockBufferReader, range: Range<Int>? = nil) throws {
+    public init(reader: sending BlockBufferReader, range: Range<Int>? = nil, permitEmptyReference: Bool = false) throws {
         do {
             self.blockBuffer = try CMBlockBuffer()
             let range = range ?? reader.blockBuffer.startIndex..<reader.blockBuffer.dataLength
-            try blockBuffer._append(bufferReference: reader.blockBuffer[range])
+            try! blockBuffer._append(
+                bufferReference: reader.blockBuffer[range],
+                flags: permitEmptyReference ? .permitEmptyReference : []
+            )
             _readerIndex = .zero
         } catch {
             if error is BlockBufferReaderErrors {
@@ -54,12 +60,25 @@ public struct BlockBufferReader: Hashable {
         }
     }
 
-    @inlinable
     public func withUnsafeReadableBlockBuffer<R>(_ body: (CMBlockBuffer) throws -> R) throws -> R {
         return try body(CMBlockBuffer(bufferReference: blockBuffer[_readerIndex...]))
     }
 
-    @inlinable
+    public func withUnsafeReadableBuffer<R>(
+        makeContigiousWith allocator: CFAllocator? = nil,
+        _ body: (UnsafeRawBufferPointer) throws -> R
+    ) throws -> R {
+        let blockBuffer = if let allocator {
+            try blockBuffer[_readerIndex...].makeContiguous(allocator: allocator)
+        } else {
+            try CMBlockBuffer(bufferReference: blockBuffer[_readerIndex...])
+        }
+
+        return try blockBuffer._withContiguousStorage { buffer in
+            try body(buffer)
+        }
+    }
+
     public func extend(with blockBuffer: CMBlockBuffer, permitEmptyReference: Bool = false) throws {
         do {
             try self.blockBuffer.append(
@@ -71,7 +90,38 @@ public struct BlockBufferReader: Hashable {
         }
     }
 
-    @inlinable
+    public func extend(with reader: BlockBufferReader, permitEmptyReference: Bool = false) throws {
+        do {
+            try self.blockBuffer.append(
+                bufferReference: reader.blockBuffer,
+                flags: permitEmptyReference ? [.permitEmptyReference] : []
+            )
+        } catch {
+            throw BlockBufferReaderErrors(.emptyBlockBuffer)
+        }
+    }
+
+    @_specialize(where T == BlockBufferView)
+    public func extend<T: Collection>(
+        with data: T,
+        permitEmptyReference: Bool = false
+    ) throws where T.Element == UInt8 {
+        do {
+            let blockBuffer = try data.withContiguousStorageIfAvailable {
+                let blockBuffer = try CMBlockBuffer(length: $0.count, flags: .assureMemoryNow)
+                try blockBuffer.replaceDataBytes(with: UnsafeRawBufferPointer($0))
+                return blockBuffer
+            }
+
+            try self.blockBuffer.append(
+                bufferReference: blockBuffer ?? CMBlockBuffer(),
+                flags: permitEmptyReference ? [.permitEmptyReference] : []
+            )
+        } catch {
+            throw BlockBufferReaderErrors(.emptyBlockBuffer)
+        }
+    }
+
     public mutating func clear() throws {
         do {
             self.blockBuffer = try CMBlockBuffer()
@@ -90,7 +140,6 @@ public struct BlockBufferReader: Hashable {
     ///            to the `writerIndex`. Failing to meet either of these requirements leads to undefined behaviour.
     /// - Parameters:
     ///   - offset: The number of bytes to move the reader index forward by.
-    @inlinable
     public mutating func moveReaderIndex(forwardBy offset: Int) {
         let newIndex = self._readerIndex + offset
         precondition(
@@ -107,7 +156,6 @@ public struct BlockBufferReader: Hashable {
     ///            to the `writerIndex`. Failing to meet either of these requirements leads to undefined behaviour.
     /// - Parameters:
     ///   - offset: The offset in bytes to set the reader index to.
-    @inlinable
     public mutating func moveReaderIndex(to offset: Int) {
         precondition(
             offset >= 0 && offset <= blockBuffer.endIndex,
@@ -138,7 +186,6 @@ public struct BlockBufferReader: Hashable {
     ///   - as: the desired `FixedWidthInteger` type (optional parameter)
     /// - Returns: An integer value deserialized from this `BlockBufferReader` or `error` if the bytes of interest are not
     ///            readable.
-    @inlinable
     public func getInt<T: FixedWidthInteger>(
         at index: Int,
         endianness: Endianness = Endianness.big,
@@ -178,7 +225,6 @@ public struct BlockBufferReader: Hashable {
     ///   - endianness: The endianness of the integer (defaults to big endian).
     ///   - as: The desired `FixedWidthInteger` type (optional parameter).
     /// - Returns: An integer value deserialized from this `BlockBufferReader` or throws if the bytes are not readable.
-    @inlinable
     public func peekInt<T: FixedWidthInteger>(
         endianness: Endianness = .big,
         as: T.Type = T.self
@@ -279,7 +325,6 @@ public struct BlockBufferReader: Hashable {
     ///   - index: The starting index of the bytes of interest into the `BlockBufferReader`.
     ///   - length: The number of bytes of interest.
     /// - Returns: A `[UInt8]` value containing the bytes of interest or `error` if the bytes `BlockBufferReader` are not readable.
-    @inlinable
     public func getBytes(at index: Int, length: Int) throws -> [UInt8] {
         let range = try self.rangeWithinReadableBytes(index: index, length: length)
         let startIndex = range.startIndex + readerIndex
@@ -301,7 +346,6 @@ public struct BlockBufferReader: Hashable {
     /// - Parameters:
     ///   - length: The number of bytes to be read from this `BlockBufferReader`.
     /// - Returns: A `[UInt8]` value containing `length` bytes or `error` if there aren't at least `length` bytes readable.
-    @inlinable
     public mutating func readBytes(length: Int) throws -> [UInt8] {
         let result = try self.getBytes(at: self.readerIndex, length: length)
         self.moveReaderIndex(forwardBy: length)
@@ -374,7 +418,6 @@ public struct BlockBufferReader: Hashable {
         return slice
     }
 
-    @inlinable
     func _toEndianness<T: FixedWidthInteger>(value: T, endianness: Endianness) -> T {
         switch endianness {
         case .little:
@@ -384,7 +427,6 @@ public struct BlockBufferReader: Hashable {
         }
     }
 
-    @inlinable
     func rangeWithinReadableBytes(index: Int, length: Int) throws -> Range<Int> {
         guard index >= self.readerIndex && length >= 0 else {
             throw BlockBufferReaderErrors(.outOfBounds)
@@ -403,7 +445,6 @@ public struct BlockBufferReader: Hashable {
         return Range<Int>(uncheckedBounds: (lower: indexFromReaderIndex, upper: upperBound))
     } 
 
-    @inlinable
     mutating func _moveReaderIndex(to newIndex: Int) {
         assert(newIndex >= 0 && newIndex <= blockBuffer.endIndex)
         self._readerIndex = newIndex
@@ -499,7 +540,7 @@ extension CMBlockBufferProtocol {
     }
 
     @inlinable
-    func _withContiguousStorage<R>(_ body: (UnsafeRawBufferPointer) -> R) throws(BlockBufferReaderErrors) -> R {
+    func _withContiguousStorage<R>(_ body: (UnsafeRawBufferPointer) throws -> R) throws(BlockBufferReaderErrors) -> R {
         do {
             return try withContiguousStorage(body)
         } catch {

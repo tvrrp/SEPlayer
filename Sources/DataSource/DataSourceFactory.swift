@@ -10,185 +10,136 @@ import Foundation
 import SEPlayerCommon
 
 public protocol DataSourceFactory {
-    func createDataSource() -> any DataSource
-    func createDataSource2() -> any DataSource2
+    func createDataSource(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> any DataSource
 }
 
-public struct DefaultDataSourceFactory<NetworkLoader: IPlayerSessionLoader>: DataSourceFactory {
+public final class DefaultDataSourceFactory<NetworkLoader: IPlayerSessionLoader>: DataSourceFactory {
     private let segmentLength: Int?
     private let syncActor: PlayerActor
     private let networkLoader: NetworkLoader
-    private let baseDataSource: (any DataSource)?
+    private let baseDataSourceFactory: (any DataSourceFactory)?
+
+    private var runningDataSources: NSHashTable<DataSourceWrapper>
 
     public init(
         segmentLength: Int? = nil,
         syncActor: PlayerActor,
         networkLoader: NetworkLoader,
-        baseDataSource: (any DataSource)? = nil
+        baseDataSourceFactory: (any DataSourceFactory)? = nil
     ) {
         self.segmentLength = segmentLength
         self.syncActor = syncActor
         self.networkLoader = networkLoader
-        self.baseDataSource = baseDataSource
+        self.baseDataSourceFactory = baseDataSourceFactory
+        runningDataSources = .weakObjects()
     }
 
-    public func createDataSource() -> any DataSource {
-        DefaultDataSource(
-            segmentLength: segmentLength,
-            syncActor: syncActor,
-            networkLoader: networkLoader,
-            baseDataSource: baseDataSource ?? RangeRequestHTTPDataSource(
-                syncActor: syncActor,
-                networkLoader: networkLoader
-            )
-        )
+    public func createDataSource(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> any DataSource {
+        let dataSources = runningDataSources.allObjects
+
+        if let wrapper = dataSources.first(where: { $0.value.canHandle(new: dataSpec, isolation) }) {
+            return wrapper.value
+        }
+
+        let dataSource: any DataSource
+
+        if let baseDataSourceFactory {
+            dataSource = try await baseDataSourceFactory
+                .createDataSource(dataSpec: dataSpec, isolation)
+        } else {
+            dataSource = try await createNewDataSource(dataSpec: dataSpec, isolation)
+            runningDataSources.add(.init(dataSource))
+        }
+
+        return dataSource
     }
 
-    public func createDataSource2() -> any DataSource2 {
+    private func createNewDataSource(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> any DataSource {
         let queue = syncActor.executor.queue
-        return DefaultDataSource2(
-            queue: queue,
-            baseDataSource: HTTPDataSource2(
+
+        if dataSpec.url.isFileURL {
+            return try await FileDataSource(queue: queue, dataSpec: dataSpec, isolation)
+        } else {
+            return try await HTTPDataSource(
                 queue: queue,
                 transportFactory: DefaultHTTPTransportFactory(
                     loadQueue: queue,
                     sessionLoader: networkLoader
-                )
+                ),
+                dataSpec: dataSpec,
+                isolation
             )
-        )
-    }
-}
-
-private final class DefaultDataSource: DataSource {
-    var components: DataSourceOpaque { dataSource?.components ?? fakeComponents }
-    var url: URL? { dataSource?.url }
-    var urlResponse: HTTPURLResponse? { dataSource?.urlResponse }
-
-    private let segmentLength: Int?
-    private let syncActor: PlayerActor
-    private let networkLoader: any IPlayerSessionLoader
-    private let baseDataSource: any DataSource
-    private let fakeComponents: DataSourceOpaque
-
-    private var fileDataSource: (any DataSource)?
-
-    private var dataSource: (any DataSource)?
-
-    init(
-        segmentLength: Int?,
-        syncActor: PlayerActor,
-        networkLoader: any IPlayerSessionLoader,
-        baseDataSource: any DataSource
-    ) {
-        self.segmentLength = segmentLength
-        self.syncActor = syncActor
-        self.networkLoader = networkLoader
-        self.baseDataSource = baseDataSource
-        self.fakeComponents = DataSourceOpaque(isNetwork: false)
-    }
-
-    func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
-        syncActor.assertIsolated()
-        try checkArgument(dataSource == nil)
-
-        let dataSource: any DataSource = if dataSpec.url.isFileURL {
-            createFileDataSource(dataSpec: dataSpec)
-        } else {
-            baseDataSource
         }
-
-        self.dataSource = dataSource
-        return try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
-    }
-
-    func close(isolation: isolated any Actor) async throws -> ByteBuffer? {
-        syncActor.assertIsolated()
-        let copyDataSource = dataSource
-        dataSource = nil
-        return try await copyDataSource?.close(isolation: isolation)
-    }
-
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        syncActor.assertIsolated()
-
-        return try await dataSource
-            .checkNotNil()
-            .read(to: &buffer, offset: offset, length: length, isolation: isolation)
-    }
-
-    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        syncActor.assertIsolated()
-
-        return try await dataSource
-            .checkNotNil()
-            .read(allocation: allocation, offset: offset, length: length, isolation: isolation)
-    }
-
-    private func createFileDataSource(dataSpec: DataSpec) -> any DataSource {
-        if let fileDataSource { return fileDataSource }
-
-        let fileDataSource = FileDataSource(syncActor: syncActor)
-        self.fileDataSource = fileDataSource
-        return fileDataSource
     }
 }
 
-public final class DefaultDataSource2: DataSource2 {
-    private let queue: any Queue
-    private let baseDataSource: any DataSource2
+private final class DataSourceWrapper {
+    let value: DataSource
+
+    init(_ dataSource: any DataSource) {
+        value = dataSource
+    }
+}
+
+//public final class DefaultDataSource: DataSource {
+//    public var isolation: any Actor { queue.playerActor() }
+//    public var components: DataSourceOpaque { dataSource?.components ?? fakeComponents }
+//
+//    private let queue: any Queue
+//    private let baseDataSource: any DataSource
 //    private let fakeComponents: DataSourceOpaque
-
-    private var fileDataSource: (any DataSource2)?
-
-    private var dataSource: (any DataSource2)?
-
-    init(
-        queue: any Queue,
-        baseDataSource: any DataSource2
-    ) {
-        self.queue = queue
-        self.baseDataSource = baseDataSource
+//
+//    private var fileDataSource: (any DataSource)?
+//
+//    private var dataSource: (any DataSource)?
+//
+//    init(
+//        queue: any Queue,
+//        baseDataSource: any DataSource
+//    ) {
+//        self.queue = queue
+//        self.baseDataSource = baseDataSource
 //        self.fakeComponents = DataSourceOpaque(isNetwork: false)
-    }
-
-    public func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int? {
-        assert(queue.isCurrent())
-        try checkArgument(dataSource == nil)
-
-        let dataSource: any DataSource2 = if dataSpec.url.isFileURL {
-            try createFileDataSource(dataSpec: dataSpec)
-        } else {
-            baseDataSource
-        }
-
-        self.dataSource = dataSource
-        return try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
-    }
-
-    public func close(isolation: isolated any Actor) async throws {
-        assert(queue.isCurrent())
-        let copyDataSource = dataSource
-        dataSource = nil
-        try await copyDataSource?.close(isolation: isolation)
-    }
-
-    public func read(range: Range<Int>, isolation: isolated any Actor) async throws -> CMBlockBuffer {
-        assert(queue.isCurrent())
-
-        return try await dataSource
-            .checkNotNil()
-            .read(range: range, isolation: isolation)
-    }
-
-    public func getUrlResponse() -> HTTPURLResponse? {
-        dataSource?.getUrlResponse()
-    }
-
-    private func createFileDataSource(dataSpec: DataSpec) throws -> any DataSource2 {
-        if let fileDataSource { return fileDataSource }
-
-        let fileDataSource = try FileDataSource2(queue: queue)
-        self.fileDataSource = fileDataSource
-        return fileDataSource
-    }
-}
+//    }
+//
+//    public func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int? {
+//        assert(queue.isCurrent())
+//        try checkArgument(dataSource == nil)
+//
+//        let dataSource: any DataSource = if dataSpec.url.isFileURL {
+//            try createFileDataSource(dataSpec: dataSpec)
+//        } else {
+//            baseDataSource
+//        }
+//
+//        self.dataSource = dataSource
+//        return try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
+//    }
+//
+//    public func close(isolation: isolated any Actor) async throws {
+//        assert(queue.isCurrent())
+//        let copyDataSource = dataSource
+//        dataSource = nil
+//        try await copyDataSource?.close(isolation: isolation)
+//    }
+//
+//    public func read(range: Range<Int>, isolation: isolated any Actor) async throws -> CMBlockBuffer? {
+//        assert(queue.isCurrent())
+//
+//        return try await dataSource
+//            .checkNotNil()
+//            .read(range: range, isolation: isolation)
+//    }
+//
+//    public func getURLResponse(isolation: isolated any Actor) -> HTTPURLResponse? {
+//        dataSource?.getURLResponse(isolation: isolation)
+//    }
+//
+//    private func createFileDataSource(dataSpec: DataSpec) throws -> any DataSource {
+//        if let fileDataSource { return fileDataSource }
+//
+//        let fileDataSource = try FileDataSource(queue: queue)
+//        self.fileDataSource = fileDataSource
+//        return fileDataSource
+//    }
+//}

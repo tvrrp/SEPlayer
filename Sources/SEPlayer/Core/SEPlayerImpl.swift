@@ -8,10 +8,12 @@
 import AVFoundation
 import SEPlayerCommon
 
+// TODO: thread safety via locks
 final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     @MainActor public let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
 
     let clock: SEClock
+    let timebase: CMTimebase
     var playbackState: PlayerState { queue.sync { playbackInfo.state } }
 
     var isPlaying: Bool { queue.sync { playbackInfo.isPlaying } }
@@ -29,11 +31,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     var shuffleModeEnabled: Bool {
         get { queue.sync { _shuffleModeEnabled } }
         set { setShuffleModeEnabled(newValue) }
-    }
-
-    var seekParameters: SeekParameters {
-        get { queue.sync { _seekParameters } }
-        set { setSeekParameters(newValue) }
     }
 
     var volume: Float {
@@ -82,6 +79,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     var currentPosition: CMTime {
         queue.sync {
+            // TODO: go to player
             currentPositionInternal(playbackInfo: playbackInfo)
         }
     }
@@ -90,7 +88,10 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     var totalBufferedDuration: CMTime { queue.sync { playbackInfo.totalBufferedDuration } }
 
-    var contentPosition: CMTime { queue.sync { contentPositionInternal(playbackInfo: playbackInfo) } }
+    var contentPosition: CMTime {
+        // TODO: ad
+        queue.sync { contentPositionInternal(playbackInfo: playbackInfo) }
+    }
 
     var contentBufferedPosition: CMTime { queue.sync { getContentBufferedPosition() } }
 
@@ -114,7 +115,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private var playbackInfo: PlaybackInfo
     private var _repeatMode: RepeatMode
     private var _shuffleModeEnabled: Bool
-    private var _seekParameters: SeekParameters
     private var _shufflerOrder: ShuffleOrder
     private var _preloadConfiguration: PreloadConfiguration
     private var _pauseAtTheEndOfMediaItem: Bool
@@ -125,6 +125,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private var pendingOperationAcks: Int = 0
     private var pendingDiscontinuityReason: DiscontinuityReason = .autoTransition
     private var pendingDiscontinuity: Bool = false
+
+    private var timeObservers = Set<TimebaseTimeObserver>()
 
     init(
         identifier: UUID,
@@ -138,10 +140,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         mediaSourceFactory: MediaSourceFactory,
         audioSessionManager: IAudioSessionManager,
         useLazyPreparation: Bool = true,
-        seekParameters: SeekParameters = .default,
         seekBackIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
         seekForwardIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
-        maxSeekToPreviousPosition: CMTime = CMTime(seconds: 3, preferredTimescale: 1000),
+        maxSeekToPreviousPosition: CMTime = CMTime(seconds: 1, preferredTimescale: 1000),
         pauseAtTheEndOfMediaItem: Bool = false
     ) {
         self.workQueue = workQueue
@@ -149,11 +150,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         self.clock = clock
         self.mediaSourceFactory = mediaSourceFactory
         self.useLazyPreparation = useLazyPreparation
-        _seekParameters = seekParameters
         self.seekBackIncrement = seekBackIncrement
         self.seekForwardIncrement = seekForwardIncrement
         self.maxSeekToPreviousPosition = maxSeekToPreviousPosition
         _pauseAtTheEndOfMediaItem = pauseAtTheEndOfMediaItem
+        timebase = try! CMTimebase(sourceClock: .hostTimeClock)
 
         let renderSynchronizer = AVSampleBufferRenderSynchronizer()
         self.renderers = renderersFactory.createRenderers(
@@ -185,10 +186,10 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             bandwidthMeter: bandwidthMeter,
             repeatMode: _repeatMode,
             shuffleModeEnabled: _shuffleModeEnabled,
-            seekParameters: seekParameters,
             pauseAtEndOfWindow: pauseAtTheEndOfMediaItem,
             clock: clock,
-            mediaClock: DefaultMediaClock(clock: clock),
+            outboundTimebase: timebase,
+            mediaClock: DefaultMediaClock(clock: clock, outboundTimebase: timebase),
             identifier: identifier,
             preloadConfiguration: _preloadConfiguration,
             audioSessionManager: audioSessionManager
@@ -517,9 +518,18 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
     }
 
-    func seek(to mediaItemIndex: Int?, position: CMTime, isRepeatingCurrentItem: Bool) {
+    func seek(
+        to mediaItemIndex: Int?,
+        position: CMTime,
+        isRepeatingCurrentItem: Bool,
+        seekParameters: SeekParameters,
+        completion: ((Bool) -> Void)?
+    ) {
         queue.async { [weak self] in
-            guard let self, let mediaItemIndex, mediaItemIndex >= 0 else { return }
+            guard let self, let mediaItemIndex, mediaItemIndex >= 0 else {
+                completion?(false)
+                return
+            }
 
             let timeline = playbackInfo.timeline
             if !timeline.isEmpty && mediaItemIndex >= timeline.windowCount() {
@@ -545,11 +555,15 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                     windowPosition: position
                 )
             )
-            self.internalPlayer.seekTo(
+            internalPlayer.seekTo(
                 timeline: timeline,
                 windowIndex: mediaItemIndex,
-                position: position
+                position: position,
+                seekParameters: seekParameters,
+                completion: completion
             )
+
+            print("🌈 SEEEK TO POSITION = \(position.seconds)")
             updatePlaybackInfo(
                 new: newPlaybackInfo,
                 timelineChangeReason: .playlistChanged,
@@ -581,14 +595,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
     }
 
-    private func setSeekParameters(_ seekParameters: SeekParameters) {
-        queue.async { [weak self] in
-            guard let self, _seekParameters != seekParameters else { return }
-            _seekParameters = seekParameters
-            internalPlayer.setSeekParameters(seekParameters)
-        }
-    }
-
     func stop() {
         queue.async {
             self.stopInternal(error: nil)
@@ -615,7 +621,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             return playbackInfo.timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).duration
         }
 
-        
         return periodPosition(
             to: playbackInfo.bufferedPosition,
             timeline: playbackInfo.timeline,
@@ -626,7 +631,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private func stopInternal(error: Error?) {
         assert(queue.isCurrent())
         var playbackInfo = playbackInfo.loadingMediaPeriodId(playbackInfo.periodId)
-        playbackInfo.bufferedPosition = playbackInfo.position
+        playbackInfo.bufferedPosition = timebase.time
         playbackInfo.totalBufferedDuration = .zero
         playbackInfo = mask(playbackState: .idle, playbackInfo: playbackInfo)
         if let error {
@@ -666,8 +671,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             return maskingWindowPosition
         }
 
+        let position = timebase.time
         return periodPosition(
-            to: playbackInfo.position,
+            to: position,
             timeline: playbackInfo.timeline,
             periodId: playbackInfo.periodId
         )
@@ -700,6 +706,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             timelineChanged: timelineChanged,
             repeatCurrentMediaItem: repeatCurrentMediaItem
         )
+
+        print("🌈 Set outboundTimebase time = \(playbackInfo.position.seconds)")
+        try! timebase.setTime(playbackInfo.position)
 
         var mediaItem: MediaItem?
 
@@ -956,7 +965,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         var startWindowIndex = startWindowIndex
         var startPosition = startPosition
         let currentWindowIndex = currentWindowIndexInternal(playbackInfo: playbackInfo)
-        let currentPositionMs = currentPosition
+        let currentPosition = currentPosition
         pendingOperationAcks += 1
         if !mediaSourceHolderSnapshots.isEmpty {
             removeMediaSourceHolders(range: 0..<mediaSourceHolderSnapshots.count)
@@ -1069,7 +1078,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private func removeMediaItemsInternal(playbackInfo: PlaybackInfo, range: Range<Int>) -> PlaybackInfo {
         assert(queue.isCurrent())
         let currentIndex = currentWindowIndexInternal(playbackInfo: playbackInfo) ?? .zero
-        let contentPositionMs = contentPositionInternal(playbackInfo: playbackInfo)
+        let contentPosition = contentPositionInternal(playbackInfo: playbackInfo)
         let oldTimeline = playbackInfo.timeline
         let currentMediaSourceCount = mediaSourceHolderSnapshots.count
         pendingOperationAcks += 1
@@ -1152,16 +1161,16 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         if !oldTimeline.isEmpty {
             oldContentPosition = oldContentPosition - oldTimeline.periodById(oldPeriodId, period: period).positionInWindow
 
-            if !playingPeriodChanged {
-                let diff = oldContentPosition - newContentPosition
-                // Check if off by one tick (the duration-1 clamp artifact)
-                if diff == CMTime(value: 1, timescale: oldContentPosition.timescale) {
-                    let oldDuration = oldTimeline.periodById(oldPeriodId, period: period).duration
-                    if oldContentPosition == oldDuration {
-                        oldContentPosition = oldContentPosition - CMTime(value: 1, timescale: oldContentPosition.timescale)
-                    }
-                }
-            }
+//            TODO: check if !playingPeriodChanged {
+//                let diff = oldContentPosition - newContentPosition
+//                // Check if off by one tick (the duration-1 clamp artifact)
+//                if diff == CMTime(value: 1, timescale: oldContentPosition.timescale) {
+//                    let oldDuration = oldTimeline.periodById(oldPeriodId, period: period).duration
+//                    if oldContentPosition == oldDuration {
+//                        oldContentPosition = oldContentPosition - CMTime(value: 1, timescale: oldContentPosition.timescale)
+//                    }
+//                }
+//            }
         }
 
         if playingPeriodChanged || newContentPosition < oldContentPosition {
@@ -1361,11 +1370,14 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
 
         pendingOperationAcks += 1
-        let newPlaybackInfo = playbackInfo.playWhenReady(
-            playWhenReady,
-            playWhenReadyChangeReason: changeReason,
-            playbackSuppressionReason: playbackSuppressionReason
-        )
+
+        let newPlaybackInfo = playbackInfo
+            .playWhenReady(
+                playWhenReady,
+                playWhenReadyChangeReason: changeReason,
+                playbackSuppressionReason: playbackSuppressionReason
+            )
+            .setPosition(timebase.time)
 
         internalPlayer.setPlayWhenReady(
             playWhenReady,
@@ -1435,6 +1447,42 @@ extension SEPlayerImpl {
 
     func removeVideoOutput(_ output: VideoSampleBufferRenderer) {
         internalPlayer.removeVideoOutput(output)
+    }
+
+    func addPeriodicTimeObserver(for interval: CMTime, queue: DispatchQueue, block: @escaping (CMTime) -> Void) throws -> AnyObject {
+        try self.queue.sync {
+            let observer = try TimebaseTimeObserver(
+                queue: queue,
+                timebase: timebase,
+                sourceType: .periodic(interval),
+                block: block
+            )
+            timeObservers.insert(observer)
+            return observer
+        }
+    }
+
+    func addBoundaryTimeObserver(for times: [CMTime], queue: DispatchQueue, block: @escaping (CMTime) -> Void) throws -> AnyObject {
+        try self.queue.sync {
+            let observer = try TimebaseTimeObserver(
+                queue: queue,
+                timebase: timebase,
+                sourceType: .boundary(times),
+                block: block
+            )
+            timeObservers.insert(observer)
+            return observer
+        }
+    }
+
+    func removeTimeObserver(_ observer: AnyObject) {
+        queue.async {
+            guard let observer = observer as? TimebaseTimeObserver else {
+                return
+            }
+
+            self.timeObservers.remove(observer)
+        }
     }
 }
 

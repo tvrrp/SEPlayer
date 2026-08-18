@@ -12,7 +12,10 @@ public protocol HTTPTransport: AnyObject, Sendable {
     var rangeID: UUID { get }
     var dataSpec: DataSpec { get }
 
-    func start()
+    func start() -> (
+        eventStream: AsyncStream<TransportStatus>,
+        sessionStream: AsyncStream<TransportEvent>
+    )
     func cancel()
 }
 
@@ -21,23 +24,14 @@ public protocol HTTPTransportFactory: Sendable {
 
     func makeTransport(
         dataSpec: DataSpec,
-        rangeID: UUID,
-        delegate: any TransportEventDelegate
+        rangeID: UUID
     ) -> Transport
-}
-
-public protocol TransportEventDelegate: AnyObject {
-    func transport(_ transport: any HTTPTransport, didChange status: TransportStatus)
-    func transport(_ transport: any HTTPTransport, didRecieve response: HTTPURLResponse, contentLength: Int?)
-    func transport(_ transport: any HTTPTransport, didRecieve bytes: DispatchData, offset: Int)
-    func transport(_ transport: any HTTPTransport, didRecieve metrics: URLSessionTaskMetrics)
 }
 
 public enum TransportEvent: Sendable {
     case responseReceived(_ response: HTTPURLResponse, _ contentLength: Int?)
     case bytesReceived(DispatchData, at: Int)
     case metricsReceived(URLSessionTaskMetrics)
-    case statusChanged(TransportStatus)
 }
 
 public enum TransportStatus: Sendable {
@@ -60,60 +54,96 @@ public struct DefaultHTTPTransportFactory<SessionLoader: IPlayerSessionLoader>: 
     public func makeTransport(
         dataSpec: DataSpec,
         rangeID: UUID,
-        delegate: any TransportEventDelegate
     ) -> DefaultHTTPTransport<SessionLoader> {
         return DefaultHTTPTransport(
-            queue: loadQueue,
             rangeID: rangeID,
             dataSpec: dataSpec,
-            sessionLoader: sessionLoader,
-            delegate: delegate
+            sessionLoader: sessionLoader
         )
     }
 }
 
 public final class DefaultHTTPTransport<SessionLoader: IPlayerSessionLoader>: HTTPTransport, @unchecked Sendable {
-    public let queue: any Queue
     public let rangeID: UUID
     public let dataSpec: DataSpec
 
     private let sessionLoader: SessionLoader
-    private weak let delegate: (any TransportEventDelegate)?
+    private let lock: UnfairLock
+
+    private var eventContinuation: AsyncStream<TransportStatus>.Continuation?
+    private var sessionContinuation: AsyncStream<TransportEvent>.Continuation?
 
     private var dataTask: URLSessionDataTask?
     private var currentOffset: Int
     private var bytesToRead: Int?
-    private var bytesToSkip: Int = 0
+    private var bytesToSkip: Int
 
     init(
-        queue: any Queue,
         rangeID: UUID,
         dataSpec: DataSpec,
-        sessionLoader: SessionLoader,
-        delegate: any TransportEventDelegate
+        sessionLoader: SessionLoader
     ) {
-        self.queue = queue
         self.rangeID = rangeID
         self.dataSpec = dataSpec
         self.sessionLoader = sessionLoader
-        self.delegate = delegate
+        lock = UnfairLock()
 
         currentOffset = dataSpec.position
+        bytesToSkip = 0
     }
 
-    public func start() {
-        assert(queue.isCurrent())
-        print("❤️ START with range = \(dataSpec.range2)")
+    public func start() -> (
+        eventStream: AsyncStream<TransportStatus>,
+        sessionStream: AsyncStream<TransportEvent>
+    ) {
+        print("🦃 START NEW LOAD, dataSpec = \(dataSpec)")
+        let (eventStream, eventContinuation) = AsyncStream<TransportStatus>.makeStream()
+        let (sessionStream, sessionContinuation) = AsyncStream<TransportEvent>.makeStream()
+        self.eventContinuation = eventContinuation
+        self.sessionContinuation = sessionContinuation
+
         let request = dataSpec.createURLRequest()
         dataTask = sessionLoader.createTask(request: request, delegate: self)
         dataTask?.resume()
-        delegate?.transport(self, didChange: .pending)
+        defer { eventContinuation.yield(.pending) }
+        return (eventStream, sessionStream)
     }
 
     public func cancel() {
-        assert(queue.isCurrent())
+        lock.withLock {
+            eventContinuation?.yield(.cancelled)
+            eventContinuation?.finish()
+            sessionContinuation?.finish()
+
+            eventContinuation = nil
+            sessionContinuation = nil
+        }
+
         dataTask?.cancel()
-        dataTask = nil
+    }
+
+    private func finish(
+        with error: Error?,
+        _ eventContinuation: AsyncStream<TransportStatus>.Continuation,
+        _ sessionContinuation: AsyncStream<TransportEvent>.Continuation
+    ) {
+        switch error {
+        case is CancellationError:
+            eventContinuation.yield(.cancelled)
+            break
+        case let .some(error):
+            eventContinuation.yield(.failed(error))
+        case .none:
+            eventContinuation.yield(.completed)
+        }
+
+        eventContinuation.finish()
+        sessionContinuation.finish()
+
+        lock.withLock {
+            self.eventContinuation = nil
+            self.sessionContinuation = nil
+        }
     }
 }
 
@@ -123,15 +153,20 @@ extension DefaultHTTPTransport: PlayerSessionDelegate {
         task: URLSessionTask,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        assert(queue.isCurrent())
-        guard let delegate else { return }
+        guard let eventContinuation = lock.withLock({ eventContinuation }),
+              let sessionContinuation = lock.withLock({ sessionContinuation }) else {
+            completionHandler(.cancel); return
+        }
+
         guard let response = response as? HTTPURLResponse else {
-            delegate.transport(self, didChange: .failed(
-                URLSessionDataSourceError(
+            finish(
+                with: URLSessionDataSourceError(
                     failedURL: dataSpec.url,
                     errorReason: .cannotParseResponse
-                )
-            ))
+                ),
+                eventContinuation,
+                sessionContinuation
+            )
 
             completionHandler(.cancel); return
         }
@@ -141,18 +176,21 @@ extension DefaultHTTPTransport: PlayerSessionDelegate {
             if responseCode == 416 {
                 let documentSize = response.contentLength
                 if dataSpec.position == documentSize {
-                    delegate.transport(self, didRecieve: response, contentLength: dataSpec.length ?? .zero)
+                    sessionContinuation.yield(.responseReceived(response, dataSpec.length ?? .zero))
                     completionHandler(.allow)
                     return
                 }
             }
 
-            delegate.transport(self, didChange: .failed(
-                URLSessionDataSourceError(
+            finish(
+                with: URLSessionDataSourceError(
                     failedURL: dataSpec.url,
                     errorReason: .badServerResponse
-                )
-            ))
+                ),
+                eventContinuation,
+                sessionContinuation
+            )
+
             completionHandler(.cancel); return
         }
 
@@ -160,47 +198,62 @@ extension DefaultHTTPTransport: PlayerSessionDelegate {
         if let bytesToRead = dataSpec.length {
             self.bytesToRead = bytesToRead
         } else {
-            if let contentLength = response.contentLength2 {
+            if let contentLength = response.contentLength {
                 bytesToRead = contentLength - bytesToSkip
             } else {
                 bytesToRead = nil
             }
         }
 
-        delegate.transport(self, didRecieve: response, contentLength: bytesToRead)
+        sessionContinuation.yield(.responseReceived(response, bytesToRead))
         completionHandler(.allow)
-        delegate.transport(self, didChange: .running(bytesToRead))
+        eventContinuation.yield(.running(bytesToRead))
     }
 
     public func didReciveBuffer(_ buffer: DispatchData, task: URLSessionTask) {
-        assert(queue.isCurrent())
-        if bytesToSkip > 0 {
-            bytesToSkip -= buffer.count
+        guard let sessionContinuation = lock.withLock({ sessionContinuation }) else {
+            task.cancel()
             return
         }
 
-        delegate?.transport(self, didRecieve: buffer, offset: currentOffset)
+        if bytesToSkip > 0 {
+            if buffer.count <= bytesToSkip { bytesToSkip -= buffer.count; return }
+            let chunk = buffer.subdata(in: bytesToSkip..<buffer.count)
+            bytesToSkip = 0
+            sessionContinuation.yield(.bytesReceived(chunk, at: currentOffset))
+            currentOffset += chunk.count
+            return
+        }
+
+        sessionContinuation.yield(.bytesReceived(buffer, at: currentOffset))
         currentOffset += buffer.count
     }
 
     public func didFinishTask(_ task: URLSessionTask, error: (any Error)?) {
-        assert(queue.isCurrent())
+        guard let eventContinuation = lock.withLock({ eventContinuation }),
+              let sessionContinuation = lock.withLock({ sessionContinuation }) else {
+            return
+        }
+
         if let error {
             let error = URLSessionDataSourceError(error: error as NSError)
             if error.errorReason == .cancelled {
-                delegate?.transport(self, didChange: .cancelled)
+                finish(with: CancellationError(), eventContinuation, sessionContinuation)
             } else {
-                delegate?.transport(self, didChange: .failed(error))
+                finish(with: error, eventContinuation, sessionContinuation)
             }
 
             return
         }
 
-        delegate?.transport(self, didChange: .completed)
+        finish(with: nil, eventContinuation, sessionContinuation)
     }
 
     public func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask) {
-        assert(queue.isCurrent())
-        delegate?.transport(self, didRecieve: metrics)
+        guard let sessionContinuation = lock.withLock({ sessionContinuation }) else {
+            return
+        }
+
+        sessionContinuation.yield(.metricsReceived(metrics))
     }
 }

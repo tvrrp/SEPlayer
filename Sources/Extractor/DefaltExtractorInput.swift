@@ -5,376 +5,172 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation.NSRange
+import Foundation
+import CoreMedia
 import SEPlayerCommon
 
-public final class DefaltExtractorInput: ExtractorInput {
-    private let dataReader: DataReader
-    private let streamLength: Int?
-
-    private var scratchBuffer: ByteBuffer
-    private var position: Int
-    private var peekBuffer: ByteBuffer
-    private var peekBufferPosition: Int
-    private var peekBufferLength: Int
-
+public final class DefaultExtractorInput: ExtractorInput, DataReader {
+    public var isolation: any Actor { syncActor }
     let syncActor: PlayerActor
 
-    public init(dataReader: DataReader, syncActor: PlayerActor, range: NSRange? = nil) {
+    private let queue: Queue
+    private let dataReader: DataReader
+    private var position: Int
+    private var lenght: Int?
+
+    private var peekPosition = 0
+
+    public init(queue: Queue, dataReader: DataReader, position: Int, lenght: Int?) {
+        self.queue = queue
         self.dataReader = dataReader
-        self.position = range?.location ?? 0
-        self.streamLength = range?.length
-
-        let allocator = ByteBufferAllocator()
-        self.scratchBuffer = allocator.buffer(capacity: .scratchSpaceSize)
-        self.peekBuffer = allocator.buffer(capacity: .peekBufferSize)
-        self.peekBufferPosition = 0
-        self.peekBufferLength = 0
-        self.syncActor = syncActor
+        self.position = position
+        self.lenght = lenght
+        syncActor = queue.playerActor()
     }
 
-    @discardableResult
-    public func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        syncActor.assertIsolated()
-        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
-        if bytesRead == 0 {
-            bytesRead = try await readFromUpstream(
-                buffer: &buffer,
-                offset: offset,
-                length: length,
-                bytesAlreadyRead: 0,
-                allowEndOfInput: true,
-                isolation: isolation
-            )
-        }
-        commit(bytes: bytesRead)
-
-        if bytesRead == .resultEndOfInput {
-            return .endOfInput
-        } else {
-            return .success(amount: bytesRead)
-        }
+    public func setPosition(_ position: Int, _ isolation: isolated any Actor) {
+        self.position = position
     }
 
-    public func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
-        syncActor.assertIsolated()
-        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
-
-        while bytesRead < length && bytesRead != .resultEndOfInput {
-            bytesRead = try await readFromUpstream(
-                buffer: &buffer,
-                offset: offset,
-                length: length,
-                bytesAlreadyRead: bytesRead,
-                allowEndOfInput: allowEndOfInput,
-                isolation: isolation
-            )
-        }
-
-        commit(bytes: bytesRead)
-        return bytesRead != .resultEndOfInput
+    // TODO: fix this (tinkering with range)
+    public func read(range: Range<Int>, _ isolation: isolated any Actor) async throws -> CMBlockBuffer? {
+//        let readRange = position..<(position + range.count)
+//        if let lenght, !(position..<(position + lenght)).contains(readRange) {
+//            throw EndOfFileError()
+//        }
+//
+//        guard position == readRange.lowerBound else {
+//            throw EndOfFileError()
+//        }
+//
+//        let blockBuffer = try await dataReader.read(range: readRange, isolation: isolation)
+//        position += blockBuffer.dataLength
+//        return blockBuffer
+//        fatalError()
+        throw EndOfFileError()
     }
 
-    public func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        var buffer = ByteBuffer()
-        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
-        if bytesRead != 0 {
-            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
-                bytesRead = 0
+    public func read(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer {
+        assert(queue.isCurrent())
+        guard let blockBuffer = try await dataReader.read(range: position..<(position + length), isolation) else {
+            throw EndOfFileError()
+        }
+
+        position += blockBuffer.dataLength
+        return blockBuffer
+    }
+
+    public func readFully(
+        length: Int,
+        allowEndOfInput: Bool,
+        _ isolation: isolated any Actor
+    ) async throws -> (buffer: CMBlockBuffer, isEndOfInput: Bool) {
+        assert(queue.isCurrent())
+        let blockBuffer = try CMBlockBuffer()
+        var bytesRead = 0
+        var position = position
+
+        while bytesRead < length {
+            let readAmount = length - bytesRead
+
+            switch try await dataReader.read(range: position..<(position + readAmount), isolation) {
+            case let .some(upstreamBlockBuffer):
+                guard !upstreamBlockBuffer.isEmpty else { fallthrough }
+                bytesRead += upstreamBlockBuffer.dataLength
+                position += upstreamBlockBuffer.dataLength
+                try blockBuffer.append(bufferReference: upstreamBlockBuffer)
+            case .none:
+                guard allowEndOfInput else { throw EndOfFileError() }
+
+                self.position += bytesRead
+                return (blockBuffer, true)
             }
         }
 
-        if bytesRead == 0 {
-            bytesRead = try await readFromUpstream(
-                allocation: allocation,
-                offset: offset,
-                length: length,
-                bytesAlreadyRead: 0,
-                allowEndOfInput: true,
-                isolation: isolation
-            )
-        }
-        commit(bytes: bytesRead)
-
-        if bytesRead == .resultEndOfInput {
-            return .endOfInput
-        } else {
-            return .success(amount: bytesRead)
-        }
+        self.position += bytesRead
+        return (blockBuffer, false)
     }
 
-    public func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
-        syncActor.assertIsolated()
-        var buffer = ByteBuffer()
-        var bytesRead = readFromPeekBuffer(&buffer, offset: offset, length: length)
-        if bytesRead != 0 {
-            if !readFromBuffer(buffer, to: allocation, offset: offset, length: bytesRead) {
-                bytesRead = 0
+    public func skip(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) throws -> Bool {
+        assert(queue.isCurrent())
+        if let upperBound = self.lenght, (position + length) > upperBound {
+            if allowEndOfInput {
+                position = upperBound
+                return true
+            } else {
+                throw EndOfFileError()
             }
         }
 
-        while bytesRead < length && bytesRead != .resultEndOfInput {
-            bytesRead = try await readFromUpstream(
-                allocation: allocation,
-                offset: offset,
-                length: length,
-                bytesAlreadyRead: bytesRead,
-                allowEndOfInput: allowEndOfInput,
-                isolation: isolation
-            )
-        }
-
-        commit(bytes: bytesRead)
-        return bytesRead != .resultEndOfInput
-    }
-
-    public func skip(length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        syncActor.assertIsolated()
-        var bytesSkipped = skipFromPeekBuffer(length: length)
-        if bytesSkipped == 0 {
-            bytesSkipped = try await readFromUpstream(
-                buffer: &scratchBuffer,
-                offset: .zero,
-                length: min(length, peekBuffer.capacity),
-                bytesAlreadyRead: .zero,
-                allowEndOfInput: true,
-                isolation: isolation
-            )
-        }
-
-        commit(bytes: bytesSkipped)
-        if bytesSkipped == .resultEndOfInput {
-            return .endOfInput
-        } else {
-            return .success(amount: bytesSkipped)
-        }
-    }
-
-    public func skipFully(length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
-        syncActor.assertIsolated()
-        var bytesSkipped = skipFromPeekBuffer(length: length)
-
-        while bytesSkipped < length && bytesSkipped != .resultEndOfInput {
-            let minLenght = min(length, bytesSkipped + scratchBuffer.capacity)
-            bytesSkipped = try await readFromUpstream(
-                buffer: &scratchBuffer,
-                offset: -bytesSkipped,
-                length: minLenght,
-                bytesAlreadyRead: bytesSkipped,
-                allowEndOfInput: allowEndOfInput,
-                isolation: isolation
-            )
-        }
-
-        commit(bytes: bytesSkipped)
-        return bytesSkipped != .resultEndOfInput
-    }
-
-    public func peek(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        syncActor.assertIsolated()
-        let peekBufferRemainingBytes = peekBufferLength - peekBufferPosition
-        var bytesPeeked: Int = 0
-
-        if peekBufferRemainingBytes == 0 {
-            bytesPeeked = try await readFromUpstream(
-                buffer: &peekBuffer,
-                offset: peekBufferPosition,
-                length: length,
-                bytesAlreadyRead: .zero,
-                allowEndOfInput: true,
-                isolation: isolation
-            )
-
-            if bytesPeeked == .resultEndOfInput {
-                return .endOfInput
-            }
-
-            peekBufferLength += bytesPeeked
-        } else {
-            bytesPeeked = min(length, peekBufferRemainingBytes)
-        }
-
-        var buffer = buffer
-        buffer.moveWriterIndex(to: offset)
-        peekBuffer.moveReaderIndex(to: peekBufferPosition)
-        guard var slice = peekBuffer.readSlice(length: bytesPeeked) else {
-            return .endOfInput
-        }
-
-        buffer.writeBuffer(&slice)
-
-        peekBufferPosition += bytesPeeked
-        return .success(amount: bytesPeeked)
-    }
-
-    public func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
-        if try await !advancePeekPosition(length: length, allowEndOfInput: allowEndOfInput, isolation: isolation) {
-            return false
-        }
-
-        peekBuffer.moveReaderIndex(to: peekBufferPosition - length)
-        guard var slice = peekBuffer.readSlice(length: length) else {
-            return false
-        }
-        buffer.moveWriterIndex(to: offset)
-        buffer.writeBuffer(&slice)
-
+        position += length
         return true
     }
 
-    public func advancePeekPosition(length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool {
-        syncActor.assertIsolated()
-        var bytesPeeked = peekBufferLength - peekBufferPosition
+    public func peek(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer {
+        guard let blockBuffer = try await dataReader.read(range: peekPosition..<(peekPosition + length), isolation) else {
+            throw EndOfFileError()
+        }
+
+        peekPosition += blockBuffer.dataLength
+        return blockBuffer
+    }
+
+    public func peekFully(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) async throws -> (buffer: CMBlockBuffer, isEndOfInput: Bool) {
+        let blockBuffer = try CMBlockBuffer()
+        var bytesPeeked = 0
+        var peekPosition = peekPosition
+
         while bytesPeeked < length {
-            bytesPeeked = try await readFromUpstream(
-                buffer: &peekBuffer,
-                offset: peekBufferPosition,
-                length: length,
-                bytesAlreadyRead: bytesPeeked,
-                allowEndOfInput: allowEndOfInput,
-                isolation: isolation
-            )
+            let readAmount = length - bytesPeeked
 
-            if bytesPeeked == .resultEndOfInput {
-                return false
+            switch try await dataReader.read(range: peekPosition..<(peekPosition + readAmount), isolation) {
+            case let .some(upstreamBlockBuffer):
+                guard !upstreamBlockBuffer.isEmpty else { fallthrough }
+                bytesPeeked += upstreamBlockBuffer.dataLength
+                peekPosition += upstreamBlockBuffer.dataLength
+                try blockBuffer.append(bufferReference: upstreamBlockBuffer)
+            case .none:
+                guard allowEndOfInput else { throw EndOfFileError() }
+
+                self.peekPosition += bytesPeeked
+                return (blockBuffer, true)
             }
-
-            peekBufferLength = peekBufferPosition + bytesPeeked
         }
 
-        peekBufferPosition += length
-        return true
+        self.peekPosition += bytesPeeked
+        return (blockBuffer, false)
     }
 
-    public func resetPeekPosition(isolation: isolated any Actor) {
-        syncActor.assertIsolated()
-        peekBufferPosition = 0
-        peekBuffer.moveReaderIndex(to: .zero)
+    public func advancePeekPosition(length: Int, _ isolation: isolated any Actor) throws {
+        try advancePeekPosition(length: length, allowEndOfInput: false, isolation)
     }
 
-    public func getPeekPosition(isolation: isolated any Actor) -> Int {
-        syncActor.assertIsolated()
-        return position + peekBufferPosition
+    public func advancePeekPosition(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) throws {
+        // TODO: look at the max data position
+        peekPosition += length
     }
 
-    public func getPosition(isolation: isolated any Actor) -> Int {
-        syncActor.assertIsolated()
+    public func resetPeekPosition(_ isolation: isolated any Actor) {
+        peekPosition = position
+    }
+
+    public func getPeekPosition(_ isolation: isolated any Actor) -> Int {
+        position + peekPosition
+    }
+
+    public func getPosition(_ isolation: isolated any Actor) -> Int {
+        assert(queue.isCurrent())
         return position
     }
 
-    public func getLength(isolation: isolated any Actor) -> Int? {
-        syncActor.assertIsolated()
-        return streamLength
+    public func getLength(_ isolation: isolated any Actor) -> Int? {
+        assert(queue.isCurrent())
+        return lenght
     }
 
-    public func set<ErrorType: Error>(retryPosition: Int, using error: ErrorType, isolation: isolated any Actor) throws(ErrorType) {
+    public func set<E: Error>(retryPosition: Int, using error: E, _ isolation: isolated any Actor) throws(E) {
+        assert(queue.isCurrent())
         self.position = retryPosition
         throw error
     }
-}
-
-private extension DefaltExtractorInput {
-    private func skipFromPeekBuffer(length: Int) -> Int {
-        let skipped = min(peekBufferLength, length)
-        peekBuffer.moveReaderIndex(forwardBy: skipped)
-        updatePeekBuffer(consumed: skipped)
-        return skipped
-    }
-
-    private func readFromPeekBuffer(_ buffer: inout ByteBuffer, offset: Int, length: Int) -> Int {
-        guard peekBufferLength > 0 else { return .zero }
-        let peekBytes = min(peekBufferLength, length)
-
-        guard var slice = peekBuffer.readSlice(length: peekBytes) else {
-            return .zero
-        }
-        buffer.moveWriterIndex(to: offset)
-        buffer.writeBuffer(&slice)
-        updatePeekBuffer(consumed: peekBytes)
-
-        return peekBytes
-    }
-
-    private func updatePeekBuffer(consumed: Int) {
-        peekBufferLength -= consumed
-        peekBufferPosition = 0
-        peekBuffer.discardReadBytes()
-    }
-
-    private func readFromUpstream(
-        buffer: inout ByteBuffer,
-        offset: Int,
-        length: Int,
-        bytesAlreadyRead: Int,
-        allowEndOfInput: Bool,
-        isolation: isolated any Actor
-    ) async throws -> Int {
-        let result = try await dataReader.read(
-            to: &buffer,
-            offset: offset + bytesAlreadyRead,
-            length: length - bytesAlreadyRead,
-            isolation: isolation
-        )
-
-        switch result {
-        case let .success(amount):
-            return bytesAlreadyRead + amount
-        case .endOfInput:
-            if bytesAlreadyRead == 0, allowEndOfInput {
-                return .resultEndOfInput
-            }
-
-            throw EndOfFileError()
-        }
-    }
-
-    private func readFromUpstream(
-        allocation: Allocation,
-        offset: Int,
-        length: Int,
-        bytesAlreadyRead: Int,
-        allowEndOfInput: Bool,
-        isolation: isolated any Actor
-    ) async throws -> Int {
-        let result = try await dataReader.read(
-            allocation: allocation,
-            offset: offset,
-            length: length,
-            isolation: isolation
-        )
-
-        switch result {
-        case let .success(amount):
-            return bytesAlreadyRead + amount
-        case .endOfInput:
-            if bytesAlreadyRead == 0, allowEndOfInput {
-                return .resultEndOfInput
-            }
-
-            throw EndOfFileError()
-        }
-    }
-
-    private func readFromBuffer(
-        _ buffer: ByteBuffer,
-        to allocation: Allocation,
-        offset: Int,
-        length: Int
-    ) -> Bool {
-        buffer.withUnsafeReadableBytes { buffer in
-            allocation.writeBuffer(offset: offset, lenght: length, buffer: buffer)
-            return true
-        }
-    }
-
-    private func commit(bytes read: Int) {
-        guard read != .resultEndOfInput else { return }
-        position += read
-    }
-}
-
-private extension Int {
-    static let resultEndOfInput: Int = -1
-    static let scratchSpaceSize: Int = 4096
-    static let peekBufferSize: Int = 64 * 1024
 }

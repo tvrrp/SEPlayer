@@ -18,7 +18,7 @@ final class MediaPeriodHolder {
     let id: AnyHashable
     let rendererCapabilities: [RendererCapabilitiesResolver]
 
-    var sampleStreams: [SampleStream2?]
+    var sampleStreams: [SampleStream?]
     let targetPreloadBufferDuration: CMTime
     var info: MediaPeriodInfo
 
@@ -33,6 +33,11 @@ final class MediaPeriodHolder {
     var next: MediaPeriodHolder?
 
     private var mayRetainStreamFlags: [Bool]
+
+    // TODO: ONE LOCK
+    @UnfairLocked private var durationForPlaybackTriggerTokens: [(SampleStream, QueueTriggerToken)]?
+    @UnfairLocked private var durationForStartLoadingTriggerTokens: [(SampleStream, QueueTriggerToken)]?
+    @UnfairLocked private var durationToStopLoadingTriggerTokens: [(SampleStream, QueueTriggerToken)]?
 
     init(
         queue: Queue,
@@ -98,6 +103,98 @@ final class MediaPeriodHolder {
         !isPrepared ? .zero : mediaPeriod.getNextLoadPosition()
     }
 
+    func changeDurationForPlaybackTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+        let condition: TriggerCondition? = if let duration {
+            .whenDurationBecomesGreaterThanOrEqualTo(duration)
+        } else {
+            nil
+        }
+
+        durationForPlaybackTriggerTokens = installTriggers(
+            previousTokens: durationForPlaybackTriggerTokens,
+            condition: condition,
+            body: { [weak self] _ in
+                guard let self,
+                      let tokens = self.durationForPlaybackTriggerTokens else {
+                    return
+                }
+
+                queue.justDispatch {
+                    if tokens.allSatisfy({ $0.0.testTrigger($0.1) }) {
+                        body?(self)
+                    }
+                }
+            }
+        )
+    }
+
+    func changeDurationForStartLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+        let condition: TriggerCondition? = if let duration {
+            .whenDurationBecomesLessThanOrEqualTo(duration)
+        } else {
+            nil
+        }
+
+        durationForStartLoadingTriggerTokens = installTriggers(
+            previousTokens: durationForStartLoadingTriggerTokens,
+            condition: condition,
+            body: { [weak self] _ in
+                guard let self else { return }
+
+                body?(self)
+            }
+        )
+    }
+
+    func changeDurationToStopLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+        let condition: TriggerCondition? = if let duration {
+            .whenDurationBecomesGreaterThanOrEqualTo(duration)
+        } else {
+            nil
+        }
+
+        durationToStopLoadingTriggerTokens = installTriggers(
+            previousTokens: durationToStopLoadingTriggerTokens,
+            condition: condition,
+            body: { [weak self] _ in
+                guard let self,
+                      let tokens = self.durationToStopLoadingTriggerTokens else {
+                    return
+                }
+
+                queue.justDispatch {
+                    if tokens.allSatisfy({ $0.0.testTrigger($0.1) }) {
+                        body?(self)
+                    }
+                }
+            }
+        )
+    }
+
+    private func installTriggers(
+        previousTokens: [(SampleStream, QueueTriggerToken)]?,
+        condition: TriggerCondition?,
+        body: @escaping (QueueTriggerToken) -> Void
+    ) -> [(SampleStream, QueueTriggerToken)]? {
+        if let previousTokens {
+            previousTokens.forEach { stream, token in
+                stream.removeTrigger(token)
+            }
+        }
+
+        guard let condition, isPrepared else { return nil }
+
+        return sampleStreams
+            .compactMap { $0 }
+            .map { stream in
+                let token = stream.installTrigger(condition: condition) { token in
+                    body(token)
+                }
+
+                return (stream, token)
+            }
+    }
+
     func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws {
         assert(queue.isCurrent())
         isPrepared = true
@@ -109,7 +206,8 @@ final class MediaPeriodHolder {
         )
         var requestedStartPosition = info.startPosition
         if info.duration.isValid && requestedStartPosition >= info.duration {
-            requestedStartPosition = max(.zero, CMTime(value: info.duration.value - 1, timescale: info.duration.timescale))
+            // TODO: check requestedStartPosition = max(.zero, CMTime(value: info.duration.value - 1, timescale: info.duration.timescale))
+            requestedStartPosition = max(.zero, info.duration)
         }
         let newStartPosition = try applyTrackSelection(trackSelectorResult: selectorResult,
                                                        position: requestedStartPosition,
@@ -193,6 +291,10 @@ final class MediaPeriodHolder {
     }
 
     func release() {
+        durationForPlaybackTriggerTokens?.forEach { $0.0.removeTrigger($0.1) }
+        durationForStartLoadingTriggerTokens?.forEach { $0.0.removeTrigger($0.1) }
+        durationToStopLoadingTriggerTokens?.forEach { $0.0.removeTrigger($0.1) }
+
         disableTrackSelectionsInResult()
         releaseMediaPeriod(mediaSourceList: mediaSourceList, mediaPeriod: mediaPeriod)
     }
@@ -238,7 +340,7 @@ final class MediaPeriodHolder {
         }
     }
 
-    func disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream2?]) {
+    func disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream?]) {
         for (index, capability) in rendererCapabilities.enumerated() {
             if capability.trackType == .unknown {
                 sampleStreams[index] = nil
@@ -246,10 +348,10 @@ final class MediaPeriodHolder {
         }
     }
 
-    func associateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream2?]) {
+    func associateNoSampleRenderersWithEmptySampleStream(sampleStreams: inout [SampleStream?]) {
         for (index, capability) in rendererCapabilities.enumerated() {
             if capability.trackType == .unknown, trackSelectorResults.isRendererEnabled(for: index) {
-                sampleStreams[index] = EmptySampleStream2()
+                sampleStreams[index] = EmptySampleStream()
             }
         }
     }
@@ -292,5 +394,36 @@ extension MediaPeriodHolder: Equatable {
 extension MediaPeriodHolder {
     static func durationsCompatible(lhs: CMTime, rhs: CMTime) -> Bool {
         !lhs.isValid || lhs == rhs
+    }
+}
+
+private extension TriggerCondition {
+    func isEqual(_ other: TriggerCondition) -> Bool {
+        switch (self, other) {
+        case (let .whenDurationBecomesLessThan(lhs), let .whenDurationBecomesLessThan(rhs)):
+            return lhs == rhs
+        case (let .whenDurationBecomesLessThanOrEqualTo(lhs), let .whenDurationBecomesLessThanOrEqualTo(rhs)):
+            return lhs == rhs
+        case (let .whenDurationBecomesGreaterThan(lhs), let .whenDurationBecomesGreaterThan(rhs)):
+            return lhs == rhs
+        case (let .whenDurationBecomesGreaterThanOrEqualTo(lhs), let .whenDurationBecomesGreaterThanOrEqualTo(rhs)):
+            return lhs == rhs
+        case (.whenMinPresentationTimeStampChanges, .whenMinPresentationTimeStampChanges):
+            return true
+        case (.whenMaxPresentationTimeStampChanges, .whenMaxPresentationTimeStampChanges):
+            return true
+        case (.whenDataBecomesReady, .whenDataBecomesReady):
+            return true
+        case (.whenEndOfDataReached, .whenEndOfDataReached):
+            return true
+        case (.whenReset, .whenReset):
+            return true
+        case (let .whenBufferCountBecomesLessThan(lhs), let .whenBufferCountBecomesLessThan(rhs)):
+            return lhs == rhs
+        case (let .whenBufferCountBecomesGreaterThan(lhs), let .whenBufferCountBecomesGreaterThan(rhs)):
+            return lhs == rhs
+        default:
+            return false
+        }
     }
 }

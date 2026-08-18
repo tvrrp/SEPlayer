@@ -5,9 +5,116 @@
 //  Created by Damir Yackupov on 02.06.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 public enum NalUnitUtil {
+    public static func parseSpsNalUnit<T: RandomAccessCollection<UInt8>>(
+        nalData: T,
+        nalOffset: Int,
+        nalLimit: Int
+    ) throws -> SpsData where T.Index == Int {
+        try SpsData(data: nalData, nalOffset: nalOffset + 1, nalLimit: nalLimit)
+    }
+
+    public static func parsePpsNalUnit<T: RandomAccessCollection<UInt8>>(
+        nalData: T,
+        nalOffset: Int,
+        nalLimit: Int
+    ) throws -> PpsData where T.Index == Int {
+        try PpsData(data: nalData, nalOffset: nalOffset + 1, nalLimit: nalLimit)
+    }
+
+    public static func clearPrefixFlags(_ prefixFlags: inout (Bool, Bool, Bool)) {
+        prefixFlags = (false, false, false)
+    }
+
+    public static func unescapeStream(
+        _ source: CMBlockBuffer,
+        length: Int,
+        allocator: CFAllocator
+    ) throws -> CMBlockBuffer {
+        let scratch = try source.makeContiguous(allocator: allocator, flags: .alwaysCopyData)
+
+        let unescapedLength = try scratch.withUnsafeMutableBytes(atOffset: 0) { destination -> Int in
+            let bytes = destination.baseAddress!.assumingMemoryBound(to: UInt8.self)
+            var write = 0
+            var read = 0
+            while read < length {
+                if read + 2 < length,
+                   bytes[read] == 0x00,
+                   bytes[read + 1] == 0x00,
+                   bytes[read + 2] == 0x03 {
+                    bytes[write] = 0x00
+                    bytes[write + 1] = 0x00
+                    write += 2
+                    read += 3
+                } else {
+                    bytes[write] = bytes[read]
+                    write += 1
+                    read += 1
+                }
+            }
+            return write
+        }
+
+        return try CMBlockBuffer(bufferReference: scratch[0..<unescapedLength])
+    }
+
+    public static func findNalUnit<T: RandomAccessCollection<UInt8>>(
+        _ data: T,
+        offset: Int,
+        limit: Int,
+        prefixFlags: inout (Bool, Bool, Bool)
+    ) -> Int where T.Index == Int {
+        let length = limit - offset
+        if prefixFlags.0 {
+            clearPrefixFlags(&prefixFlags)
+            return offset - 3
+        } else if length > 1, prefixFlags.1, data[offset] == 1 {
+            clearPrefixFlags(&prefixFlags)
+            return offset - 2
+        } else if length > 2, prefixFlags.2, data[offset] == 0, data[offset + 1] == 1 {
+            clearPrefixFlags(&prefixFlags)
+            return offset - 1
+        }
+
+        // We're looking for the NAL unit start code prefix 0x000001. The value of i tracks the
+        // index of the third byte.
+        var i = offset + 2
+        while i < limit - 1 {
+            if data[i] & 0xFE != 0 {
+                // There isn't a NAL prefix here, or at the next two positions.
+                i += 3
+            } else if data[i - 2] == 0, data[i - 1] == 0, data[i] == 1 {
+                clearPrefixFlags(&prefixFlags)
+                return i - 2
+            } else {
+                // There isn't a NAL prefix here, but there might be at the next position.
+                i += 1
+            }
+        }
+
+        // True if the last three bytes in the data seen so far are {0,0,1}.
+        if length > 2 {
+            prefixFlags.0 = data[limit - 3] == 0 && data[limit - 2] == 0 && data[limit - 1] == 1
+        } else if length == 2 {
+            prefixFlags.0 = prefixFlags.2 && data[limit - 2] == 0 && data[limit - 1] == 1
+        } else {
+            prefixFlags.0 = prefixFlags.1 && data[limit - 1] == 1
+        }
+        // True if the last two bytes in the data seen so far are {0,0}.
+        if length > 1 {
+            prefixFlags.1 = data[limit - 2] == 0 && data[limit - 1] == 0
+        } else {
+            prefixFlags.1 = prefixFlags.2 && data[limit - 1] == 0
+        }
+        // True if the last byte in the data seen so far is {0}.
+        prefixFlags.2 = data[limit - 1] == 0
+
+        return limit
+    }
+
     public struct SpsData {
         public let profileIdc: Int
         public let constraintsFlagsAndReservedZero2Bits: Int
@@ -30,8 +137,12 @@ public enum NalUnitUtil {
         public let colorTransfer: ColorTransfer?
         public let maxNumReorderFrames: Int
 
-        public init(data: [UInt8], nalOffset: Int, nalLimit: Int) throws {
-            var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset + 1, limit: nalLimit)
+        public init<T: RandomAccessCollection<UInt8>>(
+            data: T,
+            nalOffset: Int,
+            nalLimit: Int
+        ) throws where T.Index == Int {
+            var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset, limit: nalLimit)
             profileIdc = try data.readBits(8)
             let constraintsFlagsAndReservedZero2Bits = try data.readBits(8)
             levelIdc = try data.readBits(8)
@@ -219,7 +330,7 @@ public enum NalUnitUtil {
             self.maxNumReorderFrames = maxNumReorderFrames
         }
 
-        private static func skipScalingList(bitArray: inout ParsableNalUnitBitArray, size: Int) throws {
+        private static func skipScalingList<T>(bitArray: inout ParsableNalUnitBitArray<T>, size: Int) throws {
             var lastScale = 8
             var nextScale = 8
 
@@ -233,7 +344,7 @@ public enum NalUnitUtil {
             }
         }
 
-        private static func skipHrdParameters(data: inout ParsableNalUnitBitArray) throws {
+        private static func skipHrdParameters<T>(data: inout ParsableNalUnitBitArray<T>) throws {
             let codedPictureBufferCount = try data.readUnsignedExpGolombCodedInt() + 1 // cpb_cnt_minus1
             try data.skipBits(8) // bit_rate_scale (4), cpb_size_scale (4)
             for _ in 0..<codedPictureBufferCount {
@@ -253,6 +364,24 @@ public enum NalUnitUtil {
         public let picParameterSetId: Int
         public let seqParameterSetId: Int
         public let bottomFieldPicOrderInFramePresentFlag: Bool
+
+        public init(picParameterSetId: Int, seqParameterSetId: Int, bottomFieldPicOrderInFramePresentFlag: Bool) {
+            self.picParameterSetId = picParameterSetId
+            self.seqParameterSetId = seqParameterSetId
+            self.bottomFieldPicOrderInFramePresentFlag = bottomFieldPicOrderInFramePresentFlag
+        }
+
+        public init<T: RandomAccessCollection<UInt8>>(
+            data: T,
+            nalOffset: Int,
+            nalLimit: Int
+        ) throws where T.Index == Int {
+            var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset, limit: nalLimit)
+            picParameterSetId = try data.readUnsignedExpGolombCodedInt()
+            seqParameterSetId = try data.readUnsignedExpGolombCodedInt()
+            try data.skipBit() // entropy_coding_mode_flag
+            bottomFieldPicOrderInFramePresentFlag = try data.readBit()
+        }
     }
 
     public static func isH264NalUnitDependedOn(nalUnitHeaderFirstByte: UInt8) -> Bool {
@@ -319,6 +448,18 @@ public enum NalUnitUtil {
 }
 
 public extension NalUnitUtil {
+    enum H264NalUnitType: Int {
+        case unspecified = 0
+        case nonIdr = 1
+        case partitionA = 2
+        case idr = 5
+        case sei = 6
+        case sps = 7
+        case pps = 8
+        case aud = 9
+        case prefix = 14
+    }
+
     static let nalStartCode: [UInt8] = [0, 0, 0, 1]
 }
 
@@ -342,12 +483,6 @@ private extension NalUnitUtil {
         3 / 2,
         2
     ]
-
-    enum H264NalUnitType: Int {
-        case nonIdr = 1
-        case aud = 9
-        case prefix = 14
-    }
 }
 
 private extension Int {

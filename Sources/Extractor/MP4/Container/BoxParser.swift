@@ -14,7 +14,7 @@ public struct BoxParser {
     public func parseTraks(
         moov: ContainerBox,
         gaplessInfoHolder: inout GaplessInfoHolder,
-        duration: CMTime,
+        durationTimeValue: CMTimeValue?,
         ignoreEditLists: Bool,
         isQuickTime: Bool,
         omitTrackSampleTable: Bool
@@ -26,7 +26,7 @@ public struct BoxParser {
                     trak: atom,
                     mvhd: moov.getLeafBoxOfType(type: .mvhd)
                         .checkNotNil(BoxParserErrors.missingBox(type: .mvhd)),
-                    duration: duration,
+                    durationTimeValue: durationTimeValue,
                     ignoreEditLists: ignoreEditLists,
                     isQuickTime: isQuickTime
                 ) else { return nil }
@@ -51,20 +51,29 @@ public struct BoxParser {
         var udtaData = udtaBox.data
         udtaData.moveReaderIndex(to: MP4Box.headerSize)
         var metadata = Metadata()
-        while udtaData.readableBytes >= MP4Box.headerSize {
-            // TODO: metadata reading
-        }
         return metadata
+    }
+
+    func maybeSkipRemainingMetaBoxHeaderBytes(meta: inout BlockBufferReader) throws {
+        var endPosition = meta.readerIndex
+        // The next 8 bytes can be either:
+        // (iso) [1 byte version + 3 bytes flags][4 byte size of next atom]
+        // (qt)  [4 byte size of next atom      ][4 byte hdlr atom type   ]
+        // In case of (iso) we need to skip the next 4 bytes.
+        meta.moveReaderIndex(forwardBy: 4)
+        if try meta.readInt(as: UInt32.self) != MP4Box.BoxType.hdlr.rawValue {
+            endPosition += 4
+        }
+        meta.moveReaderIndex(to: endPosition)
     }
 
     private func parseTrak(
         trak: ContainerBox,
         mvhd: LeafBox,
-        duration: CMTime,
+        durationTimeValue: CMTimeValue?,
         ignoreEditLists: Bool,
         isQuickTime: Bool
     ) throws -> Track? {
-        var duration = duration
         let mdia = try trak.getContainerBoxOfType(type: .mdia)
             .checkNotNil(BoxParserErrors.missingBox(type: .mdia))
 
@@ -76,16 +85,18 @@ public struct BoxParser {
 
         guard trackType != .unknown else { return nil }
 
-        let movieTimescale = try! Mp4TimestampData(mvhd: mvhd.data).timescale
         let tkhdData = try! TkhdData(
             tkhd: trak
                 .getLeafBoxOfType(type: .tkhd)
                 .checkNotNil(BoxParserErrors.missingBox(type: .tkhd)).data,
-            movieTimescale: movieTimescale
         )
+        let durationTimeValue = durationTimeValue ?? tkhdData.durationTimeValue
+        let movieTimescale = try! Mp4TimestampData(mvhd: mvhd.data).timescale
 
-        if !duration.isValid {
-            duration = tkhdData.duration
+        let duration: CMTime = if let durationTimeValue {
+            CMTime(value: durationTimeValue, timescale: movieTimescale)
+        } else {
+            .invalid
         }
 
         let stbl = try! mdia.getContainerBoxOfType(type: .minf)
@@ -555,11 +566,11 @@ extension BoxParser {
 
     struct TkhdData {
         let trackId: Int
-        let duration: CMTime
+        let durationTimeValue: CMTimeValue?
         let rotationDegrees: CGFloat
         let transform3D: CATransform3D
 
-        init(tkhd: BlockBufferReader, movieTimescale: CMTimeScale) throws {
+        init(tkhd: BlockBufferReader) throws {
             var tkhd = tkhd
             tkhd.moveReaderIndex(to: Int(MP4Box.headerSize))
             let (version, _) = try BoxParser.readFullboxExtra(reader: &tkhd)
@@ -570,7 +581,7 @@ extension BoxParser {
             var durationUnknown = true
             let durationPosition = tkhd.readerIndex
             let durationByteCount = version == 0 ? 4 : 8
-            let view = tkhd.blockBufferView
+            let view = tkhd.readableBytesView
             for index in 0..<durationByteCount {
                 if view[durationPosition + index] != 0xFF { // != -1
                     durationUnknown = false
@@ -578,10 +589,9 @@ extension BoxParser {
                 }
             }
 
-            var duration: CMTime
             if durationUnknown {
                 tkhd.moveReaderIndex(forwardBy: durationByteCount)
-                duration = .invalid
+                durationTimeValue = nil
             } else {
                 let value: Int64
                 if version == 0 {
@@ -596,12 +606,11 @@ extension BoxParser {
                 if value == 0 {
                     // 0 duration normally indicates that the file is fully fragmented (i.e. all of the media
                     // samples are in fragments). Treat as unknown.
-                    duration = .invalid
+                    durationTimeValue = nil
                 } else {
-                    duration = CMTime(value: value, timescale: movieTimescale)
+                    durationTimeValue = value
                 }
             }
-            self.duration = duration
 
             tkhd.moveReaderIndex(forwardBy: 16)
 
@@ -668,7 +677,7 @@ extension BoxParser {
             var mediaDurationUnknown = true
             let mediaDurationPosition = mdhd.readerIndex
             let mediaDurationByteCount = version == 0 ? 4 : 8
-            let view = mdhd.blockBufferView
+            let view = mdhd.readableBytesView
             for index in 0..<mediaDurationByteCount {
                 if view[mediaDurationPosition + index] != 0xFF { // != -1
                     mediaDurationUnknown = false

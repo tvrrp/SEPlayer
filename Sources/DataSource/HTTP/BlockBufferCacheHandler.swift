@@ -10,12 +10,12 @@ import SEPlayerCommon
 
 public final class BlockBufferCacheHandler: @unchecked Sendable {
     public var totalBytes: Int {
-        assert(queue.isCurrent())
+//        assert(queue.isCurrent())
         return blocks.reduce(into: 0) { $0 += $1.byteRange.count }
     }
 
     public var availableDataRanges: [Range<Int>] {
-        assert(queue.isCurrent())
+//        assert(queue.isCurrent())
         return blocks.map { $0.filledRange }
     }
 
@@ -41,10 +41,14 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
     public func read(_ range: Range<Int>) throws -> CMBlockBuffer? {
         assert(queue.isCurrent())
         for block in blocks {
-            if block.filledRange.contains(range) {
-                let low = range.lowerBound - block.byteRange.lowerBound
-                return try CMBlockBuffer(bufferReference: block.buffer[low..<(low + range.count)])
-            }
+            guard block.filledRange.contains(range.lowerBound) else { continue }
+
+            let low = range.lowerBound - block.byteRange.lowerBound
+            let end = min(range.upperBound, block.filledRange.upperBound)
+            let length = end - range.lowerBound
+
+//            print("✅ Did read bytes, range = \(range.lowerBound..<(range.lowerBound + length))")
+            return try CMBlockBuffer(bufferReference: block.buffer[low..<(low + length)])
         }
 
         return nil
@@ -96,11 +100,15 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
         // Don't grow this block's valid bytes into another block's territory.
         let writeCeiling = nextBlockLowerBound(after: block).map { min(endOffset, $0) } ?? endOffset
         var remainingNow = writeCeiling - blockOffset
+
         guard remainingNow > 0 else {
-            blockOffset += writeCeiling
-            position += writeCeiling
+            guard let next = blocks.first(where: { $0.filledRange.contains(blockOffset) }) else {
+                throw IOError(message: "offset inside next block's capacity but not filled", cause: nil)
+            }
+            let skip = min(endOffset, next.filledRange.upperBound) - blockOffset
+            blockOffset += skip
+            position += skip
             return
-//            throw IOError(message: nil, cause: nil)
         }
 
         if block.freeCapacity < remainingNow {
@@ -132,6 +140,7 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
     private func createBlock(at blockOffset: inout Int, position: inout Int, endOffset: Int, data: DispatchData) throws {
         let writeCeiling = nextBlockLowerBound(after: blockOffset).map { min(endOffset, $0) } ?? endOffset
         let remainingNow = writeCeiling - blockOffset
+
         guard remainingNow > 0 else {
             throw IOError(message: nil, cause: nil)
         }
@@ -175,7 +184,7 @@ public final class BlockBufferCacheHandler: @unchecked Sendable {
                 return
             }
 
-            try last.buffer.append(bufferReference: block.buffer)
+            try last.appendBuffer(block.buffer)
             last.filledBytes += block.filledBytes
         }
     }

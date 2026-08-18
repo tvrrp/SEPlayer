@@ -39,17 +39,19 @@ struct DefaultRenderersFactory: RenderersFactory {
         renderSynchronizer: AVSampleBufferRenderSynchronizer
     ) -> [any SERenderer] {
         let renderers = [
-            try? AVFVideoRenderer(
-                queue: queue,
-                clock: clock,
-                allowedJoiningTimeMs: .zero,
-                maxDroppedFramesToNotify: .zero
-            ),
-            try? AVFAudioRenderer(
-                queue: queue,
-                renderSynchronizer: renderSynchronizer,
-                clock: clock
-            )
+//            try? AVFVideoRenderer(
+//                queue: queue,
+//                clock: clock,
+//                allowedJoiningTimeMs: .zero,
+//                maxDroppedFramesToNotify: .zero
+//            ),
+//            try? AVFAudioRenderer(
+//                queue: queue,
+//                renderSynchronizer: renderSynchronizer,
+//                clock: clock
+//            )
+            try? AVFAudioRenderer2(queue: queue, clock: clock, renderSynchronizer: renderSynchronizer),
+            try? AVFVideoRenderer2(queue: queue, clock: clock)
         ].compactMap { $0 }
 
         return renderers

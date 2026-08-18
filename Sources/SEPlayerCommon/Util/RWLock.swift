@@ -5,50 +5,72 @@
 //  Created by Damir Yackupov on 17.07.2026.
 //
 
-import pthread
+import Darwin
+import Foundation
 
-public class RWLock {
-    private var rwLock = pthread_rwlock_t()
+public final class RWLock: @unchecked Sendable {
+    private let rwlock: UnsafeMutablePointer<pthread_rwlock_t>
 
     public init() {
-        guard pthread_rwlock_init(&rwLock, nil) == 0 else {
-            preconditionFailure("Unable to initialize RWLock")
-        }
+        rwlock = .allocate(capacity: 1)
+        let result = pthread_rwlock_init(rwlock, nil)
+        precondition(result == 0, "pthread_rwlock_init failed: \(String(cString: strerror(result)))")
     }
 
     deinit {
-        pthread_rwlock_destroy(&rwLock)
+        let result = pthread_rwlock_destroy(rwlock)
+        precondition(result == 0, "pthread_rwlock_destroy failed: \(String(cString: strerror(result)))")
+        rwlock.deallocate()
+    }
+
+    // MARK: - Blocking acquisition
+
+    public func readLock() {
+        let result = pthread_rwlock_rdlock(rwlock)
+        precondition(result == 0, "pthread_rwlock_rdlock failed: \(String(cString: strerror(result)))")
     }
 
     public func writeLock() {
-        pthread_rwlock_wrlock(&rwLock)
-    }
-
-    public func tryWriteLock() {
-        pthread_rwlock_trywrlock(&rwLock)
-    }
-
-    public func readLock() {
-        pthread_rwlock_rdlock(&rwLock)
-    }
-
-    public func tryReadLock() {
-        pthread_rwlock_tryrdlock(&rwLock)
+        let result = pthread_rwlock_wrlock(rwlock)
+        precondition(result == 0, "pthread_rwlock_wrlock failed: \(String(cString: strerror(result)))")
     }
 
     public func unlock() {
-        pthread_rwlock_unlock(&rwLock)
+        let result = pthread_rwlock_unlock(rwlock)
+        precondition(result == 0, "pthread_rwlock_unlock failed: \(String(cString: strerror(result)))")
     }
 
-    public func readProtected<T>(_ aBlock: () throws -> T) rethrows -> T {
+    public func tryReadLock() -> Bool {
+        let result = pthread_rwlock_tryrdlock(rwlock)
+        switch result {
+        case 0: return true
+        case EBUSY, EAGAIN: return false
+        default:
+            preconditionFailure("pthread_rwlock_tryrdlock failed: \(String(cString: strerror(result)))")
+        }
+    }
+
+    public func tryWriteLock() -> Bool {
+        let result = pthread_rwlock_trywrlock(rwlock)
+        switch result {
+        case 0: return true
+        case EBUSY: return false
+        default:
+            preconditionFailure("pthread_rwlock_trywrlock failed: \(String(cString: strerror(result)))")
+        }
+    }
+
+    @discardableResult
+    public func withReadLock<T>(_ body: () throws -> T) rethrows -> T {
         readLock()
         defer { unlock() }
-        return try aBlock()
+        return try body()
     }
 
-    public func writeProtected<T>(_ aBlock: () throws -> T) rethrows -> T {
+    @discardableResult
+    public func withWriteLock<T>(_ body: () throws -> T) rethrows -> T {
         writeLock()
         defer { unlock() }
-        return try aBlock()
+        return try body()
     }
 }

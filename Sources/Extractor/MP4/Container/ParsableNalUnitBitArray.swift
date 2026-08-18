@@ -7,14 +7,14 @@
 
 import SEPlayerCommon
 
-struct ParsableNalUnitBitArray {
-    private let data: [UInt8]
+struct ParsableNalUnitBitArray<T: RandomAccessCollection<UInt8>> where T.Index == Int {
+    private let data: T
 
     private var byteLimit: Int
     private var byteOffset: Int
     private var bitOffset: Int
 
-    init(data: [UInt8], offset: Int = 0, limit: Int? = nil) throws {
+    init(data: T, offset: Int = 0, limit: Int? = nil) throws {
         let end = limit ?? data.count
         guard offset >= 0, end <= data.count, offset <= end else {
             throw Error.invalidOffset
@@ -146,7 +146,7 @@ struct ParsableNalUnitBitArray {
     private func shouldSkipByte(_ index: Int) -> Bool {
         index >= 2 &&
         index < byteLimit &&
-        data[index]     == 0x03 &&
+        data[index] == 0x03 &&
         data[index - 1] == 0x00 &&
         data[index - 2] == 0x00
     }

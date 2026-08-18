@@ -23,7 +23,7 @@ public final class SEPlayerFactory {
 
     public init(configuration: URLSessionConfiguration = .default) {
         let operationQueue = OperationQueue()
-        operationQueue.underlyingQueue = Queues.loaderQueue.queue
+        operationQueue.underlyingQueue = SignalQueue(name: "com.seplayer.loader", qos: .userInitiated).queue//Queues.loaderQueue.queue
         operationQueue.maxConcurrentOperationCount = 1
         sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
         bandwidthMeter = DefaultBandwidthMeter()

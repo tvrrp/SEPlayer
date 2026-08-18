@@ -6,11 +6,11 @@
 //
 
 import Foundation
+import CoreMedia
 import SEPlayerCommon
 
 public final class StatsDataSource: DataSource {
-    public var url: URL? { dataSource.url }
-    public var urlResponse: HTTPURLResponse? { dataSource.urlResponse }
+    public var isolation: any Actor { dataSource.isolation }
     public nonisolated var components: DataSourceOpaque { dataSource.components }
 
     public var bytesRead = 0
@@ -23,41 +23,38 @@ public final class StatsDataSource: DataSource {
         self.dataSource = dataSource
     }
 
-    public func resetBytesRead() { bytesRead = 0 }
-
-    public func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int {
-        lastOpenedUrl = dataSpec.url
-        lastUrlResponse = nil
-        let result = try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
-
-        if let lastOpenedUrl = dataSource.url {
-            self.lastOpenedUrl = lastOpenedUrl
-        }
-
-        if let lastUrlResponse = dataSource.urlResponse {
-            self.lastUrlResponse = lastUrlResponse
-        }
-
-        return result
+//    public func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int? {
+//        lastOpenedUrl = dataSpec.url
+//        lastUrlResponse = nil
+//
+//        let result = try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
+////        TODO: if let lastOpenedUrl = dataSource.url {
+////            self.lastOpenedUrl = lastOpenedUrl
+////        }
+//
+//        if let lastUrlResponse = dataSource.getURLResponse(isolation: isolation) {
+//            self.lastUrlResponse = lastUrlResponse
+//        }
+//
+//        return result
+//    }
+    public func canHandle(new dataSpec: DataSpec, _ isolation: isolated any Actor) -> Bool {
+        dataSource.canHandle(new: dataSpec, isolation)
     }
 
-    public func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        let result = try await dataSource.read(to: &buffer, offset: offset, length: length, isolation: isolation)
-        if case let .success(amount) = result {
-            bytesRead += amount
-        }
-        return result
+    public func close(_ isolation: isolated any Actor) async throws {
+        try await dataSource.close(isolation)
     }
 
-    public func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult {
-        let result = try await dataSource.read(allocation: allocation, offset: offset, length: length, isolation: isolation)
-        if case let .success(amount) = result {
-            bytesRead += amount
-        }
-        return result
+    public func getURLResponse(_ isolation: isolated any Actor) -> HTTPURLResponse? {
+        dataSource.getURLResponse(isolation)
     }
 
-    public func close(isolation: isolated any Actor) async throws -> ByteBuffer? {
-        try await dataSource.close(isolation: isolation)
+    public func read(range: Range<Int>, _ isolation: isolated any Actor) async throws -> CMBlockBuffer? {
+        let sampleBuffer = try await dataSource.read(range: range, isolation)
+        if let sampleBuffer, !sampleBuffer.isEmpty {
+            bytesRead += sampleBuffer.dataLength
+        }
+        return sampleBuffer
     }
 }

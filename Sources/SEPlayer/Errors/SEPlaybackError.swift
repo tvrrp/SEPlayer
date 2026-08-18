@@ -18,9 +18,14 @@ public struct SEPlaybackError: Error {
 public extension SEPlaybackError {
     enum ErrorSource {
         case mediaSource
-        case renderer(RendererError)
+        case renderer(RendererErrorType)
         case unexpected
         case remote
+    }
+
+    enum RendererErrorType {
+        case rendererRequiresFlush
+        case error(RendererError)
     }
 
     struct RendererError: Error {

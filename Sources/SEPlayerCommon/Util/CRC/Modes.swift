@@ -1,0 +1,58 @@
+//
+//  Modes.swift
+//  SEPlayer
+//
+//  Created by Damir Yackupov on 12.08.2026.
+//
+
+public enum CRC8_TYPE {
+    case defaultCrc
+    case cdma2000
+    case darc
+    case dvbS2
+    case ebu
+    case iCode
+    case itu
+    case maxim
+    case rohc
+    case wcdma
+}
+
+public enum CRC16_TYPE {
+    case ccittFalse
+    case arc
+    case augCcitt
+    case buypass
+    case cdma2000
+    case dds110
+    case dectR
+    case dectX
+    case dnp
+    case en13757
+    case genibus
+    case maxim
+    case mcrf4xx
+    case riello
+    case t10dif
+    case teledisk
+    case tms37157
+    case usb
+    case a
+    case kermit
+    case modbus
+    case x25
+    case xmodem
+}
+
+public enum CRC32_TYPE {
+    case defaultCrc
+    case bzip2
+    case c
+    case d
+    case mpeg2
+    case posix
+    case sata
+    case q
+    case jamcrc
+    case xfer
+}

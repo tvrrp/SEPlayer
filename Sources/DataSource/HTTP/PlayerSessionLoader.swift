@@ -14,7 +14,6 @@ public protocol IPlayerSessionLoader: Sendable {
 }
 
 public protocol PlayerSessionDelegate: AnyObject {
-    var queue: any Queue { get }
     func didRecieveResponse(_ response: URLResponse, task: URLSessionTask, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void)
     func didReciveBuffer(_ buffer: DispatchData, task: URLSessionTask)
     func didFinishCollectingMetrics(_ metrics: URLSessionTaskMetrics, task: URLSessionTask)
@@ -88,9 +87,7 @@ private final class _DataLoader: NSObject, URLSessionTaskDelegate, @unchecked Se
         guard let handler = handlers[task] else { return }
         handlers[task] = nil
 
-        handler.queue.async {
-            handler.didFinishTask(task, error: error)
-        }
+        handler.didFinishTask(task, error: error)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
@@ -98,9 +95,7 @@ private final class _DataLoader: NSObject, URLSessionTaskDelegate, @unchecked Se
             return
         }
 
-        handler.queue.async {
-            handler.didFinishCollectingMetrics(metrics, task: task)
-        }
+        handler.didFinishCollectingMetrics(metrics, task: task)
     }
 }
 
@@ -117,9 +112,7 @@ extension _DataLoader {
             completionHandler(.cancel); return
         }
 
-        handler.queue.async {
-            handler.didRecieveResponse(response, task: dataTask, completionHandler: completionHandler)
-        }
+        handler.didRecieveResponse(response, task: dataTask, completionHandler: completionHandler)
     }
 
     // Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
@@ -142,8 +135,6 @@ extension _DataLoader {
             )
         }
 
-        handler.queue.async {
-            handler.didReciveBuffer(buffer, task: dataTask)
-        }
+        handler.didReciveBuffer(buffer, task: dataTask)
     }
 }
