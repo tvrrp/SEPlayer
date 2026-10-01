@@ -35,8 +35,11 @@ struct UrlListScreen: View {
     weak var hostViewController: UIViewController?
 
     @State private var urls: [String] = [
-        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/v5/main.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-1/gen-3/screens/dash-vod-single-segment/video-avc-baseline-480.mp4",
+//        Bundle.main.url(forResource: "ts-file", withExtension: "mp4")!.absoluteString,
+//        "https://media.axprod.net/TestVectors/Hls/protected_hls_1080p_h264_singlekey/video-H264-1080-3000k_1.ts",
+//        "https://test-streams.mux.dev/x36xhzz/url_8/url_590/193039199_mp4_h264_aac_fhd_7.ts",
+//        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/v5/main.mp4",
+//        "https://storage.googleapis.com/exoplayer-test-media-1/gen-3/screens/dash-vod-single-segment/video-avc-baseline-480.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-1/gen-3/screens/dash-vod-single-segment/video-137.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4",
         "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4",

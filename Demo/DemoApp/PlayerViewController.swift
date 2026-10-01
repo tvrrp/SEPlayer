@@ -11,14 +11,20 @@ import SEPlayer
 import MediaPlayer
 import DataSource
 
+/// A view whose layer is an `SEPlayerLayer`, so the video follows the view's animated size changes.
+final class PlayerLayerView: UIView {
+    override class var layerClass: AnyClass { SEPlayerLayer.self }
+    var playerLayer: SEPlayerLayer { layer as! SEPlayerLayer }
+}
+
 class PlayerViewController: UIViewController {
     var seekParameters: SeekParameters = .default
 
     let player: SEPlayer
     let mediaTimeInterpolator: MediaTimeInterpolator
 
-    let playerView = SEPlayerView()
-    let playerView2 = SEPlayerView()
+    let playerView = PlayerLayerView()
+    let playerView2 = PlayerLayerView()
 
     var videoUrls = [URL]()
     var repeatMode: RepeatMode = .off
@@ -51,14 +57,14 @@ class PlayerViewController: UIViewController {
 
     init() {
         player = playerFactory.buildPlayer()
-        playerView.player = player
+        playerView.playerLayer.player = player
         mediaTimeInterpolator = MediaTimeInterpolator(player: player)
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         player = playerFactory.buildPlayer()
-        playerView.player = player
+        playerView.playerLayer.player = player
         mediaTimeInterpolator = MediaTimeInterpolator(player: player)
         super.init(coder: coder)
     }
@@ -168,7 +174,7 @@ class PlayerViewController: UIViewController {
         try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
         try! AVAudioSession.sharedInstance().setActive(true)
 
-        playerView.gravity = .resizeAspect
+        playerView.playerLayer.videoGravity = .resizeAspect
 
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
         if videoUrls.count == 1 {
@@ -282,12 +288,12 @@ class PlayerViewController: UIViewController {
         player.seek(to: time, seekParameters: .exact)
         print("🌈 seek position EEEEEEEEEEEENDNDNNDNDNDNND")
 
-        currentTimeLabel.text = "\(Int(player.bufferedPosition.seconds))" + "|" + "\(Int64(sender.value))"
+        currentTimeLabel.text = "\(player.bufferedPosition.isNumeric ? Int(player.bufferedPosition.seconds) : 0)" + "|" + "\(Int64(sender.value))"
 //        updateTime()
     }
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
-        currentTimeLabel.text = "\(Int(player.bufferedPosition.seconds))" + "|" + "\(Int64(sender.value))"
+        currentTimeLabel.text = "\(player.bufferedPosition.isNumeric ? Int(player.bufferedPosition.seconds) : 0)" + "|" + "\(Int64(sender.value))"
 
         let yieldResult = seekContinuation?.yield((sender.value, .closestSync))
         if case .enqueued = yieldResult {
@@ -378,7 +384,11 @@ class PlayerViewController: UIViewController {
     private func handleTimer(displayLink: CADisplayLink) {
 //        let position = player.currentPosition.seconds
         let position = mediaTimeInterpolator.time(at: displayLink.targetTimestamp)
-        currentTimeLabel.text = "\(Int(player.bufferedPosition.seconds))|\(Int(position))"
+        // Unknown while a new item is still preparing: `.seconds` is NaN then, and `Int(_:)` traps.
+        let bufferedPosition = player.bufferedPosition.seconds
+        guard position.isFinite, bufferedPosition.isFinite else { return }
+
+        currentTimeLabel.text = "\(Int(bufferedPosition))|\(Int(position))"
         seekSlider.setValue(Float(position), animated: false)
     }
 
@@ -407,7 +417,7 @@ extension PlayerViewController: SEPlayerDelegate {
     func player(_ player: any Player, didChangePlaybackState state: PlayerState) {
         print("🫟 seek position REEEEDYYYYYYY")
         if state == .ready, seekContinuation == nil {
-            if player.duration.isValid {
+            if player.duration.isNumeric {
                 let duration = player.duration.seconds
                 durationLabel.text = "\(Int(duration))"
                 seekSlider.maximumValue = Float(duration)
@@ -416,10 +426,10 @@ extension PlayerViewController: SEPlayerDelegate {
             }
 
 //            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-//                self.playerView2.player = player as? SEPlayer
+//                self.playerView2.playerLayer.player = player as? SEPlayer
 //
 //                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-//                    self.playerView2.player = nil
+//                    self.playerView2.playerLayer.player = nil
 //                    self.playerView2.removeFromSuperview()
 //                }
 //            }
@@ -427,7 +437,7 @@ extension PlayerViewController: SEPlayerDelegate {
     }
 
     func player(_ player: any Player, didChangeTimeline timeline: any Timeline, reason: TimelineChangeReason) {
-        if player.duration.isValid {
+        if player.duration.isNumeric {
             let duration = player.duration.seconds
             durationLabel.text = "\(Int(duration))"
             seekSlider.maximumValue = Float(duration)
@@ -438,7 +448,7 @@ extension PlayerViewController: SEPlayerDelegate {
 
     func player(_ player: any Player, didTransitionMediaItem mediaItem: MediaItem?, reason: MediaItemTransitionReason?) {
         let duration = player.duration
-        if duration.isValid {
+        if duration.isNumeric {
             durationLabel.text = "\(Int(player.duration.seconds))"
             seekSlider.maximumValue = Float(player.duration.seconds)
         }

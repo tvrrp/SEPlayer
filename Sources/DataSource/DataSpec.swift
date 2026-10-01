@@ -80,12 +80,16 @@ public extension DataSpec {
 
     func createURLRequest() -> URLRequest {
         var request = URLRequest(url: url)
+        // Idle time, not total time: a request that stops answering fails after this and the
+        // loader retries it, instead of waiting out the 60-second default.
+        request.timeoutInterval = 8
 
         if position > 0 || length != nil {
             request.cachePolicy = .reloadIgnoringLocalCacheData
+            // `Range` is inclusive on both ends, so the last byte is position + length - 1.
             var rangeString = "bytes=\(position)-"
             if let length, length > 0 {
-                rangeString.append("\(length)")
+                rangeString.append("\(position + length - 1)")
             }
 
             request.addValue(rangeString, forHTTPHeaderField: "Range")

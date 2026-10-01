@@ -7,14 +7,14 @@
 
 import SEPlayerCommon
 
-struct ParsableNalUnitBitArray<T: RandomAccessCollection<UInt8>> where T.Index == Int {
-    private let data: T
+struct ParsableNalUnitBitArray<Buffer: RandomAccessCollection<UInt8>> where Buffer.Index == Int {
+    private let data: Buffer
 
     private var byteLimit: Int
     private var byteOffset: Int
     private var bitOffset: Int
 
-    init(data: T, offset: Int = 0, limit: Int? = nil) throws {
+    init(data: Buffer, offset: Int = 0, limit: Int? = nil) throws {
         let end = limit ?? data.count
         guard offset >= 0, end <= data.count, offset <= end else {
             throw Error.invalidOffset
@@ -157,6 +157,7 @@ struct ParsableNalUnitBitArray<T: RandomAccessCollection<UInt8>> where T.Index =
         }
     }
 
+    // TODO: mark as io error
     enum Error: Swift.Error {
         case invalidOffset
         case notEnoughBits(Int)

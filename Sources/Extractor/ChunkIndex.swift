@@ -35,8 +35,23 @@ struct ChunkIndex {
         }
     }
 
+    /// The last chunk starting at or before `time`, or the first chunk if `time` is earlier.
     func index(for time: CMTime) -> Int {
-        times.firstIndex(of: time) ?? .zero
+        var low = 0
+        var high = count - 1
+        var result = 0
+
+        while low <= high {
+            let middle = (low + high) / 2
+            if times[middle] <= time {
+                result = middle
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+
+        return result
     }
 }
 
@@ -46,6 +61,7 @@ extension ChunkIndex: SeekMap {
     func getDuration() -> CMTime { duration }
 
     func getSeekPoints(for time: CMTime) -> SeekPoints {
+        guard count > 0 else { return SeekPoints(first: .start) }
         let chunkIndex = index(for: time)
         let seekPoint = SeekPoints.SeekPoint(
             time: times[chunkIndex],

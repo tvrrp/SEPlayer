@@ -141,7 +141,8 @@ final class DefaultLoadControl: LoadControl {
 
     func shouldContinueLoading(with parameters: LoadControlParams) -> Bool {
         assertQueue(); assert(loadingStates[parameters.playerId] != nil)
-        let targetBufferSizeReached = allocator.totalBytesAllocated >= totalTargetBufferBytes()
+        let targetBufferBytes = totalTargetBufferBytes()
+        let targetBufferSizeReached = targetBufferBytes > 0 && allocator.totalBytesAllocated >= targetBufferBytes
         var minBuffer = minBuffer
 
         if parameters.playbackSpeed > 1 {
@@ -164,10 +165,10 @@ final class DefaultLoadControl: LoadControl {
 
     func shouldStartPlayback(parameters: LoadControlParams) -> Bool {
         assertQueue()
-        let bufferedDuration = CMTimeMultiplyByFloat64(
-            parameters.bufferedDuration,
-            multiplier: Float64(parameters.playbackSpeed)
-        )
+        // How long the buffered media plays for: at 2x, 3 s of media lasts 1.5 s.
+        let bufferedDuration = parameters.playbackSpeed > 0
+            ? CMTimeMultiplyByFloat64(parameters.bufferedDuration, multiplier: 1 / Float64(parameters.playbackSpeed))
+            : parameters.bufferedDuration
 
         var minBufferDuration = parameters.rebuffering ? bufferForPlaybackAfterRebuffer : bufferForPlayback
         if parameters.targetLiveOffset.isValid {
@@ -231,10 +232,10 @@ final class DefaultLoadControl: LoadControl {
 extension DefaultLoadControl {
     public enum DefaultConstants {
         public static let minBuffer: CMTime = CMTime(seconds: 2, preferredTimescale: 1000)
-        public static let maxBuffer: CMTime = CMTime(seconds: 50, preferredTimescale: 1000)
-        public static let bufferForPlayback: CMTime = CMTime(seconds: 1.5, preferredTimescale: 1000)
+        public static let maxBuffer: CMTime = CMTime(seconds: 100, preferredTimescale: 1000)
+        public static let bufferForPlayback: CMTime = CMTime(seconds: 0.5, preferredTimescale: 1000)
         public static let bufferForPlaybackAfterRebuffer: CMTime = CMTime(seconds: 3, preferredTimescale: 1000)
-        public static let backBufferDuration: CMTime = CMTime(seconds: 3, preferredTimescale: 1000)
+        public static let backBufferDuration: CMTime = CMTime(seconds: 60, preferredTimescale: 1000)
         public static let retainBackBufferFromKeyframe: Bool = true
     }
 

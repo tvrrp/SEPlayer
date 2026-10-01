@@ -55,7 +55,8 @@ final class NalUnitTargetBuffer {
         guard isFilling, source.count > 0 else { return }
         try ensureCapacity(nalLength + source.count)
         let copied = try source.withContiguousStorageIfAvailable {
-            try nalBuffer[nalLength...].replaceDataBytes(with: UnsafeRawBufferPointer($0))
+            try nalBuffer[nalLength..<(nalLength + $0.count)]
+                .replaceDataBytes(with: UnsafeRawBufferPointer($0))
             return $0.count
         }
 

@@ -591,7 +591,7 @@ public extension TrackSelectionParameters {
         }
 
         private func normalizeLanguageCode(_ s: String) -> String {
-            if #available(iOS 16, *) {
+            if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                 s.replacing("_", with: "-").lowercased()
             } else {
                 s.replacingOccurrences(of: "_", with: "-").lowercased()

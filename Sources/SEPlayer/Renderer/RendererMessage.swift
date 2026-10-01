@@ -11,8 +11,8 @@ import SEPlayerCommon
 public enum RendererMessage {
     case requestMediaDataWhenReady(queue: Queue, block: () -> Void)
     case stopRequestingMediaData
-    case setVideoOutput(_ output: VideoSampleBufferRenderer)
-    case removeVideoOutput(_ output: VideoSampleBufferRenderer)
+    case setVideoOutput(_ output: any VideoOutput)
+    case removeVideoOutput(_ output: any VideoOutput)
     case setControlTimebase(_ timebase: CMTimebase?)
     case setAudioVolume(_ volume: Float)
     case setAudioIsMuted(_ isMuted: Bool)

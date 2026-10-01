@@ -246,7 +246,8 @@ final class ProgressiveMediaPeriod2: MediaPeriod {
 
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool {
         stateLock.withLock { state in
-            if state.loadingFinished
+            if state.didRelease
+                || state.loadingFinished
                 || state.pendingDeferredRetry
                 || (state.isPrepared && state.enabledTrackCount == 0) {
                 return false
@@ -456,6 +457,7 @@ private extension ProgressiveMediaPeriod2 {
         state.pendingDeferredRetry = false
         state.pendingResetPosition = position
         state.loadingFinished = false
+        state.sampleQueues.forEach { $0.setLoadingFinished(false) }
         state.pendingInitialDiscontinuity = false
 
         let queues = state.sampleQueues
@@ -488,6 +490,7 @@ private extension ProgressiveMediaPeriod2 {
 
             if state.duration.isValid, state.pendingResetPosition > state.duration {
                 state.loadingFinished = true
+                state.sampleQueues.forEach { $0.setLoadingFinished(true) }
                 state.pendingResetPosition = .invalid
                 return
             }
@@ -750,6 +753,7 @@ extension ProgressiveMediaPeriod2: Loader.Callback {
             }
 
             state.loadingFinished = true
+            state.sampleQueues.forEach { $0.setLoadingFinished(true) }
             effects.append(.continueLoadingRequested)
         }
     }
@@ -987,7 +991,9 @@ extension ProgressiveMediaPeriod2 {
                     let dataSource = try await dataSourceFactory.createDataSource(dataSpec: dataSpec, isolation)
                     openedDataSource = dataSource
 
-                    let length = dataSource.getContentLenght(dataSpec: dataSpec, isolation)
+                    // Extractors take the length as the absolute end of the stream, and this load may
+                    // start in the middle of it.
+                    let length = dataSource.getContentLenght(dataSpec: dataSpec, isolation).map { $0 + position }
                     guard !Task.isCancelled else { throw CancellationError() }
 
                     try await progressiveMediaExtractor.prepare(
@@ -1009,17 +1015,20 @@ extension ProgressiveMediaPeriod2 {
                         pendingExtractorSeek = false
                     }
 
+                    var checkedPosition = position
                     while result == .continueRead, !Task.isCancelled {
                         try await loadCondition.wait()
                         guard !Task.isCancelled else { throw CancellationError() }
                         result = try await progressiveMediaExtractor.read(isolation)
 
-//                        if let currentInputPosition = progressiveMediaExtractor.getCurrentInputPosition(isolation: isolation),
-//                           currentInputPosition > position + continueLoadingCheckIntervalBytes {
-//                            position = currentInputPosition
-//                            loadCondition.close()
-//                            requestContiniueLoading()
-//                        }
+                        // Pause every few bytes and let the player decide whether to go on. Without
+                        // this, cached media loads to the end before the player can stop it.
+                        if let inputPosition = progressiveMediaExtractor.getCurrentInputPosition(isolation),
+                           inputPosition > checkedPosition + continueLoadingCheckIntervalBytes {
+                            checkedPosition = inputPosition
+                            loadCondition.close()
+                            requestContiniueLoading()
+                        }
                     }
                 } catch {
                     await postLoadTask(

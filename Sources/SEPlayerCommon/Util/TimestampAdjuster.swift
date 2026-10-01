@@ -140,15 +140,18 @@ public extension TimestampAdjuster {
         }
 
         public func adjustTS(pts33: Int64, dts33: Int64?) -> (pts: CMTime, dts: CMTime) {
-            adjuster.lock.usingLock { () -> (CMTime, CMTime) in
+            let (result, waiters) = adjuster.lock.usingLock { () -> ((CMTime, CMTime), [CheckedContinuation<Void, Error>]) in
                 let dtsTicks = unwrapper.unwrap(dts33 ?? pts33)
                 let ptsTicks = pts33 + (dtsTicks - (dts33 ?? pts33))
 
                 let dts = CMTime(value: dtsTicks, timescale: Self.tsTimescale)
                 let pts = CMTime(value: ptsTicks, timescale: Self.tsTimescale)
-                let offset = resolveOffsetLocked(observing: dts)
-                return (CMTimeAdd(pts, offset), CMTimeAdd(dts, offset))
+                let (offset, waiters) = resolveOffsetLocked(observing: dts)
+                return ((CMTimeAdd(pts, offset), CMTimeAdd(dts, offset)), waiters)
             }
+
+            waiters.forEach { $0.resume() }
+            return result
         }
 
         public var hasEstablishedOffset: Bool {
@@ -173,18 +176,24 @@ public extension TimestampAdjuster {
             observing first: CMTime,
             _ body: (CMTime) -> CMTime
         ) -> CMTime {
-            adjuster.lock.usingLock {
-                body(resolveOffsetLocked(observing: first))
+            let (result, waiters) = adjuster.lock.usingLock { () -> (CMTime, [CheckedContinuation<Void, Error>]) in
+                let (offset, waiters) = resolveOffsetLocked(observing: first)
+                return (body(offset), waiters)
             }
+
+            waiters.forEach { $0.resume() }
+            return result
         }
 
-        private func resolveOffsetLocked(observing first: CMTime) -> CMTime {
-            if let offset { return offset }
+        /// Returns the offset and the waiters it releases. The caller resumes them after unlocking:
+        /// resuming takes the task's own lock, which `Task.cancel()` holds while a waiter's
+        /// cancellation handler waits for this one.
+        private func resolveOffsetLocked(observing first: CMTime) -> (CMTime, [CheckedContinuation<Void, Error>]) {
+            if let offset { return (offset, []) }
             let candidate = CMTimeSubtract(desired ?? .zero, first)
             let established = adjuster.establishLocked(offset: candidate)
             offset = established.offset
-            established.waiters.forEach { $0.resume() }
-            return established.offset
+            return (established.offset, established.waiters)
         }
     }
 }

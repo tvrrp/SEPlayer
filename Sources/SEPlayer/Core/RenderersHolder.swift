@@ -155,7 +155,7 @@ final class RenderersHolder {
             return true
         }
 
-        print("Renderer = \(String(describing: renderer)) didReadStreamToEnd = \(renderer.didReadStreamToEnd()), isReady = \(renderer.isReady()), isEnded - \(renderer.isEnded())")
+//        print("Renderer = \(String(describing: renderer)) didReadStreamToEnd = \(renderer.didReadStreamToEnd()), isReady = \(renderer.isReady()), isEnded - \(renderer.isEnded())")
         return renderer.didReadStreamToEnd() || renderer.isReady() || renderer.isEnded()
     }
 
@@ -372,7 +372,7 @@ final class RenderersHolder {
         }
     }
 
-    func setVideoOutput(_ output: VideoSampleBufferRenderer) throws {
+    func setVideoOutput(_ output: any VideoOutput) throws {
         guard trackType == .video else { return }
 
         if prewarmingState == .transitioningToPrimary || prewarmingState == .notPrewarmingUsingSecondary {
@@ -382,7 +382,7 @@ final class RenderersHolder {
         }
     }
 
-    func removeVideoOutput(_ output: VideoSampleBufferRenderer) throws {
+    func removeVideoOutput(_ output: any VideoOutput) throws {
         guard trackType == .video else { return }
         try secondaryRenderer?.handleMessage(.removeVideoOutput(output))
         try primaryRenderer.handleMessage(.removeVideoOutput(output))

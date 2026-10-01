@@ -38,10 +38,13 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         }
     }
 
-    override var hasReadableSamples: Bool { readableSampleCount > 0 }
+    /// Samples to read, or the end of the stream once loading has finished.
+    override var hasReadableSamples: Bool {
+        readableSampleCount > 0 || lock.withReadLock { isLoadingFinished }
+    }
 
     override var isEndOfData: Bool {
-        lock.withReadLock { isLastSampleQueued && readPosition == length }
+        lock.withReadLock { (isLastSampleQueued || isLoadingFinished) && readPosition == length }
     }
 
     override var backBufferDuration: CMTime? {
@@ -68,6 +71,9 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     private var largestQueuedTimestamp: CMTime
 
     private var isLastSampleQueued: Bool = false
+    /// Set by the media period once nothing more will be loaded. The last sample may never arrive,
+    /// e.g. after a seek to the very end, when every sample is before the start time.
+    private var isLoadingFinished: Bool = false
     private var upstreamKeyframeRequired: Bool
     private var upstreamFormatRequired: Bool
 
@@ -114,6 +120,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
             largestDiscardedTimestamp = .negativeInfinity
             largestQueuedTimestamp = .negativeInfinity
             isLastSampleQueued = false
+            isLoadingFinished = false
             sharedSampleMetadata.clear()
             if resetUpstreamFormat {
                 upstreamFormat = nil
@@ -129,6 +136,15 @@ class SampleQueue: TriggerableQueue, TrackOutput {
 //        }
         fireResetTriggers()
         evaluateTriggers()
+    }
+
+    /// Wakes readers waiting for data, so they read the end of the stream.
+    final func setLoadingFinished(_ isLoadingFinished: Bool) {
+        let changed = lock.withWriteLock {
+            defer { self.isLoadingFinished = isLoadingFinished }
+            return self.isLoadingFinished != isLoadingFinished
+        }
+        if changed { evaluateTriggers() }
     }
 
     final func setStartTime(_ startTime: CMTime) {

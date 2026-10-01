@@ -23,14 +23,14 @@ public final class SEPlayerFactory {
 
     public init(configuration: URLSessionConfiguration = .default) {
         let operationQueue = OperationQueue()
-        operationQueue.underlyingQueue = SignalQueue(name: "com.seplayer.loader", qos: .userInitiated).queue//Queues.loaderQueue.queue
+        operationQueue.underlyingQueue = SignalQueue(name: "com.seplayer.loader", qos: .userInteractive).queue//Queues.loaderQueue.queue
         operationQueue.maxConcurrentOperationCount = 1
         sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
         bandwidthMeter = DefaultBandwidthMeter()
         clock = DefaultSEClock()
         audioSessionManager = AudioSessionManager.shared
-        workQueue = SignalQueue(name: "com.seplayer.work.shared", qos: .userInitiated)
-        loaderQueue = SignalQueue(name: "com.seplayer.loader.shared", qos: .userInitiated)
+        workQueue = SignalQueue(name: "com.seplayer.work.shared", qos: .userInteractive)
+        loaderQueue = SignalQueue(name: "com.seplayer.loader.shared", qos: .userInteractive)
         trackSelector = DefaultTrackSelector(
             trackSelectionFactory: AdaptiveTrackSelection.Factory(clock: clock)
         )

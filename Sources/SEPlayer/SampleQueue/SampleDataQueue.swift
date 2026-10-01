@@ -34,9 +34,17 @@ final class SampleDataQueue {
     func discardUpstreamSampleBytes(totalBytesWritten: Int) throws {
         assert(queue.isCurrent())
         precondition(totalBytesWritten <= self.totalBytesWritten)
-        precondition(totalBytesWritten >= baseOffset)
 
         guard totalBytesWritten < self.totalBytesWritten else { return }
+        // Every sample is gone, the read ones included: nothing kept is left, so writing starts
+        // over from there. With no samples the queue reports 0, which can be behind data that
+        // has already been discarded downstream.
+        guard totalBytesWritten > baseOffset else {
+            masterBuffer = try CMBlockBuffer()
+            baseOffset = totalBytesWritten
+            self.totalBytesWritten = totalBytesWritten
+            return
+        }
         let localLength = totalBytesWritten - baseOffset
 
         masterBuffer = localLength == 0

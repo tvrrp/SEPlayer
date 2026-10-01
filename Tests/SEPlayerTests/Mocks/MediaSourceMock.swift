@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
+import CoreMedia
+import DataSource
 import Foundation
 @testable import SEPlayer
 
@@ -50,13 +52,12 @@ class MediaSourceMock: MediaSource {
         updateCounter()
     }
     func enable(delegate: MediaSourceDelegate) {}
-    func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) throws -> MediaPeriod { MediaPeriodMock() }
+    func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> MediaPeriod { MediaPeriodMock() }
     func release(mediaPeriod: MediaPeriod) {}
     func disable(delegate: MediaSourceDelegate) {}
     func releaseSource(delegate: MediaSourceDelegate) {
         updateCounter()
     }
-    func continueLoadingRequested(with source: MediaSource) {}
 
     private func updateCounter(funcName: String = #function) {
         if var counter = methodInvocationStorage[funcName] {
@@ -69,26 +70,24 @@ class MediaSourceMock: MediaSource {
 }
 
 class MediaPeriodMock: MediaPeriod {
-    func maybeThrowPrepareError() throws {
-        // TODO: 
-    }
-    
     let trackGroups = TrackGroupArray.empty
     let isLoading: Bool = false
 
-    func prepare(callback: any MediaPeriodCallback, on time: Int64) {}
-    func discardBuffer(to position: Int64, toKeyframe: Bool) {}
-    func readDiscontinuity() -> Int64 { .zero }
-    func seek(to position: Int64) -> Int64 { .zero }
-    func getAdjustedSeekPositionUs(positionUs: Int64, seekParameters: SeekParameters) -> Int64 { .zero }
+    func maybeThrowPrepareError() throws {}
+    func prepare(callback: any MediaPeriodCallback, on time: CMTime) {}
+    func discardBuffer(position: CMTime, toKeyframe: Bool) {}
+    func readDiscontinuity() -> CMTime { .invalid }
+    func seek(position: CMTime) -> CMTime { .zero }
+    func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime { .zero }
     func selectTrack(
         selections: [SETrackSelection?],
         mayRetainStreamFlags: [Bool],
         streams: inout [SampleStream?],
         streamResetFlags: inout [Bool],
-        positionUs: Int64
-    ) -> Int64 { .zero }
-    func getBufferedPositionUs() -> Int64 { .zero }
-    func getNextLoadPositionUs() -> Int64 { .zero }
+        position: CMTime
+    ) -> CMTime { .zero }
+    func getBufferedPosition() -> CMTime { .zero }
+    func getNextLoadPosition() -> CMTime { .zero }
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool { false }
+    func stopLoading() {}
 }

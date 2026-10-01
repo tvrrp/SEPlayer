@@ -19,7 +19,8 @@ public final class DefaultDataSourceFactory<NetworkLoader: IPlayerSessionLoader>
     private let networkLoader: NetworkLoader
     private let baseDataSourceFactory: (any DataSourceFactory)?
 
-    private var runningDataSources: NSHashTable<DataSourceWrapper>
+    /// Resources in use by some data source. Data sources of the same URL share one.
+    private let resources = NSHashTable<HTTPResource>.weakObjects()
 
     public init(
         segmentLength: Int? = nil,
@@ -31,53 +32,35 @@ public final class DefaultDataSourceFactory<NetworkLoader: IPlayerSessionLoader>
         self.syncActor = syncActor
         self.networkLoader = networkLoader
         self.baseDataSourceFactory = baseDataSourceFactory
-        runningDataSources = .weakObjects()
     }
 
     public func createDataSource(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> any DataSource {
-        let dataSources = runningDataSources.allObjects
-
-        if let wrapper = dataSources.first(where: { $0.value.canHandle(new: dataSpec, isolation) }) {
-            return wrapper.value
-        }
-
-        let dataSource: any DataSource
-
         if let baseDataSourceFactory {
-            dataSource = try await baseDataSourceFactory
-                .createDataSource(dataSpec: dataSpec, isolation)
-        } else {
-            dataSource = try await createNewDataSource(dataSpec: dataSpec, isolation)
-            runningDataSources.add(.init(dataSource))
+            return try await baseDataSourceFactory.createDataSource(dataSpec: dataSpec, isolation)
         }
 
-        return dataSource
-    }
-
-    private func createNewDataSource(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> any DataSource {
         let queue = syncActor.executor.queue
 
         if dataSpec.url.isFileURL {
             return try await FileDataSource(queue: queue, dataSpec: dataSpec, isolation)
-        } else {
-            return try await HTTPDataSource(
-                queue: queue,
-                transportFactory: DefaultHTTPTransportFactory(
-                    loadQueue: queue,
-                    sessionLoader: networkLoader
-                ),
-                dataSpec: dataSpec,
-                isolation
-            )
         }
+
+        return try await HTTPDataSource(
+            queue: queue,
+            resource: resource(for: dataSpec),
+            position: dataSpec.position,
+            isolation
+        )
     }
-}
 
-private final class DataSourceWrapper {
-    let value: DataSource
+    private func resource(for dataSpec: DataSpec) -> HTTPResource {
+        if let resource = resources.allObjects.first(where: { $0.canServe(dataSpec) }) {
+            return resource
+        }
 
-    init(_ dataSource: any DataSource) {
-        value = dataSource
+        let resource = HTTPResource(dataSpec: dataSpec, sessionLoader: networkLoader)
+        resources.add(resource)
+        return resource
     }
 }
 

@@ -36,7 +36,44 @@ final class CollectablePlayerDelegateAsyncStream {
 
     final class EventValidator {
         let validation: ((PlayerDelegateAsyncStream.Event) -> Bool)
-        var continuation: CheckedContinuation<Void, Error>?
+
+        /// Resumed once: by the awaited event or by a timeout, whichever comes first. A result that
+        /// comes before anything waits is kept for the continuation set later.
+        var continuation: CheckedContinuation<Void, Error>? {
+            get { lock.withLock { _continuation } }
+            set {
+                let pending: Result<Void, Error>? = lock.withLock {
+                    guard let result else {
+                        _continuation = newValue
+                        return nil
+                    }
+                    return result
+                }
+                if let pending { newValue?.resume(with: pending) }
+            }
+        }
+
+        private let lock = UnfairLock()
+        private var _continuation: CheckedContinuation<Void, Error>?
+        private var result: Result<Void, Error>?
+
+        func resume() {
+            resume(with: .success(()))
+        }
+
+        func resume(throwing error: Error) {
+            resume(with: .failure(error))
+        }
+
+        private func resume(with result: Result<Void, Error>) {
+            let continuation: CheckedContinuation<Void, Error>? = lock.withLock {
+                guard self.result == nil else { return nil }
+                self.result = result
+                defer { _continuation = nil }
+                return _continuation
+            }
+            continuation?.resume(with: result)
+        }
 
         init(validation: @escaping (PlayerDelegateAsyncStream.Event) -> Bool) {
             self.validation = validation
@@ -72,7 +109,7 @@ final class CollectablePlayerDelegateAsyncStream {
                 events.append(event)
 
                 if eventValidator.validation(event) == true {
-                    eventValidator.continuation?.resume()
+                    eventValidator.resume()
                     return
                 }
             }

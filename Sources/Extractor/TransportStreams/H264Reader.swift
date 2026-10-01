@@ -58,9 +58,9 @@ final class H264Reader: ElementaryStreamReader {
         self.accumulator = try NalUnitAccumulator(
             memoryPool: memoryPool,
             ignoreNalTypes: [
-                NalUnitUtil.H264NalUnitType.sps.rawValue,
-                NalUnitUtil.H264NalUnitType.pps.rawValue,
-                NalUnitUtil.H264NalUnitType.sei.rawValue,
+//                NalUnitUtil.H264NalUnitType.sps.rawValue,
+//                NalUnitUtil.H264NalUnitType.pps.rawValue,
+//                NalUnitUtil.H264NalUnitType.sei.rawValue,
             ]
         )
         seiWrapper = try BlockBufferReader()
@@ -76,6 +76,9 @@ final class H264Reader: ElementaryStreamReader {
         pps.reset()
         sei.reset()
         seiReader.clear()
+        // Partially accumulated NAL units are truncated by the discontinuity, so drop them instead
+        // of gluing them onto the first sample that follows.
+        accumulator.reset()
         sampleReader?.reset()
     }
 
@@ -116,6 +119,7 @@ final class H264Reader: ElementaryStreamReader {
     func consume(data: inout BlockBufferReader, _ isolation: isolated any Actor) async throws {
         try checkTracksCreated()
         guard data.readableBytes > 0 else { return }
+        // TODO: why to create data?
         let data = try! data.readSlice(length: data.readableBytes)
 
         let view = data.readableBytesView
@@ -193,6 +197,8 @@ final class H264Reader: ElementaryStreamReader {
             pesDecodeTime: pesDecodeTime
         )
         try await endNalUnit(position: totalBytesWritten, offset: 0, discardPadding: 0, pesTime: pesTime, isolation)
+        // No further sample will arrive to provide the last sample's duration, so release it now.
+        try await sampleReader?.flushPendingSample(isolation)
     }
 
     private func startNalUnit(
@@ -374,6 +380,11 @@ private final class SampleReader {
     private var randomAccessIndicator = false
     private var currentOffset = 0
 
+    // Output is delayed by one sample so that each sample's duration can be derived from the
+    // timestamp of the sample that follows it.
+    private var pendingSample: PendingSample?
+    private var lastSampleDuration: CMTime = .invalid
+
     init(
         trackOutput: TrackOutput,
         allowNonIdrKeyframes: Bool,
@@ -403,6 +414,11 @@ private final class SampleReader {
         isFilling = false
         readingSample = false
         sliceHeader.clear()
+        // Called on a seek and on a transport stream discontinuity. The held back sample is dropped
+        // rather than output: its data may be truncated by the packet loss, and the timestamps that
+        // follow are not contiguous with it, so they cannot provide its duration.
+        pendingSample = nil
+        lastSampleDuration = .invalid
     }
 
     func startNalUnit(
@@ -542,8 +558,7 @@ private final class SampleReader {
             || (detectAccessUnits && sliceHeader.isFirstVclNalUnitOfPicture(previousSliceHeader)) {
             // If the NAL unit ending is the start of a new sample, output the previous one.
             if hasOutputFormat, readingSample {
-//                try await outputBuffer(isolation)
-                try await outputSample(isolation)
+                try await completeSample(isolation)
             }
             samplePosition = nalUnitStartPosition
             sampleTime = nalUnitTime
@@ -567,24 +582,82 @@ private final class SampleReader {
         }
     }
 
-    private func outputSample(_ isolation: isolated any Actor) async throws {
+    /// Takes ownership of the sample that just ended and outputs the previously held back one, whose
+    /// duration is now known.
+    private func completeSample(_ isolation: isolated any Actor) async throws {
         guard let blockBuffer = try accumulator.commit() else { return }
-        try await trackOutput.sampleData(data: blockBuffer, isolation: trackOutput.isolation)
-
         guard sampleTime.isNumeric, nalUnitStartPosition != samplePosition else { return }
-        let timing = CMSampleTimingInfo(
-            duration: .invalid,
-            presentationTimeStamp: sampleTime,
-            decodeTimeStamp: sampleDecodeTime
+
+        let sample = PendingSample(
+            data: blockBuffer,
+            time: sampleTime,
+            decodeTime: sampleDecodeTime,
+            flags: sampleIsKeyframe ? .keyframe : []
         )
+
+        if let pendingSample {
+            try await output(pendingSample, followedBy: sample, isolation)
+        }
+        pendingSample = sample
+    }
+
+    /// Outputs the sample held back for duration derivation, estimating its duration. Called when no
+    /// further sample will follow it, i.e. at the end of the input.
+    func flushPendingSample(_ isolation: isolated any Actor) async throws {
+        guard let sample = pendingSample else { return }
+        pendingSample = nil
+        try await output(sample, followedBy: nil, isolation)
+    }
+
+    private func output(
+        _ sample: PendingSample,
+        followedBy next: PendingSample?,
+        _ isolation: isolated any Actor
+    ) async throws {
+        let duration = duration(of: sample, followedBy: next)
+        lastSampleDuration = duration
+
+        try await trackOutput.sampleData(data: sample.data, isolation: trackOutput.isolation)
         try await trackOutput.sampleMetadata(
-            time: timing,
-            flags: sampleIsKeyframe ? .keyframe : [],
-            range: 0..<blockBuffer.dataLength,
+            time: CMSampleTimingInfo(
+                duration: duration,
+                presentationTimeStamp: sample.time,
+                decodeTimeStamp: sample.decodeTime
+            ),
+            flags: sample.flags,
+            range: 0..<sample.data.dataLength,
             isolation: trackOutput.isolation
         )
+    }
 
-//        currentOffset += blockBuffer.dataLength
+    private func duration(of sample: PendingSample, followedBy next: PendingSample?) -> CMTime {
+        guard let next else { return lastSampleDuration }
+        // Samples are output in decode order, so the decode timestamps are the monotonic ones.
+        let useDecodeTimes = sample.decodeTime.isNumeric && next.decodeTime.isNumeric
+        let start = useDecodeTimes ? sample.decodeTime : sample.time
+        let end = useDecodeTimes ? next.decodeTime : next.time
+        guard start.isNumeric, end.isNumeric else { return lastSampleDuration }
+
+        let duration = end - start
+        // A timestamp discontinuity that is not signalled by a continuity counter break (a PCR/PTS
+        // jump or a 33 bit wraparound) yields a nonsensical delta. Several access units may also
+        // share a single PES packet, and therefore a single timestamp, which yields a zero delta.
+        // Estimate from the previous sample in both cases.
+        guard duration > .zero, duration <= Self.maxPlausibleSampleDuration else {
+            return lastSampleDuration
+        }
+        return duration
+    }
+}
+
+private extension SampleReader {
+    static var maxPlausibleSampleDuration: CMTime { CMTime(value: 1, timescale: 1) }
+
+    struct PendingSample {
+        let data: CMBlockBuffer
+        let time: CMTime
+        let decodeTime: CMTime
+        let flags: SampleFlags
     }
 }
 

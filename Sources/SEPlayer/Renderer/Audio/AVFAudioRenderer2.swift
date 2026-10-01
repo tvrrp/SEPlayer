@@ -21,8 +21,6 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
     private var allowPositionDiscontinuity: Bool = false
     private var playbackParameters: PlaybackParameters = .default
 
-    private var renderingStatus: NSKeyValueObservation?
-
     @UnfairLocked private var isAirPlayOutput = false
 
     init(
@@ -35,18 +33,6 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
         try decodeBufferQueue = .init()
         try bufferedOutputSamples = .init()
         super.init(queue: queue, trackType: .audio, clock: clock)
-
-        renderingStatus = audioRenderer.observe(\.status, changeHandler: { renderer, _ in
-//            switch renderer.status {
-//            case .unknown:
-//                print("🏙️ RENDERER STATUS UNKNOWN")
-//            case .rendering:
-//                print("🏙️ RENDERER STATUS rendering")
-//            case .failed:
-//                print("🏙️ RENDERER STATUS FAILED, \(renderer.error)")
-//            }
-        })
-
         renderSynchronizer.delaysRateChangeUntilHasSufficientMediaData = false
     }
 
@@ -66,8 +52,6 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
         )
 
         isAirPlayOutput = AVAudioSession.isAirPlayOutput
-        let session = AVAudioSession.sharedInstance()
-        print("⛑️ ON ENABLED output = \(session.currentRoute.outputs), prefer = \(session.preferredIOBufferDuration), dur = \(session.ioBufferDuration)")
     }
 
     override func onDisabled() {
@@ -85,26 +69,6 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
 
         return .create(formatSupport: .handled)
     }
-
-//    override func handleMessage(_ message: RendererMessage) throws {
-//        switch message {
-//        case let .setVideoOutput(renderer):
-////            let didHasRenderers = renderersStorage.hasOutput
-//            renderersStorage.addRenderer(renderer)
-////            if !didHasRenderers {
-////                onOutputChanged()
-////            }
-//        case let .removeVideoOutput(renderer):
-//            renderersStorage.removeRenderer(renderer)
-////            if !renderersStorage.hasOutput {
-////                onOutputRemoved()
-////            }
-//        case let .setControlTimebase(timebase):
-//            renderersStorage.setControlTimebase(timebase)
-//        default:
-//            try super.handleMessage(message)
-//        }
-//    }
 
     override func getMediaClock() -> (any MediaClock)? {
         self
@@ -131,7 +95,13 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
     }
 
     override func onStopped() {
-        renderSynchronizer.rate = .zero
+        // Changing the synchronizer rate blocks for tens of milliseconds, on the queue all players
+        // share. A final stream that has played out has nothing to stop, and at an item without
+        // audio this runs right at the item boundary. What comes next is a disable or a position
+        // reset, and the reset sets the rate again.
+        if !(isEnded() && isCurrentStreamFinal()) {
+            renderSynchronizer.rate = .zero
+        }
         updateCurrentPosition()
     }
 
@@ -140,7 +110,9 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
         try decodeBufferQueue.reset()
         audioRenderer.flush()
         try bufferedOutputSamples.reset()
-        renderSynchronizer.setRate(renderSynchronizer.rate, time: position)
+        // The rate follows the state: a synchronizer left running after the audio ended must not
+        // play what comes next before the renderer starts.
+        renderSynchronizer.setRate(getState() == .started ? playbackParameters.playbackRate : .zero, time: position)
         currentPosition = position
     }
 
@@ -232,9 +204,6 @@ final class AVFAudioRenderer2: AVFBaseRenderer2 {
                 }
             }
         }
-//        audioRenderer.flush()
-//        print("")
-//
     }
 }
 
@@ -271,7 +240,6 @@ final class AVQueuedSampleBufferRenderingWrapper: NSObject {
 
     nonisolated(nonsending) public func enqueue(_ sampleBuffer: CMSampleBuffer) async throws -> EnqueueResult {
         fatalError()
-
     }
 
 //    private func

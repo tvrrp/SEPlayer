@@ -16,6 +16,14 @@ public protocol SEClock {
     var nanoseconds: Int64 { get }
 
     func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper
+    /// A timebase for media time to run on, following this clock.
+    func makeTimebase() throws -> CMTimebase
+}
+
+public extension SEClock {
+    func makeTimebase() throws -> CMTimebase {
+        try CMTimebase(sourceClock: clock)
+    }
 }
 
 public struct DefaultSEClock: SEClock {

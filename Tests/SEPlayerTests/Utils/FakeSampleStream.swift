@@ -5,12 +5,16 @@
 //  Created by Damir Yackupov on 06.11.2025.
 //
 
+import CoreMedia
 import Foundation
 import Testing
 @testable import SEPlayer
 
+/// A sample stream over a real `SampleQueue`, fed with predefined samples.
 final class FakeSampleStream: SampleStream {
-    var loadingFinished: Bool = false
+    private(set) var loadingFinished: Bool = false
+
+    var bufferedAheadDuration: CMTime { sampleQueue.bufferedAheadDuration }
 
     private let queue: Queue
     private let sampleQueue: SampleQueue
@@ -22,12 +26,11 @@ final class FakeSampleStream: SampleStream {
 
     init(
         queue: Queue,
-        allocator: Allocator,
         initialFormat: Format,
         fakeSampleStreamItems: [FakeSampleStreamItem]
-    ) {
+    ) throws {
         self.queue = queue
-        self.sampleQueue = SampleQueue(queue: queue, allocator: allocator)
+        self.sampleQueue = try SampleQueue(queue: queue)
         sampleStreamItems = [FakeSampleStreamItem(format: initialFormat)] + fakeSampleStreamItems
     }
 
@@ -38,7 +41,7 @@ final class FakeSampleStream: SampleStream {
 
     func writeData(startPositionUs: Int64, isolation: isolated any Actor) throws {
         if sampleStreamItemsWritePosition == 0 {
-            sampleQueue.setStartTime(startPositionUs)
+            sampleQueue.setStartTime(.time(us: startPositionUs))
         }
         var writtenFirstFormat = false
         var pendingFirstFormat: Format?
@@ -47,7 +50,7 @@ final class FakeSampleStream: SampleStream {
             guard let sampleInfo = fakeSampleStreamItem.sampleInfo else {
                 let format = try #require(fakeSampleStreamItem.format)
                 if writtenFirstFormat {
-                    sampleQueue.setFormat(format)
+                    sampleQueue.setFormat(format, isolation: isolation)
                 } else {
                     pendingFirstFormat = format
                 }
@@ -56,44 +59,40 @@ final class FakeSampleStream: SampleStream {
 
             if sampleInfo.flags.contains(.endOfStream) {
                 loadingFinished = true
+                sampleQueue.setLoadingFinished(true)
                 break
             }
 
             if sampleInfo.timeUs >= startPositionUs && index >= sampleStreamItemsWritePosition {
                 if !writtenFirstFormat {
-                    try sampleQueue.setFormat(#require(pendingFirstFormat))
+                    try sampleQueue.setFormat(#require(pendingFirstFormat), isolation: isolation)
                     writtenFirstFormat = true
                 }
 
-                try sampleQueue.sampleData(
-                    data: sampleInfo.data,
-                    length: sampleInfo.data.readableBytes,
+                let time = CMTime.time(us: sampleInfo.timeUs)
+                try sampleQueue.sampleData(data: Self.makeBlockBuffer(sampleInfo.data), isolation: isolation)
+                try sampleQueue.sampleMetadata(
+                    time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
+                    flags: sampleInfo.flags,
+                    range: 0..<sampleInfo.data.count,
                     isolation: isolation
                 )
-                sampleQueue.sampleMetadata(
-                    time: sampleInfo.timeUs,
-                    flags: sampleInfo.flags,
-                    size: sampleInfo.data.readableBytes,
-                    offset: 0
-                )
-            } else {
-                print()
             }
         }
         sampleStreamItemsWritePosition = sampleStreamItems.count
     }
 
     func seekTo(positionUs: Int64, allowTimeBeyondBuffer: Bool) -> Bool {
-        sampleQueue.seek(to: positionUs, allowTimeBeyondBuffer: allowTimeBeyondBuffer)
+        sampleQueue.seek(time: .time(us: positionUs), allowTimeBeyondBuffer: allowTimeBeyondBuffer)
     }
 
-    func reset() {
-        sampleQueue.reset()
+    func reset() throws {
+        try sampleQueue.reset()
         sampleStreamItemsWritePosition = 0
         loadingFinished = false
     }
 
-    func getLargestQueuedTimestampUs() -> Int64 {
+    func getLargestQueuedTimestamp() -> CMTime {
         sampleQueue.getLargestQueuedTimestamp()
     }
 
@@ -105,20 +104,22 @@ final class FakeSampleStream: SampleStream {
         try sampleQueue.maybeThrowError()
     }
 
-    func discardTo(positionUs: Int64, toKeyframe: Bool) {
-        sampleQueue.discard(to: positionUs, to: toKeyframe, stopAtReadPosition: true)
+    func discardTo(positionUs: Int64, toKeyframe: Bool) throws {
+        try sampleQueue.discard(toTime: .time(us: positionUs), to: toKeyframe, stopAtReadPosition: true)
     }
 
-    func release() { sampleQueue.release() }
+    func release() {
+        try? sampleQueue.release()
+    }
 
-    func readData(to buffer: DecoderInputBuffer, readFlags: ReadFlags) throws -> SampleStreamReadResult {
-        let result = try sampleQueue.read(buffer: buffer, readFlags: readFlags, loadingFinished: loadingFinished)
+    func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult {
+        let result = try sampleQueue.read(readFlags: readFlags, loadingFinished: loadingFinished)
         switch result {
         case let .didReadFormat(format):
             downstreamFormat = format
         case .didReadBuffer:
             if !readFlags.contains(.omitSampleData) {
-                maybeNotifyDownstreamFormat(timeUs: buffer.timeUs)
+                maybeNotifyDownstreamFormat()
             }
         default:
             break
@@ -126,18 +127,36 @@ final class FakeSampleStream: SampleStream {
         return result
     }
 
-    func skipData(position: Int64) -> Int {
+    func skipData(position: CMTime) throws -> Int {
         let skipCount = sampleQueue.getSkipCount(time: position, allowEndOfQueue: loadingFinished)
         sampleQueue.skip(count: skipCount)
         return skipCount
     }
 
-    private func maybeNotifyDownstreamFormat(timeUs: Int64) {
+    @discardableResult
+    func installTrigger(condition: TriggerCondition, _ body: ((QueueTriggerToken) -> Void)?) -> QueueTriggerToken {
+        sampleQueue.installTrigger(condition: condition, body)
+    }
+
+    func removeTrigger(_ token: QueueTriggerToken) {
+        sampleQueue.removeTrigger(token)
+    }
+
+    func testTrigger(_ token: QueueTriggerToken) -> Bool {
+        sampleQueue.testTrigger(token)
+    }
+
+    private func maybeNotifyDownstreamFormat() {
         // TODO: event dispatcher
         if let downstreamFormat, downstreamFormat != notifiedDownstreamFormat {
-            // TODO: notify event dispatcher
             notifiedDownstreamFormat = downstreamFormat
         }
+    }
+
+    private static func makeBlockBuffer(_ bytes: [UInt8]) throws -> CMBlockBuffer {
+        let blockBuffer = try CMBlockBuffer(length: bytes.count, flags: .assureMemoryNow)
+        try bytes.withUnsafeBytes { try blockBuffer.replaceDataBytes(with: $0) }
+        return blockBuffer
     }
 }
 
@@ -147,7 +166,7 @@ extension FakeSampleStream {
         fileprivate var sampleInfo: SampleInfo?
 
         static let endOfStream = FakeSampleStreamItem(
-            sample: ByteBuffer(),
+            sample: [],
             flags: .endOfStream,
             timeUs: .max
         )
@@ -157,36 +176,51 @@ extension FakeSampleStream {
         }
 
         init(oneByteSample timeUs: Int64, flags: SampleFlags = []) {
-            if timeUs == 0 {
-                print()
-            }
-            self.init(sampleInfo: .init(
-                data: ByteBuffer(repeating: 0, count: 1),
-                flags: flags,
-                timeUs: timeUs
-            ))
+            self.init(sampleInfo: .init(data: [0], flags: flags, timeUs: timeUs))
         }
 
-        init(sample data: ByteBuffer, flags: SampleFlags, timeUs: Int64) {
+        init(sample data: [UInt8], flags: SampleFlags, timeUs: Int64) {
             self.init(sampleInfo: .init(data: data, flags: flags, timeUs: timeUs))
         }
 
         private init(format: Format? = nil, sampleInfo: SampleInfo? = nil) {
-            try! #require((format == nil) != (sampleInfo == nil))
+            precondition((format == nil) != (sampleInfo == nil))
             self.format = format
             self.sampleInfo = sampleInfo
         }
     }
 
     fileprivate struct SampleInfo {
-        fileprivate let data: ByteBuffer
+        fileprivate let data: [UInt8]
         fileprivate let flags: SampleFlags
         fileprivate let timeUs: Int64
+    }
+}
 
-        init(data: ByteBuffer, flags: SampleFlags, timeUs: Int64) {
-            self.data = data
-            self.flags = flags
-            self.timeUs = timeUs
+/// Format descriptions for the tests' formats, which carry no codec configuration: a sample
+/// queue builds one for every sample it hands out.
+struct FakeInitializationData: Format.InitializationData {
+    func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {
+        switch format.sampleMimeType?.trackType {
+        case .audio:
+            let description = AudioStreamBasicDescription(
+                mSampleRate: Float64(max(format.sampleRate, 1)),
+                mFormatID: kAudioFormatMPEG4AAC,
+                mFormatFlags: 0,
+                mBytesPerPacket: 0,
+                mFramesPerPacket: 1024,
+                mBytesPerFrame: 0,
+                mChannelsPerFrame: UInt32(max(format.channelCount, 1)),
+                mBitsPerChannel: 0,
+                mReserved: 0
+            )
+            return try CMAudioFormatDescription(audioStreamBasicDescription: description)
+        default:
+            return try CMVideoFormatDescription(
+                videoCodecType: .h264,
+                width: max(format.width, 1),
+                height: max(format.height, 1)
+            )
         }
     }
 }

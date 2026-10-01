@@ -61,6 +61,7 @@ public enum NalUnitUtil {
         return try CMBlockBuffer(bufferReference: scratch[0..<unescapedLength])
     }
 
+    // TODO: just pass slice of RandomAccessCollection<UInt8> and ignore offset and limit
     public static func findNalUnit<T: RandomAccessCollection<UInt8>>(
         _ data: T,
         offset: Int,
@@ -421,6 +422,20 @@ public enum NalUnitUtil {
             return 2
         }
         return 0
+    }
+
+    public static func isDependedOn<T: RandomAccessCollection<UInt8>>(
+        data: T,
+        format: Format
+    ) -> Bool where T.Index == Int {
+        if format.sampleMimeType == .videoH264 {
+            return isH264NalUnitDependedOn(nalUnitHeaderFirstByte: data[0])
+        }
+        if format.sampleMimeType == .videoH265 {
+            return true // TODO: isH265NalUnitDependedOn
+        }
+
+        return true
     }
 
     public static func isDependedOn(data: ByteBuffer, offset: Int, length: Int, format: Format) -> Bool {

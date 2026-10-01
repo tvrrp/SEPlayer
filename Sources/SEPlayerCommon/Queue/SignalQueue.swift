@@ -50,7 +50,9 @@ public final class SignalQueue: Queue, Sendable {
     }
 
     public init(name: String? = nil, qos: DispatchQoS = .default) {
-        nativeQueue = DispatchQueue(label: name ?? "", qos: qos)
+        let workloop = DispatchWorkloop.init(__label: "workloop-\(name ?? "")")
+        workloop.activate()
+        nativeQueue = DispatchQueue(label: name ?? "", qos: qos, target: workloop)
 
         specialIsMainQueue = false
 

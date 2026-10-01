@@ -6,10 +6,18 @@
 //
 
 import AVFoundation
+import DataSource
+import Extractor
 import Testing
 @testable import SEPlayer
 
 final class TestSEPlayerFactory {
+    private static func loaderOperationQueue() -> OperationQueue {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }
+
     private(set) var trackSelector: DefaultTrackSelector
     private(set) var loadControl: LoadControl
     private(set) var bandwidthMeter: BandwidthMeter
@@ -141,17 +149,18 @@ final class TestSEPlayerFactory {
             mediaSourceFactory: mediaSourceFactory ?? DefaultMediaSourceFactory(
                 workQueue: queue,
                 loaderQueue: loaderQueue,
+                // Tests set their own media sources; this one is never asked for data.
                 dataSourceFactory: DefaultDataSourceFactory(
                     syncActor: loaderSyncActor,
-                    networkLoader: MockPlayerSessionLoader()
+                    networkLoader: PlayerSessionLoader(configuration: .ephemeral, queue: Self.loaderOperationQueue())
                 ),
                 extractorsFactory: DefaultExtractorFactory(queue: queue)
             ),
             audioSessionManager: AudioSessionManager.shared,
             useLazyPreparation: useLazyPreparation,
-            seekBackIncrementMs: seekBackIncrementMs,
-            seekForwardIncrementMs: seekForwardIncrementMs,
-            maxSeekToPreviousPositionMs: maxSeekToPreviousPositionMs,
+            seekBackIncrement: CMTime(value: seekBackIncrementMs, timescale: 1000),
+            seekForwardIncrement: CMTime(value: seekForwardIncrementMs, timescale: 1000),
+            maxSeekToPreviousPosition: CMTime(value: maxSeekToPreviousPositionMs, timescale: 1000)
         )
     }
 }
@@ -166,14 +175,4 @@ private struct MockRenderersFactory: RenderersFactory {
     ) -> [any SERenderer] {
         renderers
     }
-}
-
-private struct MockPlayerSessionLoader: IPlayerSessionLoader {
-    func createTask(request: URLRequest, delegate: any PlayerSessionDelegate) -> URLSessionDataTask {
-        URLSession.shared.dataTask(with: request)
-    }
-
-//    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, Error> {
-//        return AsyncThrowingStream<PlayerSessionLoaderEvent, Error> { $0.finish() }
-//    }
 }

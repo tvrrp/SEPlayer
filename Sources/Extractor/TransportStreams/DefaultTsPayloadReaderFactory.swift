@@ -66,7 +66,7 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
                     containerMimeType: .videoMP2T
                 )
             )
-        case .h264:
+        case .h264, .h264Encrypted:
             guard !flags.contains(.ignoreAACStream) else { return nil }
 
             return try PesReader(

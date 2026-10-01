@@ -34,15 +34,9 @@ class AVFBaseRenderer2: BaseSERenderer {
         rendererFinishedTimer = DispatchSource.makeTimerSource(queue: queue.queue)
 
         super.init(queue: queue, trackType: trackType, clock: clock)
-//        handler.callback = self
 
         stallTimer.setEventHandler { [weak self] in
             guard let self else { return }
-
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED TIMER 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED TIMER 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED TIMER 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED TIMER 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
 
             if !isReady() && wasReady {
                 wasReady = false
@@ -53,7 +47,6 @@ class AVFBaseRenderer2: BaseSERenderer {
         rendererFinishedTimer.setEventHandler{ [weak self] in
             guard let self else { return }
 
-//            print("🌈 DID FINISH RENDERING")
             isRenderingEnded = true
             delegate?.rendererDidFinishRendering(self)
         }
@@ -138,6 +131,19 @@ class AVFBaseRenderer2: BaseSERenderer {
         wasReady = false
         isRenderingEnded = false
         rendererAtEndOfStream = false
+        lastEnqueuedSample = .invalid
+
+        // The renderer only reads when something wakes it, and a flushed output does not reliably
+        // deliver the "ready for more data" callback it was waiting for. Drop that wait and start
+        // reading again once the subclass has flushed.
+        stopRequestingOutputMediaData()
+        if let sampleQueueToken {
+            getStream()?.removeTrigger(sampleQueueToken)
+            self.sampleQueueToken = nil
+        }
+        queue.justDispatch { [weak self] in
+            self?.readInputStream()
+        }
     }
 
     override func onStopped() {
@@ -160,14 +166,13 @@ class AVFBaseRenderer2: BaseSERenderer {
         }
     }
 
-//    override func onPositionReset(position: CMTime, joining: Bool) throws {
-//        try super.onPositionReset(position: position, joining: joining)
-//        print("ℹ️ onPositionReset, position = \(position.seconds)")
-//    }
-
     final func changeOutputMode(to outputMode: OutputMode) {
         guard self.outputMode != outputMode else { return }
-        pendingOutputMode = outputMode
+        if getState() == .disabled {
+            self.outputMode = outputMode
+        } else {
+            pendingOutputMode = outputMode
+        }
     }
 
     func onOutputModeChanged() {}
@@ -184,11 +189,6 @@ class AVFBaseRenderer2: BaseSERenderer {
         if isReady() && !wasReady {
             delegate?.rendererFinishedPreroll(self)
         } else if !isReady() && wasReady {
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED ON CHANGE 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED ON CHANGE 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED ON CHANGE 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//            print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER STALLED ON CHANGE 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-
             delegate?.rendererPipelineStalled(self)
         }
     }
@@ -251,6 +251,7 @@ class AVFBaseRenderer2: BaseSERenderer {
                 try controlTimebase?.setTimerNextFireTime(stallTimer, fireTime: lastEnqueuedSample.end)
             }
 
+            reportReadyIfNeeded()
             return false
         case let .didReadFormat(format):
             try onInputFormatChanged(format)
@@ -258,15 +259,32 @@ class AVFBaseRenderer2: BaseSERenderer {
         case let .didReadBuffer(buffer):
             try controlTimebase?.setTimerNextFireTime(stallTimer, fireTime: .invalid)
 
-            if buffer.flags.contains(.endOfStream), !rendererAtEndOfStream {
+            // End of stream stops reading every time, not only the first. Fed on as a sample, it
+            // comes straight back from the queue and loops forever on the shared player queue.
+            if buffer.flags.contains(.endOfStream) {
+                guard !rendererAtEndOfStream else { return false }
                 rendererAtEndOfStream = true
-                try controlTimebase?.setTimerNextFireTime(rendererFinishedTimer, fireTime: lastEnqueuedSample.end)
+
+                // Rendering ends when the last sample has played out. A timebase timer set behind the
+                // current time never fires, and after a seek to the end nothing may have been
+                // enqueued at all, so then it has ended already.
+                let end = lastEnqueuedSample.isValid ? lastEnqueuedSample.end : .invalid
+                if let controlTimebase, end.isValid, end > controlTimebase.time {
+                    try controlTimebase.setTimerNextFireTime(rendererFinishedTimer, fireTime: end)
+                } else {
+                    isRenderingEnded = true
+                    delegate?.rendererDidFinishRendering(self)
+                }
                 return false
             }
 
-            for singleSample in try buffer.singleSampleBuffers() {
-                if singleSample.outputPresentationTimeStamp < getLastResetPosition() {
-                    singleSample.sampleAttachments[0][.doNotDisplay] = true
+            // Frames that end before the seek position are decoded but not shown. The frame covering
+            // the position stays visible, or there would be nothing to show at that time. Marked on
+            // the buffer itself: `singleSampleBuffers()` returns copies.
+            if trackType == .video, buffer.duration.isNumeric,
+               buffer.outputPresentationTimeStamp + buffer.duration <= getLastResetPosition() {
+                for index in 0..<buffer.numSamples {
+                    buffer.sampleAttachments[index][.doNotDisplay] = true
                 }
             }
 
@@ -279,10 +297,7 @@ class AVFBaseRenderer2: BaseSERenderer {
                     readInputStream()
                 }
 
-                if isReady() && !wasReady {
-                    wasReady = true
-                    delegate?.rendererFinishedPreroll(self)
-                }
+                reportReadyIfNeeded()
             }
 
             return isReadyForMoreMediaData
@@ -301,7 +316,6 @@ class AVFBaseRenderer2: BaseSERenderer {
             }
 
             while try pumpOutputStream() {}
-//            print("🏈🏈🏈🏈🏈 ============== END REQUEST IS READY = \(isReady()) ============== 🏈🏈🏈🏈🏈")
         } catch {
             let currentError = createPlaybackError(error)
             self.currentError = currentError
@@ -336,29 +350,29 @@ class AVFBaseRenderer2: BaseSERenderer {
         lastEnqueuedSample = .init(start: buffer.outputPresentationTimeStamp, duration: buffer.duration)
 
         if !isReadyForMoreMediaData {
-            if outputMode == .decode {
-//                print()
-            }
-
             requestOutputMediaDataWhenReady { [unowned self] in
-//                print("🏈🏈🏈🏈🏈 ============== REQUEST ============== 🏈🏈🏈🏈🏈")
                 stopRequestingOutputMediaData()
                 feedOutputStream()
             }
 
-            if isReady() && !wasReady {
-                wasReady = true
-                delegate?.rendererFinishedPreroll(self)
-
-//                print("🏈🏈🏈🏈🏈 ============== REQUEST FINISHED PREROLL ============== 🏈🏈🏈🏈🏈")
-            }
+            reportReadyIfNeeded()
         }
 
         return isReadyForMoreMediaData
     }
 
+    /// Tells the player once the renderer can play, whether its output filled up or its input ran
+    /// out first. The player has no timer, so without this it would not look again.
+    private func reportReadyIfNeeded() {
+        guard isReady(), !wasReady else { return }
+        wasReady = true
+        delegate?.rendererFinishedPreroll(self)
+    }
+
     private func installInputQueueTrigger() throws {
-        guard sampleQueueToken == nil, let stream = getStream() else { return }
+        // After the end of the stream there is nothing to wait for: marking the stream final or
+        // replacing it wakes the renderer.
+        guard sampleQueueToken == nil, !didReadStreamToEnd(), let stream = getStream() else { return }
 
         sampleQueueToken = stream.installTrigger(
             condition: .whenDataBecomesReady

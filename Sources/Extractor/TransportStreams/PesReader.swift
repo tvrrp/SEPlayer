@@ -18,7 +18,7 @@ final class PesReader: TsPayload.Reader {
     }
 
     private let reader: ElementaryStreamReader
-    private var pesScratch: BlockBufferBitReader
+    private var pesScratch: BlockBufferReader
     private var timestampAdjuster: TimestampAdjuster.Session?
 
     private var state: State
@@ -34,9 +34,7 @@ final class PesReader: TsPayload.Reader {
 
     init(reader: any ElementaryStreamReader) throws {
         self.reader = reader
-        pesScratch = try BlockBufferBitReader(
-            CMBlockBuffer(length: .pesScratchSize)
-        )
+        pesScratch = try BlockBufferReader()
         state = .findingHeader
         bytesRead = .zero
     }
@@ -93,30 +91,29 @@ final class PesReader: TsPayload.Reader {
                 try await reader.endOfInputReached(isolation)
             }
 
-            setState(.readingHeader)
+            try setState(.readingHeader)
         }
 
         while data.readableBytes > 0 {
             switch state {
             case .findingHeader:
                 data.moveReaderIndex(forwardBy: data.readableBytes)
-                break
             case .readingHeader:
-                if try continueRead(source: &data, target: pesScratch.getBlockBufferUnsafe(), targetLength: .headerSize) {
+                if try continueRead(source: &data, targetLength: .headerSize) {
                     try setState(parseHeader() ? .readingHeaderExtension : .findingHeader)
                 }
             case .readingHeaderExtension:
                 let readLength = min(.maxHeaderExtensionSize, extendedHeaderLength)
                 // Read as much of the extended header as we're interested in, and skip the rest.
-                if try continueRead(source: &data, target: pesScratch.getBlockBufferUnsafe(), targetLength: readLength),
-                   try continueRead(source: &data, target: nil, targetLength: readLength) {
+                if try continueRead(source: &data, targetLength: readLength),
+                   continueSkip(source: &data, targetLength: extendedHeaderLength) {
                     try parseHeaderExtension(session: timestampAdjuster)
                     reader.packetStarted(
                         pesTime: pts,
                         decodeTime: dts,
                         flags: flags.union(dataAlignmentIndicator ? .dataAlignment : [])
                     )
-                    setState(.readingBody)
+                    try setState(.readingBody)
                 }
             case .readingBody:
                 var readLength = data.readableBytes
@@ -133,7 +130,7 @@ final class PesReader: TsPayload.Reader {
                     self.payloadSize = payloadSize - readLength
                     if (payloadSize - readLength) == 0 {
                         try await reader.packetFinished(isolation)
-                        setState(.readingHeader)
+                        try setState(.readingHeader)
                     }
                 }
             }
@@ -145,64 +142,65 @@ final class PesReader: TsPayload.Reader {
         // pes does not have a length field and body is being read, another exclusion
         // is due to H262 streams possibly having, in HLS mode, a pes across more than one segment
         // which would trigger committing an unfinished sample in the middle of the access unit
+        guard state == .readingBody,
+              payloadSize == nil,
+              !(isModeHls && false /* TODO: reader is H262Reader */) else {
+            return false
+        }
 
         // Only call parseHeader if isModeHls is true and can parse header as some HLS streams may
         // contain packages.
-        let headerParsed = try !isModeHls || parseHeader()
-        return state == .readingBody
-            && payloadSize == nil
-            && !(isModeHls && false /* TODO: reader is H262Reader */)
-            && headerParsed
+        return try !isModeHls || parseHeader()
     }
 
-    private func setState(_ state: State) {
+    private func setState(_ state: State) throws {
         self.state = state
         bytesRead = 0
+        if state == .readingHeader {
+            try pesScratch.clear()
+        }
     }
 
-    private func continueRead(
-        source: inout BlockBufferReader,
-        target: CMBlockBuffer?,
-        targetLength: Int
-    ) throws -> Bool {
+    private func continueRead(source: inout BlockBufferReader, targetLength: Int) throws -> Bool {
         let bytesToRead = min(source.readableBytes, targetLength - bytesRead)
-        if bytesToRead <= 0 {
-            return true
-        } else if let target {
-            let buffer = try source.readBytes(length: bytesToRead)
-            try buffer.withUnsafeBytes {
-                try target.replaceDataBytes(with: $0)
-            }
-        } else {
-            source.moveReaderIndex(forwardBy: bytesToRead)
+        if bytesToRead > 0 {
+            try pesScratch.extend(with: source.readSlice(length: bytesToRead))
+            bytesRead += bytesToRead
         }
+        return bytesRead == targetLength
+    }
 
-        bytesRead += bytesToRead
+    private func continueSkip(source: inout BlockBufferReader, targetLength: Int) -> Bool {
+        let bytesToSkip = min(source.readableBytes, targetLength - bytesRead)
+        if bytesToSkip > 0 {
+            source.moveReaderIndex(forwardBy: bytesToSkip)
+            bytesRead += bytesToSkip
+        }
         return bytesRead == targetLength
     }
 
     private func parseHeader() throws -> Bool {
         // Note: see ISO/IEC 13818-1, section 2.4.3.6 for detailed information on the format of
         // the header.
-        pesScratch.setPosition(0)
-        let startCodePrefix = try pesScratch.readBits(24)
+        var header = BlockBufferBitReader(reader: pesScratch)
+        let startCodePrefix = try header.readBits(24)
         if (startCodePrefix != 0x000001) {
             // TODO: log "Unexpected start code prefix: \(startCodePrefix)"
             payloadSize = nil
             return false
         }
 
-        pesScratch.skipBits(8) // stream_id.
-        let packetLength = try pesScratch.readBits(16)
-        pesScratch.skipBits(5) // '10' (2), PES_scrambling_control (2), PES_priority (1)
-        dataAlignmentIndicator = try pesScratch.readBit()
-        pesScratch.skipBits(2) // copyright (1), original_or_copy (1)
-        ptsFlag = try pesScratch.readBit()
-        dtsFlag = try pesScratch.readBit()
+        header.skipBits(8) // stream_id.
+        let packetLength = try header.readBits(16)
+        header.skipBits(5) // '10' (2), PES_scrambling_control (2), PES_priority (1)
+        dataAlignmentIndicator = try header.readBit()
+        header.skipBits(2) // copyright (1), original_or_copy (1)
+        ptsFlag = try header.readBit()
+        dtsFlag = try header.readBit()
         // ESCR_flag (1), ES_rate_flag (1), DSM_trick_mode_flag (1),
         // additional_copy_info_flag (1), PES_CRC_flag (1), PES_extension_flag (1)
-        pesScratch.skipBits(6)
-        extendedHeaderLength = try pesScratch.readBits(8)
+        header.skipBits(6)
+        extendedHeaderLength = try header.readBits(8)
 
         if packetLength == 0 {
             payloadSize = nil
@@ -224,29 +222,30 @@ final class PesReader: TsPayload.Reader {
     }
 
     private func parseHeaderExtension(session: TimestampAdjuster.Session) throws {
-        pesScratch.setPosition(0)
+        var headerExtension = BlockBufferBitReader(reader: pesScratch)
+        headerExtension.setPosition(.headerSize * 8)
         pts = .invalid
         dts = .invalid
 
         guard ptsFlag else { return }
 
-        pesScratch.skipBits(4) // '0010' or '0011'
-        var pts33 = Int64(try pesScratch.readBits(3)) << 30
-        pesScratch.skipBits(1) // marker_bit
-        pts33 |= Int64(try pesScratch.readBits(15)) << 15
-        pesScratch.skipBits(1) // marker_bit
-        pts33 |= Int64(try pesScratch.readBits(15))
-        pesScratch.skipBits(1) // marker_bit
+        headerExtension.skipBits(4) // '0010' or '0011'
+        var pts33 = Int64(try headerExtension.readBits(3)) << 30
+        headerExtension.skipBits(1) // marker_bit
+        pts33 |= Int64(try headerExtension.readBits(15)) << 15
+        headerExtension.skipBits(1) // marker_bit
+        pts33 |= Int64(try headerExtension.readBits(15))
+        headerExtension.skipBits(1) // marker_bit
 
         var dts33: Int64?
         if dtsFlag {
-            pesScratch.skipBits(4) // '0011'
-            var value = Int64(try pesScratch.readBits(3)) << 30
-            pesScratch.skipBits(1) // marker_bit
-            value |= Int64(try pesScratch.readBits(15)) << 15
-            pesScratch.skipBits(1) // marker_bit
-            value |= Int64(try pesScratch.readBits(15))
-            pesScratch.skipBits(1) // marker_bit
+            headerExtension.skipBits(4) // '0011'
+            var value = Int64(try headerExtension.readBits(3)) << 30
+            headerExtension.skipBits(1) // marker_bit
+            value |= Int64(try headerExtension.readBits(15)) << 15
+            headerExtension.skipBits(1) // marker_bit
+            value |= Int64(try headerExtension.readBits(15))
+            headerExtension.skipBits(1) // marker_bit
             dts33 = value
         }
 
@@ -257,5 +256,4 @@ final class PesReader: TsPayload.Reader {
 private extension Int {
     static let headerSize = 9
     static let maxHeaderExtensionSize = 10
-    static let pesScratchSize = 10 // max(.headerSize, .maxHeaderExtensionSize)
 }

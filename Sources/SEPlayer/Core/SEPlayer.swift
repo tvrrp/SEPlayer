@@ -32,8 +32,8 @@ public protocol SEPlayer: Player {
     func removeTimeObserver(_ observer: AnyObject)
 
     func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage
-    func setVideoOutput(_ output: VideoSampleBufferRenderer)
-    func removeVideoOutput(_ output: VideoSampleBufferRenderer)
+    func setVideoOutput(_ output: any VideoOutput)
+    func removeVideoOutput(_ output: any VideoOutput)
 }
 
 public extension SEPlayer {

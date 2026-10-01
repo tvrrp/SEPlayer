@@ -6,14 +6,16 @@
 //
 
 import CoreMedia
+import Foundation
 
 final class TimebaseTimeObserver {
     private let queue: DispatchQueue
     private let dispatchSourceTimer: DispatchSourceTimer
     private let timebase: CMTimebase
     private let block: (CMTime) -> Void
-
-    private var sourceType: SourceType
+    private let sourceType: SourceType
+    private let boundaryTimes: [CMTime]
+    private var notificationObservers: [NSObjectProtocol] = []
 
     init(
         queue: DispatchQueue,
@@ -25,6 +27,11 @@ final class TimebaseTimeObserver {
         self.timebase = timebase
         self.sourceType = sourceType
         self.block = block
+        if case let .boundary(times) = sourceType {
+            boundaryTimes = times.sorted()
+        } else {
+            boundaryTimes = []
+        }
 
         dispatchSourceTimer = DispatchSource.makeTimerSource(queue: queue)
         dispatchSourceTimer.setEventHandler { [weak self] in
@@ -34,26 +41,37 @@ final class TimebaseTimeObserver {
         }
         dispatchSourceTimer.resume()
         try timebase.addTimer(dispatchSourceTimer)
+
+        // A timer never fires for a time the timebase has already passed, so when the time jumps
+        // (the player sets its start position, or seeks) the next fire time is worked out again.
+        // A jump of the source timebase does not always reach this one as a jump, so a change of
+        // rate — playback starting or stopping — does the same.
+        notificationObservers = [CMTimebase.timeJumped, CMTimebase.effectiveRateChanged].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: timebase, queue: nil) { [weak self] _ in
+                queue.async { self?.start() }
+            }
+        }
         start()
     }
 
+    deinit {
+        notificationObservers.forEach(NotificationCenter.default.removeObserver)
+        try? timebase.removeTimer(dispatchSourceTimer)
+        dispatchSourceTimer.cancel()
+    }
+
     private func start() {
+        let now = timebase.time
         let fireTime: CMTime
 
         switch sourceType {
-        case let .periodic(time):
-            fireTime = timebase.time + time
-        case var .boundary(times):
-            guard !times.isEmpty else { return }
-            fireTime = times.removeFirst()
-            sourceType = .boundary(times)
+        case let .periodic(interval):
+            fireTime = now + interval
+        case .boundary:
+            // The first boundary still ahead; each one fires once as the time passes it.
+            fireTime = boundaryTimes.first { $0 > now } ?? .invalid
         }
-
-        startTimer(for: fireTime)
-    }
-
-    private func startTimer(for time: CMTime) {
-        try! timebase.setTimerNextFireTime(dispatchSourceTimer, fireTime: time)
+        try? timebase.setTimerNextFireTime(dispatchSourceTimer, fireTime: fireTime)
     }
 }
 

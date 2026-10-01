@@ -41,7 +41,8 @@ final class NalUnitAccumulator {
         guard filling, writePosition > 0, source.count > 0 else { return }
         try ensureCapacity(buffer: buffer, required: writePosition + source.count)
         let copied = try source.withContiguousStorageIfAvailable {
-            try buffer[writePosition...].replaceDataBytes(with: UnsafeRawBufferPointer($0))
+            try buffer[writePosition..<(writePosition + $0.count)]
+                .replaceDataBytes(with: UnsafeRawBufferPointer($0))
             return $0.count
         }
 
@@ -63,7 +64,7 @@ final class NalUnitAccumulator {
 
     func commit() throws -> CMBlockBuffer? {
         guard writePosition > 0 else { return nil }
-        let buffer = try buffer[0...writePosition].makeContiguous(
+        let buffer = try buffer[0..<writePosition].makeContiguous(
             allocator: allocator,
             flags: [.assureMemoryNow, .alwaysCopyData]
         )
@@ -71,6 +72,13 @@ final class NalUnitAccumulator {
         startOfNewNal = 0
 
         return buffer
+    }
+
+    /// Discards everything accumulated so far, e.g. after a seek or a stream discontinuity.
+    func reset() {
+        filling = false
+        startOfNewNal = 0
+        writePosition = 0
     }
 
     private func ensureCapacity(buffer: CMBlockBuffer, required: Int) throws {
@@ -81,7 +89,7 @@ final class NalUnitAccumulator {
         }
 
         try buffer.append(
-            length: target - buffer.dataLength,
+            length: target,
             allocator: allocator,
             flags: .assureMemoryNow
         )

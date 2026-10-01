@@ -304,7 +304,7 @@ public final class TsExtractor: Extractor {
         }
 
         while tsPacketBuffer.readableBytes < TSConstants.packetSize {
-            let block = try! await input.read(length: TSConstants.bufferSize, isolation)
+            let block = try await input.read(length: TSConstants.bufferSize, isolation)
             if block.dataLength == 0 {
                 return false
             }

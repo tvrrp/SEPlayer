@@ -173,7 +173,15 @@ final class MediaPeriodQueue {
         for index in 0..<preloadPriorityList.count {
             let mediaPeriodHolder = preloadPriorityList[index]
             if mediaPeriodHolder.canBeUsedFor(mediaPeriodInfo: info) {
-                return preloadPriorityList.remove(at: index)
+                preloadPriorityList.remove(at: index)
+
+                // The holder now belongs to the queue. Left as `preloading`, it would keep being
+                // loaded as a preload even after the queue releases it.
+                if preloading === mediaPeriodHolder {
+                    preloading = nil
+                    maybeUpdatePreloadMediaPeriodHolder()
+                }
+                return mediaPeriodHolder
             }
         }
 

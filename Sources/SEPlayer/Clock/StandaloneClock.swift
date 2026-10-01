@@ -21,7 +21,7 @@ final class StandaloneClock: MediaClock {
     init(clock: SEClock) throws {
         self.clock = clock
         playbackParameters = .default
-        timebase = try CMTimebase(sourceClock: clock.clock)
+        timebase = try clock.makeTimebase()
     }
 
     func start() {
@@ -43,7 +43,7 @@ final class StandaloneClock: MediaClock {
         started = false
 
         do {
-            try timebase.setRate(Double(playbackParameters.playbackRate))
+            try timebase.setRate(.zero)
         } catch {
             print(error)
         }

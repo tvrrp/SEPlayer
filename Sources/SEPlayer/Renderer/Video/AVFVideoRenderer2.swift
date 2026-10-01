@@ -9,48 +9,29 @@ import CoreMedia
 import SEPlayerCommon
 
 final class AVFVideoRenderer2: AVFBaseRenderer2 {
-    private let renderersStorage: VideoSampleBufferRenderersStorage
+    private let displayLayers: DisplayLayersStorage
     private let videoDecoder: VTDecoder2
     private let decodeBufferQueue: TypedCMBufferQueue<CMSampleBuffer>
 
-    private let joiningTimer: DispatchSourceTimer
-
-    private var currentOutputFormat: CMFormatDescription?
-
-    private var pendingRenderer: (any VideoSampleBufferRenderer)?
-    private var joiningDeadline = CMTime.invalid
-
-    private var firstJoiningSampleQueued = true
-    private var lowWaterMarkToken: CMBufferQueue.TriggerToken?
-
-    private var isFirstSampleQueued = false
-
     private let lowWaterMark: CMTime
     private let highWaterMark: CMTime
+
+    private var currentOutputFormat: CMFormatDescription?
+    private var lowWaterMarkToken: CMBufferQueue.TriggerToken?
 
     init(
         queue: any Queue,
         clock: any SEClock
     ) throws {
-        renderersStorage = try VideoSampleBufferRenderersStorage(queue: queue)
+        displayLayers = DisplayLayersStorage(queue: queue)
         decodeBufferQueue = try .init()
         videoDecoder = VTDecoder2(decodeQueue: queue, outputBufferQueue: decodeBufferQueue)
 
         lowWaterMark = CMTime(value: 3, timescale: 30) // 3 frames @ 30fps = 100ms
         highWaterMark = CMTime(value: 5, timescale: 30) // 5 frames @ 30fps = 167ms
 
-        joiningTimer = DispatchSource.makeTimerSource(queue: queue.queue)
-
         super.init(queue: queue, trackType: .video, clock: clock)
-
-        renderersStorage.delegate = self
-        joiningTimer.setEventHandler { [weak self] in
-            guard let self else { return }
-
-            renderersStorage.setIsHidden(false)
-        }
-
-        joiningTimer.resume()
+        displayLayers.delegate = self
     }
 
     override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
@@ -63,40 +44,12 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
 
     override func handleMessage(_ message: RendererMessage) throws {
         switch message {
-        case let .setVideoOutput(renderer):
-            let didHasRenderers = renderersStorage.hasOutput
-            if didHasRenderers, isFirstSampleQueued {
-                pendingRenderer = renderer
-                renderer.setIsHidden(true)
-                renderer.setControlTimebase(renderersStorage.controlTimebase)
-                changeOutputMode(to: .decode)
-
-                firstJoiningSampleQueued = false
-                if let controlTimebase = renderersStorage.controlTimebase {
-                    joiningDeadline = controlTimebase.time + CMTime(seconds: 0.5, preferredTimescale: 1000)
-                }
-            } else {
-                renderersStorage.addRenderer(renderer)
-            }
-//            if !didHasRenderers {
-//                onOutputChanged()
-//            }
-        case let .removeVideoOutput(renderer):
-            renderersStorage.removeRenderer(renderer)
-            renderer.flush(removeImage: true)
-
-            if pendingRenderer === renderer {
-                pendingRenderer = nil
-            }
-
-            if renderersStorage.hasOutput {
-                changeOutputMode(to: .passthrough)
-            }
-//            if !renderersStorage.hasOutput {
-//                onOutputRemoved()
-//            }
+        case let .setVideoOutput(output):
+            displayLayers.addOutput(output)
+        case let .removeVideoOutput(output):
+            displayLayers.removeOutput(output)
         case let .setControlTimebase(timebase):
-            renderersStorage.setControlTimebase(timebase)
+            displayLayers.setControlTimebase(timebase)
         default:
             break
         }
@@ -104,44 +57,21 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
         try super.handleMessage(message)
     }
 
-//    override func onOutputModeChanged() {
-//        if let pendingRenderer {
-//            print("🏈🏈🏈🏈🏈🏈")
-//            print("🏈 ON OUTPUT CHANGED, ")
-//            print("🏈🏈🏈🏈🏈🏈")
-//            renderersStorage.addRenderer(pendingRenderer)
-//            self.pendingRenderer = nil
-//        }
-//    }
-
     override func isReady() -> Bool {
-        if joiningDeadline != .invalid,
-           let timebase = renderersStorage.controlTimebase,
-           joiningDeadline > timebase.time {
-            return true
-        } else {
-            joiningDeadline = .invalid
-            return renderersStorage.hasSufficientMediaDataForReliablePlaybackStart
-                && renderersStorage.isReadyForDisplay
-        }
+        displayLayers.hasSufficientMediaDataForReliablePlaybackStart && displayLayers.isReadyForDisplay
     }
+
 
     override func onPositionReset(position: CMTime, joining: Bool) throws {
         try super.onPositionReset(position: position, joining: joining)
-        isFirstSampleQueued = false
         videoDecoder.flush()
         try decodeBufferQueue.reset()
-        renderersStorage.flush()
+        displayLayers.flush()
     }
-
-//    override func onStreamChanged(formats: [Format], startPosition: CMTime, offset: CMTime, mediaPeriodId: MediaPeriodId) throws {
-//        outputMode = .decode
-//        try super.onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-//    }
 
     override func onDisabled() {
         super.onDisabled()
-        renderersStorage.flush(removeImage: true)
+        displayLayers.flush(removeImage: true)
     }
 
     override func onInputFormatChanged(_ format: Format) throws {
@@ -162,8 +92,6 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
             throw ErrorBuilder(errorDescription: "") // TODO: real error
         }
 
-//        while try feedInputBufferInternal(stream) {}
-//        return result && decodeBufferQueue.duration < highWaterMark
         guard videoDecoder.getNumberOfFramesBeingDecoded() < 10 else {
             return false
         }
@@ -176,22 +104,9 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
         switch try readStream([]) {
         case .nothingRead:
             return false
-        case let .didReadFormat(format):
-//            print()
+        case .didReadFormat:
             return true
         case let .didReadBuffer(buffer):
-//            if isFirstSampleQueued {
-//                buffer.flags.insert(.firstSample)
-//            }
-            if !firstJoiningSampleQueued {
-                if let controlTimebase = renderersStorage.controlTimebase {
-                    try controlTimebase.addTimer(joiningTimer)
-                    try controlTimebase.setTimerNextFireTime(joiningTimer, fireTime: buffer.outputPresentationTimeStamp)
-                }
-
-                firstJoiningSampleQueued = true
-            }
-
             try videoDecoder.queueInputBuffer(buffer: buffer, flags: [])
 
             let maxPts = videoDecoder.getMaxOutputPtsOfFramesBeingDecoded()
@@ -201,8 +116,6 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
             if maxPts.isValid, minPts.isValid {
                 enqueuedDuration = enqueuedDuration + (maxPts - minPts)
             }
-
-//            print("🏈 ENQUEUED, inDecodeSamples = \(videoDecoder.getNumberOfFramesBeingDecoded()), maxPts = \(maxPts.seconds), minPts = \(minPts.seconds), enqueuedDuration = \(enqueuedDuration.seconds)")
 
             if enqueuedDuration >= highWaterMark {
                 try installLowWaterMarkToken()
@@ -232,35 +145,19 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
             currentOutputFormat = buffer.formatDescription
         }
 
-        isFirstSampleQueued = true
-        renderersStorage.enqueue(buffer)
+        displayLayers.enqueue(buffer)
 
-        if let pendingRenderer {
-            // TODO: mark buffers as doNotDisplay
-            pendingRenderer.enqueue(buffer)
-
-            // TODO: add timer that will hide view
-            if pendingRenderer.hasSufficientMediaDataForReliablePlaybackStart && pendingRenderer.isReadyForDisplay {
-//                print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER ATTACHING 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//                print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER ATTACHING 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//                print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER ATTACHING 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-//                print("🌈🌈🌈🌈🌈🌈🌈🌈 RENDERER ATTACHING 🌈🌈🌈🌈🌈🌈🌈🌈🌈")
-
-                renderersStorage.addRenderer(pendingRenderer)
-                self.pendingRenderer = nil
-            }
-        }
-
-        if outputMode == .passthrough, buffer.flags.contains(.lastSample) {
+        // End of media only when nothing follows; the next item continues on the same layers.
+        if outputMode == .passthrough, buffer.flags.contains(.lastSample), isCurrentStreamFinal() {
             let drainSampleBuffer = try CMSampleBuffer.marker(with: [
                 kCMSampleBufferAttachmentKey_DrainAfterDecoding as String: kCFBooleanTrue as Any
             ])
-            renderersStorage.enqueue(drainSampleBuffer)
+            displayLayers.enqueue(drainSampleBuffer)
 
             let postNotification = try CMSampleBuffer.marker(with: [
                 kCMSampleBufferAttachmentKey_PostNotificationWhenConsumed as String : [:] as CFDictionary
             ])
-            renderersStorage.enqueue(postNotification)
+            displayLayers.enqueue(postNotification)
 
             let endOfMediaSampleBuffer = try CMSampleBuffer.marker(
                 with: [
@@ -273,24 +170,19 @@ final class AVFVideoRenderer2: AVFBaseRenderer2 {
                     decodeTimeStamp: .invalid
                 )
             )
-            renderersStorage.enqueue(endOfMediaSampleBuffer)
+            displayLayers.enqueue(endOfMediaSampleBuffer)
             return false
         }
 
-        let isReadyForMoreMediaData = renderersStorage.isReadyForMoreMediaData
-//        if outputMode == .decode {
-//            print("🏈 RENDER BUFFER, pts = \(buffer.presentationTimeStamp.seconds), isReady = \(isReadyForMoreMediaData)")
-//        }
-
-        return isReadyForMoreMediaData
+        return displayLayers.isReadyForMoreMediaData
     }
 
     override func requestOutputMediaDataWhenReady(_ callback: @Sendable @escaping () -> Void) {
-        renderersStorage.requestMediaDataWhenReady(on: queue.queue, using: callback)
+        displayLayers.requestMediaDataWhenReady(on: queue.queue, using: callback)
     }
 
     override func stopRequestingOutputMediaData() {
-        renderersStorage.stopRequestingMediaData()
+        displayLayers.stopRequestingMediaData()
     }
 
     private func installLowWaterMarkToken() throws {
@@ -310,7 +202,6 @@ extension AVFVideoRenderer2: VideoSampleBufferRendererDelegate {
     var isolation: any Actor { queue.playerActor() }
 
     func renderer(_ renderer: any VideoSampleBufferRenderer, didFailedRenderingWith error: any Error, isolation: isolated any Actor) {
-        print(error)
         if renderer.requiresFlushToResumeDecoding {
             delegate?.onRendererError(
                 self,
@@ -326,7 +217,6 @@ extension AVFVideoRenderer2: VideoSampleBufferRendererDelegate {
     }
 
     func renderer(_ renderer: any VideoSampleBufferRenderer, didChangeReadyForDisplay: Bool, isolation: isolated any Actor) {
-//        print("🏈🏈🏈🌈🌈 ============== RENDERER IS READY = \(didChangeReadyForDisplay) ============== 🌈🌈🏈🏈🏈")
         rendererDidChangeIsReady()
     }
 }

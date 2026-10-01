@@ -20,15 +20,13 @@ public extension DataSource {
     func getURLResponse(_ isolation: isolated any Actor) -> HTTPURLResponse? { nil }
 
     func getContentLenght(dataSpec: DataSpec, _ isolation: isolated any Actor) -> Int? {
-        guard let contentLenght = getURLResponse(isolation)?.contentLength else {
+        guard let total = getURLResponse(isolation)?.resourceLength else {
             return nil
         }
 
-        if let length = dataSpec.length {
-            return max(length, contentLenght - dataSpec.position)
-        } else {
-            return contentLenght - dataSpec.position
-        }
+        let available = total - dataSpec.position
+        guard let length = dataSpec.length else { return available }
+        return min(length, available)
     }
 }
 

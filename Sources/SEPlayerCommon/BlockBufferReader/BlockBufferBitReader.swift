@@ -439,10 +439,6 @@ public struct BlockBufferBitReader: Hashable {
         skipBits(numBits)
     }
 
-    // MARK: UnsafeBlockBuffer
-
-    public func getBlockBufferUnsafe() -> CMBlockBuffer { blockBuffer }
-
     // MARK: - Internals
 
     private mutating func readBits32(_ numBits: Int) throws -> UInt32 {

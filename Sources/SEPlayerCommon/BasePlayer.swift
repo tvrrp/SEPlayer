@@ -231,7 +231,13 @@ public extension BasePlayer {
     }
 
     func seek(to position: CMTime, of mediaItemIndex: Int, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
-        seek(to: position, of: mediaItemIndex, seekParameters: seekParameters, completion: completion)
+        seek(
+            to: mediaItemIndex,
+            position: position,
+            isRepeatingCurrentItem: false,
+            seekParameters: seekParameters,
+            completion: completion
+        )
     }
 }
 

@@ -113,10 +113,6 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
             throw ErrorBuilder.illegalState
         }
 
-        do {
-            return try await extractor.read(input: extractorInput, isolation)
-        } catch {
-            fatalError()
-        }
+        return try await extractor.read(input: extractorInput, isolation)
     }
 }

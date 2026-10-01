@@ -35,9 +35,9 @@ final class MediaPeriodHolder {
     private var mayRetainStreamFlags: [Bool]
 
     // TODO: ONE LOCK
-    @UnfairLocked private var durationForPlaybackTriggerTokens: [(SampleStream, QueueTriggerToken)]?
-    @UnfairLocked private var durationForStartLoadingTriggerTokens: [(SampleStream, QueueTriggerToken)]?
-    @UnfairLocked private var durationToStopLoadingTriggerTokens: [(SampleStream, QueueTriggerToken)]?
+    @UnfairLocked private var durationForPlaybackTriggers: DurationTriggers?
+    @UnfairLocked private var durationForStartLoadingTriggers: DurationTriggers?
+    @UnfairLocked private var durationToStopLoadingTriggers: DurationTriggers?
 
     init(
         queue: Queue,
@@ -103,96 +103,77 @@ final class MediaPeriodHolder {
         !isPrepared ? .zero : mediaPeriod.getNextLoadPosition()
     }
 
+    /// Calls `body` once every stream has at least `duration` buffered ahead, once per install.
+    /// While the decoder catches up after a seek, the renderers take samples in bursts and the
+    /// buffer crosses `duration` again and again; the player needs waking only the first time.
     func changeDurationForPlaybackTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
-        let condition: TriggerCondition? = if let duration {
-            .whenDurationBecomesGreaterThanOrEqualTo(duration)
-        } else {
-            nil
-        }
-
-        durationForPlaybackTriggerTokens = installTriggers(
-            previousTokens: durationForPlaybackTriggerTokens,
-            condition: condition,
-            body: { [weak self] _ in
-                guard let self,
-                      let tokens = self.durationForPlaybackTriggerTokens else {
-                    return
-                }
-
-                queue.justDispatch {
-                    if tokens.allSatisfy({ $0.0.testTrigger($0.1) }) {
-                        body?(self)
-                    }
-                }
-            }
-        )
-    }
-
-    func changeDurationForStartLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
-        let condition: TriggerCondition? = if let duration {
-            .whenDurationBecomesLessThanOrEqualTo(duration)
-        } else {
-            nil
-        }
-
-        durationForStartLoadingTriggerTokens = installTriggers(
-            previousTokens: durationForStartLoadingTriggerTokens,
-            condition: condition,
-            body: { [weak self] _ in
-                guard let self else { return }
-
+        durationForPlaybackTriggers = updateTriggers(
+            durationForPlaybackTriggers,
+            duration: duration,
+            condition: { .whenDurationBecomesGreaterThanOrEqualTo($0) },
+            fire: { [weak self] in
+                guard let self, let triggers = durationForPlaybackTriggers, !triggers.didFire, triggers.allHold else { return }
+                durationForPlaybackTriggers?.didFire = true
                 body?(self)
             }
         )
     }
 
-    func changeDurationToStopLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
-        let condition: TriggerCondition? = if let duration {
-            .whenDurationBecomesGreaterThanOrEqualTo(duration)
-        } else {
-            nil
-        }
-
-        durationToStopLoadingTriggerTokens = installTriggers(
-            previousTokens: durationToStopLoadingTriggerTokens,
-            condition: condition,
-            body: { [weak self] _ in
-                guard let self,
-                      let tokens = self.durationToStopLoadingTriggerTokens else {
-                    return
-                }
-
-                queue.justDispatch {
-                    if tokens.allSatisfy({ $0.0.testTrigger($0.1) }) {
-                        body?(self)
-                    }
-                }
+    /// Calls `body` when any stream drops below `duration` buffered ahead.
+    func changeDurationForStartLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+        durationForStartLoadingTriggers = updateTriggers(
+            durationForStartLoadingTriggers,
+            duration: duration,
+            condition: { .whenDurationBecomesLessThan($0) },
+            fire: { [weak self] in
+                guard let self, durationForStartLoadingTriggers != nil else { return }
+                body?(self)
             }
         )
     }
 
-    private func installTriggers(
-        previousTokens: [(SampleStream, QueueTriggerToken)]?,
-        condition: TriggerCondition?,
-        body: @escaping (QueueTriggerToken) -> Void
-    ) -> [(SampleStream, QueueTriggerToken)]? {
-        if let previousTokens {
-            previousTokens.forEach { stream, token in
-                stream.removeTrigger(token)
+    /// Calls `body` once every stream has at least `duration` buffered ahead.
+    func changeDurationToStopLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+        durationToStopLoadingTriggers = updateTriggers(
+            durationToStopLoadingTriggers,
+            duration: duration,
+            condition: { .whenDurationBecomesGreaterThanOrEqualTo($0) },
+            fire: { [weak self] in
+                guard let self, durationToStopLoadingTriggers?.allHold == true else { return }
+                body?(self)
             }
+        )
+    }
+
+    /// Installs a trigger for `condition(duration)` on every sample stream; `nil` removes them.
+    ///
+    /// Triggers already installed for the same duration on the same streams are kept: a fresh
+    /// install fires at once when the condition already holds, so reinstalling on every update
+    /// would keep waking the player.
+    private func updateTriggers(
+        _ installed: DurationTriggers?,
+        duration: CMTime?,
+        condition: (CMTime) -> TriggerCondition,
+        fire: @escaping () -> Void
+    ) -> DurationTriggers? {
+        let streams = sampleStreams.compactMap { $0 }
+        if let installed, installed.duration == duration, installed.isInstalled(on: streams) {
+            return installed
         }
 
-        guard let condition, isPrepared else { return nil }
+        installed?.tokens.forEach { $0.stream.removeTrigger($0.token) }
+        guard let duration, isPrepared else { return nil }
 
-        return sampleStreams
-            .compactMap { $0 }
-            .map { stream in
-                let token = stream.installTrigger(condition: condition) { token in
-                    body(token)
-                }
-
-                return (stream, token)
+        let tokens = streams.map { stream -> (stream: SampleStream, token: QueueTriggerToken) in
+            let token = stream.installTrigger(condition: condition(duration)) { [queue] _ in
+                // Checked on the queue: a condition that already holds fires during this install,
+                // before the new tokens are stored.
+                queue.justDispatch { fire() }
             }
+            return (stream: stream, token: token)
+        }
+
+        return DurationTriggers(duration: duration, tokens: tokens)
     }
 
     func handlePrepared(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws {
@@ -291,16 +272,17 @@ final class MediaPeriodHolder {
     }
 
     func release() {
-        durationForPlaybackTriggerTokens?.forEach { $0.0.removeTrigger($0.1) }
-        durationForStartLoadingTriggerTokens?.forEach { $0.0.removeTrigger($0.1) }
-        durationToStopLoadingTriggerTokens?.forEach { $0.0.removeTrigger($0.1) }
+        [durationForPlaybackTriggers, durationForStartLoadingTriggers, durationToStopLoadingTriggers]
+            .compactMap { $0 }
+            .forEach { $0.tokens.forEach { $0.stream.removeTrigger($0.token) } }
 
         disableTrackSelectionsInResult()
         releaseMediaPeriod(mediaSourceList: mediaSourceList, mediaPeriod: mediaPeriod)
     }
 
+    /// `nil` unlinks the rest of the queue; without it, released holders stay reachable.
     func setNext(_ mediaPeriodHolder: MediaPeriodHolder?) {
-        guard let mediaPeriodHolder else { return }
+        guard mediaPeriodHolder !== next else { return }
 
         disableTrackSelectionsInResult()
         next = mediaPeriodHolder
@@ -309,7 +291,7 @@ final class MediaPeriodHolder {
 
     func canBeUsedFor(mediaPeriodInfo: MediaPeriodInfo) -> Bool {
         Self.durationsCompatible(lhs: self.info.duration, rhs: mediaPeriodInfo.duration)
-            && self.info.startPosition == info.startPosition
+            && self.info.startPosition == mediaPeriodInfo.startPosition
             && self.info.id == mediaPeriodInfo.id
     }
 
@@ -425,5 +407,21 @@ private extension TriggerCondition {
         default:
             return false
         }
+    }
+}
+
+/// Duration triggers installed on a period's sample streams.
+private struct DurationTriggers {
+    let duration: CMTime
+    let tokens: [(stream: SampleStream, token: QueueTriggerToken)]
+    var didFire = false
+
+    /// Whether the condition holds on every stream.
+    var allHold: Bool {
+        tokens.allSatisfy { $0.stream.testTrigger($0.token) }
+    }
+
+    func isInstalled(on streams: [SampleStream]) -> Bool {
+        tokens.map { ObjectIdentifier($0.stream) } == streams.map { ObjectIdentifier($0) }
     }
 }

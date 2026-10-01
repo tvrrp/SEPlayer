@@ -25,8 +25,8 @@ enum SEPlayerMessageImpl: MessageKind {
         _ completion: ((Bool) -> Void)?
     )
     case setPlaybackParameters(_ playbackParameters: PlaybackParameters)
-    case setVideoOutput(_ output: VideoSampleBufferRenderer)
-    case removeVideoOutput(_ output: VideoSampleBufferRenderer)
+    case setVideoOutput(_ output: any VideoOutput)
+    case removeVideoOutput(_ output: any VideoOutput)
     case stop
     case release(_ continuation: CheckedContinuation<Void, Never>)
     case periodPrepared(_ mediaPeriod: any MediaPeriod)

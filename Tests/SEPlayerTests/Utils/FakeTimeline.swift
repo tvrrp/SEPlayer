@@ -5,11 +5,12 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
+import CoreMedia
 import Foundation
 import Testing
 @testable import SEPlayer
 
-struct FakeTimeline: Timeline {
+final class FakeTimeline: Timeline, @unchecked Sendable {
     private var windowDefinitions: [TimelineWindowDefinition]
     private var periodOffsets: [Int]
     private let shuffleOrder: ShuffleOrder
@@ -59,36 +60,39 @@ struct FakeTimeline: Timeline {
         shuffleModeEnabled ? shuffleOrder.firstIndex : _firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
     }
 
-    func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+    @discardableResult
+    func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
         let windowDefinition = windowDefinitions[windowIndex]
         var windowDurationUs = Int64.zero
-        var period = Period()
+        let period = Period()
 
-        for index in periodOffsets[windowIndex..<windowIndex + 1] {
-            let periodDurationUs = getPeriod(periodIndex: index, period: period).durationUs
-            if index == periodOffsets[windowIndex] && periodDurationUs != 0 {
-                windowDurationUs -= windowDefinition.windowOffsetInFirstPeriodUs
-            }
-            if periodDurationUs == .timeUnset {
+        for index in periodOffsets[windowIndex]..<periodOffsets[windowIndex + 1] {
+            let periodDuration = getPeriod(periodIndex: index, period: period).duration
+            guard periodDuration.isValid else {
                 windowDurationUs = .timeUnset
                 break
             }
-            windowDurationUs += periodDurationUs
+            if index == periodOffsets[windowIndex] && periodDuration != .zero {
+                windowDurationUs -= windowDefinition.windowOffsetInFirstPeriodUs
+            }
+            windowDurationUs += periodDuration.microseconds
         }
 
         window.set(
             id: windowDefinition.id,
             mediaItem: windowDefinition.mediaItem,
-            presentationStartTimeMs: .timeUnset,
-            windowStartTimeMs: windowDefinition.isLive ? Time.usToMs(timeUs: windowDefinition.windowStartTimeUs) : .timeUnset,
-            elapsedRealtimeEpochOffsetMs: windowDefinition.isLive ? 0 : .timeUnset,
+            manifest: nil,
+            presentationStartTime: .invalid,
+            windowStartTime: windowDefinition.isLive ? .time(us: windowDefinition.windowStartTimeUs) : .invalid,
+            elapsedRealtimeEpochOffset: windowDefinition.isLive ? .zero : .invalid,
             isSeekable: windowDefinition.isSeekable,
             isDynamic: windowDefinition.isDynamic,
-            defaultPositionUs: windowDefinition.defaultPositionUs,
-            durationUs: windowDurationUs,
+            liveConfiguration: nil,
+            defaultPosition: .time(us: windowDefinition.defaultPositionUs),
+            duration: .time(us: windowDurationUs),
             firstPeriodIndex: periodOffsets[windowIndex],
             lastPeriodIndex: periodOffsets[windowIndex + 1] - 1,
-            positionInFirstPeriodUs: windowDefinition.windowOffsetInFirstPeriodUs
+            positionInFirstPeriod: .time(us: windowDefinition.windowOffsetInFirstPeriodUs)
         )
         window.isPlaceholder = windowDefinition.isPlaceholder
 
@@ -99,13 +103,14 @@ struct FakeTimeline: Timeline {
         periodOffsets[periodOffsets.count - 1]
     }
 
+    @discardableResult
     func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
         let windowIndex = Util.binarySearch(array: periodOffsets, value: periodIndex, inclusive: true, stayInBounds: false)
         let windowPeriodIndex = periodIndex - periodOffsets[windowIndex]
         let windowDefinition = windowDefinitions[windowIndex]
         let id = setIds ? windowPeriodIndex : nil
         let uid = setIds ? ConcatenatedId(windowDefinition.id, windowPeriodIndex) : nil
-        var periodDurationUs = if periodIndex == windowDefinition.periodCount - 1, windowDefinition.durationUs == .timeUnset {
+        var periodDurationUs = if windowPeriodIndex == windowDefinition.periodCount - 1, windowDefinition.durationUs == .timeUnset {
             Int64.timeUnset
         } else {
             windowDefinition.durationUs / Int64(windowDefinition.periodCount)
@@ -124,9 +129,8 @@ struct FakeTimeline: Timeline {
             id: id,
             uid: uid,
             windowIndex: windowIndex,
-            durationUs: periodDurationUs,
-            positionInWindowUs: positionInWindowUs,
-            // TODO: adPlaybackState: ad,
+            duration: .time(us: periodDurationUs),
+            positionInWindow: .time(us: positionInWindowUs),
             isPlaceholder: windowDefinition.isPlaceholder
         )
     }
@@ -203,4 +207,11 @@ extension FakeTimeline {
         .setMediaId("FakeTimeline")
         .setUrl(URL(string: "about:blank")!)
         .build()
+}
+
+extension CMTime {
+    /// Microseconds from the tests' timelines and samples, with `.timeUnset` as `.invalid`.
+    static func time(us: Int64) -> CMTime {
+        us == .timeUnset ? .invalid : (us == .endOfSource ? .positiveInfinity : .from(microseconds: us))
+    }
 }

@@ -21,7 +21,6 @@ public protocol VideoSampleBufferRenderer: VideoSampleBufferRendererPerformance,
     var hasSufficientMediaDataForReliablePlaybackStart: Bool { get }
     var requiresFlushToResumeDecoding: Bool { get }
 
-    func setIsHidden(_ isHidden: Bool)
     func setControlTimebase(_ timebase: CMTimebase?)
     func enqueue(_ sampleBuffer: CMSampleBuffer)
     func flush()
@@ -44,34 +43,7 @@ public protocol VideoSampleBufferRendererPerformance: AnyObject {
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation)
 }
 
-private final class WeakBox {
-    weak var value: VideoSampleBufferRenderer?
-    init(_ value: VideoSampleBufferRenderer) { self.value = value }
-}
-
-private enum AssocKeys {
-    static var service: UInt8 = 0
-}
-
 extension AVSampleBufferDisplayLayer {
-    @MainActor
-    func createRenderer() -> VideoSampleBufferRenderer {
-        if let box = objc_getAssociatedObject(self, &AssocKeys.service),
-           let service = (box as? WeakBox)?.value {
-            return service
-        }
-
-        let service: VideoSampleBufferRenderer = if #available(macOS 14.4, iOS 17.4, tvOS 17.4, visionOS 1.1, *) {
-            AVSBVideoRenderer(renderer: self.sampleBufferRenderer, layer: self)
-        } else {
-            AVSBDLVideoRenderer(layer: self)
-        }
-
-        let weakBox = WeakBox(service)
-        objc_setAssociatedObject(self, &AssocKeys.service, weakBox, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        return service
-    }
-
     func setPresentationTimeExpectation(_ expectation: PresentationTimeExpectation) {
 //        TODO: think about this
         switch expectation {
@@ -101,7 +73,6 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
         set { lock.withLock { _delegate = newValue } }
     }
 
-    var timebase: CMTimebase { renderer.timebase }
     var isReadyForMoreMediaData: Bool { renderer.isReadyForMoreMediaData }
     var isReadyForDisplay: Bool {
         if #available(iOS 17.4, macCatalyst 17.4, *) {
@@ -125,7 +96,6 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
 
-    @MainActor
     init(renderer: AVSampleBufferVideoRenderer, layer: AVSampleBufferDisplayLayer) {
         self.renderer = renderer
         self.layer = layer
@@ -174,12 +144,6 @@ final class AVSBVideoRenderer: VideoSampleBufferRenderer {
         }
     }
 
-    func setIsHidden(_ isHidden: Bool) {
-        DispatchQueue.main.async {
-            self.layer.isHidden = isHidden
-        }
-    }
-
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
         renderer.enqueue(sampleBuffer)
     }
@@ -225,11 +189,6 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
         set { lock.withLock { _delegate = newValue } }
     }
 
-    var timebase: CMTimebase? {
-        get { nil }
-        set { layer.controlTimebase = newValue }
-    }
-
     var isReadyForMoreMediaData: Bool {
         layer.isReadyForMoreMediaData
     }
@@ -256,17 +215,14 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     private nonisolated(unsafe) var observer: NSKeyValueObservation? // mutated only on init
     private nonisolated(unsafe) weak var _delegate: VideoSampleBufferRendererDelegate? // guarded by lock
 
-    @MainActor
     init(layer: AVSampleBufferDisplayLayer) {
         self.layer = layer
 
-        DispatchQueue.main.async { [self] in
-            observer = layer.observe(\.status) { [weak self] layer, _ in
-                guard let self else { return }
-                if layer.status == .failed, let error = layer.error, let delegate {
-                    Task {
-                        await delegate.renderer(self, didFailedRenderingWith: error, isolation: delegate.isolation)
-                    }
+        observer = layer.observe(\.status) { [weak self] layer, _ in
+            guard let self else { return }
+            if layer.status == .failed, let error = layer.error, let delegate {
+                Task {
+                    await delegate.renderer(self, didFailedRenderingWith: error, isolation: delegate.isolation)
                 }
             }
         }
@@ -292,12 +248,6 @@ final class AVSBDLVideoRenderer: VideoSampleBufferRenderer {
     func setControlTimebase(_ timebase: CMTimebase?) {
         if layer.controlTimebase !== timebase {
             layer.controlTimebase = timebase
-        }
-    }
-
-    func setIsHidden(_ isHidden: Bool) {
-        DispatchQueue.main.async {
-            self.layer.isHidden = isHidden
         }
     }
 

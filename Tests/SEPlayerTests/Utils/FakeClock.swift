@@ -12,6 +12,26 @@ import Testing
 final class FakeClock: SEClock {
     let clock: CMClock = CMClockGetHostTimeClock()
 
+    var time: CMTime {
+        CMTime(value: milliseconds, timescale: 1000)
+    }
+
+    /// How much faster media time runs than real time. The player plays on a timebase rather than
+    /// on the messages this clock delivers, so tests would otherwise play media in real time.
+    static let mediaTimeRate: Float64 = 30
+
+    /// The source of every timebase the player makes: the host clock, sped up.
+    private let mediaTimeSource: CMTimebase = {
+        let timebase = try! CMTimebase(sourceClock: CMClockGetHostTimeClock())
+        try! timebase.setTime(.zero)
+        try! timebase.setRate(FakeClock.mediaTimeRate)
+        return timebase
+    }()
+
+    func makeTimebase() throws -> CMTimebase {
+        try CMTimebase(sourceTimebase: mediaTimeSource)
+    }
+
     var milliseconds: Int64 {
         lock.withLock { bootTimeMs + timeSinceBootMs }
     }
@@ -312,9 +332,16 @@ private final class ClockHandler: HandlerWrapper {
         ClockMessage(
             timeMs: Int64(DispatchTime.now().uptimeNanoseconds),
             handler: self,
-            what: EmptyMessageKind(),
+            what: CallbackMessageKind(),
             pendingHandlerMessageClosure: pendingHandlerMessageClosure,
             callback: callback
         ).sendToTarget()
+    }
+}
+
+/// The `what` of a posted callback.
+private struct CallbackMessageKind: MessageKind {
+    func isEqual(to other: MessageKind) -> Bool {
+        other is CallbackMessageKind
     }
 }

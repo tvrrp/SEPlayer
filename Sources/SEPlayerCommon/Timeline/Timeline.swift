@@ -151,9 +151,10 @@ public extension Timeline {
         }
         getPeriod(periodIndex: periodIndex, period: period, setIds: true)
         var periodPosition = windowPosition - period.positionInWindow
-        if period.duration.isValid == false {
-//          TODO: check  periodPosition = min(periodPosition, CMTime(value: period.duration.value - 1, timescale: period.duration.timescale))
-            periodPosition = min(periodPosition, period.duration)
+        // As in ExoPlayer: a position at or past the end of a period of known duration is just
+        // before its end, which still belongs to the period.
+        if period.duration.isNumeric {
+            periodPosition = min(periodPosition, period.duration - CMTime(value: 1, timescale: 1_000_000))
         }
         periodPosition = max(.zero, periodPosition)
         guard let periodId = period.uid else { return nil }

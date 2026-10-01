@@ -59,7 +59,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     var currentPeriodIndex: Int? {
         queue.sync {
             if playbackInfo.timeline.isEmpty {
-                maskingPeriodIndex
+                // As in ExoPlayer: before there is a timeline, a seek's window stands for its period.
+                maskingWindowIndex ?? 0
             } else {
                 playbackInfo.timeline.indexOfPeriod(by: playbackInfo.periodId.periodId)
             }
@@ -86,7 +87,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     var bufferedPosition: CMTime { queue.sync { contentBufferedPosition } }
 
-    var totalBufferedDuration: CMTime { queue.sync { playbackInfo.totalBufferedDuration } }
+    var totalBufferedDuration: CMTime { queue.sync { totalBufferedDurationInternal(playbackInfo: playbackInfo) } }
 
     var contentPosition: CMTime {
         // TODO: ad
@@ -120,7 +121,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private var _pauseAtTheEndOfMediaItem: Bool
 
     private var maskingWindowIndex: Int?
-    private var maskingPeriodIndex: Int = 0
     private var maskingWindowPosition: CMTime = .zero
     private var pendingOperationAcks: Int = 0
     private var pendingDiscontinuityReason: DiscontinuityReason = .autoTransition
@@ -533,6 +533,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
             let timeline = playbackInfo.timeline
             if !timeline.isEmpty && mediaItemIndex >= timeline.windowCount() {
+                completion?(false)
                 return
             }
 
@@ -563,13 +564,17 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 completion: completion
             )
 
+            // Show the target right away. The player queue sets the exact time once the seek runs;
+            // other updates leave the timebase alone, as their positions are already out of date.
+            try? timebase.setTime(newPlaybackInfo.position)
+
             print("🌈 SEEEK TO POSITION = \(position.seconds)")
             updatePlaybackInfo(
                 new: newPlaybackInfo,
                 timelineChangeReason: .playlistChanged,
                 positionDiscontinuity: true,
                 positionDiscontinuityReason: .seek,
-                discontinuityWindowStartPosition: currentPositionInternal(playbackInfo: playbackInfo),
+                discontinuityWindowStartPosition: currentPositionInternal(playbackInfo: newPlaybackInfo),
                 oldMaskingMediaItemIndex: oldMaskingMediaItemIndex,
                 repeatCurrentMediaItem: isRepeatingCurrentItem
             )
@@ -609,6 +614,22 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     public func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage {
         queue.sync { createMessageInternal(handler: handler) }
+    }
+
+    /// The playback info comes from the last update from the playback queue, which has no timer and
+    /// does not update while media just plays. Playback has moved on since by what the timebase
+    /// shows, and that much of the buffer has been played.
+    private func totalBufferedDurationInternal(playbackInfo: PlaybackInfo) -> CMTime {
+        assert(queue.isCurrent())
+        guard !playbackInfo.timeline.isEmpty,
+              playbackInfo.timeline.indexOfPeriod(by: playbackInfo.periodId.periodId) != nil else {
+            return playbackInfo.totalBufferedDuration
+        }
+
+        let positionInWindow = playbackInfo.timeline.periodById(playbackInfo.periodId.periodId, period: period).positionInWindow
+        let periodPosition = contentPositionInternal(playbackInfo: playbackInfo) - positionInWindow
+        let played = max(.zero, periodPosition - playbackInfo.position)
+        return max(.zero, playbackInfo.totalBufferedDuration - played)
     }
 
     private func getContentBufferedPosition() -> CMTime {
@@ -671,7 +692,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             return maskingWindowPosition
         }
 
-        let position = timebase.time
+        // As in ExoPlayer, the position stops with `pause()`, not once the playback queue has got
+        // to it: until then the timebase still runs. The masked position is where it paused.
+        let position = playbackInfo.playWhenReady ? timebase.time : playbackInfo.position
         return periodPosition(
             to: position,
             timeline: playbackInfo.timeline,
@@ -706,9 +729,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             timelineChanged: timelineChanged,
             repeatCurrentMediaItem: repeatCurrentMediaItem
         )
-
-        print("🌈 Set outboundTimebase time = \(playbackInfo.position.seconds)")
-        try! timebase.setTime(playbackInfo.position)
 
         var mediaItem: MediaItem?
 
@@ -828,7 +848,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         var oldWindowId: AnyHashable?
         var oldPeriodId: AnyHashable?
         var oldMediaItemIndex = oldMaskingMediaItemIndex
-        var oldPeriodIndex: Int?
+        var oldPeriodIndex = oldMaskingMediaItemIndex
         var oldMediaItem: MediaItem?
         let oldPeriod = Period()
 
@@ -868,7 +888,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         var newWindowId: AnyHashable?
         var newPeriodId: AnyHashable?
         let newMediaItemIndex = currentMediaItemIndex
-        var newPeriodIndex: Int?
+        var newPeriodIndex = currentPeriodIndex
         var newMediaItem: MediaItem?
 
         if !playbackInfo.timeline.isEmpty {
@@ -986,7 +1006,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             startWindowIndex = currentWindowIndex
             startPosition = currentPosition
         }
-
         var newPlaybackInfo = maskTimelineAndPosition(
             playbackInfo: playbackInfo,
             timeline: timeline,
@@ -1218,7 +1237,10 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             }
         } else {
             // TODO: assert(!newPeriodId.isAd)
-            let maskedTotalBufferedDuration = max(.zero, playbackInfo.totalBufferedDuration - (newContentPosition - oldContentPosition))
+            let maskedTotalBufferedDuration = max(
+                .zero,
+                totalBufferedDurationInternal(playbackInfo: playbackInfo) - (newContentPosition - oldContentPosition)
+            )
             var maskedBufferedPosition = playbackInfo.bufferedPosition
             if playbackInfo.loadingMediaPeriodId == playbackInfo.periodId {
                 maskedBufferedPosition = newContentPosition + maskedTotalBufferedDuration
@@ -1309,7 +1331,6 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         guard !timeline.isEmpty else {
             maskingWindowIndex = windowIndex
             maskingWindowPosition = windowPosition.isValid ? windowPosition : .zero
-            maskingPeriodIndex = 0
             return nil
         }
 
@@ -1371,13 +1392,17 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
         pendingOperationAcks += 1
 
-        let newPlaybackInfo = playbackInfo
+        let time = timebase.time
+        var newPlaybackInfo = playbackInfo
             .playWhenReady(
                 playWhenReady,
                 playWhenReadyChangeReason: changeReason,
                 playbackSuppressionReason: playbackSuppressionReason
             )
-            .setPosition(timebase.time)
+            .setPosition(time)
+        // The buffer ahead shrinks with the position that moves here, by the same time.
+        let played = max(.zero, time - playbackInfo.position)
+        newPlaybackInfo.totalBufferedDuration = max(.zero, playbackInfo.totalBufferedDuration - played)
 
         internalPlayer.setPlayWhenReady(
             playWhenReady,
@@ -1441,11 +1466,11 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 }
 
 extension SEPlayerImpl {
-    func setVideoOutput(_ output: VideoSampleBufferRenderer) {
+    func setVideoOutput(_ output: any VideoOutput) {
         internalPlayer.setVideoOutput(output)
     }
 
-    func removeVideoOutput(_ output: VideoSampleBufferRenderer) {
+    func removeVideoOutput(_ output: any VideoOutput) {
         internalPlayer.removeVideoOutput(output)
     }
 
@@ -1504,8 +1529,7 @@ extension SEPlayerImpl: SEPlayerImplInternalDelegate {
             if !playbackInfo.timeline.isEmpty, newTimeline.isEmpty {
                 maskingWindowIndex = nil
                 maskingWindowPosition = .zero
-                maskingPeriodIndex = 0
-            }
+                }
 
             if !newTimeline.isEmpty, let timelines = (newTimeline as? PlaylistTimeline)?.timelines,
                timelines.count == mediaSourceHolderSnapshots.count {

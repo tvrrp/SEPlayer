@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
+import CoreMedia
+import DataSource
 import Foundation
 import Testing
 @testable import SEPlayer
@@ -112,7 +114,7 @@ class FakeMediaSource: BaseMediaSource {
         }
     }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: Int64) throws -> MediaPeriod {
+    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> MediaPeriod {
         #expect(preparedSource)
         #expect(!releasedSource)
         let timeline = try #require(timeline)
@@ -172,7 +174,7 @@ class FakeMediaSource: BaseMediaSource {
         transferListener: TransferListener?
     ) throws -> FakeMediaPeriod {
         let timeline = try #require(timeline)
-        let positionInWindowUs = timeline.periodById(id.periodId, period: Period()).positionInWindowUs
+        let positionInWindowUs = timeline.periodById(id.periodId, period: Period()).positionInWindow.microseconds
         let defaultFirstSampleTimeUs = positionInWindowUs >= 0 ? 0 : -positionInWindowUs
         return try FakeMediaPeriod(
             queue: queue,
@@ -193,11 +195,11 @@ class FakeMediaSource: BaseMediaSource {
 
 extension FakeMediaSource {
     final class InitialTimeline: ForwardingTimeline, @unchecked Sendable {
-        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
+        override func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
             let childWindow = timeline.getWindow(
                 windowIndex: windowIndex,
                 window: window,
-                defaultPositionProjectionUs: defaultPositionProjectionUs
+                defaultPositionProjection: defaultPositionProjection
             )
             childWindow.isDynamic = true
             childWindow.isSeekable = false

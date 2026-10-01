@@ -6,247 +6,96 @@
 //
 
 import CoreMedia
-import SEPlayerCommon
+import Foundation
 
-public final class BlockBufferCacheHandler: @unchecked Sendable {
-    public var totalBytes: Int {
-//        assert(queue.isCurrent())
-        return blocks.reduce(into: 0) { $0 += $1.byteRange.count }
+/// Downloaded bytes kept in memory, as sorted runs of contiguous bytes.
+///
+/// Bytes are stored as the `DispatchData` URLSession delivered them, so nothing is copied, neither
+/// when storing nor when reading.
+final class BlockBufferCacheHandler {
+    private struct Run {
+        var start: Int
+        var data: DispatchData
+        var end: Int { start + data.count }
     }
 
-    public var availableDataRanges: [Range<Int>] {
-//        assert(queue.isCurrent())
-        return blocks.map { $0.filledRange }
+    private var runs: [Run] = []
+
+    var size: Int {
+        runs.reduce(0) { $0 + $1.data.count }
     }
 
-    private let queue: any Queue
-    private let blockSize: Int
-    private let memoryPool: CMMemoryPool
-    private let allocator: CFAllocator
-
-    private var blocks: [Block] = []
-
-    public init(
-        queue: any Queue,
-        blockSize: Int = (Int(getpagesize()) * 25),
-        memoryPool: CMMemoryPool = CMMemoryPoolCreate(options: nil)
-    ) {
-        precondition(blockSize > 0)
-        self.queue = queue
-        self.blockSize = blockSize
-        self.memoryPool = memoryPool
-        allocator = CMMemoryPoolGetAllocator(memoryPool)
+    /// Where the cached bytes starting at `offset` end; `offset` itself if it is not cached.
+    func endOfCachedBytes(from offset: Int) -> Int {
+        guard let run = runs.first(where: { $0.start <= offset && offset < $0.end }) else {
+            return offset
+        }
+        return run.end
     }
 
-    public func read(_ range: Range<Int>) throws -> CMBlockBuffer? {
-        assert(queue.isCurrent())
-        for block in blocks {
-            guard block.filledRange.contains(range.lowerBound) else { continue }
+    func contains(_ range: Range<Int>) -> Bool {
+        range.isEmpty || endOfCachedBytes(from: range.lowerBound) >= range.upperBound
+    }
 
-            let low = range.lowerBound - block.byteRange.lowerBound
-            let end = min(range.upperBound, block.filledRange.upperBound)
-            let length = end - range.lowerBound
-
-//            print("✅ Did read bytes, range = \(range.lowerBound..<(range.lowerBound + length))")
-            return try CMBlockBuffer(bufferReference: block.buffer[low..<(low + length)])
+    /// Returns the bytes in `range`, which must be cached.
+    func read(_ range: Range<Int>) throws -> CMBlockBuffer {
+        guard let run = runs.first(where: { $0.start <= range.lowerBound && range.upperBound <= $0.end }) else {
+            throw DataSourceError(reason: .unknown, message: "Reading bytes that are not cached")
         }
 
-        return nil
+        let bytes = run.data.subdata(in: (range.lowerBound - run.start)..<(range.upperBound - run.start))
+        let blockBuffer = try CMBlockBuffer()
+        var appendError: (any Error)?
+
+        bytes.enumerateBytes { region, _, stop in
+            do {
+                try blockBuffer.append(
+                    buffer: UnsafeMutableRawBufferPointer(mutating: UnsafeRawBufferPointer(region)),
+                    deallocator: { _, _ in withExtendedLifetime(bytes) {} }
+                )
+            } catch {
+                appendError = error
+                stop = true
+            }
+        }
+
+        if let appendError { throw appendError }
+        return blockBuffer
     }
 
-    public func append(_ data: DispatchData, at offset: Int) throws {
-        assert(queue.isCurrent())
-        guard !data.isEmpty else { return }
+    /// Stores `bytes` at `offset`, joining them with the runs they touch or overlap.
+    func append(_ bytes: DispatchData, at offset: Int) {
+        guard !bytes.isEmpty else { return }
+        runs.append(Run(start: offset, data: bytes))
+        runs.sort { $0.start < $1.start }
 
-        var blockOffset = offset
-        var position = 0
-        let endOffset = offset + data.count
-
-        while blockOffset < endOffset {
-            if let block = blocks.first(where: { $0.filledRange.upperBound == blockOffset }) {
-                try extend(
-                    block,
-                    with: data,
-                    blockOffset: &blockOffset,
-                    position: &position,
-                    endOffset: endOffset
-                )
-
+        var joined: [Run] = []
+        for run in runs {
+            guard var last = joined.last, run.start <= last.end else {
+                joined.append(run)
                 continue
             }
 
-            try createBlock(
-                at: &blockOffset,
-                position: &position,
-                endOffset: endOffset,
-                data: data
-            )
-        }
-
-        try adaptBlockStorageIfNeeded()
-    }
-
-    public func dropBelow(_ offset: Int) throws {
-        assert(queue.isCurrent())
-        blocks.removeAll { $0.availableRange.upperBound <= offset }
-    }
-
-    public func clear() {
-        assert(queue.isCurrent())
-        blocks.removeAll()
-    }
-
-    private func extend(_ block: Block, with data: DispatchData, blockOffset: inout Int, position: inout Int, endOffset: Int) throws {
-        // Don't grow this block's valid bytes into another block's territory.
-        let writeCeiling = nextBlockLowerBound(after: block).map { min(endOffset, $0) } ?? endOffset
-        var remainingNow = writeCeiling - blockOffset
-
-        guard remainingNow > 0 else {
-            guard let next = blocks.first(where: { $0.filledRange.contains(blockOffset) }) else {
-                throw IOError(message: "offset inside next block's capacity but not filled", cause: nil)
-            }
-            let skip = min(endOffset, next.filledRange.upperBound) - blockOffset
-            blockOffset += skip
-            position += skip
-            return
-        }
-
-        if block.freeCapacity < remainingNow {
-            try block.appendBuffer(
-                CMBlockBuffer(
-                    length: max(remainingNow, blockSize),
-                    allocator: allocator,
-                    flags: .assureMemoryNow
-                )
-            )
-        }
-
-        while remainingNow > 0 {
-            let writeStart = blockOffset - block.byteRange.lowerBound
-
-            try block.buffer.withUnsafeMutableBytes(atOffset: writeStart) { bufferPointer in
-                let toCopy = min(remainingNow, bufferPointer.count)
-
-                data.copyBytes(to: bufferPointer, from: position..<(position + toCopy))
-
-                remainingNow -= toCopy
-                block.filledBytes += toCopy
-                blockOffset += toCopy
-                position += toCopy
+            if run.end > last.end {
+                last.data.append(run.data.subdata(in: (last.end - run.start)..<run.data.count))
+                joined[joined.count - 1] = last
             }
         }
+        runs = joined
     }
 
-    private func createBlock(at blockOffset: inout Int, position: inout Int, endOffset: Int, data: DispatchData) throws {
-        let writeCeiling = nextBlockLowerBound(after: blockOffset).map { min(endOffset, $0) } ?? endOffset
-        let remainingNow = writeCeiling - blockOffset
+    /// Drops every byte outside `ranges`.
+    func removeAll(except ranges: [Range<Int>]) {
+        let old = runs
+        runs = []
 
-        guard remainingNow > 0 else {
-            throw IOError(message: nil, cause: nil)
-        }
-
-        let blockBuffer = try createBlockBuffer(
-            backededBy: data,
-            range: position..<(position + remainingNow)
-        )
-
-        let block = Block(
-            offsetInData: blockOffset,
-            filledBytes: remainingNow,
-            buffer: blockBuffer
-        )
-
-        if let insertIdx = blocks.firstIndex(where: { $0.byteRange.lowerBound > blockOffset }) {
-            blocks.insert(block, at: insertIdx)
-        } else {
-            blocks.append(block)
-        }
-
-        blockOffset += remainingNow
-        position += remainingNow
-    }
-
-    private func nextBlockLowerBound(after block: Block) -> Int? {
-        blocks.first(where: {
-            $0.byteRange.lowerBound > block.byteRange.lowerBound
-        })?.byteRange.lowerBound
-    }
-
-    private func nextBlockLowerBound(after offset: Int) -> Int? {
-        blocks.first(where: { $0.byteRange.lowerBound > offset })?.byteRange.lowerBound
-    }
-
-    private func adaptBlockStorageIfNeeded() throws {
-        blocks = try blocks.reduce(into: [Block]()) { result, block in
-            guard let last = result.last,
-                  last.filledRange.upperBound == block.filledRange.lowerBound else {
-                result.append(block)
-                return
+        for run in old {
+            for range in ranges {
+                let lower = max(run.start, range.lowerBound)
+                let upper = min(run.end, range.upperBound)
+                guard lower < upper else { continue }
+                append(run.data.subdata(in: (lower - run.start)..<(upper - run.start)), at: lower)
             }
-
-            try last.appendBuffer(block.buffer)
-            last.filledBytes += block.filledBytes
-        }
-    }
-
-    private func createBlockBuffer(backededBy data: DispatchData, range: Range<Int>) throws -> CMBlockBuffer {
-        let doCopy = if data.count <= 256 * 1024 {
-            true
-        } else {
-            data.regions.count != 1
-        }
-
-        switch doCopy {
-        case true:
-            let result = try data.withContiguousStorageIfAvailable { ptr in
-                try CMBlockBuffer(
-                    length: range.count,
-                    allocator: { _ in
-                        return UnsafeMutableRawPointer(mutating: ptr.baseAddress)
-                    },
-                    deallocator: { _, _ in
-                        withExtendedLifetime(data, {})
-                    }
-                )
-            }
-
-            guard let result else { fallthrough }
-            return result
-        case false:
-            let blockBuffer = try CMBlockBuffer(
-                length: max(range.count, blockSize),
-                allocator: allocator,
-                flags: .assureMemoryNow
-            )
-
-            try blockBuffer.withUnsafeMutableBytes { bufferPointer in
-                data.copyBytes(to: bufferPointer, from: range)
-            }
-
-            return blockBuffer
-        }
-    }
-}
-
-private extension BlockBufferCacheHandler {
-    final class Block {
-        var filledRange: Range<Int> { byteRange.lowerBound..<(byteRange.lowerBound) + filledBytes }
-        var availableRange: Range<Int> { filledRange.upperBound..<byteRange.upperBound }
-        var freeCapacity: Int { availableRange.count }
-
-        fileprivate var byteRange: Range<Int>
-        fileprivate var filledBytes: Int
-        fileprivate let buffer: CMBlockBuffer
-
-        init(offsetInData: Int, filledBytes: Int, buffer: CMBlockBuffer) {
-            self.byteRange = offsetInData..<(offsetInData + buffer.dataLength)
-            self.filledBytes = filledBytes
-            self.buffer = buffer
-        }
-
-        func appendBuffer(_ blockBuffer: CMBlockBuffer) throws {
-            try buffer.append(bufferReference: blockBuffer)
-            byteRange = byteRange.lowerBound..<(byteRange.upperBound + blockBuffer.dataLength)
         }
     }
 }
