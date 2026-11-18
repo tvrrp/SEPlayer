@@ -11,8 +11,8 @@ import Foundation
 /// Contains information about a specific cue, including textual content and formatting data.
 ///
 /// Unset values are `nil`.
-// This type shouldn't be extended. If a subtitle format needs additional fields, either they should be generic enough
-// to be added here, or the format-specific decoder should pass the information around in a sidecar object.
+/// This type shouldn't be extended. If a subtitle format needs additional fields, either they should be generic enough
+/// to be added here, or the format-specific decoder should pass the information around in a sidecar object.
 public struct Cue: Hashable, @unchecked Sendable {
     /// The cue text, or `nil` if this is an image cue. Note the text may be decorated with styling attributes, those
     /// of `AttributeScopes.CueAttributes`.
@@ -337,4 +337,3 @@ public extension Cue {
         }
     }
 }
-

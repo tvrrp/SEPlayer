@@ -42,7 +42,7 @@ public final class DiskCache: @unchecked Sendable {
 
     private let lock = UnfairLock()
 
-    // Guarded by `lock`.
+    /// Guarded by `lock`.
     /// The entries on storage, by file name.
     private var records: [String: Record] = [:]
     /// The entries being read, by file name.

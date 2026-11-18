@@ -39,10 +39,10 @@ struct ParsableNalUnitBitArray<Buffer: RandomAccessCollection<UInt8>> where Buff
         let start = byteOffset
         let fullBytes = count / 8
         byteOffset += fullBytes
-        bitOffset  += count - fullBytes * 8
+        bitOffset += count - fullBytes * 8
         if bitOffset > 7 {
             byteOffset += 1
-            bitOffset  -= 8
+            bitOffset -= 8
         }
         var i = start + 1
         while i <= byteOffset {
@@ -63,14 +63,14 @@ struct ParsableNalUnitBitArray<Buffer: RandomAccessCollection<UInt8>> where Buff
 
     func canReadBits(_ count: Int) -> Bool {
         var tmpByte = byteOffset
-        var tmpBit  = bitOffset
+        var tmpBit = bitOffset
 
         let fullBytes = count / 8
         tmpByte += fullBytes
-        tmpBit  += count - fullBytes * 8
+        tmpBit += count - fullBytes * 8
         if tmpBit > 7 {
             tmpByte += 1
-            tmpBit  -= 8
+            tmpBit -= 8
         }
         var i = byteOffset + 1
         while i <= tmpByte, tmpByte < byteLimit {
@@ -114,14 +114,14 @@ struct ParsableNalUnitBitArray<Buffer: RandomAccessCollection<UInt8>> where Buff
 
     mutating func canReadExpGolombCodedNum() throws -> Bool {
         let savedByte = byteOffset
-        let savedBit  = bitOffset
+        let savedBit = bitOffset
 
         var zeros = 0
         while byteOffset < byteLimit, try !readBit() { zeros += 1 }
 
         let hitLimit = byteOffset == byteLimit
         byteOffset = savedByte
-        bitOffset  = savedBit
+        bitOffset = savedBit
         return !hitLimit && canReadBits(zeros * 2 + 1)
     }
 
@@ -145,10 +145,10 @@ struct ParsableNalUnitBitArray<Buffer: RandomAccessCollection<UInt8>> where Buff
 
     private func shouldSkipByte(_ index: Int) -> Bool {
         index >= 2 &&
-        index < byteLimit &&
-        data[index] == 0x03 &&
-        data[index - 1] == 0x00 &&
-        data[index - 2] == 0x00
+            index < byteLimit &&
+            data[index] == 0x03 &&
+            data[index - 1] == 0x00 &&
+            data[index - 2] == 0x00
     }
 
     private func assertValidOffset() throws {

@@ -10,14 +10,14 @@ struct SpannedData<Value> {
 
     private var keys: [Int] = []
     private var values: [Value] = []
-    private var memoizedReadIndex: Int? = nil
+    private var memoizedReadIndex: Int?
     private let removeCallback: RemoveCallback?
 
-    public init(removeCallback: RemoveCallback? = nil) {
+    init(removeCallback: RemoveCallback? = nil) {
         self.removeCallback = removeCallback
     }
 
-    public mutating func get(_ key: Int) -> Value {
+    mutating func get(_ key: Int) -> Value {
         var memoizedReadIndex = memoizedReadIndex ?? .zero
         defer { self.memoizedReadIndex = memoizedReadIndex }
 
@@ -32,7 +32,7 @@ struct SpannedData<Value> {
         return values[memoizedReadIndex]
     }
 
-    public mutating func appendSpan(startKey: Int, value: Value) {
+    mutating func appendSpan(startKey: Int, value: Value) {
         let memoizedReadIndex = memoizedReadIndex ?? .zero
         defer { self.memoizedReadIndex = memoizedReadIndex }
 
@@ -48,11 +48,11 @@ struct SpannedData<Value> {
         values.append(value)
     }
 
-    public func getEndValue() -> Value {
-        return values[values.endIndex - 1]
+    func getEndValue() -> Value {
+        values[values.endIndex - 1]
     }
 
-    public mutating func discard(to discardToKey: Int) {
+    mutating func discard(to discardToKey: Int) {
         while keys.count > 1, discardToKey >= keys[1] {
             let removed = values.removeFirst()
             keys.removeFirst()
@@ -64,7 +64,7 @@ struct SpannedData<Value> {
         }
     }
 
-    public mutating func discard(from discardFromKey: Int) {
+    mutating func discard(from discardFromKey: Int) {
         while let lastKey = keys.last, discardFromKey < lastKey {
             let removed = values.removeLast()
             keys.removeLast()
@@ -77,7 +77,7 @@ struct SpannedData<Value> {
         }
     }
 
-    public mutating func clear() {
+    mutating func clear() {
         for v in values {
             removeCallback?(v)
         }
@@ -86,7 +86,7 @@ struct SpannedData<Value> {
         memoizedReadIndex = nil
     }
 
-    public var isEmpty: Bool {
+    var isEmpty: Bool {
         keys.isEmpty
     }
 }

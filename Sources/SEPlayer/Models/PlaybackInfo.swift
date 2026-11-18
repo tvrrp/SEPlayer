@@ -24,14 +24,16 @@ struct PlaybackInfo {
     private(set) var playWhenReadyChangeReason: PlayWhenReadyChangeReason
     private(set) var playbackSuppressionReason: PlaybackSuppressionReason
     private(set) var playbackParameters: PlaybackParameters
-    // Set in place, without a copy. A new `object` makes the change count for `==`, or it would
-    // never reach the player's public API.
+    /// Set in place, without a copy. A new `object` makes the change count for `==`, or it would
+    /// never reach the player's public API.
     var bufferedPosition: CMTime {
         didSet { if bufferedPosition != oldValue { object = NSObject() } }
     }
+
     var totalBufferedDuration: CMTime {
         didSet { if totalBufferedDuration != oldValue { object = NSObject() } }
     }
+
     private(set) var position: CMTime
     private(set) var positionUpdateTime: CMTime
 
@@ -204,14 +206,13 @@ struct PlaybackInfo {
         guard isPlaying else { return position }
 
         let elapsed = clock.time - positionUpdateTime
-        let estimatedPosition = position + CMTimeMultiplyByFloat64(elapsed, multiplier: Float64(playbackParameters.playbackRate))
-        return estimatedPosition
+        return position + CMTimeMultiplyByFloat64(elapsed, multiplier: Float64(playbackParameters.playbackRate))
     }
 }
 
 extension PlaybackInfo: Equatable {
     static func == (lhs: PlaybackInfo, rhs: PlaybackInfo) -> Bool {
-        return lhs.object === rhs.object
+        lhs.object === rhs.object
 //        return lhs.timeline.equals(to: rhs.timeline) &&
 //            lhs.periodId == rhs.periodId &&
 //            lhs.requestedContentPositionUs == rhs.requestedContentPositionUs &&

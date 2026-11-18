@@ -3,6 +3,8 @@
 //  SEPlayer
 //
 
+// swiftlint:disable file_length
+
 import CoreMedia
 import DataSource
 import Foundation
@@ -43,6 +45,7 @@ final class HlsChunkSource {
             }
         }
     }
+
     /// Whether the chunks set the timeline of their discontinuity for the other renditions.
     var isTimestampMaster = false
     /// Whether only the frame at the load position is needed. With I-frame variants the source then loads the keyframe
@@ -146,7 +149,7 @@ final class HlsChunkSource {
         let now = CMClock.hostTimeClock.time
         let length = trackSelection?.length ?? 1
         let excluded = trackSelection.map { selection in
-            (0..<selection.length).filter { selection.isTrackExcluded(index: $0, now: now) }.count
+            (0 ..< selection.length).filter { selection.isTrackExcluded(index: $0, now: now) }.count
         } ?? 0
         return FallbackOptions(
             numberOfLocations: 1,
@@ -548,7 +551,7 @@ final class HlsChunkSource {
 
         var target = current
         if trackSelection.loadsQuickly(bits: bits(current)) == false {
-            target = (current + 1..<variants.count).first {
+            target = (current + 1 ..< variants.count).first {
                 trackSelection.loadsQuickly(bits: bits($0)) != false
             } ?? variants.count - 1
         } else if current > 0,
@@ -665,7 +668,7 @@ final class HlsChunkSource {
     /// track whose playlist isn't loaded.
     private func makeMediaChunkIterators(loadPosition: CMTime) -> [MediaChunkIterator] {
         guard let trackSelection else { return [] }
-        return (0..<trackSelection.length).map { selectionIndex -> MediaChunkIterator in
+        return (0 ..< trackSelection.length).map { selectionIndex -> MediaChunkIterator in
             guard let trackIndex = trackSelection.indexInTrackGroup(selectionIndex),
                   playlistUrls.indices.contains(trackIndex) else {
                 return EmptyMediaChunkIterator()

@@ -68,13 +68,12 @@ public final class MulticastDelegate<T> {
     }
 
     public func invokeDelegates(_ invocation: (T) throws -> Void) rethrows {
-        let observers: [AnyObject]
-        if isThreadSafe {
-            observers = queue.sync {
+        let observers: [AnyObject] = if isThreadSafe {
+            queue.sync {
                 delegates.allObjects
             }
         } else {
-            observers = delegates.allObjects
+            delegates.allObjects
         }
 
         try observers.forEach { try invocation($0 as! T) }
@@ -96,9 +95,9 @@ public final class MulticastDelegate<T> {
 
     private func conformsToClass(_ delegate: T) -> Bool {
         #if DEBUG
-        return type(of: self as Any) is AnyClass
+        type(of: self as Any) is AnyClass
         #else
-        return true
+        true
         #endif
     }
 }

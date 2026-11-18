@@ -43,7 +43,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
             .map { group.getFormat(index: $0) }
             .sorted(by: { $0.bitrate > $1.bitrate })
         var tracks = [Int?]()
-        for index in 0..<length {
+        for index in 0 ..< length {
             tracks.append(group.indexOf(format: formats[index]))
         }
         self.tracks = tracks
@@ -90,7 +90,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         let now = CMClock.hostTimeClock.time
         // An excluded track can stay excluded for longer; otherwise another track has to be left to play.
         let canExclude = isTrackExcluded(index: index, now: now)
-            || (0..<length).contains { $0 != index && !isTrackExcluded(index: $0, now: now) }
+            || (0 ..< length).contains { $0 != index && !isTrackExcluded(index: $0, now: now) }
 
         if !canExclude { return false }
 

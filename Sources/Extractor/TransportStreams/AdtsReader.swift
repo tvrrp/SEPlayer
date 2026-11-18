@@ -19,7 +19,7 @@ final class AdtsReader: ElementaryStreamReader {
         case readingSample
     }
 
-    // Match states used while looking for the next sample
+    /// Match states used while looking for the next sample
     private enum MatchState {
         case start
         case ff
@@ -59,7 +59,7 @@ final class AdtsReader: ElementaryStreamReader {
     private var hasOutputFormat = false
     private var sampleSize = 0
 
-    // Used when reading the samples.
+    /// Used when reading the samples.
     private var time: CMTime = .invalid
 
     private var currentOutput: TrackOutput?
@@ -275,7 +275,7 @@ final class AdtsReader: ElementaryStreamReader {
             return
         }
         // Peek the next byte of buffer.
-        let currentFrameSampleRateIndex = Int((try buffer.peekInt(as: UInt8.self) >> 2) & 0x0F)
+        let currentFrameSampleRateIndex = try Int((buffer.peekInt(as: UInt8.self) >> 2) & 0x0F)
         if firstFrameSampleRateIndex != .indexUnset,
            currentFrameSampleRateIndex != firstFrameSampleRateIndex {
             // Invalid header.
@@ -434,15 +434,15 @@ final class AdtsReader: ElementaryStreamReader {
                 sampleRateIndex: firstFrameSampleRateIndex,
                 channelConfig: channelConfig
             )
-            let format = Format.Builder()
-                .setId(try formatId.checkNotNil())
+            let format = try Format.Builder()
+                .setId(formatId.checkNotNil())
                 .setContainerMimeType(containerMimeType)
                 .setSampleMimeType(.audioAAC)
                 .setCodecs(aacConfig.codecs)
                 .setChannelCount(aacConfig.channelCount)
                 .setSampleRate(aacConfig.sampleRate)
                 .setInitializationData(
-                    try FormatInitializationData(
+                    FormatInitializationData(
                         audioSpecificConfig: aacConfig.audioSpecificConfig
                     )
                 )
@@ -487,7 +487,7 @@ final class AdtsReader: ElementaryStreamReader {
             if let currentOutput {
                 let sampleData = try sampleMemory.copy(
                     data.blockBuffer,
-                    range: data.readerIndex..<(data.readerIndex + bytesToRead)
+                    range: data.readerIndex ..< (data.readerIndex + bytesToRead)
                 )
                 data.moveReaderIndex(forwardBy: bytesToRead)
                 try currentOutput.sampleData(
@@ -510,7 +510,7 @@ final class AdtsReader: ElementaryStreamReader {
                     decodeTimeStamp: .invalid
                 ),
                 flags: .keyframe,
-                range: 0..<sampleSize
+                range: 0 ..< sampleSize
             )
         }
         time = time + currentSampleDuration
@@ -568,10 +568,10 @@ private extension AdtsReader {
 
 private extension BlockBufferReader {
     mutating func readSynchSafeInt() throws -> Int {
-        let firstByte = Int(try readInt(as: UInt8.self))
-        let secondByte = Int(try readInt(as: UInt8.self))
-        let thirdByte = Int(try readInt(as: UInt8.self))
-        let fourthByte = Int(try readInt(as: UInt8.self))
+        let firstByte = try Int(readInt(as: UInt8.self))
+        let secondByte = try Int(readInt(as: UInt8.self))
+        let thirdByte = try Int(readInt(as: UInt8.self))
+        let fourthByte = try Int(readInt(as: UInt8.self))
         return (firstByte << 21) | (secondByte << 14) | (thirdByte << 7) | fourthByte
     }
 }

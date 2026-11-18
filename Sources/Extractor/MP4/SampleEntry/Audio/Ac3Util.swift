@@ -95,7 +95,7 @@ enum Ac3Util {
         var sampleRate = 0.0
         var labels: [AudioChannelLabel] = []
 
-        for _ in 0..<independentSubstreamCount {
+        for _ in 0 ..< independentSubstreamCount {
             // fscod (2), bsid (5), reserved (1), asvc (1), bsmod (3), acmod (3), lfeon (1), reserved (3),
             // num_dep_sub (4), then chan_loc (9) with dependent substreams or reserved (1).
             guard let first = try? reader.readInt(as: UInt8.self),
@@ -142,8 +142,13 @@ enum Ac3Util {
         case 4: [kAudioChannelLabel_Left, kAudioChannelLabel_Right, kAudioChannelLabel_CenterSurround]
         case 5: [kAudioChannelLabel_Left, kAudioChannelLabel_Center, kAudioChannelLabel_Right, kAudioChannelLabel_CenterSurround]
         case 6: [kAudioChannelLabel_Left, kAudioChannelLabel_Right, kAudioChannelLabel_LeftSurround, kAudioChannelLabel_RightSurround]
-        case 7: [kAudioChannelLabel_Left, kAudioChannelLabel_Center, kAudioChannelLabel_Right,
-                 kAudioChannelLabel_LeftSurround, kAudioChannelLabel_RightSurround]
+        case 7: [
+                kAudioChannelLabel_Left,
+                kAudioChannelLabel_Center,
+                kAudioChannelLabel_Right,
+                kAudioChannelLabel_LeftSurround,
+                kAudioChannelLabel_RightSurround,
+            ]
         // Dual mono and stereo.
         default: [kAudioChannelLabel_Left, kAudioChannelLabel_Right]
         }

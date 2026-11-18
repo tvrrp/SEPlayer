@@ -30,18 +30,18 @@ public extension RenderersFactory {
 /// `AVSampleBufferDisplayLayer`, in an `AVSampleBufferRenderSynchronizer`.
 public struct DefaultRenderersFactory: RenderersFactory {
     public init() {
-#if os(macOS)
+        #if os(macOS)
         VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
-#elseif targetEnvironment(macCatalyst)
+        #elseif targetEnvironment(macCatalyst)
         typealias RegisterFn = @convention(c) (CMVideoCodecType) -> Void
         if let sym = dlsym(dlopen(nil, RTLD_NOW), "VTRegisterSupplementalVideoDecoderIfAvailable") {
             unsafeBitCast(sym, to: RegisterFn.self)(kCMVideoCodecType_VP9)
         }
-#else
+        #else
         if #available(iOS 26.2, tvOS 26.2, visionOS 26.2, *) {
             VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9)
         }
-#endif
+        #endif
     }
 
     public func createRenderers(

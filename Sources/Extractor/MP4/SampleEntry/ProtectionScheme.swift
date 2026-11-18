@@ -72,7 +72,7 @@ struct ProtectionScheme {
             )
         }
         if let trackEncryptionBox {
-            extensions.addFirst(try Data(buffer: trackEncryptionBox), for: SampleDescriptionExtensionKey.commonEncryptionTrackEncryptionBox)
+            try extensions.addFirst(Data(buffer: trackEncryptionBox), for: SampleDescriptionExtensionKey.commonEncryptionTrackEncryptionBox)
         }
     }
 

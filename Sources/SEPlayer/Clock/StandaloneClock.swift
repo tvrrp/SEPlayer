@@ -59,14 +59,18 @@ final class StandaloneClock: MediaClock {
         }
     }
 
-    func getPosition() -> CMTime  {
+    func getPosition() -> CMTime {
         timebase.time
     }
 
     func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
         if started {
             if self.playbackParameters != playbackParameters {
-                try! timebase.setRate(to: Double(playbackParameters.playbackRate))
+                do {
+                    try timebase.setRate(to: Double(playbackParameters.playbackRate))
+                } catch {
+                    SELogger.error(.clock, "Setting the clock rate to \(playbackParameters.playbackRate) failed: \(error)")
+                }
             }
         }
         self.playbackParameters = playbackParameters

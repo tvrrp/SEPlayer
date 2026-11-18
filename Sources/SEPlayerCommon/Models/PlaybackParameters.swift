@@ -16,7 +16,7 @@ public struct PlaybackParameters: Hashable, Sendable {
 
     public static let `default` = PlaybackParameters(playbackRate: 1.0, pitch: 1)
 
-    internal func mediaTimeForPlaybackRate(_ position: Int64) -> Int64 {
+    func mediaTimeForPlaybackRate(_ position: Int64) -> Int64 {
         Int64(Double(position) * Double(playbackRate))
     }
 

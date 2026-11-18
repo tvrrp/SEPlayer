@@ -7,8 +7,8 @@
 
 import CoreMedia.CMSync
 import DataSource
-import Foundation
 import Extractor
+import Foundation
 import SEPlayerCommon
 
 public final class SEPlayerFactory {
@@ -41,7 +41,7 @@ public final class SEPlayerFactory {
         fileMemoryPool = CMMemoryPool()
         decryptionMemoryPool = CMMemoryPool(ageOutPeriod: 5)
         let operationQueue = OperationQueue()
-        operationQueue.underlyingQueue = SignalQueue(name: "com.seplayer.loader", qos: .userInitiated).queue//Queues.loaderQueue.queue
+        operationQueue.underlyingQueue = SignalQueue(name: "com.seplayer.loader", qos: .userInitiated).queue // Queues.loaderQueue.queue
         operationQueue.maxConcurrentOperationCount = 1
         sessionLoader = PlayerSessionLoader(configuration: configuration, queue: operationQueue)
         bandwidthMeter = DefaultBandwidthMeter()
@@ -68,7 +68,7 @@ public final class SEPlayerFactory {
         loadControl: LoadControl? = nil,
         bandwidthMeter: BandwidthMeter? = nil,
         loadErrorHandlingPolicy: LoadErrorHandlingPolicy? = nil
-    ) -> SEPlayer {
+    ) throws -> SEPlayer {
         let workQueue = workQueue ?? self.workQueue
         let loaderQueue = loaderQueue ?? self.loaderQueue
 
@@ -109,7 +109,7 @@ public final class SEPlayerFactory {
             bandwidthMeter: bandwidthMeter
         )
 
-        return SEPlayerImpl(
+        return try SEPlayerImpl(
             identifier: identifier,
             workQueue: workQueue,
             clock: clock,

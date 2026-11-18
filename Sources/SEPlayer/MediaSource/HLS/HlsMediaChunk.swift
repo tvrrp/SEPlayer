@@ -382,8 +382,8 @@ private final class FirstSampleOutput: ExtractorOutput {
     }
 
     func track(for id: Int, trackType: TrackType) throws -> TrackOutput {
-        FirstSampleTrackOutput(
-            output: try target.track(for: id, trackType: trackType),
+        try FirstSampleTrackOutput(
+            output: target.track(for: id, trackType: trackType),
             owner: self,
             isVideo: trackType == .video
         )

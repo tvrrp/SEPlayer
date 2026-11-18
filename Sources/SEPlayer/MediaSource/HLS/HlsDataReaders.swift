@@ -18,7 +18,7 @@ final class BoundedDataReader: DataReader {
     /// - Parameter end: Where the readable range ends, or `nil` for the end of the resource.
     init(upstream: DataReader, end: Int?) {
         self.upstream = upstream
-        bounds = end.map { 0..<$0 }
+        bounds = end.map { 0 ..< $0 }
     }
 
     func read(range: Range<Int>, _ isolation: isolated any Actor) async throws -> CMBlockBuffer? {
@@ -95,7 +95,7 @@ final class Aes128DataReader: DataReader {
             try await decryptMore(isolation)
         }
 
-        let readable = range.clamped(to: plainStart..<plainEnd)
+        let readable = range.clamped(to: plainStart ..< plainEnd)
         guard !readable.isEmpty else { return nil }
 
         let blockBuffer = try reference(readable)
@@ -113,7 +113,7 @@ final class Aes128DataReader: DataReader {
 
         var iv = self.iv
         if cipherStart > start {
-            let previousBlock = (cipherStart - blockSize)..<cipherStart
+            let previousBlock = (cipherStart - blockSize) ..< cipherStart
             let buffer = try await upstream.read(range: previousBlock, isolation)
             guard let buffer, buffer.dataLength == blockSize else {
                 throw DecryptionError.cryptor(CCCryptorStatus(kCCDecodeError))
@@ -137,7 +137,7 @@ final class Aes128DataReader: DataReader {
         // Without more encrypted bytes the cryptor gives its last block, less the padding.
         var cipher: Data?
         if length > 0 {
-            let buffer = try await upstream.read(range: cipherPosition..<(cipherPosition + length), isolation)
+            let buffer = try await upstream.read(range: cipherPosition ..< (cipherPosition + length), isolation)
             if let buffer, !buffer.isEmpty { cipher = try buffer.dataBytes() }
         }
 
@@ -166,7 +166,7 @@ final class Aes128DataReader: DataReader {
         }
 
         if moved > 0 {
-            pieces.append((offset: plainEnd, buffer: try CMBlockBuffer(bufferReference: output, range: 0..<moved)))
+            try pieces.append((offset: plainEnd, buffer: CMBlockBuffer(bufferReference: output, range: 0 ..< moved)))
             plainEnd += moved
         }
         if let cipher {
@@ -182,10 +182,10 @@ final class Aes128DataReader: DataReader {
     private func reference(_ range: Range<Int>) throws -> CMBlockBuffer {
         let blockBuffer = try CMBlockBuffer()
         for piece in pieces {
-            let pieceRange = piece.offset..<(piece.offset + piece.buffer.dataLength)
+            let pieceRange = piece.offset ..< (piece.offset + piece.buffer.dataLength)
             let overlap = range.clamped(to: pieceRange)
             guard !overlap.isEmpty else { continue }
-            let local = (overlap.lowerBound - piece.offset)..<(overlap.upperBound - piece.offset)
+            let local = (overlap.lowerBound - piece.offset) ..< (overlap.upperBound - piece.offset)
             try blockBuffer.append(bufferReference: piece.buffer, range: local)
         }
         return blockBuffer
@@ -197,7 +197,6 @@ final class Aes128DataReader: DataReader {
         }
         plainStart = pieces.first?.offset ?? plainEnd
     }
-
 }
 
 private extension Aes128DataReader {

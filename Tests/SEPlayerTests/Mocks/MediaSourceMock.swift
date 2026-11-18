@@ -10,8 +10,8 @@ import DataSource
 import Foundation
 @testable import SEPlayer
 
-//@AnyMockable()
-//class MediaSourceMock2: MediaSource {
+// @AnyMockable()
+// class MediaSourceMock2: MediaSource {
 //    var isSingleWindow: Bool = false
 //    func getMediaItem() -> MediaItem {}
 //    func getInitialTimeline() -> Timeline? {}
@@ -28,13 +28,13 @@ import Foundation
 //    func disable(delegate: MediaSourceDelegate) {}
 //    func releaseSource(delegate: MediaSourceDelegate) {}
 //    func continueLoadingRequested(with source: any MediaSource) {}
-//}
+// }
 
 class MediaSourceMock: MediaSource {
     func maybeThrowSourceInfoRefreshError() throws {
         // TODO:
     }
-    
+
     let isSingleWindow = true
     var methodInvocationStorage = [String: Int]()
 
@@ -51,6 +51,7 @@ class MediaSourceMock: MediaSource {
     func prepareSource(delegate: MediaSourceDelegate, mediaTransferListener: TransferListener?, playerId: UUID) throws {
         updateCounter()
     }
+
     func enable(delegate: MediaSourceDelegate) {}
     func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> MediaPeriod { MediaPeriodMock() }
     func release(mediaPeriod: MediaPeriod) {}

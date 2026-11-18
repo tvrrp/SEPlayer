@@ -41,13 +41,13 @@ enum CeaUtil {
             let nextPayloadPosition = seiBuffer.readerIndex + payloadSize
 
             if payloadType == payloadTypeUserDataRegistered, payloadSize >= 8 {
-                let countryCode = Int(try seiBuffer.readInt(as: UInt8.self))
-                let providerCode = Int(try seiBuffer.readInt(as: UInt16.self))
+                let countryCode = try Int(seiBuffer.readInt(as: UInt8.self))
+                let providerCode = try Int(seiBuffer.readInt(as: UInt16.self))
                 var userIdentifier: UInt32 = 0
                 if providerCode == providerCodeAtsc {
                     userIdentifier = try seiBuffer.readInt(as: UInt32.self)
                 }
-                let userDataTypeCode = Int(try seiBuffer.readInt(as: UInt8.self))
+                let userDataTypeCode = try Int(seiBuffer.readInt(as: UInt8.self))
                 if providerCode == providerCodeDirecTV {
                     seiBuffer.moveReaderIndex(forwardBy: 1) // user_data_length
                 }
@@ -79,14 +79,14 @@ enum CeaUtil {
         buffer.moveReaderIndex(forwardBy: 1) // em_data
         let length = min(ccCount * 3, limit - buffer.readerIndex) / 3 * 3
         guard length > 0 else { return nil }
-        return CcData(presentationTime: presentationTime, packets: try buffer.readSlice(length: length))
+        return try CcData(presentationTime: presentationTime, packets: buffer.readSlice(length: length))
     }
 
     /// A value coded as a run of 0xFF bytes and a last byte, each added; `nil` at the end of the buffer.
     private static func readNon255TerminatedValue(_ buffer: inout BlockBufferReader) throws -> Int? {
         var value = 0
         while buffer.readableBytes > 0 {
-            let byte = Int(try buffer.readInt(as: UInt8.self))
+            let byte = try Int(buffer.readInt(as: UInt8.self))
             value += byte
             if byte != 0xFF { return value }
         }

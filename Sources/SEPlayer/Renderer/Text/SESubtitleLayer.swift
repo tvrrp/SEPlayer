@@ -5,6 +5,8 @@
 //  Created by tvrrp on 02.10.2026.
 //
 
+// swiftlint:disable file_length
+
 import CoreText
 import QuartzCore
 import SEPlayerCommon
@@ -245,10 +247,11 @@ public final class SESubtitleLayer: CALayer {
 
     private func resolveTextSize(_ textSize: Cue.TextSize, viewportHeight: CGFloat) -> CGFloat {
         switch textSize {
-        case let .fractional(fraction), let .fractionalIgnoringPadding(fraction):
-            return fraction * viewportHeight
+        case let .fractional(fraction),
+             let .fractionalIgnoringPadding(fraction):
+            fraction * viewportHeight
         case let .absolute(size):
-            return size
+            size
         }
     }
 
@@ -265,7 +268,8 @@ public final class SESubtitleLayer: CALayer {
         #endif
     }
 
-    @objc private func captionSettingsChanged() {
+    @objc
+    private func captionSettingsChanged() {
         // Posted on any queue.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.followsUserStyle else { return }
@@ -383,7 +387,8 @@ private struct CuePainter {
             textStart = switch cue.positionAnchor {
             case .end: anchorPosition - textWidth
             case .middle: (anchorPosition * 2 - textWidth) / 2
-            case .start, nil: anchorPosition
+            case .start,
+                 nil: anchorPosition
             }
         } else {
             textStart = (inlineExtent - textWidth) / 2
@@ -397,7 +402,8 @@ private struct CuePainter {
             textTop = switch cue.lineAnchor {
             case .end: anchorPosition - textHeight
             case .middle: (anchorPosition * 2 - textHeight) / 2
-            case .start, nil: anchorPosition
+            case .start,
+                 nil: anchorPosition
             }
         case let .number(number):
             let firstLineHeight = lines[0].height
@@ -591,7 +597,8 @@ private struct CuePainter {
                 blur: shadow,
                 color: style.edgeColor
             )
-        case .raised, .depressed:
+        case .raised,
+             .depressed:
             let raised = style.edgeType == .raised
             let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
             let colorUp = raised ? white : style.edgeColor
@@ -815,10 +822,9 @@ private struct CuePainter {
 
     private func makeRubyAnnotation(_ ruby: Cue.Ruby) -> CTRubyAnnotation {
         let position: CTRubyPosition = ruby.position == .after ? .after : .before
-        let annotation = CTRubyAnnotationCreateWithAttributes(.auto, .auto, position, ruby.text as CFString, [
+        return CTRubyAnnotationCreateWithAttributes(.auto, .auto, position, ruby.text as CFString, [
             kCTRubyAnnotationSizeFactorAttributeName: Self.rubySizeFactor,
         ] as CFDictionary)
-        return annotation
     }
 
     private func makeFont(family: String?, size: CGFloat, traits: CTFontSymbolicTraits) -> CTFont {
@@ -829,13 +835,12 @@ private struct CuePainter {
     }
 
     private func makeUncachedFont(family: String?, size: CGFloat, traits: CTFontSymbolicTraits) -> CTFont {
-        let font: CTFont
-        if let family {
-            font = CTFontCreateWithName(Self.fontName(forFamily: family) as CFString, size, nil)
+        let font: CTFont = if let family {
+            CTFontCreateWithName(Self.fontName(forFamily: family) as CFString, size, nil)
         } else if let descriptor = style.fontDescriptor {
-            font = CTFontCreateWithFontDescriptor(descriptor, size, nil)
+            CTFontCreateWithFontDescriptor(descriptor, size, nil)
         } else {
-            font = CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
+            CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
         }
 
         guard !traits.isEmpty else { return font }
@@ -864,8 +869,12 @@ private struct CuePainter {
     private static func fontName(forFamily family: String) -> String {
         switch family.lowercased() {
         case "serif": "Times New Roman"
-        case "sans-serif", "sans_serif", "default": "Helvetica"
-        case "monospace", "monospace-serif", "monospace-sans-serif": "Menlo"
+        case "sans-serif",
+             "sans_serif",
+             "default": "Helvetica"
+        case "monospace",
+             "monospace-serif",
+             "monospace-sans-serif": "Menlo"
         case "cursive": "Snell Roundhand"
         case "casual": "Chalkboard SE"
         case "small-capitals": "Copperplate"

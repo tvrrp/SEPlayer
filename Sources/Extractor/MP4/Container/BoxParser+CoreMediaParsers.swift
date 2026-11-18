@@ -60,7 +60,7 @@ extension BoxParser {
 //                    .setCodecs(codecs)
                     .setChannelCount(Int(basicDescription.mChannelsPerFrame))
                     .setSampleRate(Int(basicDescription.mSampleRate))
-    //                .setPcmEncoding(pcmEncoding)
+                    //                .setPcmEncoding(pcmEncoding)
                     .setInitializationData(initializationData)
                     .setLanguage(language)
 
@@ -167,11 +167,11 @@ extension BoxParser {
     private static func sampleMimeType(from formatDescription: CMFormatDescription) -> MimeTypes? {
         switch formatDescription.mediaType {
         case .video:
-            return formatDescription.mediaSubType.videoMimeType
+            formatDescription.mediaSubType.videoMimeType
         case .audio:
-            return formatDescription.mediaSubType.audioMimeType
+            formatDescription.mediaSubType.audioMimeType
         default:
-            return nil
+            nil
         }
     }
 }
@@ -184,7 +184,8 @@ extension CMVideoFormatDescription.MediaSubType {
             return .videoH263
         case .h264:
             return .videoH264
-        case .hevc, .hevcWithAlpha:
+        case .hevc,
+             .hevcWithAlpha:
             return .videoH265
         case .mpeg4Video:
             return .videoMP4V
@@ -192,7 +193,8 @@ extension CMVideoFormatDescription.MediaSubType {
             return .videoMPEG2
         case .mpeg1Video:
             return .videoMPEG
-        case .jpeg, .jpeg_OpenDML:
+        case .jpeg,
+             .jpeg_OpenDML:
             return .videoMJPEG
         default:
             break
@@ -205,21 +207,35 @@ extension CMVideoFormatDescription.MediaSubType {
         }
         switch sampleEntry {
         // Protected media is named by its codec and scheme.
-        case .avc3, .cavc, .qavc, .qave:
+        case .avc3,
+             .cavc,
+             .qavc,
+             .qave:
             return .videoH264
-        case .hev1, .chvc, .qhvc, .qhev:
+        case .hev1,
+             .chvc,
+             .qhvc,
+             .qhev:
             return .videoH265
-        case .cdh1, .qdh1, .qdhe, .dav1, .qdav:
+        case .cdh1,
+             .qdh1,
+             .qdhe,
+             .dav1,
+             .qdav:
             return .videoDolbyVision
         case .qav1:
             return .videoAV1
         case .qvp9:
             return .videoVP9
-        case .s263, .H263:
+        case .s263,
+             .H263:
             return .videoH263
         case .m1v_:
             return .videoMPEG
-        case .dvav, .dva1, .dvhe, .dvh1:
+        case .dvav,
+             .dva1,
+             .dvhe,
+             .dvh1:
             return .videoDolbyVision
         case .vp08:
             return .videoVP8
@@ -240,10 +256,20 @@ extension CMAudioFormatDescription.MediaSubType {
         case .linearPCM:
             return .audioRAW
         // Every AAC profile, USAC (xHE-AAC) and the protected AAC formats share the AAC MIME type.
-        case .mpeg4AAC, .mpeg4AAC_HE, .mpeg4AAC_HE_V2, .mpeg4AAC_LD, .mpeg4AAC_ELD, .mpeg4AAC_ELD_SBR,
-             .mpeg4AAC_ELD_V2, .mpeg4AAC_Spatial, .mpegD_USAC, .aacLCProtected, .aacAudibleProtected:
+        case .mpeg4AAC,
+             .mpeg4AAC_HE,
+             .mpeg4AAC_HE_V2,
+             .mpeg4AAC_LD,
+             .mpeg4AAC_ELD,
+             .mpeg4AAC_ELD_SBR,
+             .mpeg4AAC_ELD_V2,
+             .mpeg4AAC_Spatial,
+             .mpegD_USAC,
+             .aacLCProtected,
+             .aacAudibleProtected:
             return .audioAAC
-        case .ac3, .iec60958AC3:
+        case .ac3,
+             .iec60958AC3:
             return .audioAC3
         case .enhancedAC3:
             return .audioEAC3
@@ -280,7 +306,8 @@ extension CMAudioFormatDescription.MediaSubType {
         case .qec3?: return .audioEAC3
         case .qlac?: return .audioALAC
         case .qflc?: return .audioFLAC
-        case .apac?, .qapc?: return .audioAPAC
+        case .apac?,
+             .qapc?: return .audioAPAC
         default: return nil
         }
     }

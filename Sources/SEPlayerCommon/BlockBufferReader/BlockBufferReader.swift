@@ -22,7 +22,7 @@ public struct BlockBufferReader: Hashable {
     }
 
     public var blockBuffer: CMBlockBuffer
-    internal var _readerIndex: Int
+    var _readerIndex: Int
 
     public init() throws(BlockBufferError) {
         self.blockBuffer = try CMBlockBuffer()
@@ -52,7 +52,7 @@ public struct BlockBufferReader: Hashable {
         self.blockBuffer = try CMBlockBuffer()
         try blockBuffer.append(
             bufferReference: reader.blockBuffer,
-            range: range ?? 0..<reader.blockBuffer.dataLength,
+            range: range ?? 0 ..< reader.blockBuffer.dataLength,
             flags: permitEmptyReference ? .permitEmptyReference : []
         )
         _readerIndex = .zero
@@ -60,7 +60,7 @@ public struct BlockBufferReader: Hashable {
 
     /// The readable bytes.
     private var readableRange: Range<Int> {
-        _readerIndex..<blockBuffer.dataLength
+        _readerIndex ..< blockBuffer.dataLength
     }
 
     public func withUnsafeReadableBlockBuffer<R>(_ body: (CMBlockBuffer) throws -> R) throws -> R {
@@ -258,15 +258,14 @@ public struct BlockBufferReader: Hashable {
             throw BlockBufferReaderErrors(.outOfBounds)
         }
 
-        let range = index0..<(index0 + length)
-        let doCopy: Bool
-        switch byteTransferStrategy {
+        let range = index0 ..< (index0 + length)
+        let doCopy: Bool = switch byteTransferStrategy {
         case .copy:
-            doCopy = true
+            true
         case .noCopy:
-            doCopy = !blockBuffer.isContiguous(in: range)
+            !blockBuffer.isContiguous(in: range)
         case .automatic:
-            doCopy = !blockBuffer.isContiguous(in: range) || length <= 256 * 1024
+            !blockBuffer.isContiguous(in: range) || length <= 256 * 1024
         }
 
         if doCopy {
@@ -297,7 +296,7 @@ public struct BlockBufferReader: Hashable {
     public func getBytes(at index: Int, length: Int) throws -> [UInt8] {
         let range = try self.rangeWithinReadableBytes(index: index, length: length)
         let startIndex = range.startIndex + readerIndex
-        let blockBufferRange = startIndex..<startIndex + range.count
+        let blockBufferRange = startIndex ..< startIndex + range.count
 
         if blockBuffer.isContiguous(in: blockBufferRange) {
             return try blockBuffer.withContiguousStorage(in: blockBufferRange) { ptr in
@@ -372,7 +371,7 @@ public struct BlockBufferReader: Hashable {
             throw BlockBufferReaderErrors(.outOfBounds)
         }
 
-        return try BlockBufferReader(CMBlockBuffer(bufferReference: blockBuffer, range: index..<(index + length)))
+        return try BlockBufferReader(CMBlockBuffer(bufferReference: blockBuffer, range: index ..< (index + length)))
     }
 
     public mutating func readSlice(length: Int) throws -> BlockBufferReader {
@@ -384,9 +383,9 @@ public struct BlockBufferReader: Hashable {
     func _toEndianness<T: FixedWidthInteger>(value: T, endianness: Endianness) -> T {
         switch endianness {
         case .little:
-            return value.littleEndian
+            value.littleEndian
         case .big:
-            return value.bigEndian
+            value.bigEndian
         }
     }
 
@@ -402,11 +401,11 @@ public struct BlockBufferReader: Hashable {
             throw BlockBufferReaderErrors(.outOfBounds)
         }
 
-        let upperBound = indexFromReaderIndex &+ length  // safe, can't overflow, we checked it above.
+        let upperBound = indexFromReaderIndex &+ length // safe, can't overflow, we checked it above.
 
         // uncheckedBounds is safe because `length` is >= 0, so the lower bound will always be lower/equal to upper
         return Range<Int>(uncheckedBounds: (lower: indexFromReaderIndex, upper: upperBound))
-    } 
+    }
 
     mutating func _moveReaderIndex(to newIndex: Int) {
         assert(newIndex >= 0 && newIndex <= blockBuffer.dataLength)

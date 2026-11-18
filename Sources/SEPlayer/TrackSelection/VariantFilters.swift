@@ -80,13 +80,17 @@ enum VariantFilters {
         fileprivate var isHardwareDecodeSupported: Bool {
             #if targetEnvironment(simulator)
             // The simulator decodes everything in software, and reports no hardware decoders.
-            return true
+            true
             #else
             switch self {
-            case .none, .other, .avc: true
-            case .hevc, .dolbyVisionHEVC: VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+            case .none,
+                 .other,
+                 .avc: true
+            case .hevc,
+                 .dolbyVisionHEVC: VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
             case .vp9: VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9)
-            case .av1, .dolbyVisionAV1: VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)
+            case .av1,
+                 .dolbyVisionAV1: VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)
             }
             #endif
         }

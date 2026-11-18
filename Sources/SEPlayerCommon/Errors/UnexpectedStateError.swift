@@ -9,7 +9,7 @@ public func checkArgument(
     _ check: @autoclosure () -> Bool,
     _ file: String = #fileID,
     _ line: Int = #line,
-    _ funcName: String = #function,
+    _ funcName: String = #function
 ) throws(UnexpectedStateError) {
     if check() == false {
         throw UnexpectedStateError(file: file, line: line, funcName: funcName)

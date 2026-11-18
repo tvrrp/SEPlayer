@@ -76,7 +76,7 @@ public enum RendererCapabilities {
 
         public static func create(
             formatSupport: FormatSupport,
-            adaptiveSupport: AdaptiveSupport,
+            adaptiveSupport: AdaptiveSupport
         ) -> Support {
             self.init(
                 formatSupport: formatSupport,
@@ -105,7 +105,7 @@ public enum RendererCapabilities {
             formatSupport: FormatSupport,
             adaptiveSupport: AdaptiveSupport,
             hardwareAccelerationSupport: HardwareAccelerationSupport,
-            decoderSupport: DecoderSupport,
+            decoderSupport: DecoderSupport
         ) -> Support {
             self.init(
                 formatSupport: formatSupport,

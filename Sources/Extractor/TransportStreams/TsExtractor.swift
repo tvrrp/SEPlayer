@@ -53,14 +53,14 @@ public final class TsExtractor: Extractor {
         self.subtitleParserFactory = subtitleParserFactory
         self.timestampSearchBytes = timestampSearchBytes
 
-        let clockDomains: ProgramClockDomains
-        switch mode {
+        let clockDomains = switch mode {
         case .multiPMT:
-            clockDomains = ProgramClockDomains(
+            ProgramClockDomains(
                 perProgram: TimestampAdjuster(mode: .firstSampleAt(.zero))
             )
-        case .singlePMT, .hls:
-            clockDomains = ProgramClockDomains(
+        case .singlePMT,
+             .hls:
+            ProgramClockDomains(
                 unified: session ?? TimestampAdjuster(mode: .firstSampleAt(.zero)).makeSession()
             )
         }
@@ -83,10 +83,10 @@ public final class TsExtractor: Extractor {
             isolation
         )).bytesView
 
-        for startPosCandidate in 0..<TSConstants.packetSize {
+        for startPosCandidate in 0 ..< TSConstants.packetSize {
             // Try to identify at least TSConstants.sniffPacketCount packets starting with TSConstants.syncByte.
             var isSyncBytePatternCorrect = true
-            for i in 0..<TSConstants.sniffPacketCount {
+            for i in 0 ..< TSConstants.sniffPacketCount {
                 if buffer[startPosCandidate + i * TSConstants.packetSize] != TSConstants.syncByte {
                     isSyncBytePatternCorrect = false
                     break
@@ -178,7 +178,7 @@ public final class TsExtractor: Extractor {
             // Send a synthesized empty pusi to allow for packetFinished to be triggered on the last unit.
             for payloadReader in state.tsPayloadReaders.values {
                 if let pesReader = payloadReader as? PesReader,
-                    try pesReader.canConsumeSynthesizedEmptyPusi(isModeHls: isModeHls) {
+                   try pesReader.canConsumeSynthesizedEmptyPusi(isModeHls: isModeHls) {
                     var empty = try BlockBufferReader()
                     try pesReader.consume(data: &empty, flags: .payloadUnitStart)
                 }
@@ -303,7 +303,7 @@ public final class TsExtractor: Extractor {
             if bytesLeft > 0 {
                 tsPacketBuffer = try BlockBufferReader(
                     reader: tsPacketBuffer,
-                    range: tsPacketBuffer.readerIndex..<tsPacketBuffer.capacity,
+                    range: tsPacketBuffer.readerIndex ..< tsPacketBuffer.capacity,
                     permitEmptyReference: true
                 )
             } else {
@@ -350,7 +350,7 @@ public final class TsExtractor: Extractor {
     }
 
     private func shouldConsumePacketPayload(packetPid: Int) -> Bool {
-        state.mode == .hls || state.tracksEnded || !state.trackPids.contains(packetPid)  // It's a PSI packet
+        state.mode == .hls || state.tracksEnded || !state.trackPids.contains(packetPid) // It's a PSI packet
     }
 
     private func resetPayloadReaders() throws {
@@ -426,7 +426,7 @@ private extension TsExtractor {
             sectionData.moveReaderIndex(forwardBy: 6)
 
             let programCount = sectionData.readableBytes / 4
-            for _ in 0..<programCount {
+            for _ in 0 ..< programCount {
                 var patScratch = try BlockBufferBitReader(reader: sectionData.readSlice(length: 4))
                 let programNumber = try patScratch.readBits(16)
                 patScratch.skipBits(3) // reserved (3)
@@ -574,7 +574,7 @@ private final class PmtReader: SectionPayloadReader {
             entryScratch.skipBits(3) // reserved
             let elementaryPid = try entryScratch.readBits(13)
             entryScratch.skipBits(4) // reserved
-            let esInfoLength = try entryScratch.readBits(12)  // ES_info_length.
+            let esInfoLength = try entryScratch.readBits(12) // ES_info_length.
             let esInfo = try readEsInfo(&sectionData, length: esInfoLength)
 
             if streamType == 0x06 || streamType == 0x05 {
@@ -727,7 +727,7 @@ private final class PmtReader: SectionPayloadReader {
 
         data.moveReaderIndex(to: descriptorsEndPosition)
 
-        let descriptorBytes = Data(data.bytesView[descriptorsStartPosition..<descriptorsEndPosition])
+        let descriptorBytes = Data(data.bytesView[descriptorsStartPosition ..< descriptorsEndPosition])
 
         return TsPayload.ESInfo(
             streamType: streamType,

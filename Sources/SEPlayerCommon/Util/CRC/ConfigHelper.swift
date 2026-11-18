@@ -67,7 +67,7 @@ class ConfigHelper {
             .a,
             .kermit,
             .modbus,
-            .x25
+            .x25,
         ].contains(mode)
         let refOut: Bool = refIn
 
@@ -81,7 +81,7 @@ class ConfigHelper {
             polynom = 0x0589
         } else if mode == .en13757 || mode == .dnp {
             polynom = 0x3d65
-        }else if mode == .t10dif {
+        } else if mode == .t10dif {
             polynom = 0x8bb7
         } else if mode == .teledisk {
             polynom = 0xa097

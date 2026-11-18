@@ -1,0 +1,62 @@
+included:
+  - Sources
+  - Tests
+  - Demo
+  - Package.swift
+
+excluded:
+  - .build
+  - "**/.build"
+  - Tools
+
+disabled_rules:
+  - line_length
+  - force_cast
+  - identifier_name
+  - shorthand_operator
+  - nesting
+  - function_parameter_count
+  - cyclomatic_complexity
+  - type_name
+  - todo
+  - weak_delegate
+  - multiple_closures_with_trailing_closure
+  - block_based_kvo
+  - for_where
+  - discarded_notification_center_observer
+  - inclusive_language
+  - void_function_in_ternary
+  - notification_center_detachment
+  - blanket_disable_command
+  - type_body_length
+  - static_over_final_class
+
+opt_in_rules:
+  - trailing_comma
+  - overridden_super_call
+  - empty_string
+  - vertical_whitespace_closing_braces
+  - collection_alignment
+  - multiline_literal_brackets
+
+large_tuple:
+  warning: 4
+  error: 6
+
+file_length:
+  warning: 1000
+  error: 1500
+
+function_body_length:
+  warning: 250
+  error: 350
+
+trailing_comma:
+  mandatory_comma: true
+
+overridden_super_call:
+  included:
+    - "*"
+    - viewDidLayoutSubviews()
+    - layoutSubviews()
+    - traitCollectionDidChange(_:)

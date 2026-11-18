@@ -35,7 +35,7 @@ public extension ManagedAudioChannelLayout {
         guard bytes.count >= Self.headerSize else { return nil }
         let start = bytes.startIndex
         func field(_ offset: Int) -> UInt32 {
-            (0..<4).reduce(0) { $0 << 8 | UInt32(bytes[start + offset + $1]) }
+            (0 ..< 4).reduce(0) { $0 << 8 | UInt32(bytes[start + offset + $1]) }
         }
         let tag = field(0)
         var descriptionCount = Int(field(8))
@@ -47,7 +47,7 @@ public extension ManagedAudioChannelLayout {
         }
 
         let size = Self.headerSize + descriptionCount * Self.channelDescriptionSize
-        let fields = (0..<(size / 4)).map { index in index == 2 ? UInt32(descriptionCount) : field(index * 4) }
+        let fields = (0 ..< (size / 4)).map { index in index == 2 ? UInt32(descriptionCount) : field(index * 4) }
         self = fields.withUnsafeBytes { Self(copying: $0, size: size) }
     }
 

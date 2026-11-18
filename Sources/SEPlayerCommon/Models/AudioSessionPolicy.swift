@@ -83,8 +83,8 @@ public struct AudioSessionPolicy: Hashable, @unchecked Sendable {
     /// play.
     public static let movie = AudioSessionPolicy()
 
-    /// Video that plays along with whatever else plays, as in a feed: it mixes with other audio, and lets it be as
-    /// soon as it pauses.
+    // Video that plays along with whatever else plays, as in a feed: it mixes with other audio, and lets it be as
+    // soon as it pauses.
     #if !os(macOS)
     public static let mixWithOthers = AudioSessionPolicy(
         audibility: .mixWithOthers,

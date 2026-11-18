@@ -33,15 +33,15 @@ public extension Timeline {
     func nextWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         switch repeatMode {
         case .off:
-            return if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+            if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
                 nil
             } else {
                 windowIndex + 1
             }
         case .one:
-            return windowIndex
+            windowIndex
         case .all:
-            return if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+            if windowIndex == lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
                 firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
             } else {
                 windowIndex + 1
@@ -52,15 +52,15 @@ public extension Timeline {
     func previousWindowIndex(windowIndex: Int, repeatMode: RepeatMode, shuffleModeEnabled: Bool) -> Int? {
         switch repeatMode {
         case .off:
-            return if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+            if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
                 nil
             } else {
                 windowIndex - 1
             }
         case .one:
-            return windowIndex
+            windowIndex
         case .all:
-            return if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
+            if windowIndex == firstWindowIndex(shuffleModeEnabled: shuffleModeEnabled) {
                 lastWindowIndex(shuffleModeEnabled: shuffleModeEnabled)
             } else {
                 windowIndex - 1
@@ -187,13 +187,13 @@ public extension Timeline {
         let otherWindow = Window()
         let otherPeriod = Period()
 
-        for index in 0..<windowCount() {
+        for index in 0 ..< windowCount() {
             if getWindow(windowIndex: index, window: window) != other.getWindow(windowIndex: index, window: otherWindow) {
                 return false
             }
         }
 
-        for index in 0..<periodCount() {
+        for index in 0 ..< periodCount() {
             if getPeriod(periodIndex: index, period: period) != other.getPeriod(periodIndex: index, period: otherPeriod) {
                 return false
             }

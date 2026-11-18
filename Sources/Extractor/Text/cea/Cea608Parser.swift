@@ -179,10 +179,15 @@ public final class Cea608Parser: SubtitleParser {
             isInCaptionService = false
         } else if Self.isServiceSwitchCommand(cc1) {
             switch cc2 {
-            case Command.textRestart, Command.resumeTextDisplay:
+            case Command.textRestart,
+                 Command.resumeTextDisplay:
                 isInCaptionService = false
-            case Command.endOfCaption, Command.resumeCaptionLoading, Command.resumeDirectCaptioning,
-                 Command.rollUp2Rows, Command.rollUp3Rows, Command.rollUp4Rows:
+            case Command.endOfCaption,
+                 Command.resumeCaptionLoading,
+                 Command.resumeDirectCaptioning,
+                 Command.rollUp2Rows,
+                 Command.rollUp3Rows,
+                 Command.rollUp4Rows:
                 isInCaptionService = true
             default:
                 break
@@ -365,29 +370,34 @@ public final class Cea608Parser: SubtitleParser {
     /// cc1: 0|0|0|X|X|X|X|X
     private static func isControlCode(_ cc1: UInt8) -> Bool { cc1 & 0xE0 == 0 }
     private static func isRepeatable(_ cc1: UInt8) -> Bool { cc1 & 0xF0 == 0x10 }
-    private static func isXdsControlCode(_ cc1: UInt8) -> Bool { (0x01...0x0F).contains(cc1) }
+    private static func isXdsControlCode(_ cc1: UInt8) -> Bool { (0x01 ... 0x0F).contains(cc1) }
     /// cc1: 0|0|0|1|C|1|0|0
     private static func isServiceSwitchCommand(_ cc1: UInt8) -> Bool { cc1 & 0xF7 == 0x14 }
     /// cc1: 0|0|0|1|C|0|0|1, cc2: 0|0|1|1|X|X|X|X
     private static func isSpecialNorthAmericanChar(_ cc1: UInt8, _ cc2: UInt8) -> Bool {
         cc1 & 0xF7 == 0x11 && cc2 & 0xF0 == 0x30
     }
+
     /// cc1: 0|0|0|1|C|0|1|S, cc2: 0|0|1|X|X|X|X|X
     private static func isExtendedWestEuropeanChar(_ cc1: UInt8, _ cc2: UInt8) -> Bool {
         cc1 & 0xF6 == 0x12 && cc2 & 0xE0 == 0x20
     }
+
     /// cc1: 0|0|0|1|C|0|0|1, cc2: 0|0|1|0|X|X|X|X
     private static func isMidRowControlCode(_ cc1: UInt8, _ cc2: UInt8) -> Bool {
         cc1 & 0xF7 == 0x11 && cc2 & 0xF0 == 0x20
     }
+
     /// cc1: 0|0|0|1|C|X|X|X, cc2: 0|1|X|X|X|X|X|X
     private static func isPreambleAddressCode(_ cc1: UInt8, _ cc2: UInt8) -> Bool {
         cc1 & 0xF0 == 0x10 && cc2 & 0xC0 == 0x40
     }
+
     /// cc1: 0|0|0|1|C|1|1|1, cc2: 0x21 to 0x23
     private static func isTabControlCode(_ cc1: UInt8, _ cc2: UInt8) -> Bool {
-        cc1 & 0xF7 == 0x17 && (0x21...0x23).contains(cc2)
+        cc1 & 0xF7 == 0x17 && (0x21 ... 0x23).contains(cc2)
     }
+
     /// cc1: 0|0|0|1|C|1|0|F, cc2: 0|0|1|0|X|X|X|X
     private static func isMiscCode(_ cc1: UInt8, _ cc2: UInt8) -> Bool {
         cc1 & 0xF6 == 0x14 && cc2 & 0xF0 == 0x20
@@ -646,6 +656,6 @@ private final class CueBuilder {
     private static func truncated(_ text: AttributedString, to length: Int) -> AttributedString {
         guard text.characters.count > length else { return text }
         let end = text.characters.index(text.startIndex, offsetBy: max(0, length))
-        return AttributedString(text[text.startIndex..<end])
+        return AttributedString(text[text.startIndex ..< end])
     }
 }

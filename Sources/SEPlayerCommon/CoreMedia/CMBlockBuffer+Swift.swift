@@ -64,7 +64,7 @@ public extension _CoreMediaInitializable where Self == CMBlockBuffer {
 
     /// A block buffer that references `range` of `buffer`, without copying its bytes. No bytes make an empty buffer.
     init(bufferReference buffer: CMBlockBuffer, range: Range<Int>? = nil, flags: CMBlockBuffer.Flags = .init()) throws(BlockBufferError) {
-        let range = range ?? 0..<buffer.dataLength
+        let range = range ?? 0 ..< buffer.dataLength
         // A length of 0 would reference all of the buffer from the offset.
         guard !range.isEmpty else {
             try self.init()
@@ -94,7 +94,7 @@ public extension CMBlockBuffer {
 
     /// Whether all of the bytes are in one memory block.
     var isContiguous: Bool {
-        isContiguous(in: 0..<dataLength)
+        isContiguous(in: 0 ..< dataLength)
     }
 
     /// Whether the bytes of `range` are in one memory block.
@@ -155,7 +155,7 @@ public extension CMBlockBuffer {
 
     /// Appends a reference to `range` of `buffer`, without copying its bytes. No bytes append nothing.
     func append(bufferReference buffer: CMBlockBuffer, range: Range<Int>? = nil, flags: CMBlockBuffer.Flags = .init()) throws(BlockBufferError) {
-        let range = range ?? 0..<buffer.dataLength
+        let range = range ?? 0 ..< buffer.dataLength
         // A length of 0 would reference all of the buffer from the offset.
         guard !range.isEmpty else { return }
         let status = CMBlockBufferAppendBufferReference(
@@ -179,7 +179,7 @@ public extension CMBlockBuffer {
         allocator: CFAllocator? = kCFAllocatorDefault,
         flags: CMBlockBuffer.Flags = .init()
     ) throws(BlockBufferError) -> CMBlockBuffer {
-        let range = range ?? 0..<dataLength
+        let range = range ?? 0 ..< dataLength
         guard !range.isEmpty else { return try CMBlockBuffer() }
         var buffer: CMBlockBuffer?
         let status = CMBlockBufferCreateContiguous(
@@ -202,7 +202,7 @@ public extension CMBlockBuffer {
 
     /// Calls `body` with the bytes of `range` in one piece of memory, copied into one when they are in several blocks.
     func withContiguousStorage<R>(in range: Range<Int>? = nil, _ body: (UnsafeRawBufferPointer) throws -> R) throws -> R {
-        let range = range ?? 0..<dataLength
+        let range = range ?? 0 ..< dataLength
         guard !range.isEmpty else {
             return try body(UnsafeRawBufferPointer(start: nil, count: 0))
         }
@@ -233,7 +233,7 @@ public extension CMBlockBuffer {
 
     /// A copy of the bytes of `range`.
     func dataBytes(in range: Range<Int>? = nil) throws(BlockBufferError) -> Data {
-        let range = range ?? 0..<dataLength
+        let range = range ?? 0 ..< dataLength
         var data = Data(count: range.count)
         guard !range.isEmpty else { return data }
         let status = data.withUnsafeMutableBytes { bytes in
@@ -268,7 +268,7 @@ public extension CMBlockBuffer {
 
     /// Sets the bytes of `range` to `byte`.
     func fillDataBytes(with byte: UInt8, in range: Range<Int>? = nil) throws(BlockBufferError) {
-        let range = range ?? 0..<dataLength
+        let range = range ?? 0 ..< dataLength
         guard !range.isEmpty else { return }
         let status = CMBlockBufferFillDataBytes(
             with: CChar(bitPattern: byte),

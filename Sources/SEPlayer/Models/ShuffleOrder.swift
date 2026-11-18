@@ -24,7 +24,7 @@ struct DefaultShuffleOrder: ShuffleOrder {
     }
 
     var firstIndex: Int? {
-        return shuffled.count > 0 ? shuffled[0] : nil
+        shuffled.count > 0 ? shuffled[0] : nil
     }
 
     private let shuffled: [Int]
@@ -32,8 +32,8 @@ struct DefaultShuffleOrder: ShuffleOrder {
 
     init(length: Int) {
         var shuffled = [Int](repeating: 0, count: length)
-        for i in 0..<length {
-            let swapIndex = Int.random(in: 0...i)
+        for i in 0 ..< length {
+            let swapIndex = Int.random(in: 0 ... i)
             shuffled[i] = shuffled[swapIndex]
             shuffled[swapIndex] = i
         }
@@ -56,11 +56,11 @@ struct DefaultShuffleOrder: ShuffleOrder {
     }
 
     func cloneAndInsert(insertionIndex: Int, insertionCount: Int) -> ShuffleOrder {
-        var insertionPoints = (0..<insertionCount).map { _ in Int.random(in: 0...shuffled.count) }
+        var insertionPoints = (0 ..< insertionCount).map { _ in Int.random(in: 0 ... shuffled.count) }
         var insertionValues = [Int](repeating: 0, count: insertionCount)
 
-        for i in 0..<insertionCount {
-            let swapIndex = Int.random(in: 0...i)
+        for i in 0 ..< insertionCount {
+            let swapIndex = Int.random(in: 0 ... i)
             insertionValues[i] = insertionValues[swapIndex]
             insertionValues[swapIndex] = i + insertionIndex
         }
@@ -71,7 +71,7 @@ struct DefaultShuffleOrder: ShuffleOrder {
         var oldIndex = 0
         var insertionIndexPointer = 0
 
-        for _ in 0..<(shuffled.count + insertionCount) {
+        for _ in 0 ..< (shuffled.count + insertionCount) {
             if insertionIndexPointer < insertionCount && oldIndex == insertionPoints[insertionIndexPointer] {
                 newShuffled.append(insertionValues[insertionIndexPointer])
                 insertionIndexPointer += 1

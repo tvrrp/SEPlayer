@@ -7,7 +7,8 @@
 
 import SEPlayerCommon
 
-@frozen public enum TrackSelectionType {
+@frozen
+public enum TrackSelectionType {
     case unset
     case customBase
 }

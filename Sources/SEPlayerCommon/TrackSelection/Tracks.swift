@@ -5,7 +5,6 @@
 //  Created by tvrrp on 13.02.2026.
 //
 
-
 /// Information about groups of tracks.
 public struct Tracks: Hashable, Sendable {
     /// The groups of tracks.
@@ -14,6 +13,7 @@ public struct Tracks: Hashable, Sendable {
     public init(groups: [Group]) {
         self.groups = groups
     }
+
     /// Whether there are no groups of tracks.
     public var isEmpty: Bool { groups.isEmpty }
 
@@ -37,7 +37,7 @@ public struct Tracks: Hashable, Sendable {
     }
 
     public func isSupportedOrEmpty(trackType: TrackType, allowExceedsCapabilities: Bool = false) -> Bool {
-        return !containsType(trackType) || typeSupported(trackType, allowExceedsCapabilities: allowExceedsCapabilities)
+        !containsType(trackType) || typeSupported(trackType, allowExceedsCapabilities: allowExceedsCapabilities)
     }
 
     public func typeSelected(for trackType: TrackType) -> Bool {
@@ -94,7 +94,7 @@ public extension Tracks {
         }
 
         public func isSupported(allowExceedsCapabilities: Bool = false) -> Bool {
-            for index in 0..<trackSupport.count {
+            for index in 0 ..< trackSupport.count {
                 if isTrackSupported(for: index, allowExceedsCapabilities: allowExceedsCapabilities) {
                     return true
                 }
@@ -104,7 +104,7 @@ public extension Tracks {
         }
 
         public func isTrackSelected(for trackIndex: Int) -> Bool {
-            return trackSelected[trackIndex]
+            trackSelected[trackIndex]
         }
     }
 }

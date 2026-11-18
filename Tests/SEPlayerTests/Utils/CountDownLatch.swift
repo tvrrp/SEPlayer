@@ -10,7 +10,6 @@ import Testing
 struct TimeoutError: Swift.Error {}
 
 final class CountDownLatch {
-
     var count: Int
     var timeoutTask: Task<Void, Error>?
 
@@ -28,7 +27,6 @@ final class CountDownLatch {
                 try await Task.sleep(for: .milliseconds(Int(timeoutMs)), leeway: .zero)
             }
             try Task.checkCancellation()
-            return
         }
 
         self.timeoutTask = timeoutTask
@@ -43,7 +41,7 @@ final class CountDownLatch {
     }
 
     func getCount(isolation: isolated (any Actor)? = #isolation) -> Int {
-        return count
+        count
     }
 
     func countDown(isolation: isolated (any Actor)? = #isolation) {

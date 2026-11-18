@@ -153,7 +153,6 @@ public extension Loader {
             errorCount: Int
         ) -> Loader.LoadErrorAction
     }
-
 }
 
 extension Loader: LoadDelegate {
@@ -335,7 +334,8 @@ private final class LoadTask<T: Loadable>: AnyLoadTask {
                 loadDelegate?.loadFatalError(error: error)
             case .dontRetry:
                 SELogger.warning(.loader, "\(T.self) failed, not retrying: \(error)")
-            case .retry, .retryResetErrorCount:
+            case .retry,
+                 .retryResetErrorCount:
                 if action.type == .retryResetErrorCount {
                     errorCount = 1
                 }

@@ -37,8 +37,8 @@ final class DvbSubtitleReader: ElementaryStreamReader {
             let trackOutput = try output.track(for: idGenerator.getTrackId(), trackType: .text)
             let initializationData = try BlockBufferReader()
             try initializationData.extend(with: info.initializationData)
-            let format = Format.Builder()
-                .setId(try idGenerator.getFormatId())
+            let format = try Format.Builder()
+                .setId(idGenerator.getFormatId())
                 .setContainerMimeType(.videoMP2T)
                 .setSampleMimeType(.applicationDVBSubs)
                 .setInitializationData(Format.ByteBufferInitializationData(byteBuffer: [initializationData]))
@@ -82,7 +82,7 @@ final class DvbSubtitleReader: ElementaryStreamReader {
             try output.sampleMetadata(
                 time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: sampleTime, decodeTimeStamp: .invalid),
                 flags: .keyframe,
-                range: 0..<sampleBytesWritten
+                range: 0 ..< sampleBytesWritten
             )
         }
     }

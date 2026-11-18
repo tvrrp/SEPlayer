@@ -25,7 +25,8 @@ public struct SETrackSelectionDefinition {
     }
 }
 
-@frozen public enum TrackSelectionReason {
+@frozen
+public enum TrackSelectionReason {
     case unknown
     case initial
     case manual
@@ -61,7 +62,7 @@ public protocol SETrackSelection: TrackSelection {
         bufferedDuration: CMTime,
         availableDuration: CMTime,
         queue: [MediaChunk],
-        mediaChunkIterators: [MediaChunkIterator],
+        mediaChunkIterators: [MediaChunkIterator]
     )
     func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int
     func shouldCancelChunkLoad(playbackPosition: CMTime, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool

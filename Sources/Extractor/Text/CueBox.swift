@@ -102,7 +102,7 @@ struct CueBoxWriter {
         guard let size = UInt32(exactly: bytes.count - start) else {
             throw CueBoxError.boxTooLarge
         }
-        withUnsafeBytes(of: size.bigEndian) { bytes.replaceSubrange(start..<(start + 4), with: $0) }
+        withUnsafeBytes(of: size.bigEndian) { bytes.replaceSubrange(start ..< (start + 4), with: $0) }
     }
 
     mutating func append<T: FixedWidthInteger>(_ value: T) {
@@ -146,13 +146,13 @@ struct CueBoxWriter {
         let height = image.height
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
-                data: nil,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: width * 4,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               ) else {
             throw CueBoxError.unsupportedImage
         }
@@ -197,7 +197,7 @@ struct CueBoxReader {
     }
 
     mutating func readCGFloat() throws -> CGFloat {
-        CGFloat(Double(bitPattern: try read(as: UInt64.self)))
+        try CGFloat(Double(bitPattern: read(as: UInt64.self)))
     }
 
     mutating func readBool() throws -> Bool {
@@ -222,7 +222,7 @@ struct CueBoxReader {
     }
 
     mutating func readColor() throws -> CGColor {
-        let components = try (0..<4).map { _ in CGFloat(Float32(bitPattern: try read(as: UInt32.self))) }
+        let components = try (0 ..< 4).map { _ in try CGFloat(Float32(bitPattern: read(as: UInt32.self))) }
         return CGColor(srgbRed: components[0], green: components[1], blue: components[2], alpha: components[3])
     }
 
@@ -238,17 +238,17 @@ struct CueBoxReader {
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
               let provider = CGDataProvider(data: pixels as CFData),
               let image = CGImage(
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bitsPerPixel: 32,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider,
-                decode: nil,
-                shouldInterpolate: true,
-                intent: .defaultIntent
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bitsPerPixel: 32,
+                  bytesPerRow: bytesPerRow,
+                  space: colorSpace,
+                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                  provider: provider,
+                  decode: nil,
+                  shouldInterpolate: true,
+                  intent: .defaultIntent
               ) else {
             throw CueBoxError.malformed
         }

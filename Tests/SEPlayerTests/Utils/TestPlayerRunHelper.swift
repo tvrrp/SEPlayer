@@ -5,8 +5,8 @@
 
 import CoreMedia
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 /// Runs a player until something happens.
 ///

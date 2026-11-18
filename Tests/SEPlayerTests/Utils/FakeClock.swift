@@ -6,12 +6,12 @@
 //
 
 import CoreMedia
+@testable import SEPlayer
 import SEPlayerCommon
 import Testing
-@testable import SEPlayer
 
 final class FakeClock: SEClock, @unchecked Sendable {
-    let clock: CMClock = CMClock.hostTimeClock
+    let clock: CMClock = .hostTimeClock
 
     var time: CMTime {
         CMTime(value: milliseconds, timescale: 1000)
@@ -19,12 +19,7 @@ final class FakeClock: SEClock, @unchecked Sendable {
 
     static let mediaTimeRate: Float64 = 30
 
-    private let mediaTimeSource: CMTimebase = {
-        let timebase = try! CMTimebase(sourceClock: CMClock.hostTimeClock)
-        try! timebase.setTime(to: .zero)
-        try! timebase.setRate(to: FakeClock.mediaTimeRate)
-        return timebase
-    }()
+    private let mediaTimeSource: CMTimebase
 
     func makeTimebase() throws -> CMTimebase {
         try CMTimebase(sourceTimebase: mediaTimeSource)
@@ -48,10 +43,13 @@ final class FakeClock: SEClock, @unchecked Sendable {
     private var timeSinceBootMs: Int64
     private let lock: UnfairLock
 
-    init(bootTimeMs: Int64 = 0, initialTimeMs: Int64 = 0) {
+    init(bootTimeMs: Int64 = 0, initialTimeMs: Int64 = 0) throws {
         self.bootTimeMs = bootTimeMs
         self.timeSinceBootMs = initialTimeMs
         lock = UnfairLock()
+        mediaTimeSource = try CMTimebase(sourceClock: CMClock.hostTimeClock)
+        try mediaTimeSource.setTime(to: .zero)
+        try mediaTimeSource.setRate(to: FakeClock.mediaTimeRate)
     }
 
     func advanceTime(_ timeDiffMs: Int64) {

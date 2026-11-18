@@ -5,7 +5,6 @@
 //  Created by tvrrp on 13.02.2026.
 //
 
-
 public struct TrackSelectionOverride: Hashable, Sendable {
     public var type: TrackType { mediaTrackGroup.type }
     public let mediaTrackGroup: TrackGroup

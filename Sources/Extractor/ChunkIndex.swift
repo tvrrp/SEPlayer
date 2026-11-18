@@ -8,12 +8,12 @@
 import CoreMedia
 
 struct ChunkIndex {
-    public let count: Int
+    let count: Int
 
-    public let sizes: [Int]
-    public let offsets: [Int]
-    public let durations: [CMTime]
-    public let times: [CMTime]
+    let sizes: [Int]
+    let offsets: [Int]
+    let durations: [CMTime]
+    let times: [CMTime]
     private let duration: CMTime
 
     init(
@@ -89,6 +89,6 @@ extension ChunkIndex: CustomStringConvertible {
             + ", offsets=\(offsets)"
             + ", timeUs=\(times)"
             + ", durationsUs=\(duration)"
-            + ")";
+            + ")"
     }
 }

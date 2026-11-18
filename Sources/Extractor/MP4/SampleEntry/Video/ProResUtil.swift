@@ -14,8 +14,10 @@ enum ProResUtil {
     /// The bits of each component: 16 for ProRes RAW HQ and RAW, and for 4444 with alpha; 12 otherwise.
     static func bitsPerComponent(format: MP4Box.BoxType, depth: Int) -> Int {
         switch format {
-        case .aprh, .aprn: 16
-        case .ap4h, .ap4x: depth == 32 ? 16 : 12
+        case .aprh,
+             .aprn: 16
+        case .ap4h,
+             .ap4x: depth == 32 ? 16 : 12
         default: 12
         }
     }

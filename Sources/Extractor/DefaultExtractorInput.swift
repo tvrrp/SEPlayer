@@ -5,8 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import Foundation
 import CoreMedia
+import Foundation
 import SEPlayerCommon
 
 public final class DefaultExtractorInput: ExtractorInput, DataReader {
@@ -23,6 +23,7 @@ public final class DefaultExtractorInput: ExtractorInput, DataReader {
         get { max(_peekPosition, position) }
         set { _peekPosition = newValue }
     }
+
     private var _peekPosition: Int
 
     public init(queue: Queue, dataReader: DataReader, position: Int, length: Int?) {
@@ -46,7 +47,7 @@ public final class DefaultExtractorInput: ExtractorInput, DataReader {
 
     public func read(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer {
         assert(queue.isCurrent())
-        guard let blockBuffer = try await dataReader.read(range: position..<(position + length), isolation) else {
+        guard let blockBuffer = try await dataReader.read(range: position ..< (position + length), isolation) else {
             // The end of the input.
             return try CMBlockBuffer()
         }
@@ -68,7 +69,7 @@ public final class DefaultExtractorInput: ExtractorInput, DataReader {
         while bytesRead < length {
             let readAmount = length - bytesRead
 
-            switch try await dataReader.read(range: position..<(position + readAmount), isolation) {
+            switch try await dataReader.read(range: position ..< (position + readAmount), isolation) {
             case let .some(upstreamBlockBuffer):
                 guard !upstreamBlockBuffer.isEmpty else { fallthrough }
                 bytesRead += upstreamBlockBuffer.dataLength
@@ -102,7 +103,7 @@ public final class DefaultExtractorInput: ExtractorInput, DataReader {
     }
 
     public func peek(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer {
-        guard let blockBuffer = try await dataReader.read(range: peekPosition..<(peekPosition + length), isolation) else {
+        guard let blockBuffer = try await dataReader.read(range: peekPosition ..< (peekPosition + length), isolation) else {
             throw EndOfFileError()
         }
 
@@ -118,7 +119,7 @@ public final class DefaultExtractorInput: ExtractorInput, DataReader {
         while bytesPeeked < length {
             let readAmount = length - bytesPeeked
 
-            switch try await dataReader.read(range: peekPosition..<(peekPosition + readAmount), isolation) {
+            switch try await dataReader.read(range: peekPosition ..< (peekPosition + readAmount), isolation) {
             case let .some(upstreamBlockBuffer):
                 guard !upstreamBlockBuffer.isEmpty else { fallthrough }
                 bytesPeeked += upstreamBlockBuffer.dataLength

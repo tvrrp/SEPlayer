@@ -57,7 +57,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     override func canUpdateMediaItem(new item: MediaItem) -> Bool {
         // TODO:
-        return false
+        false
     }
 
     override func updateMediaItem(new item: MediaItem) {

@@ -31,7 +31,7 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
         isDynamic: Bool,
         useLiveConfiguration: Bool,
         manifest: Any?,
-        mediaItem: MediaItem,
+        mediaItem: MediaItem
     ) {
         self.init(
             periodDuration: duration,
@@ -55,7 +55,7 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
         isDynamic: Bool,
         useLiveConfiguration: Bool,
         manifest: Any?,
-        mediaItem: MediaItem,
+        mediaItem: MediaItem
     ) {
         self.init(
             presentationStartTime: .invalid,
@@ -155,6 +155,6 @@ final class SinglePeriodTimeline: Timeline, @unchecked Sendable {
     }
 
     func id(for periodIndex: Int) -> AnyHashable {
-        return Self.uuid
+        Self.uuid
     }
 }

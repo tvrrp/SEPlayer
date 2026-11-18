@@ -51,7 +51,6 @@ public final class UnfairLock: NSLocking, @unchecked Sendable {
 public extension NSLocking {
     func usingLock<R, E: Error>(_ body: () throws(E) -> R) throws(E) -> R {
         lock(); defer { unlock() }
-        let result = try body()
-        return result
+        return try body()
     }
 }

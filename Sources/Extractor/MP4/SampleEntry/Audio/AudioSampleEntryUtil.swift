@@ -25,37 +25,42 @@ enum AudioSampleEntryUtil {
             || Mpeg4AudioUtil.isAACWithElementaryStreamDescriptor(rawFormat)
     }
 
-    /// A codec the format services know by the box of its decoder config, rather than by code here.
+    /// A codec known by the box of its decoder config, which its decoder takes as it is.
     struct RegisteredCodec {
         /// The format that decodes the config.
         let format: AudioFormatID
-        /// The config as the decoder takes it.
+        /// The config box, from its size field, as the decoder takes it.
         let magicCookie: BlockBufferReader
         /// Where the config box is among the boxes no extension describes; it isn't kept as they are.
         let configBoxIndex: Int
 
-        /// The first of `boxes` whose type the format services know: the config box of the entry's format, or a box
-        /// of a single format.
-        init?(entryFormat: UInt32, boxes: [SampleEntryBox], isQuickTime: Bool) {
-            let flavor: AudioFormatProperties.ContainerFlavor = isQuickTime ? .quickTimeMovie : .isoFamily
-            let entryConfigType = AudioFormatProperties.configBoxType(codingName: entryFormat, flavor: flavor)
+        /// The first of `boxes` that is the config of a registered codec.
+        init?(boxes: [SampleEntryBox], isQuickTime: Bool) {
+            let codecs = isQuickTime ? Self.quickTimeCodecs : Self.isoCodecs
             for (index, box) in boxes.enumerated() {
-                let format = box.rawType == entryConfigType
-                    ? AudioFormatProperties.decodeFormat(codingName: entryFormat, flavor: flavor)
-                    : AudioFormatProperties.decodeFormat(configBoxType: box.rawType, flavor: flavor)
-                guard let format else {
+                guard let format = codecs[box.rawType] else {
                     continue
                 }
-                guard let cookie = try? AudioFormatProperties.canonicalMagicCookie(configBox: box.box, format: format, flavor: flavor) else {
-                    return nil
-                }
                 self.format = format
-                magicCookie = cookie
+                magicCookie = box.box
                 configBoxIndex = index
                 return
             }
             return nil
         }
+
+        /// The formats of config box types in ISO files: APAC, AC-4, Dolby TrueHD and IAMF.
+        private static let isoCodecs: [UInt32: AudioFormatID] = [
+            0x6461_7061: kAudioFormatAPAC, // 'dapa'
+            0x6461_6334: 0x6163_2D34, // 'dac4' → 'ac-4'
+            0x646D_6C70: 0x6D6C_7061, // 'dmlp' → 'mlpa'
+            0x6961_6362: 0x6961_6D66, // 'iacb' → 'iamf'
+        ]
+
+        /// The formats of config box types in QuickTime movies: APAC.
+        private static let quickTimeCodecs: [UInt32: AudioFormatID] = [
+            0x6461_7061: kAudioFormatAPAC, // 'dapa'
+        ]
     }
 
     /// The cookie of protected media: its config box as it is, and for AAC its descriptor in an `esds` box.
@@ -194,7 +199,8 @@ enum AudioSampleEntryUtil {
                 return nil
             }
             return Cookie(reader: FlacUtil.magicCookie(dfLa: dfLa.box))
-        case .ipcm?, .fpcm?:
+        case .ipcm?,
+             .fpcm?:
             guard boxes.pcmC != nil else {
                 return nil
             }
@@ -204,7 +210,8 @@ enum AudioSampleEntryUtil {
                 return nil
             }
             return Cookie(reader: cookie)
-        case .samr?, .sawb?:
+        case .samr?,
+             .sawb?:
             guard let format, let config = boxes.amrConfig,
                   let cookie = AmrUtil.magicCookie(format: format, config: config) else {
                 return nil
@@ -235,7 +242,12 @@ enum AudioSampleEntryUtil {
             return ExplicitLayout(layout: layout)
         }
         if let chnl = boxes.chnl, description.mFormatID == kAudioFormatLinearPCM {
-            if let layout = try? AudioFormatProperties.channelLayout(description: description, channelLayoutBox: chnl.box) {
+            let layout = ChannelLayoutBox.channelLayout(
+                box: chnl.box,
+                format: description.mFormatID,
+                channelCount: Int(description.mChannelsPerFrame)
+            )
+            if let layout {
                 return ExplicitLayout(layout: layout)
             }
             guard description.mChannelsPerFrame <= 2 else {
@@ -293,7 +305,7 @@ enum AudioSampleEntryUtil {
             if plainest.mChannelLayoutTag != 0 {
                 decoderLayout = ManagedAudioChannelLayout(tag: plainest.mChannelLayoutTag)
             } else {
-                decoderLayout = try? AudioFormatProperties.channelLayout(description: plainest.mASBD, magicCookie: magicCookie)
+                decoderLayout = fallbackLayout()
             }
         } else {
             decoderLayout = fallbackLayout()

@@ -36,7 +36,8 @@ extension SampleStream {
     }
 }
 
-@frozen public enum SampleStreamReadResult: Equatable {
+@frozen
+public enum SampleStreamReadResult: Equatable {
     case nothingRead
     case didReadFormat(format: Format)
     case didReadBuffer(_ buffer: CMSampleBuffer)

@@ -19,11 +19,11 @@ public struct IncorrectFragmentationSniffFailure: SniffFailure {
     }
 
     static func fileFragmented() -> Self {
-        Self.init(fileIsFragmented: true)
+        Self(fileIsFragmented: true)
     }
 
     static func fileNotFragmented() -> Self {
-        Self.init(fileIsFragmented: false)
+        Self(fileIsFragmented: false)
     }
 }
 

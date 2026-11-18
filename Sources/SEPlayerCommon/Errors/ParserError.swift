@@ -13,7 +13,7 @@ open class ParserError: IOError, @unchecked Sendable {
         message: String? = nil,
         cause: Error? = nil,
         contentIsMalformed: Bool,
-        dataType: DataType,
+        dataType: DataType
     ) {
         self.contentIsMalformed = contentIsMalformed
         self.dataType = dataType

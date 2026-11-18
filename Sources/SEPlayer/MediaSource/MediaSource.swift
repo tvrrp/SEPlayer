@@ -76,6 +76,7 @@ class BaseMediaSource: MediaSource {
     ) throws -> MediaPeriod {
         fatalError("To override")
     }
+
     func release(mediaPeriod: MediaPeriod) { fatalError("To override") }
     func disableInternal() {}
 

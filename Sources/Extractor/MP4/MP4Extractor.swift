@@ -8,19 +8,18 @@
 import CoreMedia.CMTime
 import SEPlayerCommon
 
-//#if ExtractorMP4
+/// #if ExtractorMP4
 final class MP4Extractor: Extractor {
-    public struct Flags: OptionSet {
-        public let rawValue: UInt8
-        public init(rawValue: UInt8) { self.rawValue = rawValue }
+    struct Flags: OptionSet {
+        let rawValue: UInt8
 
-        public static let workaroundIgnoreEditLists = Flags(rawValue: 1)
-        public static let emitRawSubtitleData = Flags(rawValue: 1 << 1)
-        public static let markFirstVideoTrackWithMainRole = Flags(rawValue: 1 << 2)
-        public static let readWithinGopSampleDependencies = Flags(rawValue: 1 << 3)
-        public static let readAuxiliaryTracks = Flags(rawValue: 1 << 4)
-        public static let readWithinGopSampleDependenciesH265 = Flags(rawValue: 1 << 5)
-        public static let omitTrackSampleTable = Flags(rawValue: 1 << 6)
+        static let workaroundIgnoreEditLists = Flags(rawValue: 1)
+        static let emitRawSubtitleData = Flags(rawValue: 1 << 1)
+        static let markFirstVideoTrackWithMainRole = Flags(rawValue: 1 << 2)
+        static let readWithinGopSampleDependencies = Flags(rawValue: 1 << 3)
+        static let readAuxiliaryTracks = Flags(rawValue: 1 << 4)
+        static let readWithinGopSampleDependenciesH265 = Flags(rawValue: 1 << 5)
+        static let omitTrackSampleTable = Flags(rawValue: 1 << 6)
     }
 
     private let queue: Queue
@@ -29,11 +28,7 @@ final class MP4Extractor: Extractor {
     private let omitTrackSampleTable: Bool
     private let boxParser = BoxParser()
 
-    private var nalStartCode: ByteBuffer
-    private var nalPrefix: ByteBuffer
-    private var scratch: ByteBuffer
-
-//    private var atomHeader: BlockBufferReader?
+    ///    private var atomHeader: BlockBufferReader?
     private var containerAtoms = [ContainerBox]()
 
     private var lastSniffFailures = [SniffFailure]()
@@ -70,15 +65,9 @@ final class MP4Extractor: Extractor {
         self.flags = flags.union([.readWithinGopSampleDependencies, .readWithinGopSampleDependenciesH265])
         omitTrackSampleTable = flags.contains(.omitTrackSampleTable)
         extractorOutput = PlaceholderExtractorOutput()
-
-        let allocator = ByteBufferAllocator()
-        nalStartCode = ByteBuffer(bytes: NalUnitUtil.nalStartCode)
-        nalPrefix = allocator.buffer(capacity: 6)
-        scratch = ByteBuffer()
-//        atomHeader = allocator.buffer(capacity: MP4Box.fullHeaderSize)
     }
 
-    public static func codecsToParseWithinGopSampleDependenciesAsFlags(_ videoCodecFlags: VideoCodecFlags) -> Flags {
+    static func codecsToParseWithinGopSampleDependenciesAsFlags(_ videoCodecFlags: VideoCodecFlags) -> Flags {
         var flags = Flags()
         if videoCodecFlags.contains(.h264) {
             flags.insert(.readWithinGopSampleDependencies)
@@ -175,8 +164,8 @@ private extension MP4Extractor {
             }
             try atomHeader.extend(with: blockBuffer)
             atomHeaderBytesRead = MP4Box.headerSize
-            atomSize = try! UInt64(atomHeader.readInt(as: UInt32.self))
-            atomType = try! atomHeader.readInt(as: UInt32.self)
+            atomSize = try UInt64(atomHeader.readInt(as: UInt32.self))
+            atomType = try atomHeader.readInt(as: UInt32.self)
         }
 
         if atomSize == MP4Box.definesLargeSize {
@@ -250,7 +239,7 @@ private extension MP4Extractor {
         let atomPayloadSize = Int(atomSize) - atomHeaderBytesRead
         let atomEndPosition = input.getPosition(isolation) + atomPayloadSize
         var seekRequired = false
-        var position: Int = 0
+        var position = 0
 
         if var atomData {
             try await atomData.extend(with: input.readFully(length: atomPayloadSize, isolation))
@@ -324,7 +313,7 @@ private extension MP4Extractor {
                 decodeTimeStamp: dts
             ),
             flags: sampleFlags,
-            range: 0..<sampleSize
+            range: 0 ..< sampleSize
         )
 
         track.sampleIndex += 1
@@ -343,12 +332,12 @@ private extension MP4Extractor {
         var duration = CMTime.invalid
         var tracks = [MP4Track]()
 
-//        let mvhdMetadata = try! BoxParser.Mp4TimestampData(
+//        let mvhdMetadata = try BoxParser.Mp4TimestampData(
 //            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
 //        )
 
         var gaplessInfoHolder = GaplessInfoHolder()
-        let trackSampleTables = try! boxParser.parseTraks(
+        let trackSampleTables = try boxParser.parseTraks(
             moov: moov,
             gaplessInfoHolder: &gaplessInfoHolder,
             durationTimeValue: nil,
@@ -363,10 +352,10 @@ private extension MP4Extractor {
         for (trackIndex, trackSampleTable) in trackSampleTables.enumerated() {
             guard trackSampleTable.sampleCount > 0 else { continue }
             let track = trackSampleTable.track
-            let mp4Track = MP4Track(
+            let mp4Track = try MP4Track(
                 track: track,
                 sampleTable: trackSampleTable,
-                trackOutput: try extractorOutput.track(
+                trackOutput: extractorOutput.track(
                     for: trackIndex,
                     trackType: track.type
                 )
@@ -519,11 +508,11 @@ private extension MP4Extractor {
     func canReadWithinGopSampleDependencies(format: Format) -> Bool {
         switch format.sampleMimeType {
         case .videoH264:
-            return flags.contains(.readWithinGopSampleDependencies)
+            flags.contains(.readWithinGopSampleDependencies)
         case .videoH265:
-            return flags.contains(.readWithinGopSampleDependenciesH265)
+            flags.contains(.readWithinGopSampleDependenciesH265)
         default:
-            return false
+            false
         }
     }
 
@@ -533,13 +522,12 @@ private extension MP4Extractor {
         var nextSampleTimes = tracks.map { $0.sampleTable.pts[0] }
         var finishedTracks = Set<Int>()
 
-        var accumulatedSize: Int = 0
+        var accumulatedSize = 0
 
         while finishedTracks.count < tracks.count {
             guard let minTrackIndex = tracks.indices
                 .filter({ !finishedTracks.contains($0) })
-                .min(by: { nextSampleTimes[$0] < nextSampleTimes[$1] })
-            else { break }
+                .min(by: { nextSampleTimes[$0] < nextSampleTimes[$1] }) else { break }
 
             let sampleIndex = nextSampleIndices[minTrackIndex]
             accumulatedSampleSizes[minTrackIndex][sampleIndex] = accumulatedSize
@@ -587,7 +575,7 @@ private extension MP4Extractor {
 
     func shouldParseLeafAtom(atom: UInt32) -> Bool {
         let atoms: [MP4Box.BoxType] = [
-            .mdhd, .mvhd, .hdlr, .stsd, .stts, .stss, .ctts, .elst, .stsc, .stsz, .stz2, .stco, .co64, .tkhd, .ftyp, .udta, .keys, .ilst
+            .mdhd, .mvhd, .hdlr, .stsd, .stts, .stss, .ctts, .elst, .stsc, .stsz, .stz2, .stco, .co64, .tkhd, .ftyp, .udta, .keys, .ilst,
         ]
         return atoms.contains(where: { $0.rawValue == atom })
     }
@@ -684,7 +672,7 @@ private extension MP4Extractor {
 
             if trackId == nil {
                 // Take into account other tracks, but only if the caller has not specified a trackId.
-                for index in 0..<tracks.count {
+                for index in 0 ..< tracks.count {
                     if index != firstVideoTrackIndex {
                         let sampleTable = tracks[index].sampleTable
                         firstOffset = maybeAdjustSeekOffset(using: sampleTable, seekTime: firstTime, offset: firstOffset)
@@ -722,8 +710,9 @@ private extension MP4Extractor {
 
 private extension Int {
     static let reloadMinimumSeekDistance = 256 * 1024
-    // For poorly interleaved streams, the maximum byte difference one track is allowed to be read
-    // ahead before the source will be reloaded at a new position to read another track.
+    /// For poorly interleaved streams, the maximum byte difference one track is allowed to be read
+    /// ahead before the source will be reloaded at a new position to read another track.
     static let maximumReadAheadBytesStream = 10 * 1024 * 1024
 }
-//#endif
+
+// #endif

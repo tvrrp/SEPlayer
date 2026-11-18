@@ -20,7 +20,7 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
     public var bufferCount: CMItemCount { CMBufferQueueGetBufferCount(bufferQueue) }
 
     /// Returns whether or not the `CMBufferQueue` is full.
-    public var isFull: Bool { bufferCount == capacity}
+    public var isFull: Bool { bufferCount == capacity }
 
     /// Returns whether or not the `CMBufferQueue` has been marked with EOD.
     public var containsEndOfData: Bool { CMBufferQueueContainsEndOfData(bufferQueue) }
@@ -133,7 +133,7 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
         compareHandler: @escaping (_ lhs: T, _ rhs: T) -> CFComparisonResult,
         ptsHandler: ((T) -> CMTime)? = nil,
         durationHandler: ((T) -> CMTime)? = nil,
-        isDataReady: ((T) -> Bool)? = nil,
+        isDataReady: ((T) -> Bool)? = nil
     ) throws(BufferQueueError) {
         self.capacity = capacity
         let handlers = BufferQueueHandlers(
@@ -176,33 +176,32 @@ public final class TypedCMBufferQueue<T: CMBuffer>: @unchecked Sendable {
         _ body: CMBufferQueueTriggerHandler? = nil
     ) throws(BufferQueueError) -> CMBufferQueueTriggerToken {
         var token: CMBufferQueueTriggerToken?
-        let status: OSStatus
-        switch condition {
+        let status: OSStatus = switch condition {
         case let .whenBufferCountBecomesLessThan(count):
-            status = installTrigger(kCMBufferQueueTrigger_WhenBufferCountBecomesLessThan, count: count, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenBufferCountBecomesLessThan, count: count, &token, body)
         case let .whenBufferCountBecomesGreaterThan(count):
-            status = installTrigger(kCMBufferQueueTrigger_WhenBufferCountBecomesGreaterThan, count: count, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenBufferCountBecomesGreaterThan, count: count, &token, body)
         case let .whenDurationBecomesLessThan(time):
-            status = installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesLessThan, time: time, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesLessThan, time: time, &token, body)
         case let .whenDurationBecomesLessThanOrEqualTo(time):
-            status = installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesLessThanOrEqualTo, time: time, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesLessThanOrEqualTo, time: time, &token, body)
         case let .whenDurationBecomesGreaterThan(time):
-            status = installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesGreaterThan, time: time, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesGreaterThan, time: time, &token, body)
         case let .whenDurationBecomesGreaterThanOrEqualTo(time):
-            status = installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesGreaterThanOrEqualTo, time: time, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenDurationBecomesGreaterThanOrEqualTo, time: time, &token, body)
         case .whenMinPresentationTimeStampChanges:
-            status = installTrigger(kCMBufferQueueTrigger_WhenMinPresentationTimeStampChanges, time: .zero, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenMinPresentationTimeStampChanges, time: .zero, &token, body)
         case .whenMaxPresentationTimeStampChanges:
-            status = installTrigger(kCMBufferQueueTrigger_WhenMaxPresentationTimeStampChanges, time: .zero, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenMaxPresentationTimeStampChanges, time: .zero, &token, body)
         case .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo:
             // Buffer queues have no such trigger.
-            status = kCMBufferQueueError_InvalidTriggerCondition
+            kCMBufferQueueError_InvalidTriggerCondition
         case .whenDataBecomesReady:
-            status = installTrigger(kCMBufferQueueTrigger_WhenDataBecomesReady, time: .zero, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenDataBecomesReady, time: .zero, &token, body)
         case .whenEndOfDataReached:
-            status = installTrigger(kCMBufferQueueTrigger_WhenEndOfDataReached, time: .zero, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenEndOfDataReached, time: .zero, &token, body)
         case .whenReset:
-            status = installTrigger(kCMBufferQueueTrigger_WhenReset, time: .zero, &token, body)
+            installTrigger(kCMBufferQueueTrigger_WhenReset, time: .zero, &token, body)
         }
         guard status == noErr, let token else {
             throw BufferQueueError(status: status)

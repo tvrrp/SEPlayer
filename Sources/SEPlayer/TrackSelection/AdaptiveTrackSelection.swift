@@ -158,7 +158,7 @@ class AdaptiveTrackSelection: BaseTrackSelection {
     /// The best track within the bandwidth, or the lowest one allowed.
     private func determineIdealSelectedIndex(now: CMTime, chunkDuration: CMTime) -> Int {
         var lowestBitrateAllowedIndex = 0
-        for index in 0..<length where !isTrackExcluded(index: index, now: now) {
+        for index in 0 ..< length where !isTrackExcluded(index: index, now: now) {
             let format = format(for: index)
             if requiredBitrate(format) <= bandwidth(for: format, chunkDuration: chunkDuration) {
                 return index
@@ -177,7 +177,7 @@ class AdaptiveTrackSelection: BaseTrackSelection {
         chunkDuration: CMTime,
         bufferedDuration: CMTime
     ) -> Bool {
-        let nextHigher = (0..<current).reversed().first { !isTrackExcluded(index: $0, now: now) }
+        let nextHigher = (0 ..< current).reversed().first { !isTrackExcluded(index: $0, now: now) }
         guard let nextHigher else { return false }
         let nextFormat = format(for: nextHigher)
         let required = Double(requiredBitrate(nextFormat)) * Self.switchUpMargin

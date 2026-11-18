@@ -39,11 +39,11 @@ enum HevcUtil {
             let profileIdc = Int(profileByte & 0x1F)
             let compatibilityFlags = try reader.readInt(as: UInt32.self)
             var constraintBytes = try reader.readBytes(length: 6)
-            let levelIdc = Int(try reader.readInt(as: UInt8.self))
+            let levelIdc = try Int(reader.readInt(as: UInt8.self))
             // min_spatial_segmentation_idc (16), parallelismType (8), chromaFormat (8)
             try reader.skip(4)
-            bitdepthLuma = Int(try reader.readInt(as: UInt8.self) & 0x07) + 8
-            bitdepthChroma = Int(try reader.readInt(as: UInt8.self) & 0x07) + 8
+            bitdepthLuma = try Int(reader.readInt(as: UInt8.self) & 0x07) + 8
+            bitdepthChroma = try Int(reader.readInt(as: UInt8.self) & 0x07) + 8
             try reader.skip(2) // avgFrameRate
             // constantFrameRate (2), numTemporalLayers (3), temporalIdNested (1), lengthSizeMinusOne (2)
             let layersAndLengthByte = try reader.readInt(as: UInt8.self)
@@ -52,7 +52,7 @@ enum HevcUtil {
 
             // The compatibility flags are written in reverse bit order; trailing zero constraint bytes are left out.
             var reversedFlags: UInt32 = 0
-            for bit in 0..<32 where compatibilityFlags & (1 << bit) != 0 {
+            for bit in 0 ..< 32 where compatibilityFlags & (1 << bit) != 0 {
                 reversedFlags |= 1 << (31 - bit)
             }
             while constraintBytes.last == 0 { constraintBytes.removeLast() }
@@ -74,15 +74,15 @@ enum HevcUtil {
     static func nalUnits(hvcC: BlockBufferReader) -> [(type: Int, units: [BlockBufferReader])]? {
         do {
             var reader = try hvcC.slice(from: 22)
-            let arrayCount = Int(try reader.readInt(as: UInt8.self))
+            let arrayCount = try Int(reader.readInt(as: UInt8.self))
             var arrays: [(Int, [BlockBufferReader])] = []
-            for _ in 0..<arrayCount {
-                let type = Int(try reader.readInt(as: UInt8.self) & 0x3F)
-                let count = Int(try reader.readInt(as: UInt16.self))
+            for _ in 0 ..< arrayCount {
+                let type = try Int(reader.readInt(as: UInt8.self) & 0x3F)
+                let count = try Int(reader.readInt(as: UInt16.self))
                 var units: [BlockBufferReader] = []
-                for _ in 0..<count {
-                    let length = Int(try reader.readInt(as: UInt16.self))
-                    units.append(try reader.readSlice(length: length))
+                for _ in 0 ..< count {
+                    let length = try Int(reader.readInt(as: UInt16.self))
+                    try units.append(reader.readSlice(length: length))
                 }
                 arrays.append((type, units))
             }
@@ -124,20 +124,20 @@ enum HevcUtil {
             _ = try data.readUnsignedExpGolombCodedInt() // pic_width_in_luma_samples
             _ = try data.readUnsignedExpGolombCodedInt() // pic_height_in_luma_samples
             if try data.readBit() { // conformance_window_flag
-                for _ in 0..<4 { _ = try data.readUnsignedExpGolombCodedInt() }
+                for _ in 0 ..< 4 { _ = try data.readUnsignedExpGolombCodedInt() }
             }
             bitDepthLuma = try data.readUnsignedExpGolombCodedInt() + 8
             bitDepthChroma = try data.readUnsignedExpGolombCodedInt() + 8
             let log2MaxPicOrderCountLsb = try data.readUnsignedExpGolombCodedInt() + 4
             let subLayerOrderingInfoPresent = try data.readBit()
-            for _ in (subLayerOrderingInfoPresent ? 0 : maxSubLayersMinus1)...maxSubLayersMinus1 {
+            for _ in (subLayerOrderingInfoPresent ? 0 : maxSubLayersMinus1) ... maxSubLayersMinus1 {
                 // sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics, sps_max_latency_increase_plus1
-                for _ in 0..<3 { _ = try data.readUnsignedExpGolombCodedInt() }
+                for _ in 0 ..< 3 { _ = try data.readUnsignedExpGolombCodedInt() }
             }
             // log2_min_luma_coding_block_size_minus3, log2_diff_max_min_luma_coding_block_size,
             // log2_min_luma_transform_block_size_minus2, log2_diff_max_min_luma_transform_block_size,
             // max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra
-            for _ in 0..<6 { _ = try data.readUnsignedExpGolombCodedInt() }
+            for _ in 0 ..< 6 { _ = try data.readUnsignedExpGolombCodedInt() }
             if try data.readBit(), try data.readBit() { // scaling_list_enabled_flag, sps_scaling_list_data_present_flag
                 try HevcUtil.skipScalingListData(&data)
             }
@@ -150,7 +150,7 @@ enum HevcUtil {
             }
             try HevcUtil.skipShortTermReferencePictureSets(&data)
             if try data.readBit() { // long_term_ref_pics_present_flag
-                for _ in 0..<(try data.readUnsignedExpGolombCodedInt()) {
+                for _ in try 0 ..< (data.readUnsignedExpGolombCodedInt()) {
                     try data.skipBits(log2MaxPicOrderCountLsb + 1) // lt_ref_pic_poc_lsb_sps, used_by_curr_pic_lt_sps_flag
                 }
             }
@@ -171,14 +171,14 @@ enum HevcUtil {
         try data.skipBits(8) // general_level_idc
         var subLayerProfilePresent: [Bool] = []
         var subLayerLevelPresent: [Bool] = []
-        for _ in 0..<maxSubLayersMinus1 {
-            subLayerProfilePresent.append(try data.readBit())
-            subLayerLevelPresent.append(try data.readBit())
+        for _ in 0 ..< maxSubLayersMinus1 {
+            try subLayerProfilePresent.append(data.readBit())
+            try subLayerLevelPresent.append(data.readBit())
         }
         if maxSubLayersMinus1 > 0 {
             try data.skipBits(2 * (8 - maxSubLayersMinus1)) // reserved_zero_2bits
         }
-        for index in 0..<maxSubLayersMinus1 {
+        for index in 0 ..< maxSubLayersMinus1 {
             if subLayerProfilePresent[index] { try data.skipBits(88) }
             if subLayerLevelPresent[index] { try data.skipBits(8) }
         }
@@ -186,7 +186,7 @@ enum HevcUtil {
 
     /// Skips scaling_list_data of H.265, 7.3.4.
     private static func skipScalingListData<T>(_ data: inout ParsableNalUnitBitArray<T>) throws {
-        for sizeId in 0..<4 {
+        for sizeId in 0 ..< 4 {
             for _ in stride(from: 0, to: 6, by: sizeId == 3 ? 3 : 1) {
                 if try !data.readBit() { // scaling_list_pred_mode_flag
                     _ = try data.readUnsignedExpGolombCodedInt() // scaling_list_pred_matrix_id_delta
@@ -195,7 +195,7 @@ enum HevcUtil {
                     if sizeId > 1 {
                         _ = try data.readSignedExpGolombCodedInt() // scaling_list_dc_coef_minus8
                     }
-                    for _ in 0..<coefficientCount {
+                    for _ in 0 ..< coefficientCount {
                         _ = try data.readSignedExpGolombCodedInt() // scaling_list_delta_coef
                     }
                 }
@@ -208,13 +208,13 @@ enum HevcUtil {
         let setCount = try data.readUnsignedExpGolombCodedInt()
         // In a sequence parameter set a set predicted from another takes the one before it.
         var previousDeltaPocCount = 0
-        for index in 0..<setCount {
+        for index in 0 ..< setCount {
             let isPredicted = index != 0 ? try data.readBit() : false
             if isPredicted {
                 try data.skipBit() // delta_rps_sign
                 _ = try data.readUnsignedExpGolombCodedInt() // abs_delta_rps_minus1
                 var deltaPocCount = 0
-                for _ in 0...previousDeltaPocCount {
+                for _ in 0 ... previousDeltaPocCount {
                     let usedByCurrentPicture = try data.readBit()
                     let usesDelta = usedByCurrentPicture ? true : try data.readBit()
                     if usesDelta { deltaPocCount += 1 }
@@ -223,7 +223,7 @@ enum HevcUtil {
             } else {
                 let negativeCount = try data.readUnsignedExpGolombCodedInt()
                 let positiveCount = try data.readUnsignedExpGolombCodedInt()
-                for _ in 0..<(negativeCount + positiveCount) {
+                for _ in 0 ..< (negativeCount + positiveCount) {
                     _ = try data.readUnsignedExpGolombCodedInt() // delta_poc_minus1
                     try data.skipBit() // used_by_curr_pic_flag
                 }
@@ -265,7 +265,7 @@ enum HevcUtil {
             size += Int(rbsp[offset]); offset += 1
             guard offset + size <= rbsp.count else { return nil }
             if type == payloadType {
-                return Array(rbsp[offset..<(offset + size)])
+                return Array(rbsp[offset ..< (offset + size)])
             }
             offset += size
         }
@@ -320,8 +320,8 @@ enum HevcUtil {
         guard maxLayersMinus1 > 0 else { return false }
         try skipProfileTierLevel(&data, profilePresent: true, maxSubLayersMinus1: maxSubLayersMinus1)
         let orderingInfoPresent = try data.readBit()
-        for _ in (orderingInfoPresent ? 0 : maxSubLayersMinus1)...maxSubLayersMinus1 {
-            for _ in 0..<3 { _ = try data.readUnsignedExpGolombCodedInt() }
+        for _ in (orderingInfoPresent ? 0 : maxSubLayersMinus1) ... maxSubLayersMinus1 {
+            for _ in 0 ..< 3 { _ = try data.readUnsignedExpGolombCodedInt() }
         }
         let maxLayerId = try data.readBits(6)
         let layerSetCountMinus1 = try data.readUnsignedExpGolombCodedInt()
@@ -347,7 +347,7 @@ enum HevcUtil {
         }
         let splitting = try data.readBit()
         var scalabilityTypes: [Int] = []
-        for index in 0..<16 where try data.readBit() {
+        for index in 0 ..< 16 where try data.readBit() {
             scalabilityTypes.append(index)
         }
         let auxiliaryScalability = 3
@@ -355,11 +355,11 @@ enum HevcUtil {
             return false
         }
         var dimensionIdLengths: [Int] = []
-        for _ in 0..<(scalabilityTypes.count - (splitting ? 1 : 0)) {
-            dimensionIdLengths.append(try data.readBits(3) + 1)
+        for _ in 0 ..< (scalabilityTypes.count - (splitting ? 1 : 0)) {
+            try dimensionIdLengths.append(data.readBits(3) + 1)
         }
         let nuhLayerIdPresent = try data.readBit()
-        for layer in 1...maxLayersMinus1 {
+        for layer in 1 ... maxLayersMinus1 {
             let layerId = nuhLayerIdPresent ? try data.readBits(6) : layer
             var dimensionIds: [Int] = []
             if splitting {
@@ -373,7 +373,7 @@ enum HevcUtil {
                 }
             } else {
                 for length in dimensionIdLengths {
-                    dimensionIds.append(try data.readBits(length))
+                    try dimensionIds.append(data.readBits(length))
                 }
             }
             if auxiliaryIndex < dimensionIds.count, dimensionIds[auxiliaryIndex] == 1 {

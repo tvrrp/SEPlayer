@@ -95,7 +95,7 @@ final class ReplacingCuesResolver: CuesResolver {
         if !lastCueToDiscard.endTime.isValid || lastCueToDiscard.endTime >= time {
             indexToDiscardTo -= 1
         }
-        cuesWithTimingList.removeSubrange(0..<indexToDiscardTo)
+        cuesWithTimingList.removeSubrange(0 ..< indexToDiscardTo)
     }
 
     func getPreviousCueChangeTime(_ time: CMTime) -> CMTime? {

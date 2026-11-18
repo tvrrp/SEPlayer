@@ -9,25 +9,17 @@ import CoreMedia
 @testable import SEPlayer
 
 struct TestUtil {
-    public static func buildTestData(length: Int) -> ByteBuffer {
+    static func buildTestData(length: Int) -> [UInt8] {
         buildTestData(length: length, seed: length)
     }
 
-    public static func buildTestData(length: Int, seed: Int) -> ByteBuffer {
-        var buffer = ByteBuffer()
-        buffer.reserveCapacity(minimumWritableBytes: length)
+    static func buildTestData(length: Int, seed: Int) -> [UInt8] {
         let seed: UInt8 = seed <= Int(UInt8.max) ? UInt8(seed) : UInt8.max
-
-        for _ in 0..<length {
-            let randomNumber = UInt8.random(in: 0..<seed)
-            buffer.writeInteger(randomNumber)
-        }
-
-        return buffer
+        return (0 ..< length).map { _ in UInt8.random(in: 0 ..< seed) }
     }
 
-    public static func timelinesAreSame(lhs: Timeline, rhs: Timeline) -> Bool {
-        return NoIdOrShufflingTimeline(delegate: lhs)
+    static func timelinesAreSame(lhs: Timeline, rhs: Timeline) -> Bool {
+        NoIdOrShufflingTimeline(delegate: lhs)
             .equals(to: NoIdOrShufflingTimeline(delegate: rhs))
     }
 }

@@ -6,8 +6,8 @@
 //
 
 import CoreMedia
-import Testing
 @testable import SEPlayer
+import Testing
 
 final class SEPlayerTestRunner: @unchecked Sendable {
     static let videoFormat = Format.Builder()
@@ -41,9 +41,9 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         private var initialPositionMs: Int64
         private var skipSettingMediaSources = false
 
-        init(queue: Queue = playerSyncQueue, factory: TestSEPlayerFactory? = nil) {
+        init(queue: Queue = playerSyncQueue, factory: TestSEPlayerFactory? = nil) throws {
             self.queue = queue
-            playerFactory = factory ?? TestSEPlayerFactory(queue: queue)
+            playerFactory = try factory ?? TestSEPlayerFactory(queue: queue)
             mediaSources = []
             supportedFormats = [videoFormat]
             initialPositionMs = .timeUnset
@@ -220,7 +220,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
     @discardableResult
     func start(doPrepare: Bool = true, isolation: isolated any Actor = #isolation) -> Self {
         isolation.assertIsolated()
-        Task { //@MainActor in
+        Task { // @MainActor in
             do {
                 let player = try playerFactory.setQueue(queue).build()
                 self.player = player

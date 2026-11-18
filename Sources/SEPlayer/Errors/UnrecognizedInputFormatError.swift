@@ -5,13 +5,13 @@
 //  Created by tvrrp on 10.03.2026.
 //
 
+import Extractor
 import Foundation
 import SEPlayerCommon
-import Extractor
 
 final class UnrecognizedInputFormatError: ParserError, @unchecked Sendable {
-    public let url: URL
-    public let sniffFailures: [SniffFailure]
+    let url: URL
+    let sniffFailures: [SniffFailure]
 
     init(message: String, url: URL, sniffFailures: [SniffFailure]) {
         self.url = url

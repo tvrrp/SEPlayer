@@ -7,6 +7,7 @@
 
 public enum MimeTypes: String, Sendable {
     // MARK: - Video
+
     case videoMP4 = "video/mp4"
     case videoMatroska = "video/x-matroska"
     case videoWebM = "video/webm"
@@ -36,6 +37,7 @@ public enum MimeTypes: String, Sendable {
     case videoUnknown = "video/x-unknown"
 
     // MARK: - Audio
+
     case audioMP4 = "audio/mp4"
     case audioAAC = "audio/mp4a-latm"
     case audioMatroska = "audio/x-matroska"
@@ -73,11 +75,13 @@ public enum MimeTypes: String, Sendable {
     case audioUnknown = "audio/x-unknown"
 
     // MARK: - Text
+
     case textVTT = "text/vtt"
     case textSSA = "text/x-ssa"
     case textUnknown = "text/x-unknown"
 
     // MARK: - Application
+
     case applicationMP4 = "application/mp4"
     case applicationWebM = "application/webm"
     case applicationMatroska = "application/x-matroska"
@@ -142,17 +146,18 @@ public extension MimeTypes {
             || self == .applicationPGS
             || self == .applicationDVBSubs
     }
+
     var isApplication: Bool { self.rawValue.hasPrefix("application") }
 
     var trackType: TrackType {
         if isAudio {
-            return .audio
+            .audio
         } else if isVideo {
-            return .video
+            .video
         } else if isText {
-            return .text
+            .text
         } else if isImage {
-            return .image
+            .image
         } else {
             switch self {
             case .applicationID3,
@@ -160,17 +165,17 @@ public extension MimeTypes {
                  .applicationSCTE35,
                  .applicationICY,
                  .applicationAIT:
-                return .metadata
+                .metadata
             case .applicationCameraMotion:
-                return .cameraMotion
+                .cameraMotion
             default:
-                return .unknown
+                .unknown
             }
         }
     }
 }
 
-public extension Optional where Wrapped == MimeTypes {
+public extension MimeTypes? {
     func allSamplesAreSyncSamples(codec: String?) -> Bool {
         switch self {
         case .audioMPEGL1,
@@ -182,11 +187,11 @@ public extension Optional where Wrapped == MimeTypes {
              .audioAC3,
              .audioEAC3,
              .audioEAC3JOC:
-            return true
+            true
         case .audioAAC:
-            return true // TODO: check for codec type
+            true // TODO: check for codec type
         default:
-            return false
+            false
         }
     }
 

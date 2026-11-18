@@ -224,15 +224,14 @@ final class HlsMediaSource: BaseMediaSource, HlsPlaylistTracker.PrimaryPlaylistL
     /// The offset from the live edge to play at: from #EXT-X-START, else the server's part hold back for a
     /// low-latency playlist, else its hold back, else three target durations.
     private func targetLiveOffset(_ playlist: HlsMediaPlaylist, liveEdgeOffset: CMTime) -> CMTime {
-        let targetOffset: CMTime
-        if playlist.startOffset.isValid {
-            targetOffset = playlist.duration - playlist.startOffset
+        let targetOffset: CMTime = if playlist.startOffset.isValid {
+            playlist.duration - playlist.startOffset
         } else if playlist.isLowLatency, playlist.serverControl.partHoldBack.isValid {
-            targetOffset = playlist.serverControl.partHoldBack
+            playlist.serverControl.partHoldBack
         } else if playlist.serverControl.holdBack.isValid {
-            targetOffset = playlist.serverControl.holdBack
+            playlist.serverControl.holdBack
         } else {
-            targetOffset = CMTimeMultiply(playlist.targetDuration, multiplier: 3)
+            CMTimeMultiply(playlist.targetDuration, multiplier: 3)
         }
         return targetOffset + liveEdgeOffset
     }

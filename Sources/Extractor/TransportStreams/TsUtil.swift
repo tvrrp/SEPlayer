@@ -74,7 +74,7 @@ enum TsUtil {
         position: Int
     ) throws -> Bool {
         var consecutiveSyncByteCount = 0
-        for i in -4...4 {
+        for i in -4 ... 4 {
             let currentPosition = position + i * TSConstants.packetSize
             if try currentPosition < startPosition
                 || currentPosition >= limitPosition

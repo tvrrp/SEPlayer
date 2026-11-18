@@ -223,7 +223,13 @@ final class WebvttCssParser {
 
     private static func isIdentifierCharacter(_ character: Unicode.Scalar) -> Bool {
         switch character {
-        case "A"..."Z", "a"..."z", "0"..."9", "#", "-", ".", "_": true
+        case "A" ... "Z",
+             "a" ... "z",
+             "0" ... "9",
+             "#",
+             "-",
+             ".",
+             "_": true
         default: false
         }
     }
@@ -237,7 +243,11 @@ final class WebvttCssParser {
 
     private func maybeSkipWhitespace(_ input: inout Scanner) -> Bool {
         switch input.peek() {
-        case "\t", "\r", "\n", "\u{0C}", " ":
+        case "\t",
+             "\r",
+             "\n",
+             "\u{0C}",
+             " ":
             input.position += 1
             return true
         default:
@@ -281,7 +291,7 @@ private extension WebvttCssParser {
         mutating func read(count: Int) -> String {
             let end = min(characters.count, position + count)
             var string = ""
-            string.unicodeScalars.append(contentsOf: characters[position..<end])
+            string.unicodeScalars.append(contentsOf: characters[position ..< end])
             position = end
             return string
         }
@@ -289,22 +299,22 @@ private extension WebvttCssParser {
 }
 
 private extension String {
-    static let ruleStart = "{";
-    static let ruleEnd = "}";
-    static let properyColor = "color";
-    static let properyBgColor = "background-color";
-    static let properyFamily = "font-family";
-    static let properyWeight = "font-weight";
-    static let properyFontSize = "font-size";
-    static let properyRubyPosition = "ruby-position";
-    static let valueOver = "over";
-    static let valueUnder = "under";
-    static let propertyTextCombineUpright = "text-combine-upright";
-    static let valueAll = "all";
-    static let valueDigits = "digits";
-    static let propertyTextDecoration = "text-decoration";
-    static let valueBold = "bold";
-    static let valueUnderline = "underline";
-    static let propertyFontStyle = "font-style";
-    static let valueItalic = "italic";
+    static let ruleStart = "{"
+    static let ruleEnd = "}"
+    static let properyColor = "color"
+    static let properyBgColor = "background-color"
+    static let properyFamily = "font-family"
+    static let properyWeight = "font-weight"
+    static let properyFontSize = "font-size"
+    static let properyRubyPosition = "ruby-position"
+    static let valueOver = "over"
+    static let valueUnder = "under"
+    static let propertyTextCombineUpright = "text-combine-upright"
+    static let valueAll = "all"
+    static let valueDigits = "digits"
+    static let propertyTextDecoration = "text-decoration"
+    static let valueBold = "bold"
+    static let valueUnderline = "underline"
+    static let propertyFontStyle = "font-style"
+    static let valueItalic = "italic"
 }

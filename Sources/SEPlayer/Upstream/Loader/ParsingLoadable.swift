@@ -52,7 +52,7 @@ public final class ParsingLoadable<Result>: Loadable, @unchecked Sendable {
             while !Task.isCancelled {
                 let length = end.map { $0 - position } ?? Self.readLength
                 guard length > 0,
-                      let buffer = try await dataSource.read(range: position..<(position + length), isolation),
+                      let buffer = try await dataSource.read(range: position ..< (position + length), isolation),
                       !buffer.isEmpty else {
                     break
                 }

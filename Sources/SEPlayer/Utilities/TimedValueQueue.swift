@@ -9,9 +9,7 @@ import Foundation
 import SEPlayerCommon
 
 final class TimedValueQueue<Element> {
-    var size: Int {
-        get { unfairLock.withLock { elements.count } }
-    }
+    var size: Int { unfairLock.withLock { elements.count } }
 
     private var elements: [(timestamp: Int64, value: Element)] = []
 
@@ -33,23 +31,23 @@ final class TimedValueQueue<Element> {
     }
 
     func pollFirst() -> Element? {
-        return unfairLock.withLock { elements.isEmpty ? nil : elements.removeFirst().value }
+        unfairLock.withLock { elements.isEmpty ? nil : elements.removeFirst().value }
     }
 
     func pollFloor(timestamp: Int64) -> Element? {
-        return unfairLock.withLock { pool(timestamp: timestamp, onlyOlder: true) }
+        unfairLock.withLock { pool(timestamp: timestamp, onlyOlder: true) }
     }
 
     func pool(timestamp: Int64) -> Element? {
-        return unfairLock.withLock { pool(timestamp: timestamp, onlyOlder: false) }
+        unfairLock.withLock { pool(timestamp: timestamp, onlyOlder: false) }
     }
 
     private func pool(timestamp: Int64, onlyOlder: Bool) -> Element? {
-        var result: Element? = nil
+        var result: Element?
         var previousDiff = Int64.max
         while !elements.isEmpty {
             let currentDiff = timestamp - elements[0].timestamp
-            if currentDiff < 0, (onlyOlder || -currentDiff >= previousDiff) {
+            if currentDiff < 0, onlyOlder || -currentDiff >= previousDiff {
                 break
             }
             previousDiff = currentDiff

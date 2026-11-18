@@ -23,7 +23,7 @@ final class PlayerWorkQueue: @unchecked Sendable {
     private let scheduler: PlayerScheduler
     private let lock = UnfairLock()
 
-    // Guarded by `lock`.
+    /// Guarded by `lock`.
     private var urgentWork: [() -> Void] = []
     /// Identifies the update request that is allowed to run. Cancelling the pending update, or running it, changes
     /// the identifier, so an update that was posted before does nothing when its turn comes.

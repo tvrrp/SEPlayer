@@ -100,30 +100,43 @@ enum RendererFailure: Equatable {
     private static func isOutputError(_ error: NSError) -> Bool {
         switch error.domain {
         case AVFoundationErrorDomain:
-            switch AVError.Code(rawValue: error.code) {
-            case .operationInterrupted?, .mediaServicesWereReset?, .decoderTemporarilyUnavailable?: return true
-            default: return false
+            switch AVError.Code(rawValue: error.code) ?? .unknown {
+            case .operationInterrupted,
+                 .mediaServicesWereReset,
+                 .decoderTemporarilyUnavailable: true
+            default: false
             }
         case NSOSStatusErrorDomain:
-            return [kVTInvalidSessionErr, kVTVideoDecoderMalfunctionErr, kVTVideoDecoderNotAvailableNowErr,
-                    kVTVideoDecoderReferenceMissingErr].contains(OSStatus(error.code))
+            [
+                kVTInvalidSessionErr,
+                kVTVideoDecoderMalfunctionErr,
+                kVTVideoDecoderNotAvailableNowErr,
+                kVTVideoDecoderReferenceMissingErr,
+            ].contains(OSStatus(error.code))
         default:
-            return false
+            false
         }
     }
 
     private static func isDecodingError(_ error: NSError) -> Bool {
         switch error.domain {
         case AVFoundationErrorDomain:
-            switch AVError.Code(rawValue: error.code) {
-            case .decodeFailed?, .decoderNotFound?, .failedToParse?, .fileFormatNotRecognized?: return true
-            default: return false
+            switch AVError.Code(rawValue: error.code) ?? .unknown {
+            case .decodeFailed,
+                 .decoderNotFound,
+                 .failedToParse,
+                 .fileFormatNotRecognized: true
+            default: false
             }
         case NSOSStatusErrorDomain:
-            return [kVTVideoDecoderBadDataErr, kVTVideoDecoderUnsupportedDataFormatErr, kVTCouldNotFindVideoDecoderErr,
-                    kAudioConverterErr_FormatNotSupported].contains(OSStatus(error.code))
+            [
+                kVTVideoDecoderBadDataErr,
+                kVTVideoDecoderUnsupportedDataFormatErr,
+                kVTCouldNotFindVideoDecoderErr,
+                kAudioConverterErr_FormatNotSupported,
+            ].contains(OSStatus(error.code))
         default:
-            return false
+            false
         }
     }
 }

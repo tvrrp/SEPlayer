@@ -65,7 +65,8 @@ final class PesReader: TsPayload.Reader {
 
         if flags.contains(.payloadUnitStart) {
             switch state {
-            case .findingHeader, .readingHeader:
+            case .findingHeader,
+                 .readingHeader:
                 // Expected.
                 break
             case .readingHeaderExtension:
@@ -223,21 +224,21 @@ final class PesReader: TsPayload.Reader {
         guard ptsFlag else { return }
 
         headerExtension.skipBits(4) // '0010' or '0011'
-        var pts33 = Int64(try headerExtension.readBits(3)) << 30
+        var pts33 = try Int64(headerExtension.readBits(3)) << 30
         headerExtension.skipBits(1) // marker_bit
-        pts33 |= Int64(try headerExtension.readBits(15)) << 15
+        try pts33 |= Int64(headerExtension.readBits(15)) << 15
         headerExtension.skipBits(1) // marker_bit
-        pts33 |= Int64(try headerExtension.readBits(15))
+        try pts33 |= Int64(headerExtension.readBits(15))
         headerExtension.skipBits(1) // marker_bit
 
         var dts33: Int64?
         if dtsFlag {
             headerExtension.skipBits(4) // '0011'
-            var value = Int64(try headerExtension.readBits(3)) << 30
+            var value = try Int64(headerExtension.readBits(3)) << 30
             headerExtension.skipBits(1) // marker_bit
-            value |= Int64(try headerExtension.readBits(15)) << 15
+            try value |= Int64(headerExtension.readBits(15)) << 15
             headerExtension.skipBits(1) // marker_bit
-            value |= Int64(try headerExtension.readBits(15))
+            try value |= Int64(headerExtension.readBits(15))
             headerExtension.skipBits(1) // marker_bit
             dts33 = value
         }

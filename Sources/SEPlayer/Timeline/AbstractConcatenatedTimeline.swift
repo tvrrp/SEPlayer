@@ -230,17 +230,17 @@ extension AbstractConcatenatedTimeline {
 
     private func getNextChildIndex(childIndex: Int, shuffleModeEnabled: Bool) -> Int? {
         if shuffleModeEnabled {
-            return shuffleOrder.nextIndex(index: childIndex)
+            shuffleOrder.nextIndex(index: childIndex)
         } else {
-            return childIndex < childCount - 1 ? childIndex + 1 : nil
+            childIndex < childCount - 1 ? childIndex + 1 : nil
         }
     }
 
     private func getPreviousChildIndex(childIndex: Int, shuffleModeEnabled: Bool) -> Int? {
         if shuffleModeEnabled {
-            return shuffleOrder.previousIndex(index: childIndex)
+            shuffleOrder.previousIndex(index: childIndex)
         } else {
-            return childIndex > 0 ? childIndex - 1 : nil
+            childIndex > 0 ? childIndex - 1 : nil
         }
     }
 }

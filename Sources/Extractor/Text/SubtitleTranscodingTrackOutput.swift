@@ -137,7 +137,7 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
                 decodeTimeStamp: .invalid
             ),
             flags: flags.union(.keyframe),
-            range: 0..<data.dataLength
+            range: 0 ..< data.dataLength
         )
     }
 }

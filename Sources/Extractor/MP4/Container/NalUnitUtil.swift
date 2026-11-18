@@ -62,7 +62,7 @@ public enum NalUnitUtil {
             return write
         }
 
-        return try CMBlockBuffer(bufferReference: scratch, range: 0..<unescapedLength)
+        return try CMBlockBuffer(bufferReference: scratch, range: 0 ..< unescapedLength)
     }
 
     // TODO: just pass slice of RandomAccessCollection<UInt8> and ignore offset and limit
@@ -169,12 +169,12 @@ public enum NalUnitUtil {
                 }
                 bitDepthLumaMinus8 = try data.readUnsignedExpGolombCodedInt()
                 bitDepthChromaMinus8 = try data.readUnsignedExpGolombCodedInt()
-                try data.skipBit(); // qpprime_y_zero_transform_bypass_flag
+                try data.skipBit() // qpprime_y_zero_transform_bypass_flag
                 let seqScalingMatrixPresentFlag = try Bool(data.readBit())
 
                 if seqScalingMatrixPresentFlag {
                     let limit = (chromaFormatIdc != 3) ? 8 : 12
-                    for index in 0..<limit {
+                    for index in 0 ..< limit {
                         let seqScalingListPresentFlag = try data.readBit()
                         if seqScalingListPresentFlag {
                             try SpsData.skipScalingList(bitArray: &data, size: index < 6 ? 16 : 64)
@@ -197,12 +197,12 @@ public enum NalUnitUtil {
                 try data.readSignedExpGolombCodedInt() // offset_for_top_to_bottom_field
                 let numRefFramesInPicOrderCntCycle = try data.readUnsignedExpGolombCodedInt()
 
-                for _ in 0..<numRefFramesInPicOrderCntCycle {
+                for _ in 0 ..< numRefFramesInPicOrderCntCycle {
                     try data.readUnsignedExpGolombCodedInt() // offset_for_ref_frame[i]
                 }
             }
 
-            maxNumRefFrames = try data.readUnsignedExpGolombCodedInt(); // max_num_ref_frames
+            maxNumRefFrames = try data.readUnsignedExpGolombCodedInt() // max_num_ref_frames
             try data.skipBit() // gaps_in_frame_num_value_allowed_flag
             let picWidthInMbs = try data.readUnsignedExpGolombCodedInt() + 1
             let picHeightInMapUnits = try data.readUnsignedExpGolombCodedInt() + 1
@@ -328,7 +328,7 @@ public enum NalUnitUtil {
             var lastScale = 8
             var nextScale = 8
 
-            for _ in 0..<size {
+            for _ in 0 ..< size {
                 if nextScale != 0 {
                     let deltaScale = try bitArray.readSignedExpGolombCodedInt()
                     nextScale = (lastScale + deltaScale + 256) % 256
@@ -341,7 +341,7 @@ public enum NalUnitUtil {
         private static func skipHrdParameters<T>(data: inout ParsableNalUnitBitArray<T>) throws {
             let codedPictureBufferCount = try data.readUnsignedExpGolombCodedInt() + 1 // cpb_cnt_minus1
             try data.skipBits(8) // bit_rate_scale (4), cpb_size_scale (4)
-            for _ in 0..<codedPictureBufferCount {
+            for _ in 0 ..< codedPictureBufferCount {
                 try data.readUnsignedExpGolombCodedInt() // bit_rate_value_minus1[i]
                 try data.readUnsignedExpGolombCodedInt() // cpb_size_value_minus1[i]
                 try data.skipBit() // cbr_flag[i]
@@ -438,12 +438,6 @@ public enum NalUnitUtil {
         }
     }
 
-    public static func isDependedOn(data: ByteBuffer, offset: Int, length: Int, format: Format) -> Bool {
-        let bytes = data.readableBytesView
-        let start = bytes.startIndex + offset
-        return isDependedOn(data: Array(bytes[start..<(start + length)]), format: format)
-    }
-
     /// Whether a later frame may depend on the H.265 NAL unit with this header.
     ///
     /// A sub-layer non-reference picture of the highest temporal sub-layer isn't depended on, and neither is an access
@@ -481,9 +475,9 @@ public enum NalUnitUtil {
         var reader = sample
         while reader.readableBytes >= nalUnitLengthFieldLength {
             let nalUnitLength = switch nalUnitLengthFieldLength {
-            case 1: Int(try reader.readInt(as: UInt8.self))
-            case 2: Int(try reader.readInt(as: UInt16.self))
-            default: Int(try reader.readInt(as: UInt32.self))
+            case 1: try Int(reader.readInt(as: UInt8.self))
+            case 2: try Int(reader.readInt(as: UInt16.self))
+            default: try Int(reader.readInt(as: UInt32.self))
             }
             guard nalUnitLength >= headerLength, nalUnitLength <= reader.readableBytes else {
                 // A malformed sample may be anything: it stays depended on.
@@ -546,7 +540,7 @@ private extension NalUnitUtil {
         160 / 99,
         4 / 3,
         3 / 2,
-        2
+        2,
     ]
 }
 

@@ -13,10 +13,6 @@ struct InBandParameterSets {
     private(set) var sequenceParameterSets: [[UInt8]] = []
     private(set) var pictureParameterSets: [[UInt8]] = []
 
-    init(nalUnitLengthFieldLength: Int) {
-        self.nalUnitLengthFieldLength = nalUnitLengthFieldLength
-    }
-
     /// Whether a track's samples carry the parameter sets: H.264 whose sample entry has none.
     static func areCarried(by format: Format) -> Bool {
         guard format.sampleMimeType == .videoH264 else { return false }
@@ -95,13 +91,13 @@ private extension InBandParameterSets {
 
         while reader.readableBytes >= nalUnitLengthFieldLength {
             let length = switch nalUnitLengthFieldLength {
-            case 1: Int(try reader.readInt(as: UInt8.self))
-            case 2: Int(try reader.readInt(as: UInt16.self))
-            default: Int(try reader.readInt(as: UInt32.self))
+            case 1: try Int(reader.readInt(as: UInt8.self))
+            case 2: try Int(reader.readInt(as: UInt16.self))
+            default: try Int(reader.readInt(as: UInt32.self))
             }
             guard length > 0, length <= reader.readableBytes else { break }
 
-            let range = reader.readerIndex..<(reader.readerIndex + length)
+            let range = reader.readerIndex ..< (reader.readerIndex + length)
             let header = try reader.getInt(at: reader.readerIndex, as: UInt8.self)
             switch header & 0x1F {
             case Self.sequenceParameterSetType:

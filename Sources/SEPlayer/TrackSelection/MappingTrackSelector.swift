@@ -18,7 +18,7 @@ public class MappingTrackSelector: TrackSelector {
     private var _currentMappedTrackInfo: MappedTrackInfo? // Guarded by mappedTrackInfoLock.
     private let mappedTrackInfoLock = UnfairLock()
 
-    public final override func onSelectionActivated(info: Any?) {
+    public override final func onSelectionActivated(info: Any?) {
         guard let info = info as? MappedTrackInfo else {
             return
         }
@@ -33,11 +33,11 @@ public class MappingTrackSelector: TrackSelector {
         timeline: Timeline
     ) throws -> TrackSelectorResult {
         var rendererTrackGroupCounts = Array(repeating: 0, count: rendererCapabilities.count + 1)
-        var rendererTrackGroups = Array<[TrackGroup?]>(
+        var rendererTrackGroups = [[TrackGroup?]](
             repeating: Array(repeating: nil, count: trackGroups.count),
             count: rendererCapabilities.count + 1
         )
-        var rendererFormatSupports = Array<[[Support?]]>(
+        var rendererFormatSupports = [[[Support?]]](
             repeating: Array(
                 repeating: Array(repeating: nil, count: trackGroups.count),
                 count: trackGroups.count
@@ -71,18 +71,18 @@ public class MappingTrackSelector: TrackSelector {
         var rendererNames = [String]()
         var rendererTrackTypes = [TrackType]()
 
-        for index in 0..<rendererCapabilities.count {
+        for index in 0 ..< rendererCapabilities.count {
             let rendererTrackGroupCount = rendererTrackGroupCounts[index]
             rendererTrackGroupArrays.append(TrackGroupArray(
-                trackGroups: rendererTrackGroups[index][0..<rendererTrackGroupCount].compactMap { $0 }
+                trackGroups: rendererTrackGroups[index][0 ..< rendererTrackGroupCount].compactMap { $0 }
             ))
-            rendererFormatSupports.append(Array(rendererFormatSupports[index][0..<rendererTrackGroupCount]))
+            rendererFormatSupports.append(Array(rendererFormatSupports[index][0 ..< rendererTrackGroupCount]))
             rendererNames.append(rendererCapabilities[index].name)
             rendererTrackTypes.append(rendererCapabilities[index].trackType)
         }
 
         let unmappedTrackGroupArray = TrackGroupArray(
-            trackGroups: rendererTrackGroups[rendererCapabilities.count][0..<rendererTrackGroupCounts[rendererCapabilities.count]]
+            trackGroups: rendererTrackGroups[rendererCapabilities.count][0 ..< rendererTrackGroupCounts[rendererCapabilities.count]]
                 .compactMap { $0 }
         )
 
@@ -143,7 +143,7 @@ public class MappingTrackSelector: TrackSelector {
     ) -> Tracks {
         var groups: [Tracks.Group] = []
 
-        for rendererIndex in 0..<mappedTrackInfo.rendererCount {
+        for rendererIndex in 0 ..< mappedTrackInfo.rendererCount {
             let trackGroupArray = mappedTrackInfo.rendererTrackGroups[rendererIndex]
             let rendererTrackSelections = rendererIndex < selections.count ? selections[rendererIndex] : []
 
@@ -151,10 +151,10 @@ public class MappingTrackSelector: TrackSelector {
                 let adaptiveSupported = mappedTrackInfo.rendererMixedMimeTypeAdaptiveSupports[rendererIndex] != .notSupported
 
                 let trackCount = trackGroup.length
-                var trackSupport = Array<Support.FormatSupport>(repeating: .unsupportedType, count: trackCount)
+                var trackSupport = [Support.FormatSupport](repeating: .unsupportedType, count: trackCount)
                 var selected = Array(repeating: false, count: trackCount)
 
-                for trackIndex in 0..<trackCount {
+                for trackIndex in 0 ..< trackCount {
                     trackSupport[trackIndex] = mappedTrackInfo.rendererFormatSupports[rendererIndex][groupIndex][trackIndex].formatSupport
 
                     var isTrackSelected = false
@@ -179,7 +179,7 @@ public class MappingTrackSelector: TrackSelector {
 
         for trackGroup in mappedTrackInfo.unmappedTrackGroups {
             let trackCount = trackGroup.length
-            let trackSupport = Array<Support.FormatSupport>(
+            let trackSupport = [Support.FormatSupport](
                 repeating: .unsupportedType,
                 count: trackCount
             )
@@ -216,9 +216,9 @@ public class MappingTrackSelector: TrackSelector {
 
             if formatSupportLevel > bestFormatSupportLevel ||
                 (formatSupportLevel == bestFormatSupportLevel
-                 && preferUnassociatedRenderer
-                 && !bestRendererIsUnassociated
-                 && rendererIsUnassociated) {
+                    && preferUnassociatedRenderer
+                    && !bestRendererIsUnassociated
+                    && rendererIsUnassociated) {
                 bestRendererIndex = rendererIndex
                 bestFormatSupportLevel = formatSupportLevel
                 bestRendererIsUnassociated = rendererIsUnassociated
@@ -281,7 +281,9 @@ public extension MappingTrackSelector {
                         .playableTraks
                     case .exceedCapabilities:
                         .exceedCapabilitiesTracks
-                    case .unsupportedType, .unsupportedSubtype, .unsupportedDrm:
+                    case .unsupportedType,
+                         .unsupportedSubtype,
+                         .unsupportedDrm:
                         .unsupportedTracks
                     }
 

@@ -34,8 +34,8 @@ final class SubtitleTranscodingExtractorOutput: ExtractorOutput {
             return existingTrackOutput
         }
 
-        let trackOutput = SubtitleTranscodingTrackOutput(
-            delegate: try delegate.track(for: id, trackType: trackType),
+        let trackOutput = try SubtitleTranscodingTrackOutput(
+            delegate: delegate.track(for: id, trackType: trackType),
             subtitleParserFactory: subtitleParserFactory
         )
         textTrackOutputs[id] = trackOutput

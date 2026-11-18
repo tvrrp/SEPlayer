@@ -194,11 +194,22 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
 
     private func inferFileType(url: URL, format: Format) -> FileType? {
         switch url.pathExtension.lowercased() {
-        case "ts", "tsa", "tsv", "m2ts", "mts":
+        case "ts",
+             "tsa",
+             "tsv",
+             "m2ts",
+             "mts":
             return .ts
-        case "mp4", "m4s", "m4a", "m4v", "cmfv", "cmfa", "cmft":
+        case "mp4",
+             "m4s",
+             "m4a",
+             "m4v",
+             "cmfv",
+             "cmfa",
+             "cmft":
             return .fragmentedMp4
-        case "vtt", "webvtt":
+        case "vtt",
+             "webvtt":
             return .webvtt
         default:
             // The format of a subtitle rendition may already be that of its parsed cues, with the original type in
@@ -208,7 +219,9 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
             }
             switch format.containerMimeType {
             case .videoMP2T: return .ts
-            case .videoMP4, .audioMP4, .applicationMP4: return .fragmentedMp4
+            case .videoMP4,
+                 .audioMP4,
+                 .applicationMP4: return .fragmentedMp4
             default: return nil
             }
         }

@@ -71,8 +71,8 @@ private final class TsPcrSeeker: TimestampSeeker {
         }
         let bytesToSearch = min(timestampSearchBytes, inputLength - inputPosition)
 
-        var packetBuffer = BlockBufferReader(
-            try await input.peekFully(length: bytesToSearch, isolation)
+        var packetBuffer = try await BlockBufferReader(
+            input.peekFully(length: bytesToSearch, isolation)
         )
         self.packetBuffer = packetBuffer
 

@@ -29,7 +29,7 @@ enum AccumulatedComparison {
     case decided(CFComparisonResult)
 
     static func start() -> AccumulatedComparison {
-        return .active
+        .active
     }
 
     @discardableResult
@@ -73,7 +73,8 @@ enum AccumulatedComparison {
 
     private func classify(_ result: CFComparisonResult) -> AccumulatedComparison {
         switch result {
-        case .compareLessThan, .compareGreaterThan:
+        case .compareLessThan,
+             .compareGreaterThan:
             .decided(result)
         case .compareEqualTo:
             .active

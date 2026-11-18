@@ -102,8 +102,8 @@ final class TsDurationReader {
         }
 
         input.resetPeekPosition(isolation)
-        var packetBuffer = BlockBufferReader(
-            try await input.peekFully(length: bytesToSearch, isolation)
+        var packetBuffer = try await BlockBufferReader(
+            input.peekFully(length: bytesToSearch, isolation)
         )
 //        print(searchStartPosition)
 //        self.packetBuffer = packetBuffer
@@ -119,7 +119,7 @@ final class TsDurationReader {
     ) throws -> Int64? {
         let searchStartPosition = packetBuffer.readerIndex
         let searchEndPosition = packetBuffer.capacity
-        for searchPosition in searchStartPosition..<searchEndPosition {
+        for searchPosition in searchStartPosition ..< searchEndPosition {
             if try packetBuffer.getInt(at: searchPosition, as: UInt8.self) != TSConstants.syncByte {
                 continue
             }
@@ -149,8 +149,8 @@ final class TsDurationReader {
         }
 
         input.resetPeekPosition(isolation)
-        var packetBuffer = BlockBufferReader(
-            try await input.peekFully(length: bytesToSearch, isolation)
+        var packetBuffer = try await BlockBufferReader(
+            input.peekFully(length: bytesToSearch, isolation)
         )
 //        self.packetBuffer = packetBuffer
 

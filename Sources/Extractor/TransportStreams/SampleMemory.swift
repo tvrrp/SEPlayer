@@ -30,7 +30,7 @@ final class SampleMemory {
 
     /// A copy of `range` of `source`, all of it without one.
     func copy(_ source: CMBlockBuffer, range: Range<Int>? = nil) throws -> CMBlockBuffer {
-        let range = range ?? 0..<source.dataLength
+        let range = range ?? 0 ..< source.dataLength
         guard !range.isEmpty else { return try CMBlockBuffer() }
 
         let block: CMBlockBuffer
@@ -47,7 +47,7 @@ final class SampleMemory {
                 to: UnsafeMutableRawBufferPointer(rebasing: destination.prefix(range.count))
             )
         }
-        let copy = try CMBlockBuffer(bufferReference: block, range: position..<(position + range.count))
+        let copy = try CMBlockBuffer(bufferReference: block, range: position ..< (position + range.count))
         position += range.count
         return copy
     }

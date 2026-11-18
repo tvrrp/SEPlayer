@@ -66,7 +66,8 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
                     containerMimeType: .videoMP2T
                 )
             )
-        case .h264, .h264Encrypted:
+        case .h264,
+             .h264Encrypted:
             guard !flags.contains(.ignoreH264Stream) else { return nil }
 
             return try PesReader(
@@ -115,7 +116,7 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
 
             formats = []
             let serviceCount = Int(header & 0x1F)
-            for _ in 0..<serviceCount {
+            for _ in 0 ..< serviceCount {
                 guard descriptor.count >= 6 else { break }
                 let language = String(bytes: descriptor.prefix(3), encoding: .ascii)
                 descriptor = descriptor.dropFirst(3)

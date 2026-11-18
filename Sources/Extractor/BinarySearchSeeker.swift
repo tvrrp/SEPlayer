@@ -231,9 +231,9 @@ public class BinarySearchSeeker {
         _ isolation: isolated any Actor
     ) -> ExtractorReadResult {
         if position == input.getPosition(isolation) {
-            return .continueRead
+            .continueRead
         } else {
-            return .seek(offset: position)
+            .seek(offset: position)
         }
     }
 }

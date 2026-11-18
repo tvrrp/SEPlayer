@@ -69,7 +69,7 @@ struct AudioPacketBatch {
                 throw SampleBufferError.requiredParameterMissing
             }
             let size = buffer.totalSampleSize
-            try dataBuffer.append(bufferReference: data, range: 0..<size)
+            try dataBuffer.append(bufferReference: data, range: 0 ..< size)
             timings.append(CMSampleTimingInfo(
                 duration: buffer.duration,
                 presentationTimeStamp: buffer.presentationTimeStamp,

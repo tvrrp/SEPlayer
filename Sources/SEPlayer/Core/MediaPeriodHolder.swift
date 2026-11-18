@@ -62,7 +62,7 @@ final class MediaPeriodHolder {
         self.trackSelector = trackSelector
         self.trackSelectorResults = emptyTrackSelectorResult
 
-        self.mediaPeriod = try! Self.createMediaPeriod(
+        self.mediaPeriod = try Self.createMediaPeriod(
             id: info.id,
             mediaSourceList: mediaSourceList,
             allocator: allocator,
@@ -76,7 +76,7 @@ final class MediaPeriodHolder {
     }
 
     func toPeriodTime(rendererTime: CMTime) -> CMTime {
-        return rendererTime - renderPositionOffset
+        rendererTime - renderPositionOffset
     }
 
     func getStartPositionRendererTime() -> CMTime {
@@ -84,11 +84,11 @@ final class MediaPeriodHolder {
     }
 
     func isFullyBuffered() -> Bool {
-        return isPrepared && (!hasEnabledTracks || mediaPeriod.getBufferedPosition().isPositiveInfinity )
+        isPrepared && (!hasEnabledTracks || mediaPeriod.getBufferedPosition().isPositiveInfinity)
     }
 
     func isFullyPreloaded() -> Bool {
-        return isPrepared &&
+        isPrepared &&
             isFullyBuffered() || getBufferedPosition() - info.startPosition >= targetPreloadBufferDuration
     }
 
@@ -255,13 +255,12 @@ final class MediaPeriodHolder {
     }
 
     func selectTracks(playbackSpeed: Float, timeline: Timeline, playWhenReady: Bool) throws -> TrackSelectorResult {
-        let selectorResult = try trackSelector.selectTracks(
+        try trackSelector.selectTracks(
             rendererCapabilities: rendererCapabilities,
             trackGroups: trackGroups,
             periodId: info.id,
             timeline: timeline
         )
-        return selectorResult
     }
 
     @discardableResult
@@ -286,7 +285,7 @@ final class MediaPeriodHolder {
         forceRecreateStreams: Bool,
         streamResetFlags: inout [Bool]
     ) throws -> CMTime {
-        for index in 0..<newTrackSelectorResult.selections.count {
+        for index in 0 ..< newTrackSelectorResult.selections.count {
             // Per renderer: the streams of the renderers whose selection didn't change keep playing. Where the media
             // period allows, so do the streams of a new selection of the same group: their buffer is replaced
             // instead, and the renderer keeps showing what it has.
@@ -441,7 +440,7 @@ final class MediaPeriodHolder {
         startPosition: CMTime,
         endPosition: CMTime
     ) throws -> MediaPeriod {
-        let mediaPeriod = try! mediaSourceList.createPeriod(
+        let mediaPeriod = try mediaSourceList.createPeriod(
             id: id,
             allocator: allocator,
             startPosition: startPosition
@@ -461,7 +460,7 @@ final class MediaPeriodHolder {
 
 extension MediaPeriodHolder: Equatable {
     static func == (lhs: MediaPeriodHolder, rhs: MediaPeriodHolder) -> Bool {
-        return lhs === rhs
+        lhs === rhs
     }
 }
 
@@ -474,35 +473,35 @@ extension MediaPeriodHolder {
 private extension TriggerCondition {
     func isEqual(_ other: TriggerCondition) -> Bool {
         switch (self, other) {
-        case (let .whenDurationBecomesLessThan(lhs), let .whenDurationBecomesLessThan(rhs)):
-            return lhs == rhs
-        case (let .whenDurationBecomesLessThanOrEqualTo(lhs), let .whenDurationBecomesLessThanOrEqualTo(rhs)):
-            return lhs == rhs
-        case (let .whenDurationBecomesGreaterThan(lhs), let .whenDurationBecomesGreaterThan(rhs)):
-            return lhs == rhs
-        case (let .whenDurationBecomesGreaterThanOrEqualTo(lhs), let .whenDurationBecomesGreaterThanOrEqualTo(rhs)):
-            return lhs == rhs
+        case let (.whenDurationBecomesLessThan(lhs), .whenDurationBecomesLessThan(rhs)):
+            lhs == rhs
+        case let (.whenDurationBecomesLessThanOrEqualTo(lhs), .whenDurationBecomesLessThanOrEqualTo(rhs)):
+            lhs == rhs
+        case let (.whenDurationBecomesGreaterThan(lhs), .whenDurationBecomesGreaterThan(rhs)):
+            lhs == rhs
+        case let (.whenDurationBecomesGreaterThanOrEqualTo(lhs), .whenDurationBecomesGreaterThanOrEqualTo(rhs)):
+            lhs == rhs
         case (.whenMinPresentationTimeStampChanges, .whenMinPresentationTimeStampChanges):
-            return true
+            true
         case (.whenMaxPresentationTimeStampChanges, .whenMaxPresentationTimeStampChanges):
-            return true
-        case (
-            let .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(lhs),
-            let .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(rhs)
+            true
+        case let (
+            .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(lhs),
+            .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(rhs)
         ):
-            return lhs == rhs
+            lhs == rhs
         case (.whenDataBecomesReady, .whenDataBecomesReady):
-            return true
+            true
         case (.whenEndOfDataReached, .whenEndOfDataReached):
-            return true
+            true
         case (.whenReset, .whenReset):
-            return true
-        case (let .whenBufferCountBecomesLessThan(lhs), let .whenBufferCountBecomesLessThan(rhs)):
-            return lhs == rhs
-        case (let .whenBufferCountBecomesGreaterThan(lhs), let .whenBufferCountBecomesGreaterThan(rhs)):
-            return lhs == rhs
+            true
+        case let (.whenBufferCountBecomesLessThan(lhs), .whenBufferCountBecomesLessThan(rhs)):
+            lhs == rhs
+        case let (.whenBufferCountBecomesGreaterThan(lhs), .whenBufferCountBecomesGreaterThan(rhs)):
+            lhs == rhs
         default:
-            return false
+            false
         }
     }
 }

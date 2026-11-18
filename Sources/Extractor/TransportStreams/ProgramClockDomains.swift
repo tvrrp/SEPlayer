@@ -32,13 +32,13 @@ public final class ProgramClockDomains: @unchecked Sendable {
     public func session(forProgram programNumber: Int) -> TimestampAdjuster.Session {
         let existing = lock.usingLock { () -> TimestampAdjuster.Session? in
             switch storage {
-            case .unified(let session): return session
-            case .perProgram: return byProgram[programNumber]
+            case let .unified(session): session
+            case .perProgram: byProgram[programNumber]
             }
         }
         if let existing { return existing }
 
-        guard case .perProgram(let primary) = storage else {
+        guard case let .perProgram(primary) = storage else {
             preconditionFailure("unreachable: unified always returns above")
         }
 
@@ -61,8 +61,8 @@ public final class ProgramClockDomains: @unchecked Sendable {
     public var allSessions: [TimestampAdjuster.Session] {
         lock.usingLock {
             switch storage {
-            case .unified(let session): return [session]
-            case .perProgram: return Array(byProgram.values)
+            case let .unified(session): [session]
+            case .perProgram: Array(byProgram.values)
             }
         }
     }

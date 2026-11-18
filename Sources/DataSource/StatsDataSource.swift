@@ -5,8 +5,8 @@
 //  Created by tvrrp on 23.02.2026.
 //
 
-import Foundation
 import CoreMedia
+import Foundation
 import SEPlayerCommon
 
 public final class StatsDataSource: DataSource {

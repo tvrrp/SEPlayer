@@ -359,7 +359,7 @@ final class HlsMediaPeriod: MediaPeriod {
 
         var trackGroups: [TrackGroup] = []
         if videoCodecCount > 0 {
-            trackGroups.append(try TrackGroup(id: "main", formats: variants.map { Self.deriveVideoFormat($0.format) }))
+            try trackGroups.append(TrackGroup(id: "main", formats: variants.map { Self.deriveVideoFormat($0.format) }))
             if audioCodecCount > 0,
                multivariantPlaylist.muxedAudioFormat != nil || multivariantPlaylist.audios.isEmpty {
                 let audioFormat = Self.deriveAudioFormat(
@@ -367,12 +367,12 @@ final class HlsMediaPeriod: MediaPeriod {
                     mediaTagFormat: multivariantPlaylist.muxedAudioFormat,
                     isPrimaryTrackInVariant: false
                 )
-                trackGroups.append(try TrackGroup(id: "main:audio", formats: [audioFormat]))
+                try trackGroups.append(TrackGroup(id: "main:audio", formats: [audioFormat]))
             }
             // The captions the playlist declares, as the cues parsed from them.
             for (index, captionFormat) in (multivariantPlaylist.muxedCaptionFormats ?? []).enumerated() {
                 let trackFormat = try cuesFormat(of: captionFormat)
-                trackGroups.append(try TrackGroup(id: "main:cc:\(index)", formats: [trackFormat]))
+                try trackGroups.append(TrackGroup(id: "main:cc:\(index)", formats: [trackFormat]))
             }
         } else {
             let audioFormats = variants.map {
@@ -382,7 +382,7 @@ final class HlsMediaPeriod: MediaPeriod {
                     isPrimaryTrackInVariant: true
                 )
             }
-            trackGroups.append(try TrackGroup(id: "main", formats: audioFormats))
+            try trackGroups.append(TrackGroup(id: "main", formats: audioFormats))
         }
         wrapper.prepareWithMultivariantPlaylistInfo(trackGroups: trackGroups, primaryTrackGroupIndex: 0)
     }
@@ -428,8 +428,8 @@ final class HlsMediaPeriod: MediaPeriod {
 
             let codecsKnown = formats.allSatisfy { Codecs.split($0.codecs).count == 1 }
             if allowChunklessPreparation, codecsKnown {
-                wrapper.prepareWithMultivariantPlaylistInfo(
-                    trackGroups: [try TrackGroup(id: "audio:\(name)", formats: formats)],
+                try wrapper.prepareWithMultivariantPlaylistInfo(
+                    trackGroups: [TrackGroup(id: "audio:\(name)", formats: formats)],
                     primaryTrackGroupIndex: 0
                 )
             }
@@ -452,8 +452,8 @@ final class HlsMediaPeriod: MediaPeriod {
                 position: position
             )
             wrappers.append(wrapper)
-            wrapper.prepareWithMultivariantPlaylistInfo(
-                trackGroups: [try TrackGroup(id: uid, formats: [try cuesFormat(of: rendition.format)])],
+            try wrapper.prepareWithMultivariantPlaylistInfo(
+                trackGroups: [TrackGroup(id: uid, formats: [cuesFormat(of: rendition.format)])],
                 primaryTrackGroupIndex: 0
             )
         }

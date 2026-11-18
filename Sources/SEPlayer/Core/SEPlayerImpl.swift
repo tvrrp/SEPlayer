@@ -5,13 +5,15 @@
 //  Created by Damir Yackupov on 22.05.2025.
 //
 
+// swiftlint:disable file_length
+
 import AVFoundation
 import SEPlayerCommon
 
 /// Usable from any thread. A lock guards its state: each call runs at once, under it, and so do the updates from the
 /// playback queue. The delegates hear the changes on the main queue, in order.
 final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
-    @MainActor public let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
+    @MainActor let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
 
     let clock: SEClock
     let timebase: CMTimebase
@@ -232,7 +234,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         seekForwardIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
         maxSeekToPreviousPosition: CMTime = CMTime(seconds: 1, preferredTimescale: 1000),
         pauseAtTheEndOfMediaItem: Bool = false
-    ) {
+    ) throws {
         self.identifier = identifier
         self.audioSessionController = audioSessionController
         self.workQueue = workQueue
@@ -245,7 +247,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         self.seekForwardIncrement = seekForwardIncrement
         self.maxSeekToPreviousPosition = maxSeekToPreviousPosition
         _pauseAtTheEndOfMediaItem = pauseAtTheEndOfMediaItem
-        timebase = try! CMTimebase(sourceClock: .hostTimeClock)
+        timebase = try CMTimebase(sourceClock: .hostTimeClock)
 
         let renderSynchronizer = renderersFactory.makeSynchronizer()
         self.renderers = renderersFactory.createRenderers(
@@ -271,7 +273,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         window = Window()
         period = Period()
 
-        internalPlayer = try! SEPlayerImplInternal(
+        internalPlayer = try SEPlayerImplInternal(
             queue: workQueue,
             renderers: renderers,
             trackSelector: trackSelector,
@@ -423,7 +425,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     func removeMediaItems(at range: Range<Int>) {
         lock.withLock {
             let playlistSize = mediaSourceHolderSnapshots.count
-            let clampedRange = range.lowerBound..<min(range.upperBound, playlistSize)
+            let clampedRange = range.lowerBound ..< min(range.upperBound, playlistSize)
             guard !clampedRange.isEmpty else { return }
 
             let newPlaybackInfo = removeMediaItemsInternal(
@@ -449,7 +451,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             let playlistSize = mediaSourceHolderSnapshots.count
             let fromIndex = range.lowerBound
             let toIndex = min(range.upperBound, playlistSize)
-            let clampedRange = fromIndex..<toIndex
+            let clampedRange = fromIndex ..< toIndex
             let itemCount = clampedRange.count
             let adjustedNewIndex = min(newIndex, playlistSize - itemCount)
 
@@ -505,7 +507,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 return
             }
 
-            let clampedRange = range.lowerBound..<min(range.upperBound, mediaSourceHolderSnapshots.count)
+            let clampedRange = range.lowerBound ..< min(range.upperBound, mediaSourceHolderSnapshots.count)
 
             if canUpdateMediaSources(with: mediaItems, range: clampedRange) {
                 updateMediaSources(with: mediaItems, range: clampedRange)
@@ -707,7 +709,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
     }
 
-    public func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage {
+    func createMessage(handler: @escaping (_ messageType: Int, _ message: Any?) async -> Void) -> PlayerMessage {
         lock.withLock { createMessageInternal(handler: handler) }
     }
 
@@ -780,7 +782,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     }
 
     func contentPositionInternal(playbackInfo: PlaybackInfo) -> CMTime {
-        return currentPositionInternal(playbackInfo: playbackInfo)
+        currentPositionInternal(playbackInfo: playbackInfo)
     }
 
     func currentPositionInternal(playbackInfo: PlaybackInfo) -> CMTime {
@@ -1057,7 +1059,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         let newTimeline = playbackInfo.timeline
 
         if oldTimeline.isEmpty, newTimeline.isEmpty {
-            return(false, nil)
+            return (false, nil)
         } else if oldTimeline.isEmpty != newTimeline.isEmpty {
             return (true, .playlistChanged)
         }
@@ -1088,7 +1090,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             }
 
             if positionDiscontinuity, repeatCurrentMediaItem,
-                positionDiscontinuityReason == .seek {
+               positionDiscontinuityReason == .seek {
                 return (true, .seek)
             }
         }
@@ -1108,7 +1110,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         let currentPosition = currentPosition
         pendingOperationAcks += 1
         if !mediaSourceHolderSnapshots.isEmpty {
-            removeMediaSourceHolders(range: 0..<mediaSourceHolderSnapshots.count)
+            removeMediaSourceHolders(range: 0 ..< mediaSourceHolderSnapshots.count)
         }
 
         let holders = addMediaSourceHolders(mediaSources, at: 0)
@@ -1250,7 +1252,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     }
 
     private func createMaskingTimeline() -> Timeline {
-        return PlaylistTimeline(
+        PlaylistTimeline(
             mediaSourceInfoHolders: mediaSourceHolderSnapshots,
             shuffleOrder: _shufflerOrder
         )
@@ -1298,7 +1300,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         }
 
         if playingPeriodChanged || newContentPosition < oldContentPosition {
-            //TODO: assert(!newPeriodId.isAd)
+            // TODO: assert(!newPeriodId.isAd)
             playbackInfo = playbackInfo.setPosition(
                 periodId: newPeriodId,
                 position: newContentPosition,
@@ -1493,8 +1495,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private func updatePlayWhenReady(_ playWhenReady: Bool, changeReason: PlayWhenReadyChangeReason) {
         let playbackSuppressionReason = computePlaybackSuppressionReason(playWhenReady: playWhenReady)
         guard playbackInfo.playWhenReady != playWhenReady ||
-              playbackInfo.playbackSuppressionReason != playbackSuppressionReason ||
-              playbackInfo.playWhenReadyChangeReason != changeReason else {
+            playbackInfo.playbackSuppressionReason != playbackSuppressionReason ||
+            playbackInfo.playWhenReadyChangeReason != changeReason else {
             return
         }
 
@@ -1530,7 +1532,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     }
 
     private func computePlaybackSuppressionReason(playWhenReady: Bool) -> PlaybackSuppressionReason {
-        return playWhenReady && audioSessionCommand == .wait ? .audioSessionLoss : .none
+        playWhenReady && audioSessionCommand == .wait ? .audioSessionLoss : .none
     }
 
     // MARK: - Audio session
@@ -1552,7 +1554,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private func handleAudioSessionCommand(_ command: AudioSessionCommand) {
         SELogger.info(.audioSession, "Player \(identifier.uuidString.prefix(8)): \(command)")
         switch command {
-        case .play, .wait:
+        case .play,
+             .wait:
             audioSessionCommand = command
             updatePlayWhenReady(playbackInfo.playWhenReady, changeReason: playbackInfo.playWhenReadyChangeReason)
         case let .pause(reason):
@@ -1699,7 +1702,7 @@ extension SEPlayerImpl: SEPlayerImplInternalDelegate {
             if !playbackInfo.timeline.isEmpty, newTimeline.isEmpty {
                 maskingWindowIndex = nil
                 maskingWindowPosition = .zero
-                }
+            }
 
             if !newTimeline.isEmpty, let timelines = (newTimeline as? PlaylistTimeline)?.timelines,
                timelines.count == mediaSourceHolderSnapshots.count {

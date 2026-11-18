@@ -14,6 +14,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         get { lock.withLock { _listener } }
         set { lock.withLock { _listener = newValue } }
     }
+
     final weak var delegate: SERendererDelegate?
     var name: String { String(describing: type(of: self)) }
     let trackType: TrackType
@@ -138,8 +139,8 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     }
 
     final func getStream() -> SampleStream? { sampleStream }
-    final func didReadStreamToEnd() -> Bool { return readingPosition.isPositiveInfinity }
-    final func getReadingPosition() -> CMTime { return readingPosition }
+    final func didReadStreamToEnd() -> Bool { readingPosition.isPositiveInfinity }
+    final func getReadingPosition() -> CMTime { readingPosition }
     func setStreamFinal() { streamIsFinal = true }
     final func isCurrentStreamFinal() -> Bool { streamIsFinal }
 
@@ -168,8 +169,8 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     func isReady() -> Bool { false }
     func isEnded() -> Bool { true }
     func hasPresentedOutput() -> Bool { false }
-    func getMediaClock() -> MediaClock? { return nil }
-    func getTimebase() -> CMTimebase? { return nil }
+    func getMediaClock() -> MediaClock? { nil }
+    func getTimebase() -> CMTimebase? { nil }
     func getRenderSynchronizer() -> (any PlaybackSynchronizer)? { nil }
     func setPlaybackSpeed(current: Float, target: Float) throws {}
     func enableRenderStartOfStream() {}

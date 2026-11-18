@@ -20,11 +20,9 @@ extension TrackGroupArray: Collection {
     public var startIndex: Int { trackGroups.startIndex }
     public var endIndex: Int { trackGroups.endIndex }
 
-    public subscript(index: Index) -> Iterator.Element {
-        get { return trackGroups[index] }
-    }
+    public subscript(index: Index) -> Iterator.Element { trackGroups[index] }
 
     public func index(after i: Index) -> Index {
-        return trackGroups.index(after: i)
+        trackGroups.index(after: i)
     }
 }

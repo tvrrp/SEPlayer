@@ -24,7 +24,9 @@ enum MpegVideoUtil {
     static func codecType(descriptor: ElementaryStreamDescriptor) -> MP4Box.BoxType? {
         switch descriptor.objectTypeIndication {
         case 0x20: .mp4v
-        case 0x60, 0x61, 0x65: .mp2v
+        case 0x60,
+             0x61,
+             0x65: .mp2v
         case 0x6A: .mp1v
         case 0x6C: .jpeg
         default: nil

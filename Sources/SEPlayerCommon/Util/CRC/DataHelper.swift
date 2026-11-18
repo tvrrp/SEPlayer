@@ -34,5 +34,4 @@ class DataHelper {
 
         return UInt32(revBinaryString, radix: 2) ?? 0
     }
-
 }

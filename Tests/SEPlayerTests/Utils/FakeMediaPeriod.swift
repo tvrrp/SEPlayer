@@ -7,8 +7,8 @@
 
 import CoreMedia
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 final class FakeMediaPeriod: MediaPeriod {
     func maybeThrowPrepareError() throws {}
@@ -107,7 +107,7 @@ final class FakeMediaPeriod: MediaPeriod {
         position: CMTime
     ) throws -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
-        for i in 0..<selections.count {
+        for i in 0 ..< selections.count {
             if streams[i] != nil && (selections[i] == nil || !mayRetainStreamFlags[i]) {
                 (streams[i] as? FakeSampleStream)?.release()
                 sampleStreams.remove(streams[i] as? FakeSampleStream)
@@ -240,11 +240,15 @@ final class FakeMediaPeriod: MediaPeriod {
             for sampleStream in sampleStreams.allObjects {
                 // From where the period starts or was sought to: a period that loads ahead of playback starts after
                 // the playback position.
-                try! sampleStream.writeData(
-                    startPositionUs: lastSeekPositionUs,
-                    isolation: isolation
-                )
-                progressMade = true
+                do {
+                    try sampleStream.writeData(
+                        startPositionUs: lastSeekPositionUs,
+                        isolation: isolation
+                    )
+                    progressMade = true
+                } catch {
+                    Issue.record(error)
+                }
             }
         }
         return progressMade
@@ -292,7 +296,7 @@ extension FakeMediaPeriod {
             keyFrameInterval: Int
         ) -> Self {
             var samples = [FakeSampleStream.FakeSampleStreamItem]()
-            for frameIndex in 0..<(durationUs / 33_333) {
+            for frameIndex in 0 ..< (durationUs / 33_333) {
                 let frameTimeUs = initialSampleTimeUs + Int64((Float(frameIndex * .microsecondsPerSecond) / sampleRate).rounded(.down))
                 samples.append(.init(
                     oneByteSample: frameTimeUs,

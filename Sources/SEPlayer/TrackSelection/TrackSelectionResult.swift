@@ -32,7 +32,7 @@ extension TrackSelectorResult: Equatable {
     public static func == (lhs: TrackSelectorResult, rhs: TrackSelectorResult) -> Bool {
         guard lhs.selections.count == rhs.selections.count else { return false }
 
-        for index in 0..<lhs.selections.count {
+        for index in 0 ..< lhs.selections.count {
             if !lhs.isEquivalent(to: rhs, at: index) {
                 return false
             }

@@ -38,6 +38,7 @@ final class DefaultMediaClock: MediaClock {
         timer.activate()
         return timer
     }()
+
     private var catchUpTimebase: CMTimebase?
 
     private var baselineTime: CMTime = .zero
@@ -74,25 +75,21 @@ final class DefaultMediaClock: MediaClock {
         return synchronizer.map { .synchronizer($0) } ?? .timebase(rendererTimebase)
     }
 
-    func start() {
+    func start() throws {
         // The source already runs at the playback speed, so this timebase only follows it.
-        try! rendererTimebase.setRate(to: 1)
+        try rendererTimebase.setRate(to: 1)
         standaloneClockIsStarted = true
         standaloneClock.start()
     }
 
-    func stop() {
-        try! rendererTimebase.setRate(to: .zero)
+    func stop() throws {
+        try rendererTimebase.setRate(to: .zero)
         standaloneClockIsStarted = false
         standaloneClock.stop()
     }
 
-    func resetPosition(position: CMTime) {
-//        baselineTime = position
-        try! rendererTimebase.setTime(to: position)
-//        if rendererTimebase.rate != 0 {
-//            try! rendererTimebase.setTime(baselineTime)
-//        }
+    func resetPosition(position: CMTime) throws {
+        try rendererTimebase.setTime(to: position)
         standaloneClock.resetPosition(position: position)
     }
 
@@ -139,6 +136,7 @@ final class DefaultMediaClock: MediaClock {
         }
         return rendererClock?.getPosition() ?? standaloneClock.getPosition()
     }
+
 //    func getPosition() -> CMTime {
 //        return isUsingStandaloneClock ? standaloneClock.getPosition() : (rendererClock?.getPosition() ?? .invalid)
 //    }

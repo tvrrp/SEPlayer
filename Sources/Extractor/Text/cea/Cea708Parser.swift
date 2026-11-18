@@ -23,7 +23,7 @@ public final class Cea708Parser: SubtitleParser {
     public static let cueReplacementBehavior: Format.CueReplacementBehavior = .replace
 
     private let selectedServiceNumber: Int
-    private let windows: [Window] = (0..<Cea708Parser.windowCount).map { _ in Window() }
+    private let windows: [Window] = (0 ..< Cea708Parser.windowCount).map { _ in Window() }
     private var currentWindow = 0
     private var currentPacket: DtvCcPacket?
     private var previousSequenceNumber: Int?
@@ -34,7 +34,7 @@ public final class Cea708Parser: SubtitleParser {
 
     /// - Parameter accessibilityChannel: The service number, 1 to 63; anything else is service 1.
     public init(accessibilityChannel: Int) {
-        selectedServiceNumber = (1...63).contains(accessibilityChannel) ? accessibilityChannel : 1
+        selectedServiceNumber = (1 ... 63).contains(accessibilityChannel) ? accessibilityChannel : 1
     }
 
     public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
@@ -194,9 +194,9 @@ public final class Cea708Parser: SubtitleParser {
             window.append("\n")
         case Command.horizontalCarriageReturn:
             break
-        case 0x11...0x17:
+        case 0x11 ... 0x17:
             reader.skipBits(8)
-        case 0x18...0x1F:
+        case 0x18 ... 0x1F:
             reader.skipBits(16)
         default:
             break
@@ -205,7 +205,7 @@ public final class Cea708Parser: SubtitleParser {
 
     private func handleC1Command(_ command: Int, _ reader: inout SubtitleBitReader<[UInt8]>) {
         switch command {
-        case Command.setCurrentWindow0...Command.setCurrentWindow7:
+        case Command.setCurrentWindow0 ... Command.setCurrentWindow7:
             currentWindow = command - Command.setCurrentWindow0
         case Command.clearWindows:
             forEachWindowInBitmap(&reader) { $0.clear() }
@@ -250,7 +250,7 @@ public final class Cea708Parser: SubtitleParser {
             let justification = reader.readBits(2)
             reader.skipBits(8) // effect speed, effect direction, display effect
             window.setWindowAttributes(fillColor: fill, justification: justification)
-        case Command.defineWindow0...Command.defineWindow7:
+        case Command.defineWindow0 ... Command.defineWindow7:
             currentWindow = command - Command.defineWindow0
             defineWindow(windows[currentWindow], &reader)
         default:
@@ -334,7 +334,7 @@ public final class Cea708Parser: SubtitleParser {
 
     /// Calls `body` for the windows a bitmap of the eight of them selects, window 7 first.
     private func forEachWindowInBitmap(_ reader: inout SubtitleBitReader<[UInt8]>, _ body: (Window) -> Void) {
-        for index in (0..<Self.windowCount).reversed() where reader.readBit() {
+        for index in (0 ..< Self.windowCount).reversed() where reader.readBit() {
             body(windows[index])
         }
     }

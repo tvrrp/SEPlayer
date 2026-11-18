@@ -30,7 +30,7 @@ enum AvcUtil {
             return false
         }
         var offset = 6
-        for _ in 0..<sequenceCount {
+        for _ in 0 ..< sequenceCount {
             guard let length = try? Int(avcC.getInt(at: offset, as: UInt16.self)) else {
                 return false
             }
@@ -72,14 +72,14 @@ struct AvcConfig: Format.InitializationData {
 
             func readNalUnit(reader: inout BlockBufferReader) throws -> BlockBufferView {
                 let length = try reader.readInt(as: UInt16.self)
-                return BlockBufferView(try reader.readSlice(length: Int(length)))
+                return try BlockBufferView(reader.readSlice(length: Int(length)))
             }
 
             let numbOfSpss = try data.readInt(as: Int8.self) & 0x1F
-            let sequenceParameterSets = try (0..<numbOfSpss).map { _ in try readNalUnit(reader: &data) }
+            let sequenceParameterSets = try (0 ..< numbOfSpss).map { _ in try readNalUnit(reader: &data) }
 
             let numOfPpss = try data.readInt(as: Int8.self)
-            let pictureParameterSets = try (0..<numOfPpss).map { _ in try readNalUnit(reader: &data) }
+            let pictureParameterSets = try (0 ..< numOfPpss).map { _ in try readNalUnit(reader: &data) }
 
             try self.init(
                 sequenceParameterSets: sequenceParameterSets,

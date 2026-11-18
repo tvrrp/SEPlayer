@@ -37,7 +37,7 @@ struct VideoUsabilityInformation: Hashable {
         if try data.readBit() { // aspect_ratio_info_present_flag
             let indicator = try data.readBits(8)
             if indicator == Self.extendedSampleAspectRatio {
-                aspectRatio = AspectRatio(indicator: indicator, sarWidth: try data.readBits(16), sarHeight: try data.readBits(16))
+                aspectRatio = try AspectRatio(indicator: indicator, sarWidth: data.readBits(16), sarHeight: data.readBits(16))
             } else {
                 aspectRatio = AspectRatio(indicator: indicator, sarWidth: 0, sarHeight: 0)
             }
@@ -53,10 +53,10 @@ struct VideoUsabilityInformation: Hashable {
             try data.skipBits(3) // video_format
             videoFullRange = try data.readBit()
             if try data.readBit() { // colour_description_present_flag
-                colourDescription = ColourDescription(
-                    colourPrimaries: try data.readBits(8),
-                    transferCharacteristics: try data.readBits(8),
-                    matrixCoefficients: try data.readBits(8)
+                colourDescription = try ColourDescription(
+                    colourPrimaries: data.readBits(8),
+                    transferCharacteristics: data.readBits(8),
+                    matrixCoefficients: data.readBits(8)
                 )
             } else {
                 colourDescription = nil
@@ -67,7 +67,7 @@ struct VideoUsabilityInformation: Hashable {
         }
 
         if try data.readBit() { // chroma_loc_info_present_flag
-            chromaSampleLocation = (try data.readUnsignedExpGolombCodedInt(), try data.readUnsignedExpGolombCodedInt())
+            chromaSampleLocation = try (data.readUnsignedExpGolombCodedInt(), data.readUnsignedExpGolombCodedInt())
         } else {
             chromaSampleLocation = nil
         }
@@ -87,7 +87,7 @@ struct VideoUsabilityInformation: Hashable {
         if aspectRatio.indicator == Self.extendedSampleAspectRatio {
             return (aspectRatio.sarWidth, aspectRatio.sarHeight)
         }
-        guard (1...16).contains(aspectRatio.indicator) else { return nil }
+        guard (1 ... 16).contains(aspectRatio.indicator) else { return nil }
         return Self.sampleAspectRatios[aspectRatio.indicator - 1]
     }
 

@@ -93,11 +93,14 @@ public enum Codecs {
             return .audioAAC
         }
         switch objectType {
-        case 0x69, 0x6B: return .audioMPEG
+        case 0x69,
+             0x6B: return .audioMPEG
         case 0xA5: return .audioAC3
         case 0xA6: return .audioEAC3
-        case 0xA9, 0xAC: return .audioDTS
-        case 0xAA, 0xAB: return .audioDTSHD
+        case 0xA9,
+             0xAC: return .audioDTS
+        case 0xAA,
+             0xAB: return .audioDTSHD
         case 0xAD: return .audioOPUS
         case 0xAE: return .audioAC4
         default: return .audioAAC

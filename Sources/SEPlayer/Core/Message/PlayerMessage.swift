@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 26.12.2025.
 //
 
-//import Atomics
+// import Atomics
 import CoreMedia
 import SEPlayerCommon
 
@@ -14,7 +14,7 @@ public final class PlayerMessage {
         func sendMessage(_ message: PlayerMessage)
     }
 
-    public let target: ((_ messageType: Int, _ message: Any?) async -> Void)
+    public let target: (_ messageType: Int, _ message: Any?) async -> Void
     private weak var sender: Sender?
     private let clock: SEClock
     public let timeline: Timeline
@@ -33,7 +33,7 @@ public final class PlayerMessage {
     @UnfairLocked private var _isProcessed = false
     @UnfairLocked private var _isCanceled = false
 
-//    public var isCanceled: Bool { _isCanceled.load(ordering: .sequentiallyConsistent) }
+    ///    public var isCanceled: Bool { _isCanceled.load(ordering: .sequentiallyConsistent) }
     public var isCanceled: Bool { _isCanceled }
 
     @UnfairLocked private var continuations = [CheckedContinuation<Void, Never>]()
@@ -44,7 +44,7 @@ public final class PlayerMessage {
         timeline: Timeline,
         defaultMediaItemIndex: Int,
         clock: SEClock,
-        defaultQueue: Queue,
+        defaultQueue: Queue
     ) {
         self.sender = sender
         self.target = target

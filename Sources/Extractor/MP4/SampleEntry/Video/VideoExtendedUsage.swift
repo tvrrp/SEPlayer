@@ -71,7 +71,12 @@ enum VideoExtendedUsage {
                     requiredTypes = try requiredBoxTypes(child)
                 case .lnsc:
                     throw .lensCollection
-                case .eyes, .cams, .cmfy, .cmra, .proj, .pack:
+                case .eyes,
+                     .cams,
+                     .cmfy,
+                     .cmra,
+                     .proj,
+                     .pack:
                     try readContainer(child, path: path + [type])
                 default:
                     try readLeaf(type, payload: child)
@@ -108,8 +113,8 @@ enum VideoExtendedUsage {
             guard payload.readableBytes >= 4, payload.readableBytes % 4 == 0 else {
                 throw .malformed
             }
-            return try stride(from: payload.readerIndex + 4, to: payload.readerIndex + payload.readableBytes, by: 4).map {
-                (index) throws(ReadError) -> UInt32 in
+            let offsets = stride(from: payload.readerIndex + 4, to: payload.readerIndex + payload.readableBytes, by: 4)
+            return try offsets.map { index throws(ReadError) -> UInt32 in
                 guard let type = try? payload.getInt(at: index, as: UInt32.self) else {
                     throw .malformed
                 }
@@ -147,13 +152,13 @@ enum VideoExtendedUsage {
                 extensions.addFirst(eye, for: Key.heroEye)
             case .blin:
                 // The baseline between the cameras, in micrometers.
-                extensions.addFirst(SampleDescriptionExtensions.number(try field(payload, as: UInt32.self)), for: Key.stereoCameraBaseline)
+                try extensions.addFirst(SampleDescriptionExtensions.number(field(payload, as: UInt32.self)), for: Key.stereoCameraBaseline)
             case .dadj:
-                extensions.addFirst(SampleDescriptionExtensions.number(try field(payload, as: Int32.self)), for: Key.horizontalDisparityAdjustment)
+                try extensions.addFirst(SampleDescriptionExtensions.number(field(payload, as: Int32.self)), for: Key.horizontalDisparityAdjustment)
             case .tiny:
-                extensions.addFirst(SampleDescriptionExtensions.number(try field(payload, as: UInt32.self)), for: Key.transportIdentifier)
+                try extensions.addFirst(SampleDescriptionExtensions.number(field(payload, as: UInt32.self)), for: Key.transportIdentifier)
             case .prji:
-                let kind: String? = switch MP4Box.BoxType(rawValue: try field(payload, as: UInt32.self)) {
+                let kind: String? = switch try MP4Box.BoxType(rawValue: field(payload, as: UInt32.self)) {
                 case .rect?: "Rectilinear"
                 case .equi?: "Equirectangular"
                 case .hequ?: "HalfEquirectangular"

@@ -44,7 +44,7 @@ public final class SubtitleExtractor: Extractor {
     public func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
         // TODO: Implement sniffing. For now it's safe to return true, as this extractor is meant to be the only one
         // an ExtractorsFactory returns.
-        return true
+        true
     }
 
     public func initialize(output: any ExtractorOutput, _ isolation: isolated any Actor) async throws {
@@ -150,10 +150,10 @@ public final class SubtitleExtractor: Extractor {
                 data: subtitleData.getSlice(at: 0, length: bytesRead),
                 outputOptions: outputOptions,
                 output: { cuesWithTiming in
-                    let sample = Sample(
+                    let sample = try Sample(
                         time: cuesWithTiming.startTime,
                         duration: cuesWithTiming.duration,
-                        cues: try encoder.encode(cues: cuesWithTiming.cues, duration: cuesWithTiming.duration)
+                        cues: encoder.encode(cues: cuesWithTiming.cues, duration: cuesWithTiming.duration)
                     )
 
                     samples.append(sample)
@@ -194,7 +194,7 @@ public final class SubtitleExtractor: Extractor {
         }
 
         guard index < samples.count else { return }
-        for sample in samples[index..<samples.count] {
+        for sample in samples[index ..< samples.count] {
             try await writeToOutput(sample: sample, isolation)
         }
     }
@@ -209,7 +209,7 @@ public final class SubtitleExtractor: Extractor {
                 decodeTimeStamp: .invalid
             ),
             flags: .keyframe,
-            range: 0..<sample.cues.dataLength
+            range: 0 ..< sample.cues.dataLength
         )
     }
 

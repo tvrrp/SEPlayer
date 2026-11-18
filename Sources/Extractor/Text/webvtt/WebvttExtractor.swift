@@ -64,7 +64,7 @@ public final class WebvttExtractor: Extractor {
         if length > 0 {
             let (buffer, isEndOfInput) = try await input.readFully(length: length, allowEndOfInput: true, isolation)
             if !buffer.isEmpty {
-                sampleData.append(try BlockBufferReader(buffer).getData(at: 0, length: buffer.dataLength))
+                try sampleData.append(BlockBufferReader(buffer).getData(at: 0, length: buffer.dataLength))
             }
             let reachedLength = input.getLength(isolation).map { input.getPosition(isolation) >= $0 } ?? false
             guard isEndOfInput || reachedLength else { return .continueRead }
@@ -121,7 +121,7 @@ public final class WebvttExtractor: Extractor {
         try trackOutput.sampleMetadata(
             time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: sampleTime, decodeTimeStamp: .invalid),
             flags: .keyframe,
-            range: 0..<sampleData.count
+            range: 0 ..< sampleData.count
         )
     }
 

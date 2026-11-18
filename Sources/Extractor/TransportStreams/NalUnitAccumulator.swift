@@ -75,7 +75,7 @@ final class NalUnitAccumulator {
 
     func commit() throws -> CMBlockBuffer? {
         guard writePosition > 0 else { return nil }
-        let sample = try sampleMemory.copy(buffer, range: 0..<writePosition)
+        let sample = try sampleMemory.copy(buffer, range: 0 ..< writePosition)
         writePosition = 0
         startOfNewNal = 0
 

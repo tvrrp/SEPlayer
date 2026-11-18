@@ -15,7 +15,7 @@ public struct BlockBufferView: RandomAccessCollection {
     var _buffer: BlockBufferReader
     var _range: Range<Index>
 
-    internal init(buffer: BlockBufferReader, range: Range<Index>) {
+    init(buffer: BlockBufferReader, range: Range<Index>) {
         precondition(
             range.lowerBound >= 0
                 && range.upperBound <= (buffer.readerIndex + buffer.readableBytes)
@@ -28,7 +28,7 @@ public struct BlockBufferView: RandomAccessCollection {
     public init(_ buffer: BlockBufferReader) {
         self = BlockBufferView(
             buffer: buffer,
-            range: buffer.readerIndex..<(buffer.readerIndex + buffer.readableBytes)
+            range: buffer.readerIndex ..< (buffer.readerIndex + buffer.readableBytes)
         )
     }
 
@@ -51,18 +51,15 @@ public struct BlockBufferView: RandomAccessCollection {
     }
 
     public subscript(position: Index) -> UInt8 {
-        get {
-            guard position >= self._range.lowerBound && position < self._range.upperBound else {
-                preconditionFailure("index \(position) out of range")
-            }
-            return try! self._buffer.getInt(at: position)  // range check above
+        guard position >= self._range.lowerBound && position < self._range.upperBound,
+              let byte = try? self._buffer.getInt(at: position, as: UInt8.self) else {
+            preconditionFailure("index \(position) out of range")
         }
+        return byte
     }
 
     public subscript(range: Range<Index>) -> BlockBufferView {
-        get {
-            BlockBufferView(buffer: self._buffer, range: range)
-        }
+        BlockBufferView(buffer: self._buffer, range: range)
     }
 
     public func withContiguousStorageIfAvailable<R>(_ body: (UnsafeBufferPointer<UInt8>) throws -> R) rethrows -> R? {
@@ -83,10 +80,8 @@ public extension BlockBufferReader {
     }
 
     var bytesView: BlockBufferView {
-        get {
-            BlockBufferView(
-                BlockBufferReader(self.blockBuffer)
-            )
-        }
+        BlockBufferView(
+            BlockBufferReader(self.blockBuffer)
+        )
     }
 }

@@ -5,9 +5,9 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
-import Testing
 import ObjectiveC
 @testable import SEPlayer
+import Testing
 
 struct SpannedDataTest {
     private let value1 = -1

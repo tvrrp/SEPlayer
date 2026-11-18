@@ -4,7 +4,9 @@
 //
 //  Created by Damir Yackupov on 27.06.2025.
 
-//#if ExtractorFMP4
+// swiftlint:disable file_length
+
+// #if ExtractorFMP4
 
 import CoreMedia
 import OrderedCollections
@@ -16,7 +18,7 @@ public final class FragmentedMp4Extractor: Extractor {
     private let flags: Flags
     private let sideloadedTrack: Track?
 
-    private let closedCaptionFormats: Array<Format>
+    private let closedCaptionFormats: [Format]
     private var trackBundles: OrderedDictionary<Int, TrackBundle> = .init()
 
     private let timestampSession: TimestampAdjuster.Session?
@@ -314,7 +316,7 @@ public final class FragmentedMp4Extractor: Extractor {
             )
 
             atomHeader.moveReaderIndex(to: 0)
-            atomData = try BlockBufferReader(reader: atomHeader, range: 0..<MP4Box.headerSize)
+            atomData = try BlockBufferReader(reader: atomHeader, range: 0 ..< MP4Box.headerSize)
             parserState = .readingAtomPayload
         } else {
             try checkAtomArgument(
@@ -407,7 +409,7 @@ public final class FragmentedMp4Extractor: Extractor {
         }
 
         // TODO: drmInitData
-        let mvex = try! moov.getContainerBoxOfType(type: .mvex)
+        let mvex = try moov.getContainerBoxOfType(type: .mvex)
             .checkNotNil(BoxParser.BoxParserErrors.missingBox(type: .mvex))
         var defaultSampleValuesArray = [Int: DefaultSampleValues]()
         var durationTimeValue: CMTimeValue?
@@ -452,7 +454,7 @@ public final class FragmentedMp4Extractor: Extractor {
                 let trackBundle = try await TrackBundle(
                     output: output,
                     moovSampleTable: sampleTable,
-                    defaultSampleValues: try getDefaultSampleValues(
+                    defaultSampleValues: getDefaultSampleValues(
                         defaultSampleValues: defaultSampleValuesArray,
                         trackId: track.id
                     ),
@@ -478,7 +480,7 @@ public final class FragmentedMp4Extractor: Extractor {
                 let track = sampleTable.track
                 try await trackBundles[track.id]?.reset(
                     moovSampleTable: sampleTable,
-                    defaultSampleValues: try getDefaultSampleValues(
+                    defaultSampleValues: getDefaultSampleValues(
                         defaultSampleValues: defaultSampleValuesArray,
                         trackId: track.id
                     ),
@@ -545,9 +547,9 @@ public final class FragmentedMp4Extractor: Extractor {
         var reader = BlockBufferReader(sample)
         while reader.readableBytes >= lengthFieldLength {
             let length = switch lengthFieldLength {
-            case 1: Int(try reader.readInt(as: UInt8.self))
-            case 2: Int(try reader.readInt(as: UInt16.self))
-            default: Int(try reader.readInt(as: UInt32.self))
+            case 1: try Int(reader.readInt(as: UInt8.self))
+            case 2: try Int(reader.readInt(as: UInt16.self))
+            default: try Int(reader.readInt(as: UInt32.self))
             }
             guard length > headerLength, length <= reader.readableBytes else {
                 break
@@ -559,7 +561,7 @@ public final class FragmentedMp4Extractor: Extractor {
             reader.moveReaderIndex(forwardBy: length)
             guard isSei else { continue }
 
-            let nalUnit = try CMBlockBuffer(bufferReference: sample, range: start..<(start + length))
+            let nalUnit = try CMBlockBuffer(bufferReference: sample, range: start ..< (start + length))
             let unescaped = try NalUnitUtil.unescapeStream(nalUnit, length: length)
             var payload = BlockBufferReader(unescaped)
             payload.moveReaderIndex(to: headerLength)
@@ -862,12 +864,12 @@ public final class FragmentedMp4Extractor: Extractor {
         var sampleIsSyncFrameTable = fragment.sampleIsSyncFrameTable
 
         let workaroundEveryVideoFrameIsSyncFrame = track.type == .video
-        && flags.contains(.workaroundEveryVideoFrameIsSyncFrame)
+            && flags.contains(.workaroundEveryVideoFrameIsSyncFrame)
 
         let trackRunEnd = trackRunStart + fragment.trunLength[index]
         var cumulativeTime = fragment.nextFragmentDecodeTime
 
-        for sampleIndex in trackRunStart..<trackRunEnd {
+        for sampleIndex in trackRunStart ..< trackRunEnd {
             let sampleDurationValue = try checkNonNegative(
                 value: sampleDurationsPresent ? CMTimeValue(trun.readInt(as: UInt32.self)) : defaultSampleValues.durationTimeValue
             )
@@ -876,8 +878,8 @@ public final class FragmentedMp4Extractor: Extractor {
             )
             let sampleFlags = try checkNonNegative(
                 value: sampleFlagsPresent
-                ? Int(trun.readInt(as: UInt32.self))
-                : (sampleIndex == 0 && firstSampleFlagsPresent) ? firstSampleFlags : defaultSampleValues.flags
+                    ? Int(trun.readInt(as: UInt32.self))
+                    : (sampleIndex == 0 && firstSampleFlagsPresent) ? firstSampleFlags : defaultSampleValues.flags
             )
 
             var sampleCompositionTimeOffset: CMTimeValue = 0
@@ -925,7 +927,7 @@ public final class FragmentedMp4Extractor: Extractor {
 
     private func parseUUID(
         uuid: inout BlockBufferReader,
-        out: inout TrackFragment,
+        out: inout TrackFragment
     ) throws {
         uuid.moveReaderIndex(to: MP4Box.boxSize)
         let boxArray = try uuid.readBytes(length: 16)
@@ -983,17 +985,17 @@ public final class FragmentedMp4Extractor: Extractor {
         atom.moveReaderIndex(forwardBy: 2)
         let referenceCount = try Int(atom.readInt(as: UInt16.self))
 
-        var sizes = Array<Int>(repeating: 0, count: referenceCount)
-        var offsets = Array<Int>(repeating: 0, count: referenceCount)
-        var durations = Array<CMTime>(repeating: .zero, count: referenceCount)
-        var times = Array<CMTime>(repeating: .zero, count: referenceCount)
+        var sizes = [Int](repeating: 0, count: referenceCount)
+        var offsets = [Int](repeating: 0, count: referenceCount)
+        var durations = [CMTime](repeating: .zero, count: referenceCount)
+        var times = [CMTime](repeating: .zero, count: referenceCount)
 
         // Accumulate in the sidx's own timescale. Every CMTime below is built from this
         // accumulator with the same timescale, so times[i] + durations[i] == times[i + 1]
         // holds exactly — no rounding to compensate for.
         var timeValue = earliestPtsValue
 
-        for index in 0..<referenceCount {
+        for index in 0 ..< referenceCount {
             let firstInt = try atom.readInt(as: UInt32.self)
             guard firstInt & 0x8000_0000 == 0 else {
                 throw ParserError.createForMalformedContainer(message: "Unhandled indirect reference")
@@ -1008,7 +1010,7 @@ public final class FragmentedMp4Extractor: Extractor {
 
             timeValue += referenceDuration
 
-            atom.moveReaderIndex(forwardBy: 4)  // SAP word
+            atom.moveReaderIndex(forwardBy: 4) // SAP word
             offset += sizes[index]
         }
 
@@ -1127,7 +1129,7 @@ public final class FragmentedMp4Extractor: Extractor {
         try output.sampleMetadata(
             time: sampleTimingInfo,
             flags: sampleFlags,
-            range: 0..<sampleSize
+            range: 0 ..< sampleSize
         )
 
         // After we have the sampleTimingInfo, we can commit all the pending metadata samples
@@ -1155,11 +1157,11 @@ public final class FragmentedMp4Extractor: Extractor {
     private func canReadWithinGopSampleDependencies(format: Format) -> Bool {
         switch format.sampleMimeType {
         case .videoH264:
-            return flags.contains(.readWithinGopSampleDependencies)
+            flags.contains(.readWithinGopSampleDependencies)
         case .videoH265:
-            return flags.contains(.readWithinGopSampleDependenciesH265)
+            flags.contains(.readWithinGopSampleDependenciesH265)
         default:
-            return false
+            false
         }
     }
 
@@ -1172,7 +1174,6 @@ public final class FragmentedMp4Extractor: Extractor {
             .filter(\.hasRemainingSamples)
             .min { $0.getCurrentSampleOffset() < $1.getCurrentSampleOffset() }
     }
-
 }
 
 public extension FragmentedMp4Extractor {
@@ -1199,7 +1200,7 @@ private extension FragmentedMp4Extractor {
 
     func shouldParseLeafAtom(atom: UInt32) -> Bool {
         let atoms: [MP4Box.BoxType] = [
-            .hdlr, .mdhd, .mvhd, .sidx, .stsd, .stts, .ctts, .stsc, .stsz, .stz2, .stco, .co64, .stss, .tfdt, .tfhd, .tkhd, .trex, .trun, .pssh, .saiz, .saio, .senc, .uuid, .sbgp, .sgpd, .elst, .mehd, .emsg
+            .hdlr, .mdhd, .mvhd, .sidx, .stsd, .stts, .ctts, .stsc, .stsz, .stz2, .stco, .co64, .stss, .tfdt, .tfhd, .tkhd, .trex, .trun, .pssh, .saiz, .saio, .senc, .uuid, .sbgp, .sgpd, .elst, .mehd, .emsg,
         ]
         return atoms.contains(where: { $0.rawValue == atom })
     }
@@ -1353,7 +1354,7 @@ private extension FragmentedMp4Extractor {
 
         func outputSampleEncryptionData(sampleSize: Int, clearHeaderSize: Int) -> Int {
             // TODO: outputSampleEncryptionData
-            return .zero
+            .zero
         }
     }
 
@@ -1374,4 +1375,4 @@ private extension FragmentedMp4Extractor {
     }
 }
 
-//#endif
+// #endif

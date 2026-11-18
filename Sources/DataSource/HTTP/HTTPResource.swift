@@ -5,6 +5,8 @@
 //  Created by tvrrp on 20.06.2026.
 //
 
+// swiftlint:disable file_length
+
 import CoreMedia
 import Foundation
 import SEPlayerCommon
@@ -30,7 +32,7 @@ final class HTTPResource: @unchecked Sendable {
         fileprivate var reportedAtBlock: Int?
 
         fileprivate init(position: Int, end: Int?, readAhead: ReadAhead?) {
-            range = position..<position
+            range = position ..< position
             self.end = end
             self.readAhead = readAhead
         }
@@ -268,7 +270,7 @@ private extension HTTPResource {
 
     func clampedToLength(_ range: Range<Int>) -> Range<Int> {
         let end = min(range.upperBound, length ?? .max)
-        return range.lowerBound..<max(range.lowerBound, end)
+        return range.lowerBound ..< max(range.lowerBound, end)
     }
 
     /// Suspends until the bytes of `range` arrive or the fetch bringing them stops.
@@ -440,7 +442,7 @@ private extension HTTPResource {
 
     func startStorageFetch(at offset: Int, from diskEntry: DiskCacheEntry, blockSize: Int, for reader: Reader) -> Fetch {
         let firstBlock = offset / blockSize
-        let blocks = firstBlock..<diskEntry.endOfBlocks(from: firstBlock)
+        let blocks = firstBlock ..< diskEntry.endOfBlocks(from: firstBlock)
         let start = blocks.lowerBound * blockSize
         let end = min(blocks.upperBound * blockSize, length ?? .max)
 
@@ -768,7 +770,7 @@ private extension HTTPResource {
         // Bytes asked for exactly at the end of the resource are answered with 416.
         let isAtEnd = response.statusCode == 416 && response.resourceLength == fetch.position
 
-        guard (200...299).contains(response.statusCode) || isAtEnd else {
+        guard (200 ... 299).contains(response.statusCode) || isAtEnd else {
             // A range past the end of the resource stays so: loading it again can't succeed.
             let cause = response.statusCode == 416
                 ? DataSourceError(reason: .positionOutOfRange, errorCode: .ioReadPositionOutOfRange)
@@ -817,11 +819,11 @@ private extension HTTPResource {
         if fetch.bytesToSkip > 0 {
             let skippedBytes = min(fetch.bytesToSkip, data.count)
             fetch.bytesToSkip -= skippedBytes
-            data = data.subdata(in: skippedBytes..<data.count)
+            data = data.subdata(in: skippedBytes ..< data.count)
         }
         if let end = fetch.end, fetch.position + data.count > end {
             // A server that ignores the end of `Range` sends on into bytes that are cached already.
-            data = data.subdata(in: 0..<max(0, end - fetch.position))
+            data = data.subdata(in: 0 ..< max(0, end - fetch.position))
         }
 
         let start = fetch.position
@@ -926,7 +928,7 @@ private extension HTTPResource {
 
         guard !isStoring else { return true }
         // Only a resource of a known length is stored.
-        guard let length, let cache, (200...299).contains(response.statusCode) else {
+        guard let length, let cache, (200 ... 299).contains(response.statusCode) else {
             diskEntry.close()
             self.diskEntry = nil
             return true
@@ -971,7 +973,7 @@ private extension HTTPResource {
         let firstBlock = start / cache.blockSize
         let lastBlock = (end - 1) / cache.blockSize
 
-        for block in firstBlock...lastBlock where !diskEntry.hasBlock(block) {
+        for block in firstBlock ... lastBlock where !diskEntry.hasBlock(block) {
             guard let (memory, length) = cache.pinnedFullBlock(block) else {
                 continue
             }
@@ -1111,7 +1113,7 @@ private final class Fetch: PlayerSessionDelegate, @unchecked Sendable {
     /// `nil` for the end of the resource.
     let end: Int?
 
-    // Guarded by the lock of the resource.
+    /// Guarded by the lock of the resource.
     /// The offset of the next byte the fetch delivers.
     var position: Int
     /// Bytes to drop from the start of the body, when the server ignored `Range`.
@@ -1241,7 +1243,7 @@ private final class Fetch: PlayerSessionDelegate, @unchecked Sendable {
     }
 
     private static let requestIdLock = UnfairLock()
-    nonisolated(unsafe) private static var lastRequestId: UInt64 = 0
+    private nonisolated(unsafe) static var lastRequestId: UInt64 = 0
 
     private static func makeRequestId() -> UInt64 {
         requestIdLock.withLock {

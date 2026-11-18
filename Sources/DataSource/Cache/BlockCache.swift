@@ -150,17 +150,17 @@ final class BlockCache {
         }
 
         let blockBuffer = try CMBlockBuffer()
-        for index in firstIndex...lastIndex {
+        for index in firstIndex ... lastIndex {
             guard let block = blocks[index] else { return nil }
 
             let blockStart = index * blockSize
-            let blockRange = blockStart..<(blockStart + blockSize)
+            let blockRange = blockStart ..< (blockStart + blockSize)
             let rangeInBlock = range.clamped(to: blockRange)
             let offsetInBlock = rangeInBlock.lowerBound - blockStart
 
             do {
                 try block.memory.append(
-                    offsetInBlock..<(offsetInBlock + rangeInBlock.count),
+                    offsetInBlock ..< (offsetInBlock + rangeInBlock.count),
                     to: blockBuffer
                 )
             } catch {
@@ -448,13 +448,12 @@ private extension BlockCache {
     func updateVolatility(_ index: Int) {
         guard let block = blocks[index] else { return }
 
-        let order: PurgeableMemory.Order?
-        if block.filledBytes < blockLength(index) || isProtected(index) {
-            order = nil
+        let order: PurgeableMemory.Order? = if block.filledBytes < blockLength(index) || isProtected(index) {
+            nil
         } else if index < readBlock {
-            order = .early
+            .early
         } else {
-            order = .late
+            .late
         }
 
         let isIntact = block.memory.setVolatility(order)

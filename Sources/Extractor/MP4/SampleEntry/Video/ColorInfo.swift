@@ -16,12 +16,12 @@ struct ColorInfo {
 
     /// `nil` for color boxes other than `nclx`, as ICC profiles.
     init?(reader: inout BlockBufferReader) throws {
-        let colorType = MP4Box.BoxType(rawValue: try reader.readInt(as: UInt32.self))
+        let colorType = try MP4Box.BoxType(rawValue: reader.readInt(as: UInt32.self))
         guard colorType == .nclx || colorType == .nclc else { return nil }
-        primaries = Int(try reader.readInt(as: UInt16.self))
-        transfer = Int(try reader.readInt(as: UInt16.self))
-        matrix = Int(try reader.readInt(as: UInt16.self))
-        isFullRange = colorType == .nclx ? (try reader.readInt(as: UInt8.self) & 0x80) != 0 : false
+        primaries = try Int(reader.readInt(as: UInt16.self))
+        transfer = try Int(reader.readInt(as: UInt16.self))
+        matrix = try Int(reader.readInt(as: UInt16.self))
+        isFullRange = try colorType == .nclx ? (reader.readInt(as: UInt8.self) & 0x80) != 0 : false
     }
 
     var videoRange: Format.VideoRange {

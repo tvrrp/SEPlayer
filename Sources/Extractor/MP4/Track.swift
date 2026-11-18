@@ -19,11 +19,12 @@ public struct Track {
     public let editListDurations: [Int64]?
     public let editListMediaTimes: [Int64]?
     public let nalUnitLengthFieldLength: Int
- 
-    // Backward-compatible microsecond accessors (derived from CMTime).
+
+    /// Backward-compatible microsecond accessors (derived from CMTime).
     public var durationUs: Int64 {
         duration.isValid ? duration.microseconds : .timeUnset
     }
+
     public var mediaDurationUs: Int64 {
         mediaDuration.isValid ? mediaDuration.microseconds : .timeUnset
     }

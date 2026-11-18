@@ -110,7 +110,7 @@ public final class FileDataSource: DataSource {
             throw DataSourceError(reason: .connectionNotOpened)
         }
 
-        let range = range.clamped(to: range.lowerBound..<max(range.lowerBound, length))
+        let range = range.clamped(to: range.lowerBound ..< max(range.lowerBound, length))
         defer {
             let available = max(0, length - range.upperBound)
             readAhead?.report(availableBytes: available, resourceLength: length, holdsToEnd: true)
@@ -146,7 +146,7 @@ public final class FileDataSource: DataSource {
 
         let start = range.lowerBound / Self.pageSize * Self.pageSize
         let end = min(length, Self.roundUpToPage(max(range.upperBound, start + chunkSize)))
-        let chunk = try await readChunk(start..<end, from: file)
+        let chunk = try await readChunk(start ..< end, from: file)
         keep(chunk)
         guard let buffer = try reference(range) else {
             // The file ended sooner than its size said.
@@ -178,7 +178,7 @@ private extension FileDataSource {
         let earliestStart = lastChunk.range.upperBound - Self.pageSize
         let latestStart = lastChunk.range.upperBound + chunkSize
 
-        return (earliestStart...latestStart).contains(range.lowerBound)
+        return (earliestStart ... latestStart).contains(range.lowerBound)
     }
 
     /// The bytes of `range` as references into the chunks, if they hold all of them.
@@ -191,14 +191,14 @@ private extension FileDataSource {
             }
 
             let end = min(range.upperBound, chunk.range.upperBound)
-            parts.append((chunk, position..<end))
+            parts.append((chunk, position ..< end))
             position = end
         }
 
         let blockBuffer = try CMBlockBuffer()
         for (chunk, part) in parts {
             let start = part.lowerBound - chunk.range.lowerBound
-            try blockBuffer.append(bufferReference: chunk.buffer, range: start..<(start + part.count))
+            try blockBuffer.append(bufferReference: chunk.buffer, range: start ..< (start + part.count))
         }
 
         return blockBuffer
@@ -228,7 +228,7 @@ private extension FileDataSource {
         let middleOfLastChunk = lastChunk.range.lowerBound + lastChunk.range.count / 2
         guard range.upperBound >= middleOfLastChunk else { return }
 
-        let nextRange = lastChunk.range.upperBound..<min(length, lastChunk.range.upperBound + chunkSize)
+        let nextRange = lastChunk.range.upperBound ..< min(length, lastChunk.range.upperBound + chunkSize)
         SELogger.verbose(.file, "Reading \(nextRange) ahead")
         nextChunk = (nextRange, Task { [self] in try await readChunk(nextRange, from: file) })
     }
@@ -330,14 +330,15 @@ private final class OpenFile: @unchecked Sendable {
         }
         SELogger.verbose(.file, "Read \(range), \(length) bytes")
 
-        return FileDataSource.Chunk(range: range.lowerBound..<(range.lowerBound + length), buffer: buffer)
+        return FileDataSource.Chunk(range: range.lowerBound ..< (range.lowerBound + length), buffer: buffer)
     }
 
     /// A file that is missing or can't be read stays so.
     private static func openError(_ error: Int32) -> DataSourceError {
         let errorCode: PlaybackErrorCode = switch error {
         case ENOENT: .ioFileNotFound
-        case EACCES, EPERM: .ioNoPermission
+        case EACCES,
+             EPERM: .ioNoPermission
         default: .ioUnspecified
         }
         let cause = POSIXError(POSIXErrorCode(rawValue: error) ?? .EIO)

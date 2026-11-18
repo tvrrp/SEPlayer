@@ -373,7 +373,7 @@ final class DefaultLoadControl: LoadControl {
     private func calculateTargetBufferBytes(trackSelectionArray: [SETrackSelection?]) -> Int {
         let targetBufferSize = trackSelectionArray
             .compactMap { $0 }
-            .reduce(0, { $0 + $1.trackGroup.type.defaultBufferSize(isLocalPlayback: false) /*TODO: check for local*/ })
+            .reduce(0, { $0 + $1.trackGroup.type.defaultBufferSize(isLocalPlayback: false) /* TODO: check for local */ })
         return max(.defaultMinBufferSize, targetBufferSize)
     }
 
@@ -407,11 +407,11 @@ private extension DefaultLoadControl {
 }
 
 extension DefaultLoadControl {
-    public enum DefaultConstants {
-        public static let backBufferDuration: CMTime = .zero
-        public static let retainBackBufferFromKeyframe: Bool = true
+    enum DefaultConstants {
+        static let backBufferDuration: CMTime = .zero
+        static let retainBackBufferFromKeyframe: Bool = true
         /// How much more to buffer before asking again whether to start, when no threshold says.
-        public static let playbackCheckStep: CMTime = CMTime(seconds: 0.5, preferredTimescale: 1000)
+        static let playbackCheckStep: CMTime = .init(seconds: 0.5, preferredTimescale: 1000)
     }
 }
 
@@ -453,6 +453,7 @@ struct HlsStartupThresholds {
             : nil
     }
 }
+
 private extension Int {
     static let defaultBufferSegmentSize: Int = 64 * 1024
     static let defaultVideoBufferSize: Int = 2000 * .defaultBufferSegmentSize

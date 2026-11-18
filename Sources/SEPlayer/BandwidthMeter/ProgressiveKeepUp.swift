@@ -65,7 +65,7 @@ func progressiveIsLikelyToKeepUp(
     var wait = 0.0
     var likely = true
 
-    for index in firstUnbufferedBucket..<ProgressiveDemandProfile.bucketCount {
+    for index in firstUnbufferedBucket ..< ProgressiveDemandProfile.bucketCount {
         let bytes = profile.bytes[index]
         // A bucket without bytes ends the walk.
         if bytes == 0 { break }

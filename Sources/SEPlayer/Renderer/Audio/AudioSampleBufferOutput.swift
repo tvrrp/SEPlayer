@@ -93,5 +93,6 @@ final class AVFAudioSampleBufferOutput: AudioSampleBufferOutput {
     func requestMediaDataWhenReady(on queue: DispatchQueue, using callback: @escaping @Sendable () -> Void) {
         renderer.requestMediaDataWhenReady(on: queue, using: callback)
     }
+
     func stopRequestingMediaData() { renderer.stopRequestingMediaData() }
 }

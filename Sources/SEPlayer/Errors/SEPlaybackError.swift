@@ -151,7 +151,8 @@ private extension SEPlaybackError {
             return sourceErrorCode(for: error) ?? .ioUnspecified
         case .renderer:
             return rendererErrorCode(for: error, trackType: .unknown)
-        case .unexpected, .remote:
+        case .unexpected,
+             .remote:
             if let error = error as? PlaybackErrorCodeProviding { return error.errorCode }
             return error is UnexpectedStateError || error is UnsupportedOperationError ? .failedRuntimeCheck : .unspecified
         }
@@ -160,7 +161,7 @@ private extension SEPlaybackError {
     /// Whether the error is one of loading or parsing the media.
     static func isSourceError(_ error: Error) -> Bool {
         if let code = sourceErrorCode(for: error) {
-            return code == .behindLiveWindow || (2000..<4000).contains(code.rawValue)
+            return code == .behindLiveWindow || (2000 ..< 4000).contains(code.rawValue)
         }
         return false
     }
@@ -196,9 +197,12 @@ private extension SEPlaybackError {
         }
         if nsError.domain == NSOSStatusErrorDomain {
             switch OSStatus(nsError.code) {
-            case kVTCouldNotFindVideoDecoderErr, kVTVideoDecoderUnsupportedDataFormatErr: return .decodingFormatUnsupported
-            case kVTVideoDecoderNotAvailableNowErr, kVTVideoDecoderAuthorizationErr: return .decoderInitFailed
-            case kVTVideoDecoderBadDataErr, kVTVideoDecoderMalfunctionErr: return .decodingFailed
+            case kVTCouldNotFindVideoDecoderErr,
+                 kVTVideoDecoderUnsupportedDataFormatErr: return .decodingFormatUnsupported
+            case kVTVideoDecoderNotAvailableNowErr,
+                 kVTVideoDecoderAuthorizationErr: return .decoderInitFailed
+            case kVTVideoDecoderBadDataErr,
+                 kVTVideoDecoderMalfunctionErr: return .decodingFailed
             default: break
             }
         }

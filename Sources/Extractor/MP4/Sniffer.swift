@@ -148,7 +148,7 @@ struct Sniffer {
 
                 var compatibleBrands = [UInt32]()
                 if !foundGoodFileType, compatibleBrandsCount > 0 {
-                    for _ in 0..<compatibleBrandsCount {
+                    for _ in 0 ..< compatibleBrandsCount {
                         let compatibleBrand = try buffer.readInt(as: UInt32.self)
                         compatibleBrands.append(compatibleBrand)
                         if isCompatibleBrand(compatibleBrand) {
@@ -181,9 +181,9 @@ struct Sniffer {
     private func isCompatibleBrand(_ brand: UInt32) -> Bool {
         if brand >> 8 == 0x00336770 {
             // Brand starts with '3gp'.
-            return true
+            true
         } else {
-            return compatibleBrands.contains(brand)
+            compatibleBrands.contains(brand)
         }
     }
 }

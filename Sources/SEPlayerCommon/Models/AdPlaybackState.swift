@@ -12,7 +12,7 @@ public struct AdPlaybackState: Hashable, Sendable {
         contentDuration: .invalid
     )
 
-    private(set) public var contentDuration: CMTime
+    public private(set) var contentDuration: CMTime
 
     init(adGroupTimes: [CMTime]) {
         contentDuration = .invalid

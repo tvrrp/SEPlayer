@@ -89,7 +89,7 @@ final class PlaylistTimeline: AbstractConcatenatedTimeline, @unchecked Sendable 
     func periodCount() -> Int { _periodCount }
 
     func copyWithPlaceholderTimeline(shuffleOrder: ShuffleOrder) -> PlaylistTimeline {
-        return PlaylistTimeline(
+        PlaylistTimeline(
             timelines: timelines.map { ForwardingTimelineImpl(timeline: $0) },
             ids: ids,
             shuffleOrder: shuffleOrder
@@ -105,7 +105,7 @@ private extension PlaylistTimeline {
             let superPeriod = super.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
             // TODO: live
 //            if super.getWindow(windowIndex: superPeriod.windowIndex, window: window).isLive {
-//                
+//
 //            } else {
             superPeriod.isPlaceholder = true
             return superPeriod

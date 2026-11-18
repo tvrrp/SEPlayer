@@ -24,7 +24,7 @@ public struct Unseekable: SeekMap {
         )
     }
 
-    public func isSeekable() -> Bool { return false }
+    public func isSeekable() -> Bool { false }
     public func getDuration() -> CMTime { duration }
     public func getSeekPoints(for time: CMTime) -> SeekPoints { startSeekPoints }
 }

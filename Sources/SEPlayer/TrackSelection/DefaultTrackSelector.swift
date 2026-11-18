@@ -5,6 +5,8 @@
 //  Created by tvrrp on 18.02.2026.
 //
 
+// swiftlint:disable file_length
+
 import AVFoundation
 import SEPlayerCommon
 #if canImport(MediaAccessibility)
@@ -19,6 +21,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
     var variantFilterEnvironment: (() -> VariantFilters.Environment)? = { .current() } {
         didSet { lock.withLock { cachedVariantFilterEnvironment = nil } }
     }
+
     /// The environment as of its last change. Asking for it is a call to the media server, too slow for every
     /// selection: it is asked once, ahead of the first one, and again after the system says it changed.
     private var cachedVariantFilterEnvironment: VariantFilters.Environment? // Guarded by lock.
@@ -86,11 +89,13 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         }
     }
 
-    @objc private func audioCapabilitiesDidChange() {
+    @objc
+    private func audioCapabilitiesDidChange() {
         invalidate()
     }
 
-    @objc private func variantFilterEnvironmentDidChange() {
+    @objc
+    private func variantFilterEnvironmentDidChange() {
         lock.withLock { cachedVariantFilterEnvironment = nil }
         invalidate()
     }
@@ -102,10 +107,6 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         let environment = provider()
         lock.withLock { cachedVariantFilterEnvironment = environment }
         return environment
-    }
-
-    public override func release() {
-        super.release()
     }
 
     public override func setVideoOutputSize(_ size: CGSize?) {
@@ -185,7 +186,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
             outDefinitions: &definitions
         )
 
-        for index in 0..<mappedTrackInfo.rendererCount {
+        for index in 0 ..< mappedTrackInfo.rendererCount {
             if parameters.rendererDisabledFlags[index] == true || parameters.disabledTrackTypes.contains(mappedTrackInfo.rendererTrackTypes[index]) {
                 definitions[index] = nil
             }
@@ -199,16 +200,14 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         )
 
         var rendererConfigurations = [RendererConfiguration?]()
-        for index in 0..<mappedTrackInfo.rendererCount {
+        for index in 0 ..< mappedTrackInfo.rendererCount {
             let rendererType = mappedTrackInfo.rendererTrackTypes[index]
             let forceRendererDisabled = parameters.rendererDisabledFlags[index] == true || parameters.disabledTrackTypes.contains(rendererType)
             let rendererEnabled = !forceRendererDisabled && (rendererType == .none || rendererTrackSelections[index] != nil)
             rendererConfigurations.append(rendererEnabled ? .init() : nil)
         }
 
-        if parameters.tunnelingEnabled {
-            
-        }
+        if parameters.tunnelingEnabled {}
         // TODO: tunneling and offload
 
         return (rendererConfigurations, rendererTrackSelections)
@@ -221,7 +220,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         params: Parameters
     ) throws -> [SETrackSelectionDefinition?] {
         let rendererCount = mappedTrackInfo.rendererCount
-        var definitions = Array<SETrackSelectionDefinition?>(repeating: nil, count: rendererCount)
+        var definitions = [SETrackSelectionDefinition?](repeating: nil, count: rendererCount)
 
         let selectedAudio = try selectAudioTrack(
             mappedTrackInfo: mappedTrackInfo,
@@ -266,7 +265,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
             definitions[index] = selectedText
         }
 
-        for index in 0..<rendererCount {
+        for index in 0 ..< rendererCount {
             let trackType = mappedTrackInfo.rendererTrackTypes[index]
             if ![.video, .audio, .text, .image].contains(trackType) {
                 definitions[index] = try selectOtherTrack(
@@ -328,12 +327,12 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         mappedTrackInfo: MappingTrackSelector.MappedTrackInfo,
         rendererFormatSupports: [[[RendererCapabilities.Support]]],
         rendererMixedMimeTypeAdaptationSupport: [RendererCapabilities.Support.AdaptiveSupport],
-        params: Parameters,
+        params: Parameters
     ) throws -> (SETrackSelectionDefinition, Int)? {
         let hasVideoRendererWithMappedTracks = zip(
             mappedTrackInfo.rendererTrackTypes,
             mappedTrackInfo.rendererTrackGroups
-        ).first(where: { (type, trackGroup) in
+        ).first(where: { type, trackGroup in
             if type == .video, trackGroup.count > 0 {
                 return true
             }
@@ -407,17 +406,17 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         trackType: TrackType,
         groups: TrackGroupArray,
         formatSupport: [[RendererCapabilities.Support]],
-        params: Parameters,
+        params: Parameters
     ) throws -> SETrackSelectionDefinition? {
-        return nil
+        nil
     }
 
     private func selectImageTrack(
         mappedTrackInfo: MappingTrackSelector.MappedTrackInfo,
         rendererFormatSupports: [[[RendererCapabilities.Support]]],
-        params: Parameters,
+        params: Parameters
     ) throws -> (SETrackSelectionDefinition, Int)? {
-        return nil
+        nil
     }
 
     private func selectTrackForType<T: TrackInfo>(
@@ -428,7 +427,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         comparator: ([T], [T]) -> CFComparisonResult
     ) throws -> (SETrackSelectionDefinition, Int)? {
         var possibleSelections = [[T]]()
-        for rendererIndex in 0..<mappedTrackInfo.rendererCount {
+        for rendererIndex in 0 ..< mappedTrackInfo.rendererCount {
             guard type == mappedTrackInfo.rendererTrackTypes[rendererIndex] else {
                 continue
             }
@@ -452,7 +451,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
                         selection = []
                         selection.append(trackInfo)
 
-                        for i in (trackIndex + 1)..<group.count {
+                        for i in (trackIndex + 1) ..< group.count {
                             let otherTrackInfo = trackInfos[i]
                             if otherTrackInfo.getSelectionEligibility() == .adaptive {
                                 if trackInfo.isCompatibleForAdaptationWith(otherTrackInfo) {
@@ -482,7 +481,7 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
     }
 
     private func maybeInvalidateForRendererCapabilitiesChange(_ renderer: SERenderer) {
-        if lock.withLock({ parameters.allowInvalidateSelectionsOnRendererCapabilitiesChange}) {
+        if lock.withLock({ parameters.allowInvalidateSelectionsOnRendererCapabilitiesChange }) {
             invalidateForRendererCapabilitiesChange(renderer)
         }
     }
@@ -508,14 +507,14 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
             overridesByType: &overridesByType
         )
 
-        for rendererIndex in 0..<mappedTrackInfo.rendererCount {
+        for rendererIndex in 0 ..< mappedTrackInfo.rendererCount {
             let trackType = mappedTrackInfo.rendererTrackTypes[rendererIndex]
             guard let overrideForType = overridesByType[trackType] else {
                 continue
             }
 
             let selection: SETrackSelectionDefinition? = if !overrideForType.trackIndices.isEmpty,
-                mappedTrackInfo.rendererTrackGroups[rendererIndex].firstIndex(of: overrideForType.mediaTrackGroup) != nil {
+                                                            mappedTrackInfo.rendererTrackGroups[rendererIndex].firstIndex(of: overrideForType.mediaTrackGroup) != nil {
                 SETrackSelectionDefinition(group: overrideForType.mediaTrackGroup, tracks: overrideForType.trackIndices)
             } else {
                 nil
@@ -537,8 +536,8 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
 
             let existingOverride = overridesByType[override.type]
             if existingOverride == nil ||
-               (existingOverride?.trackIndices.isEmpty == true &&
-                override.trackIndices.isEmpty == false) {
+                (existingOverride?.trackIndices.isEmpty == true &&
+                    override.trackIndices.isEmpty == false) {
                 overridesByType[override.type] = override
             }
         }
@@ -583,7 +582,7 @@ public extension DefaultTrackSelector {
         }
 
         static func getBestLabelMatchIndex(format: Format, preferredLabels: [String]) -> Int {
-            for i in 0..<preferredLabels.count {
+            for i in 0 ..< preferredLabels.count {
                 for label in format.labels {
                     if label == preferredLabels[i] { return i }
                 }
@@ -631,9 +630,9 @@ public extension DefaultTrackSelector {
 
         static func normalizeUndeterminedLanguageToNil(_ language: String?) -> String? {
             if language?.isEmpty != false || language == "und" {
-                return nil
+                nil
             } else {
-                return language
+                language
             }
         }
 
@@ -696,7 +695,7 @@ public extension DefaultTrackSelector {
             }
 
             allowMixedMimeTypes = parameters.allowVideoMixedMimeTypeAdaptiveness
-                 && !mixedMimeTypeAdaptationSupport.intersection(requiredAdaptiveSupport).isEmpty
+                && !mixedMimeTypeAdaptationSupport.isDisjoint(with: requiredAdaptiveSupport)
 
             // Unknown values are within the limits.
             isWithinMaxConstraints = isSuitableForViewport
@@ -785,7 +784,7 @@ public extension DefaultTrackSelector {
                 orientationMayChange: viewportOrientationMayChange
             )
 
-            return trackGroup.enumerated().map { index, format in
+            return trackGroup.indices.map { index in
                 VideoTrackInfo(
                     rendererIndex: rendererIndex,
                     trackGroup: trackGroup,
@@ -897,13 +896,13 @@ public extension DefaultTrackSelector {
             }
 
             return rendererSupport.isFormatSupported(allowExceedsCapabilities: false)
-                    && isWithinMinConstraints
-                    && isWithinMaxConstraints
-                    && format.bitrate != Format.noValue
-                    && !params.forceHighestSupportedBitrate
-                    && !params.forceLowestBitrate
-                    // Any of the required kinds of adaptation will do.
-                    && !rendererSupport.adaptiveSupport.intersection(requiredAdaptiveSupport).isEmpty
+                && isWithinMinConstraints
+                && isWithinMaxConstraints
+                && format.bitrate != Format.noValue
+                && !params.forceHighestSupportedBitrate
+                && !params.forceLowestBitrate
+                // Any of the required kinds of adaptation will do.
+                && !rendererSupport.adaptiveSupport.isDisjoint(with: requiredAdaptiveSupport)
                 ? .adaptive
                 : .fixed
         }
@@ -1048,7 +1047,7 @@ public extension DefaultTrackSelector {
                 trackRoleFlags: format.roleFlags,
                 preferredRoleFlags: preferredRoleFlags
             )
-            hasCaptionRoleFlags = !format.roleFlags.intersection([.caption, .describesMusicAndSound]).isEmpty
+            hasCaptionRoleFlags = !format.roleFlags.isDisjoint(with: [.caption, .describesMusicAndSound])
             preferredLabelMatchIndex = TrackInfo.getBestLabelMatchIndex(
                 format: format,
                 preferredLabels: parameters.preferredTextLabels
@@ -1082,7 +1081,7 @@ public extension DefaultTrackSelector {
             selectedAudioLanguage: String?,
             preferredCaptioningLanguage: String?
         ) -> [TextTrackInfo] {
-            trackGroup.enumerated().map { index, _ in
+            trackGroup.indices.map { index in
                 TextTrackInfo(
                     rendererIndex: rendererIndex,
                     trackGroup: trackGroup,
@@ -1182,8 +1181,8 @@ public extension DefaultTrackSelector {
             }
 
             allowMixedMimeTypes =
-            parameters.allowAudioMixedMimeTypeAdaptiveness
-            && !mixedMimeTypeAdaptationSupport.intersection(requiredAdaptiveSupport).isEmpty
+                parameters.allowAudioMixedMimeTypeAdaptiveness
+                    && !mixedMimeTypeAdaptationSupport.isDisjoint(with: requiredAdaptiveSupport)
 
             language = TrackInfo.normalizeUndeterminedLanguageToNil(format.language)
 
@@ -1227,9 +1226,9 @@ public extension DefaultTrackSelector {
             bitrate = format.bitrate
 
             isWithinConstraints =
-            (format.bitrate == Format.noValue || format.bitrate <= parameters.maxAudioBitrate)
-            && (format.channelCount == Format.noValue || format.channelCount <= parameters.maxAudioChannelCount)
-            && withinAudioChannelCountConstraints(format)
+                (format.bitrate == Format.noValue || format.bitrate <= parameters.maxAudioBitrate)
+                && (format.channelCount == Format.noValue || format.channelCount <= parameters.maxAudioChannelCount)
+                && withinAudioChannelCountConstraints(format)
 
             // Locale language match (first match wins)
             let localeLanguages = Locale.preferredLanguages.compactMap(Util.normalizeLanguageCode)
@@ -1271,7 +1270,7 @@ public extension DefaultTrackSelector {
                 hasMappedVideoTracks: hasMappedVideoTracks,
                 requiredAdaptiveSupport: requiredAdaptiveSupport
             )
-            
+
             super.init(rendererIndex: rendererIndex, trackGroup: trackGroup, trackIndex: trackIndex)
         }
 
@@ -1284,7 +1283,7 @@ public extension DefaultTrackSelector {
             withinAudioChannelCountConstraints: (Format) -> Bool,
             mixedMimeTypeAdaptationSupport: RendererCapabilities.Support.AdaptiveSupport
         ) -> [AudioTrackInfo] {
-            trackGroup.enumerated().map { index, _ in
+            trackGroup.indices.map { index in
                 AudioTrackInfo(
                     rendererIndex: rendererIndex,
                     trackGroup: trackGroup,
@@ -1308,7 +1307,7 @@ public extension DefaultTrackSelector {
             }
 
             return (parameters.allowAudioMixedChannelCountAdaptiveness
-                 || (format.channelCount != Format.noValue && format.channelCount == otherTrack.format.channelCount))
+                || (format.channelCount != Format.noValue && format.channelCount == otherTrack.format.channelCount))
                 && (allowMixedMimeTypes
                     || (format.sampleMimeType != nil && format.sampleMimeType == otherTrack.format.sampleMimeType))
                 && (parameters.allowAudioMixedSampleRateAdaptiveness
@@ -1363,12 +1362,12 @@ public extension DefaultTrackSelector {
 
             accumulated = accumulated
                 // 4) Renderer capability prefs
-                .compareFalseFirst(usesPrimaryDecoder, other.usesPrimaryDecoder)
-                .compareFalseFirst(usesHardwareAcceleration, other.usesHardwareAcceleration)
-                // 5) Technical quality
-                .compareFalseFirst(isObjectBasedAudio, other.isObjectBasedAudio)
-                .compare(channelCount, other.channelCount, qualityOrdering)
-                .compare(sampleRate, other.sampleRate, qualityOrdering)
+                    .compareFalseFirst(usesPrimaryDecoder, other.usesPrimaryDecoder)
+                    .compareFalseFirst(usesHardwareAcceleration, other.usesHardwareAcceleration)
+                    // 5) Technical quality
+                    .compareFalseFirst(isObjectBasedAudio, other.isObjectBasedAudio)
+                    .compare(channelCount, other.channelCount, qualityOrdering)
+                    .compare(sampleRate, other.sampleRate, qualityOrdering)
 
             if language == other.language {
                 accumulated = accumulated.compare(bitrate, other.bitrate, qualityOrdering)
@@ -1392,7 +1391,7 @@ public extension DefaultTrackSelector {
                 return .none
             }
 
-            let supportsAdaptive = !rendererSupport.adaptiveSupport.intersection(requiredAdaptiveSupport).isEmpty
+            let supportsAdaptive = !rendererSupport.adaptiveSupport.isDisjoint(with: requiredAdaptiveSupport)
 
             return rendererSupport.isFormatSupported(allowExceedsCapabilities: false)
                 && isWithinConstraints
@@ -1642,7 +1641,7 @@ public extension DefaultTrackSelector {
     }
 }
 
-private extension Optional where Wrapped == MimeTypes {
+private extension MimeTypes? {
     var videoCodecPreferenceScore: Int {
         guard let self else { return 0 }
 
@@ -1666,7 +1665,9 @@ private extension Optional where Wrapped == MimeTypes {
         guard let self else { return false }
 
         switch self {
-        case .audioEAC3JOC, .audioAC4, .audioIAMF:
+        case .audioEAC3JOC,
+             .audioAC4,
+             .audioIAMF:
             return true
         default:
             return false

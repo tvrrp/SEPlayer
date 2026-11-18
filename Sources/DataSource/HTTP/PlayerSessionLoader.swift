@@ -5,7 +5,6 @@
 //  Created by Damir Yackupov on 04.06.2025.
 //
 
-
 import Foundation.NSURLSession
 import SEPlayerCommon
 
@@ -140,7 +139,7 @@ private final class _DataLoader: NSObject, URLSessionTaskDelegate, @unchecked Se
 }
 
 extension _DataLoader {
-    // Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
+    /// Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
     @objc(URLSession:dataTask:didReceiveResponse:completionHandler:)
     func urlSession(
         _ session: URLSession,
@@ -155,7 +154,7 @@ extension _DataLoader {
         handler.didRecieveResponse(response, task: dataTask, completionHandler: completionHandler)
     }
 
-    // Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
+    /// Manually specifying the selector without conforming to `URLSessionDataDelegate` to avoid Data bridging
     @objc(URLSession:dataTask:didReceiveData:)
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: NSData) {
         guard let handler = handlers[dataTask] else {

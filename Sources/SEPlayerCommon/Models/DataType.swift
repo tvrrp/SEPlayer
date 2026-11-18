@@ -5,7 +5,8 @@
 //  Created by tvrrp on 25.02.2026.
 //
 
-@frozen public enum DataType {
+@frozen
+public enum DataType {
     case unknown
     case media
     case mediaInitialization

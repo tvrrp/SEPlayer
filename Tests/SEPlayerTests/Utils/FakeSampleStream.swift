@@ -7,8 +7,8 @@
 
 import CoreMedia
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 /// A sample stream over a real `SampleQueue`, fed with predefined samples.
 final class FakeSampleStream: SampleStream {
@@ -74,7 +74,7 @@ final class FakeSampleStream: SampleStream {
                 try sampleQueue.sampleMetadata(
                     time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
                     flags: sampleInfo.flags,
-                    range: 0..<sampleInfo.data.count
+                    range: 0 ..< sampleInfo.data.count
                 )
             }
         }

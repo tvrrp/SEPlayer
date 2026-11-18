@@ -14,7 +14,6 @@ public struct TrackSampleTable {
     // timescale rather than `CMTime`s, sizes in 32 bits, and decode times sharing the presentation times when they
     // are the same, as for audio.
 
-
     public let track: Track
     public let sampleCount: Int
     public let offsets: [Int]

@@ -122,33 +122,33 @@ open class TriggerableQueue {
         refMinPTS: CMTime?, refMaxPTS: CMTime?
     ) -> Bool {
         switch condition {
-        case .whenDurationBecomesLessThan(let t):
-            return snapshot.aheadDuration < t
-        case .whenDurationBecomesLessThanOrEqualTo(let t):
-            return snapshot.aheadDuration <= t
-        case .whenDurationBecomesGreaterThan(let t):
-            return snapshot.aheadDuration > t
-        case .whenDurationBecomesGreaterThanOrEqualTo(let t):
-            return snapshot.aheadDuration >= t
+        case let .whenDurationBecomesLessThan(t):
+            snapshot.aheadDuration < t
+        case let .whenDurationBecomesLessThanOrEqualTo(t):
+            snapshot.aheadDuration <= t
+        case let .whenDurationBecomesGreaterThan(t):
+            snapshot.aheadDuration > t
+        case let .whenDurationBecomesGreaterThanOrEqualTo(t):
+            snapshot.aheadDuration >= t
         case .whenMinPresentationTimeStampChanges:
-            return snapshot.minPTS != refMinPTS
+            snapshot.minPTS != refMinPTS
         case .whenMaxPresentationTimeStampChanges:
-            return snapshot.maxPTS != refMaxPTS
-        case .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(let t):
-            return snapshot.maxPTS.map { $0 >= t } ?? false
+            snapshot.maxPTS != refMaxPTS
+        case let .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(t):
+            snapshot.maxPTS.map { $0 >= t } ?? false
         case .whenDataBecomesReady:
 //            print("ℹ️ IS READY = \(snapshot.hasData)")
-            return snapshot.hasData
+            snapshot.hasData
         case .whenEndOfDataReached:
-            return snapshot.isEndOfData
-        case .whenBufferCountBecomesLessThan(let n):
-            return snapshot.sampleCount < n
-        case .whenBufferCountBecomesGreaterThan(let n):
-            return snapshot.sampleCount > n
+            snapshot.isEndOfData
+        case let .whenBufferCountBecomesLessThan(n):
+            snapshot.sampleCount < n
+        case let .whenBufferCountBecomesGreaterThan(n):
+            snapshot.sampleCount > n
         case .whenReset:
-            return false
+            false
         @unknown default:
-            return false
+            false
         }
     }
 }

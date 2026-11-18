@@ -30,7 +30,7 @@ struct SubtitleBitReader<Bytes: RandomAccessCollection> where Bytes.Element == U
 
     mutating func readBits(_ count: Int) -> Int {
         var value = 0
-        for _ in 0..<count {
+        for _ in 0 ..< count {
             let byteIndex = position >> 3
             if byteIndex != currentByteIndex {
                 currentByteIndex = byteIndex
@@ -48,7 +48,7 @@ struct SubtitleBitReader<Bytes: RandomAccessCollection> where Bytes.Element == U
         let start = bytes.startIndex + min(bytePosition, bytes.count)
         let end = min(start + count, bytes.endIndex)
         position = (bytePosition + count) * 8
-        return bytes[start..<end]
+        return bytes[start ..< end]
     }
 
     mutating func skipBits(_ count: Int) {

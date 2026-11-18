@@ -100,7 +100,7 @@ final class SectionReader: TsPayload.Reader {
                 if bytesRead == totalSectionLength {
                     if sectionSyntaxIndicator {
                         // This section has common syntax as defined in ISO/IEC 13818-1, section 2.4.4.11.
-                        let slice = sectionData.bytesView[0..<totalSectionLength]
+                        let slice = sectionData.bytesView[0 ..< totalSectionLength]
                         if totalSectionLength < .crcLength || CrcUtil.computeCrc32(slice, mode: .mpeg2) != 0 {
                             // The CRC is invalid so discard the section.
                             waitingForPayloadStart = true

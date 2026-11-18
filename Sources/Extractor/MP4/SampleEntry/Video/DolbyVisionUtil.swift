@@ -22,7 +22,7 @@ enum DolbyVisionUtil {
             profile = Int(bits >> 9)
             level = Int((bits >> 3) & 0x3F)
             // rpu_present_flag (1), el_present_flag (1), bl_present_flag (1)
-            blSignalCompatibilityId = Int(try reader.readInt(as: UInt8.self) >> 4)
+            blSignalCompatibilityId = try Int(reader.readInt(as: UInt8.self) >> 4)
         }
 
         /// Profile 5 carries IPTPQc2 only Dolby Vision can show; the others have a base layer HEVC decoders show.

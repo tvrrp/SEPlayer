@@ -5,9 +5,9 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
-import Testing
 import Foundation
 @testable import SEPlayer
+import Testing
 
 final class PlayerDelegateAsyncStream {
     private var stream: AsyncStream<Event>!
@@ -25,7 +25,7 @@ final class PlayerDelegateAsyncStream {
             }
         }
     }
- 
+
     func start() -> AsyncStream<Event> {
         stream
     }
@@ -35,7 +35,7 @@ final class CollectablePlayerDelegateAsyncStream {
     var events = [PlayerDelegateAsyncStream.Event]()
 
     final class EventValidator {
-        let validation: ((PlayerDelegateAsyncStream.Event) -> Bool)
+        let validation: (PlayerDelegateAsyncStream.Event) -> Bool
 
         /// Resumed once: by the awaited event or by a timeout, whichever comes first. A result that
         /// comes before anything waits is kept for the continuation set later.

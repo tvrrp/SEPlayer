@@ -9,6 +9,8 @@ import CoreMedia.CMTime
 
 @available(iOS, obsoleted: 16)
 extension CMTime: @retroactive Hashable {
+    // The conformance is limited to older systems, where `hashValue` can't be synthesized for it.
+    // swiftlint:disable:next legacy_hashing
     public var hashValue: Int {
         var hasher = Hasher()
         hash(into: &hasher)

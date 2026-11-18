@@ -5,9 +5,9 @@
 //  Created by Damir Yackupov on 05.11.2025.
 //
 
-@testable import SEPlayer
 import CoreMedia
 import Foundation
+@testable import SEPlayer
 
 enum ActionErrors: Error {
     case unimplemented
@@ -337,7 +337,7 @@ final class WaitForPendingPlayerCommands: Action {
 }
 
 final class ExecuteClosure: Action {
-    private let closure: ((SEPlayer) async throws -> Void)
+    private let closure: (SEPlayer) async throws -> Void
 
     init(
         tag: String,

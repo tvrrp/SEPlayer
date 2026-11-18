@@ -36,11 +36,11 @@ public final class TimestampAdjuster: @unchecked Sendable {
         lock.usingLock {
             switch mode {
             case .noOffset:
-                return Session(adjuster: self, desiredFirstSampleTime: nil)
-            case .firstSampleAt(let time):
-                return Session(adjuster: self, desiredFirstSampleTime: time)
+                Session(adjuster: self, desiredFirstSampleTime: nil)
+            case let .firstSampleAt(time):
+                Session(adjuster: self, desiredFirstSampleTime: time)
             case .shared:
-                return Session(adjuster: self, desiredFirstSampleTime: desiredFirstSampleTime)
+                Session(adjuster: self, desiredFirstSampleTime: desiredFirstSampleTime)
             }
         }
     }

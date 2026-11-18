@@ -6,8 +6,8 @@
 //
 
 public actor PlayerActor {
-    nonisolated public let executor: PlayerExecutor
-    nonisolated public var unownedExecutor: UnownedSerialExecutor {
+    public nonisolated let executor: PlayerExecutor
+    public nonisolated var unownedExecutor: UnownedSerialExecutor {
         executor.asUnownedSerialExecutor()
     }
 
@@ -21,7 +21,7 @@ public actor PlayerActor {
 }
 
 public final class PlayerExecutor: SerialExecutor {
-    nonisolated public let queue: Queue
+    public nonisolated let queue: Queue
     public init(queue: Queue) { self.queue = queue }
 
     /// Always runs `job` later: `Queue.async` runs a block at once on its own queue, and a job run while it is being

@@ -5,7 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-@MainActor public protocol SEPlayerDelegate: AnyObject {
+@MainActor
+public protocol SEPlayerDelegate: AnyObject {
     func player(_ player: Player, didChangeTimeline timeline: Timeline, reason: TimelineChangeReason)
     func player(_ player: Player, didTransitionMediaItem mediaItem: MediaItem?, reason: MediaItemTransitionReason?)
     func player(_ player: Player, didChangeIsLoading isLoading: Bool)

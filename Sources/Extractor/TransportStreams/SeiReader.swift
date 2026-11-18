@@ -81,7 +81,7 @@ final class SeiReader {
                 try output.sampleMetadata(
                     time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: data.presentationTime, decodeTimeStamp: .invalid),
                     flags: .keyframe,
-                    range: 0..<data.packets.readableBytes
+                    range: 0 ..< data.packets.readableBytes
                 )
             }
         }

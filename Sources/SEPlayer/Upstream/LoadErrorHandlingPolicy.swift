@@ -6,8 +6,8 @@
 //
 
 import CoreMedia
-import Dispatch
 import DataSource
+import Dispatch
 import SEPlayerCommon
 
 /// What a failed load can fall back to instead of retrying.
@@ -136,9 +136,14 @@ open class DefaultLoadErrorHandlingPolicy: LoadErrorHandlingPolicy {
         if error is UnexpectedStateError || error is UnsupportedOperationError { return true }
 
         switch (error as? PlaybackErrorCodeProviding)?.errorCode {
-        case .parsingContainerMalformed?, .parsingManifestMalformed?,
-             .parsingContainerUnsupported?, .parsingManifestUnsupported?,
-             .ioFileNotFound?, .ioNoPermission?, .ioCleartextNotPermitted?, .ioReadPositionOutOfRange?:
+        case .parsingContainerMalformed?,
+             .parsingManifestMalformed?,
+             .parsingContainerUnsupported?,
+             .parsingManifestUnsupported?,
+             .ioFileNotFound?,
+             .ioNoPermission?,
+             .ioCleartextNotPermitted?,
+             .ioReadPositionOutOfRange?:
             return true
         default:
             return false

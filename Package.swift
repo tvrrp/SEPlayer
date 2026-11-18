@@ -41,7 +41,7 @@ let package = Package(
             name: "Extractor",
             dependencies: [
                 "SEPlayerCommon",
-                .product(name: "OrderedCollections", package: "swift-collections")
+                .product(name: "OrderedCollections", package: "swift-collections"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
@@ -82,7 +82,7 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ]
-        )
+        ),
     ]
 )
 

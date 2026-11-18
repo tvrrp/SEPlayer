@@ -28,14 +28,14 @@ final class H264Reader: ElementaryStreamReader {
     private var output: TrackOutput?
     private var sampleReader: SampleReader?
 
-    // State that should not be reset on seek.
+    /// State that should not be reset on seek.
     private var hasOutputFormat = false
 
     // Per PES packet state that gets reset at the start of each PES packet.
     private var pesTime: CMTime = .invalid
     private var pesDecodeTime: CMTime = .invalid
 
-    // State inherited from the TS packet header.
+    /// State inherited from the TS packet header.
     private var randomAccessIndicator = false
 
     private var seiWrapper: BlockBufferReader
@@ -164,8 +164,8 @@ final class H264Reader: ElementaryStreamReader {
                 try nalUnitData(view, from: offset, to: nalUnitOffset)
             }
 
-            let bytesWrittenPastPosition = limit - nalUnitOffset;
-            let absolutePosition = totalBytesWritten - bytesWrittenPastPosition;
+            let bytesWrittenPastPosition = limit - nalUnitOffset
+            let absolutePosition = totalBytesWritten - bytesWrittenPastPosition
             // Indicate the end of the previous NAL unit. If the length to the start of the next unit
             // is negative then we wrote too many bytes to the NAL buffers. Discard the excess bytes
             // when notifying that the unit has ended.
@@ -233,7 +233,7 @@ final class H264Reader: ElementaryStreamReader {
     ) throws {
         guard let sampleReader else { return }
 
-        let slice = data[offset..<limit]
+        let slice = data[offset ..< limit]
         if !hasOutputFormat || sampleReader.needsSpsPps() {
             try sps.appendToNalUnit(slice)
             try pps.appendToNalUnit(slice)
@@ -280,7 +280,7 @@ final class H264Reader: ElementaryStreamReader {
                     let formatDescription = try CMFormatDescription(
                         h264ParameterSets: [
                             Data(spsView[3...]),
-                            Data(ppsView[3...])
+                            Data(ppsView[3...]),
                         ],
                         nalUnitHeaderLength: 4
                     )
@@ -629,7 +629,7 @@ private final class SampleReader {
                 decodeTimeStamp: sample.decodeTime
             ),
             flags: sample.flags,
-            range: 0..<sample.data.dataLength
+            range: 0 ..< sample.data.dataLength
         )
     }
 

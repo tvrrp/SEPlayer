@@ -9,6 +9,7 @@ import CoreMedia
 import SEPlayerCommon
 
 extension BoxParser {
+    // swiftlint:disable:next function_body_length
     func parseStbl(
         track: inout Track,
         stblBox: ContainerBox,
@@ -30,11 +31,11 @@ extension BoxParser {
             return try .empty(track: track)
         }
 
-        /// Create a CMTime in track timescale from raw time-units.
+        // Create a CMTime in track timescale from raw time-units.
         func trackTime(_ value: CMTimeValue) -> CMTime {
             CMTime(value: value, timescale: track.timescale)
         }
-        /// Create a CMTime in movie timescale from raw time-units.
+        // Create a CMTime in movie timescale from raw time-units.
         func movieTime(_ value: CMTimeValue) -> CMTime {
             CMTime(value: value, timescale: track.movieTimescale)
         }
@@ -120,8 +121,8 @@ extension BoxParser {
         var samplesFlags = [SampleFlags]()
         var syncSampleIndicesList = [Int]()
         let hasOnlySyncSamples = stss == nil
-        var dtsAccumulator: Int64 = 0       // running DTS in track timescale units
-        var totalDuration = CMTime.zero     // total duration in track timescale
+        var dtsAccumulator: Int64 = 0 // running DTS in track timescale units
+        var totalDuration = CMTime.zero // total duration in track timescale
         var totalSize = 0
 
         if rechunkFixedSizeSamples, let fixedSampleSize {
@@ -170,7 +171,7 @@ extension BoxParser {
             var offset = 0
             var remainingSamplesInChunk = 0
 
-            for index in 0..<sampleCount {
+            for index in 0 ..< sampleCount {
                 var chunkDataComplete = true
                 // Advance to the next chunk if necessary.
                 while remainingSamplesInChunk == 0 {
@@ -184,12 +185,12 @@ extension BoxParser {
                     // TODO: log Unexpected end of chunk data
                     sampleCount = index
                     if !omitTrackSampleTable {
-                        offsets = Array(offsets[0..<sampleCount])
-                        sizes = Array(sizes[0..<sampleCount])
-                        ptsValues = Array(ptsValues[0..<sampleCount])
-                        dtsValues = Array(dtsValues[0..<sampleCount])
-                        sampleDurations = Array(sampleDurations[0..<sampleCount])
-                        samplesFlags = Array(samplesFlags[0..<sampleCount])
+                        offsets = Array(offsets[0 ..< sampleCount])
+                        sizes = Array(sizes[0 ..< sampleCount])
+                        ptsValues = Array(ptsValues[0 ..< sampleCount])
+                        dtsValues = Array(dtsValues[0 ..< sampleCount])
+                        sampleDurations = Array(sampleDurations[0 ..< sampleCount])
+                        samplesFlags = Array(samplesFlags[0 ..< sampleCount])
                     }
                     break
                 }
@@ -287,7 +288,7 @@ extension BoxParser {
                 || remainingTimestampDeltaChanges != 0
                 || remainingSamplesAtTimestampOffset != 0
                 || !isCttsValid {
-    //            fatalError()
+                //            fatalError()
                 // Inconsistent stbl box for track
             }
         }
@@ -344,11 +345,10 @@ extension BoxParser {
         }
 
         if omitTrackSampleTable {
-            let editedDuration: CMTime
-            if editMappings.count == 1 && editListDurations[0] == 0 {
-                editedDuration = totalDuration - trackTime(editListMediaTimes[0])
+            let editedDuration: CMTime = if editMappings.count == 1 && editListDurations[0] == 0 {
+                totalDuration - trackTime(editListMediaTimes[0])
             } else {
-                editedDuration = editMappings
+                editMappings
                     .filter { $0.source.isValid }
                     .reduce(CMTime.zero) { $0 + $1.target.duration }
             }
@@ -377,8 +377,7 @@ extension BoxParser {
         // on what edited streams are playable.
 
         if editMappings.count == 1, track.type == .audio, ptsValues.count >= 2,
-           editMappings[0].source.isValid
-        {
+           editMappings[0].source.isValid {
             let mapping = editMappings[0]
 
             if canApplyEditWithGaplessInfo(
@@ -395,7 +394,7 @@ extension BoxParser {
                 let encoderPadding = paddingDuration
                     .convertScale(sampleRateTimescale, method: .default).value
 
-                if (encoderDelay != 0 || encoderPadding != 0),
+                if encoderDelay != 0 || encoderPadding != 0,
                    encoderDelay <= .max, encoderPadding <= .max {
                     gaplessInfoHolder = .init(
                         encoderDelay: Int(encoderDelay),
@@ -497,7 +496,7 @@ extension BoxParser {
             // guarantees no more valid frames will be found.
             var samplesSeenAfterEnd = 0
             var maxValidIndexInWindow = firstSampleAfterEdit - 1
-            for j in firstSampleAfterEdit..<ptsRawValues.count {
+            for j in firstSampleAfterEdit ..< ptsRawValues.count {
                 if ptsRawValues[j] < editEndTimeRaw {
                     maxValidIndexInWindow = j
                 } else {
@@ -556,20 +555,20 @@ extension BoxParser {
             if copyMetadata {
                 let count = endIndex - startIndex
                 editedOffsets.replaceSubrange(
-                    sampleIndex..<sampleIndex + count, with: offsets[startIndex..<endIndex]
+                    sampleIndex ..< sampleIndex + count, with: offsets[startIndex ..< endIndex]
                 )
                 editedSizes.replaceSubrange(
-                    sampleIndex..<sampleIndex + count, with: sizes[startIndex..<endIndex]
+                    sampleIndex ..< sampleIndex + count, with: sizes[startIndex ..< endIndex]
                 )
                 editedFlags.replaceSubrange(
-                    sampleIndex..<sampleIndex + count, with: samplesFlags[startIndex..<endIndex]
+                    sampleIndex ..< sampleIndex + count, with: samplesFlags[startIndex ..< endIndex]
                 )
                 editedDurations.replaceSubrange(
-                    sampleIndex..<sampleIndex + count, with: sampleDurations[startIndex..<endIndex]
+                    sampleIndex ..< sampleIndex + count, with: sampleDurations[startIndex ..< endIndex]
                 )
             }
 
-            for j in startIndex..<endIndex {
+            for j in startIndex ..< endIndex {
                 editedPts[sampleIndex] = CMTimeMapTimeFromRangeToRange(
                     ptsValues[j], fromRange: mapping.source, toRange: mapping.target
                 )
@@ -649,12 +648,12 @@ private extension BoxParser {
             fixedSampleSize = sampleSize == 0 ? nil : Int(sampleSize)
             sampleCount = try Int(data.readInt(as: UInt32.self))
         }
-        
+
         mutating func readNextSampleSize() throws -> Int {
             if let fixedSampleSize {
-                return fixedSampleSize
+                fixedSampleSize
             } else {
-                return try Int(data.readInt(as: UInt32.self))
+                try Int(data.readInt(as: UInt32.self))
             }
         }
     }

@@ -8,7 +8,6 @@
 public struct Metadata {
     public protocol Entry: Hashable {
         var wrappedMetadataFormat: Format? { get }
-        var wrappedMetadataBytes: ByteBuffer? { get }
         func populateMediaMetadata(builder: MediaMetadata.Builder)
         func isEqual(to other: any Entry) -> Bool
     }
@@ -64,17 +63,14 @@ extension Metadata: Collection {
     public var startIndex: Int { entries.startIndex }
     public var endIndex: Int { entries.endIndex }
 
-    public subscript(index: Index) -> Iterator.Element {
-        get { return entries[index] }
-    }
+    public subscript(index: Index) -> Iterator.Element { entries[index] }
 
     public func index(after i: Index) -> Index {
-        return entries.index(after: i)
+        entries.index(after: i)
     }
 }
 
 public extension Metadata.Entry {
     var wrappedMetadataFormat: Format? { nil }
-    var wrappedMetadataBytes: ByteBuffer? { nil }
     func populateMediaMetadata(builder: MediaMetadata.Builder) {}
 }

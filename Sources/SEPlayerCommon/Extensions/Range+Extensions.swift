@@ -7,9 +7,8 @@
 
 import Foundation
 
-public extension Range where Bound == Int {
-
-    /// True if every element of `other` lies within `self`.
+public extension Range<Int> {
+    // True if every element of `other` lies within `self`.
 //    func contains(_ other: Range<Int>) -> Bool {
 //        lowerBound <= other.lowerBound && upperBound >= other.upperBound
 //    }
@@ -22,6 +21,6 @@ public extension Range where Bound == Int {
     func intersection(with other: Range<Int>) -> Range<Int>? {
         let lo = Swift.max(lowerBound, other.lowerBound)
         let hi = Swift.min(upperBound, other.upperBound)
-        return lo < hi ? lo..<hi : nil
+        return lo < hi ? lo ..< hi : nil
     }
 }

@@ -244,7 +244,6 @@ public extension URLSessionDataSourceError {
         /// A download task failed to decode an encoded file after downloading.
         case downloadDecodingFailedToComplete = -3007
 
-
         /// The attempted connection required activating a data context while roaming, but international roaming is disabled.
         case internationalRoamingOff = -1018
 
@@ -258,7 +257,6 @@ public extension URLSessionDataSourceError {
         ///
         /// This impacts clients on iOS that send a `POST` request using a body stream but do not implement the ``URLSessionTaskDelegate`` delegate method ``URLSessionTaskDelegate/urlSession(_:task:needNewBodyStream:)``.
         case requestBodyStreamExhausted = -1021
-
 
         /// The shared container identifier of the URL session configuration is needed but hasn't been set.
         ///
@@ -295,16 +293,30 @@ extension URLSessionDataSourceError.ErrorReason {
         switch self {
         case .timedOut:
             .ioNetworkConnectionTimeout
-        case .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed, .notConnectedToInternet,
-             .internationalRoamingOff, .callIsActive, .dataNotAllowed, .cannotLoadFromNetwork, .secureConnectionFailed,
-             .serverCertificateHasBadDate, .serverCertificateUntrusted, .serverCertificateHasUnknownRoot,
-             .serverCertificateNotYetValid, .clientCertificateRejected, .clientCertificateRequired:
+        case .cannotFindHost,
+             .cannotConnectToHost,
+             .networkConnectionLost,
+             .dnsLookupFailed,
+             .notConnectedToInternet,
+             .internationalRoamingOff,
+             .callIsActive,
+             .dataNotAllowed,
+             .cannotLoadFromNetwork,
+             .secureConnectionFailed,
+             .serverCertificateHasBadDate,
+             .serverCertificateUntrusted,
+             .serverCertificateHasUnknownRoot,
+             .serverCertificateNotYetValid,
+             .clientCertificateRejected,
+             .clientCertificateRequired:
             .ioNetworkConnectionFailed
         case .appTransportSecurityRequiresSecureConnection:
             .ioCleartextNotPermitted
         case .fileDoesNotExist:
             .ioFileNotFound
-        case .noPermissionsToReadFile, .userAuthenticationRequired, .userCancelledAuthentication:
+        case .noPermissionsToReadFile,
+             .userAuthenticationRequired,
+             .userCancelledAuthentication:
             .ioNoPermission
         default:
             .ioUnspecified
@@ -314,9 +326,16 @@ extension URLSessionDataSourceError.ErrorReason {
     /// Whether loading again can't succeed: the request itself is wrong, not the network.
     public var isPermanent: Bool {
         switch self {
-        case .badURL, .unsupportedURL, .httpTooManyRedirects, .redirectToNonExistentLocation,
-             .appTransportSecurityRequiresSecureConnection, .fileDoesNotExist, .fileIsDirectory,
-             .noPermissionsToReadFile, .userAuthenticationRequired, .userCancelledAuthentication,
+        case .badURL,
+             .unsupportedURL,
+             .httpTooManyRedirects,
+             .redirectToNonExistentLocation,
+             .appTransportSecurityRequiresSecureConnection,
+             .fileDoesNotExist,
+             .fileIsDirectory,
+             .noPermissionsToReadFile,
+             .userAuthenticationRequired,
+             .userCancelledAuthentication,
              .dataLengthExceedsMaximum:
             true
         default:

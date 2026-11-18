@@ -40,14 +40,14 @@ public final class Allocation {
     public func writeWithOutputRawSpan(
         offset: Int,
         initializingWith initializer: (_ span: inout OutputRawSpan) throws -> Void
-    ) rethrows -> Void {
+    ) rethrows {
         var span = OutputRawSpan(buffer: data, initializedCount: offset)
         try initializer(&span)
     }
 
     private func _setBytes(_ bytes: UnsafeRawBufferPointer, offset: Int, length: Int) {
-        let targetPtr = UnsafeMutableRawBufferPointer(rebasing: data[offset..<capacity])
-        targetPtr.copyBytes(from: bytes[0..<length])
+        let targetPtr = UnsafeMutableRawBufferPointer(rebasing: data[offset ..< capacity])
+        targetPtr.copyBytes(from: bytes[0 ..< length])
     }
 
     private func setSlowPath<Bytes: Sequence>(bytes: Bytes, at offset: Int, length: Int) where Bytes.Element == UInt8 {

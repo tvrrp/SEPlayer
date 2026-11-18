@@ -44,7 +44,8 @@ public final class RWLock: @unchecked Sendable {
         let result = pthread_rwlock_tryrdlock(rwlock)
         switch result {
         case 0: return true
-        case EBUSY, EAGAIN: return false
+        case EBUSY,
+             EAGAIN: return false
         default:
             preconditionFailure("pthread_rwlock_tryrdlock failed: \(String(cString: strerror(result)))")
         }

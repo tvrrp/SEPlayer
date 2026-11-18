@@ -6,8 +6,8 @@
 //
 
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 @TestableSyncPlayerActor
 struct MediaSourceListTest {
@@ -30,7 +30,7 @@ struct MediaSourceListTest {
         #expect(!timeline.equals(to: emptyTimeline))
 
         timeline = mediaSourceList.removeMediaSource(
-            range: 0..<timeline.windowCount(),
+            range: 0 ..< timeline.windowCount(),
             shuffleOrder: shuffleOrder
         )
         #expect(timeline.equals(to: emptyTimeline))
@@ -222,22 +222,22 @@ struct MediaSourceListTest {
         _ = mediaSourceList.moveMediaSource(from: 3, to: 0, shuffleOrder: shuffleOrder)
         assertDefaultFirstWindowInChildIndexOrder(holders: holders)
 
-        _ = mediaSourceList.moveMediaSourceRange(range: 0..<2, to: 2, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 0 ..< 2, to: 2, shuffleOrder: shuffleOrder)
         assertFirstWindowInChildIndices(holders: holders, firstWindowInChildIndices: [2, 3, 0, 1])
-        _ = mediaSourceList.moveMediaSourceRange(range: 2..<4, to: 0, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 2 ..< 4, to: 0, shuffleOrder: shuffleOrder)
         assertDefaultFirstWindowInChildIndexOrder(holders: holders)
 
-        _ = mediaSourceList.moveMediaSourceRange(range: 0..<2, to: 2, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 0 ..< 2, to: 2, shuffleOrder: shuffleOrder)
         assertFirstWindowInChildIndices(holders: holders, firstWindowInChildIndices: [2, 3, 0, 1])
-        _ = mediaSourceList.moveMediaSourceRange(range: 2..<3, to: 0, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 2 ..< 3, to: 0, shuffleOrder: shuffleOrder)
         assertFirstWindowInChildIndices(holders: holders, firstWindowInChildIndices: [0, 3, 1, 2])
-        _ = mediaSourceList.moveMediaSourceRange(range: 3..<4, to: 1, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 3 ..< 4, to: 1, shuffleOrder: shuffleOrder)
         assertDefaultFirstWindowInChildIndexOrder(holders: holders)
 
         // No-ops.
-        _ = mediaSourceList.moveMediaSourceRange(range: 0..<4, to: 0, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 0 ..< 4, to: 0, shuffleOrder: shuffleOrder)
         assertDefaultFirstWindowInChildIndexOrder(holders: holders)
-        _ = mediaSourceList.moveMediaSourceRange(range: 0..<0, to: 3, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.moveMediaSourceRange(range: 0 ..< 0, to: 3, shuffleOrder: shuffleOrder)
         assertDefaultFirstWindowInChildIndexOrder(holders: holders)
     }
 
@@ -254,7 +254,7 @@ struct MediaSourceListTest {
             useLazyPreparation: false
         )
         _ = try mediaSourceList.addMediaSource(index: 0, holders: holders, shuffleOrder: shuffleOrder)
-        _ = mediaSourceList.removeMediaSource(range: 1..<3, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.removeMediaSource(range: 1 ..< 3, shuffleOrder: shuffleOrder)
 
         #expect(mediaSourceList.getSize() == 2)
         let removedHolder1 = holders.remove(at: 1)
@@ -284,7 +284,7 @@ struct MediaSourceListTest {
         )
         try mediaSourceList.prepare(mediaTransferListener: nil)
         _ = try mediaSourceList.addMediaSource(index: 0, holders: holders, shuffleOrder: shuffleOrder)
-        _ = mediaSourceList.removeMediaSource(range: 1..<3, shuffleOrder: shuffleOrder)
+        _ = mediaSourceList.removeMediaSource(range: 1 ..< 3, shuffleOrder: shuffleOrder)
 
         #expect(mediaSourceList.getSize() == 2)
         holders.remove(at: 2)
@@ -368,7 +368,7 @@ struct MediaSourceListTest {
     func addMediaSourcesExpectTimelineUsesCustomShuffleOrder() throws {
         let timeline = try mediaSourceList.addMediaSource(
             index: 0,
-            holders: try createFakeHolders(),
+            holders: createFakeHolders(),
             shuffleOrder: FakeShuffleOrder(count: mediaSourceListSize)
         )
         assertTimelineUsesFakeShuffleOrder(timeline: timeline)
@@ -377,7 +377,7 @@ struct MediaSourceListTest {
     @Test
     func moveMediaSourcesExpectTimelineUsesCustomShuffleOrder() throws {
         let shuffleOrder = DefaultShuffleOrder(length: mediaSourceListSize)
-        _ = try mediaSourceList.addMediaSource(index: 0, holders: try createFakeHolders(), shuffleOrder: shuffleOrder)
+        _ = try mediaSourceList.addMediaSource(index: 0, holders: createFakeHolders(), shuffleOrder: shuffleOrder)
         let timeline = mediaSourceList.moveMediaSource(from: 0, to: 1, shuffleOrder: FakeShuffleOrder(count: mediaSourceListSize))
         assertTimelineUsesFakeShuffleOrder(timeline: timeline)
     }
@@ -385,9 +385,9 @@ struct MediaSourceListTest {
     @Test
     func moveMediaSourceRangeExpectTimelineUsesCustomShuffleOrder() throws {
         let shuffleOrder = DefaultShuffleOrder(length: mediaSourceListSize)
-        _ = try mediaSourceList.addMediaSource(index: 0, holders: try createFakeHolders(), shuffleOrder: shuffleOrder)
+        _ = try mediaSourceList.addMediaSource(index: 0, holders: createFakeHolders(), shuffleOrder: shuffleOrder)
         let timeline = mediaSourceList.moveMediaSourceRange(
-            range: 0..<2,
+            range: 0 ..< 2,
             to: 2,
             shuffleOrder: FakeShuffleOrder(count: mediaSourceListSize)
         )
@@ -397,15 +397,15 @@ struct MediaSourceListTest {
     @Test
     func removeMediaSourceRangeExpectTimelineUsesCustomShuffleOrder() throws {
         let shuffleOrder = DefaultShuffleOrder(length: mediaSourceListSize)
-        _ = try mediaSourceList.addMediaSource(index: 0, holders: try createFakeHolders(), shuffleOrder: shuffleOrder)
-        let timeline = mediaSourceList.removeMediaSource(range: 0..<2, shuffleOrder: FakeShuffleOrder(count: 2))
+        _ = try mediaSourceList.addMediaSource(index: 0, holders: createFakeHolders(), shuffleOrder: shuffleOrder)
+        let timeline = mediaSourceList.removeMediaSource(range: 0 ..< 2, shuffleOrder: FakeShuffleOrder(count: 2))
         assertTimelineUsesFakeShuffleOrder(timeline: timeline)
     }
 
     @Test
     func setShuffleOrderExpectTimelineUsesCustomShuffleOrder() throws {
         _ = try mediaSourceList.setMediaSource(
-            holders: try createFakeHolders(),
+            holders: createFakeHolders(),
             shuffleOrder: DefaultShuffleOrder(length: mediaSourceListSize)
         )
         assertTimelineUsesFakeShuffleOrder(
@@ -436,24 +436,14 @@ struct MediaSourceListTest {
 
         let timeline = try mediaSourceList.updateMediaSources(
             with: [updatedItem1, updatedItem2],
-            range: 1..<3
+            range: 1 ..< 3
         )
 
-        #expect({
-            timeline.getWindow(windowIndex: 0, window: Window()).mediaItem == unaffectedMediaItem
-        }())
-        #expect({
-            timeline.getWindow(windowIndex: 1, window: Window()).mediaItem == updatedItem1
-        }())
-        #expect({
-            timeline.getWindow(windowIndex: 1, window: Window()).isPlaceholder == false
-        }())
-        #expect({
-            timeline.getWindow(windowIndex: 2, window: Window()).mediaItem == updatedItem2
-        }())
-        #expect({
-            timeline.getWindow(windowIndex: 2, window: Window()).isPlaceholder == true
-        }())
+        #expect(timeline.getWindow(windowIndex: 0, window: Window()).mediaItem == unaffectedMediaItem)
+        #expect(timeline.getWindow(windowIndex: 1, window: Window()).mediaItem == updatedItem1)
+        #expect(timeline.getWindow(windowIndex: 1, window: Window()).isPlaceholder == false)
+        #expect(timeline.getWindow(windowIndex: 2, window: Window()).mediaItem == updatedItem2)
+        #expect(timeline.getWindow(windowIndex: 2, window: Window()).isPlaceholder == true)
     }
 
     private func assertTimelineUsesFakeShuffleOrder(timeline: Timeline) {
@@ -491,7 +481,7 @@ struct MediaSourceListTest {
     }
 
     private func createFakeHolders() throws -> [MediaSourceList.MediaSourceHolder] {
-        try (0..<mediaSourceListSize).map { _ in
+        try (0 ..< mediaSourceListSize).map { _ in
             try MediaSourceList.MediaSourceHolder(
                 queue: playerSyncQueue,
                 mediaSource: FakeMediaSource(syncQueue: playerSyncQueue),

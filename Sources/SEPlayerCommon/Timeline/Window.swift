@@ -122,7 +122,7 @@ extension Window: Hashable {
 }
 
 extension Window {
-    nonisolated(unsafe) public static let singleWindowId: AnyHashable = UUID()
+    public nonisolated(unsafe) static let singleWindowId: AnyHashable = UUID()
     public static let placeholderMediaItem = MediaItem.Builder()
         .setMediaId("com.SEPlayer.common.Timeline")
         .setUrl(URL(string: "about:blank")!)

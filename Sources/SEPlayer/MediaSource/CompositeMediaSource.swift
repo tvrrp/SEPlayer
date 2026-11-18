@@ -10,10 +10,11 @@ import Foundation.NSMapTable
 import SEPlayerCommon
 
 class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
-    private var childSources = NSMapTable<ID, MediaSourceAndListener>.init()
+    private var childSources = NSMapTable<ID, MediaSourceAndListener>()
     private var childSourcesEnumerator: [MediaSourceAndListener] {
         childSources.objectEnumerator()?.compactMap { $0 as? MediaSourceAndListener } ?? []
     }
+
     private var mediaTransferListener: TransferListener?
 
     override func prepareSourceInternal(mediaTransferListener: TransferListener?) throws {

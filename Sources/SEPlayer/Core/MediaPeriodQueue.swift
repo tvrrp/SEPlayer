@@ -55,7 +55,7 @@ final class MediaPeriodQueue {
 
     func updatePreloadConfiguration(new preloadConfiguration: PreloadConfiguration, timeline: Timeline) throws {
         self.preloadConfiguration = preloadConfiguration
-        try! invalidatePreloadPool(timeline: timeline)
+        try invalidatePreloadPool(timeline: timeline)
     }
 
     func isLoading(mediaPeriod: any MediaPeriod) -> Bool {
@@ -80,13 +80,13 @@ final class MediaPeriodQueue {
 
     func nextMediaPeriodInfo(rendererPosition: CMTime, playbackInfo: PlaybackInfo) -> MediaPeriodInfo? {
         if let loading {
-            return followingMediaPeriodInfo(
+            followingMediaPeriodInfo(
                 timeline: playbackInfo.timeline,
                 mediaPeriodHolder: loading,
                 rendererPosition: rendererPosition
             )
         } else {
-            return firstMediaPeriodInfo(with: playbackInfo)
+            firstMediaPeriodInfo(with: playbackInfo)
         }
     }
 
@@ -135,7 +135,7 @@ final class MediaPeriodQueue {
             defaultPositionProjection: .zero
         )
         if let defaultPositionOfNextWindow {
-           // TODO: timeline.getWindow(windowIndex: defaultPositionOfNextWindow.0, window: window).isLive {
+            // TODO: timeline.getWindow(windowIndex: defaultPositionOfNextWindow.0, window: window).isLive {
             let windowSequenceNumber: Int
             if let sequenceNumber = resolvePeriodIdToWindowSequenceNumberInPreloadPeriods(periodId: defaultPositionOfNextWindow.0) {
                 windowSequenceNumber = sequenceNumber
@@ -156,7 +156,7 @@ final class MediaPeriodQueue {
                 nextMediaPeriodHolder = next
             } else {
                 let rendererPositionOffset = loading.renderPositionOffset + loading.info.duration - nextInfo.startPosition
-                if let periodHolder = try! builder?(nextInfo, rendererPositionOffset) {
+                if let periodHolder = try builder?(nextInfo, rendererPositionOffset) {
                     nextMediaPeriodHolder = periodHolder
                 } else {
                     throw ErrorBuilder(errorDescription: "") // TODO: real error
@@ -174,7 +174,7 @@ final class MediaPeriodQueue {
     }
 
     private func removePreloadedMediaPeriodHolder(info: MediaPeriodInfo) -> MediaPeriodHolder? {
-        for index in 0..<preloadPriorityList.count {
+        for index in 0 ..< preloadPriorityList.count {
             let mediaPeriodHolder = preloadPriorityList[index]
             if mediaPeriodHolder.canBeUsedFor(mediaPeriodInfo: info) {
                 preloadPriorityList.remove(at: index)
@@ -219,7 +219,7 @@ final class MediaPeriodQueue {
             periodId: mediaPeriodId.periodId,
             startPosition: position,
             requestedContentPosition: .invalid,
-            windowSequenceNumber: windowSequenceNumber,
+            windowSequenceNumber: windowSequenceNumber
         )
     }
 
@@ -678,7 +678,6 @@ final class MediaPeriodQueue {
 
         if contentPosition.isValid, mediaPeriodInfo.requestedContentPosition.isValid {
             // TODO: ad
-            
         }
 
         return getMediaPeriodInfo(
@@ -693,7 +692,7 @@ final class MediaPeriodQueue {
         timeline: Timeline,
         mediaPeriodHolder: MediaPeriodHolder,
         bufferedDuration: CMTime
-    ) -> MediaPeriodInfo?{
+    ) -> MediaPeriodInfo? {
         let mediaPeriodInfo = mediaPeriodHolder.info
         let currentPeriodId = mediaPeriodInfo.id
         timeline.periodById(currentPeriodId.periodId, period: period)
@@ -758,7 +757,7 @@ final class MediaPeriodQueue {
 
     private func isLastInPeriod(id: MediaPeriodId) -> Bool {
         // TODO: ads
-        return true
+        true
     }
 
     private func isLastInWindow(timeline: Timeline, id: MediaPeriodId) -> Bool {
@@ -792,6 +791,6 @@ extension MediaPeriodQueue {
         static let alteredPrewarmingPeriod = UpdatePeriodQueueResult(rawValue: 1 << 1)
     }
 
-    static let initialRendererPositionOffset: CMTime = CMTime(value: 1_000_000_000_000, timescale: 1_000_000)
+    static let initialRendererPositionOffset: CMTime = .init(value: 1_000_000_000_000, timescale: 1_000_000)
     static let maximumBufferAheadPeriods = 100
 }

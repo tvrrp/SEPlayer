@@ -42,13 +42,13 @@ extension Subtitle {
             }
         }
 
-        for index in startIndex..<eventTimes.count {
+        for index in startIndex ..< eventTimes.count {
             try outputEvent(at: index, output: output)
         }
 
         guard outputOptions.outputAllCues else { return }
         let endIndex = startedInMiddleOfCue ? startIndex - 1 : startIndex
-        for index in 0..<max(0, endIndex) {
+        for index in 0 ..< max(0, endIndex) {
             try outputEvent(at: index, output: output)
         }
         if startedInMiddleOfCue, endIndex >= 0 {

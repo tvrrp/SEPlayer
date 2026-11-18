@@ -27,7 +27,7 @@ public final class AudioSessionController: @unchecked Sendable {
     private let queue: DispatchQueue
     private let session: AudioSessionInterface
 
-    // Used on `queue` only.
+    /// Used on `queue` only.
     private var clients: [UUID: Client] = [:]
     /// Counts the reports, so the latest report decides among players of equal exclusivity.
     private var reportCount = 0
@@ -149,7 +149,8 @@ private extension AudioSessionController {
             switch exclusivity {
             case .exclusive: []
             case .duckOthers: [.duckOthers]
-            case .none, .mixWithOthers: [.mixWithOthers]
+            case .none,
+                 .mixWithOthers: [.mixWithOthers]
             }
         }
     }

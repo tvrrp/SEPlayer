@@ -12,28 +12,34 @@ public struct DefaultSubtitleParserFactory: SubtitleParserFactory {
 
     public func supportsFormat(_ format: Format) -> Bool {
         switch format.sampleMimeType {
-        case .applicationTX3G, .textVTT, .applicationMP4VTT, .applicationCEA608, .applicationMP4CEA608, .applicationCEA708,
+        case .applicationTX3G,
+             .textVTT,
+             .applicationMP4VTT,
+             .applicationCEA608,
+             .applicationMP4CEA608,
+             .applicationCEA708,
              .applicationDVBSubs:
-            return true
+            true
         default:
-            return false
+            false
         }
     }
 
     public func getCueReplacementBehavior(format: Format) throws -> Format.CueReplacementBehavior {
         switch format.sampleMimeType {
         case .applicationTX3G:
-            return Tx3gParser.cueReplacementBehavior
+            Tx3gParser.cueReplacementBehavior
         case .textVTT:
-            return WebvttParser.cueReplacementBehavior
+            WebvttParser.cueReplacementBehavior
         case .applicationMP4VTT:
-            return Mp4WebvttParser.cueReplacementBehavior
-        case .applicationCEA608, .applicationMP4CEA608:
-            return Cea608Parser.cueReplacementBehavior
+            Mp4WebvttParser.cueReplacementBehavior
+        case .applicationCEA608,
+             .applicationMP4CEA608:
+            Cea608Parser.cueReplacementBehavior
         case .applicationCEA708:
-            return Cea708Parser.cueReplacementBehavior
+            Cea708Parser.cueReplacementBehavior
         case .applicationDVBSubs:
-            return DvbParser.cueReplacementBehavior
+            DvbParser.cueReplacementBehavior
         default:
             throw UnexpectedStateError()
         }
@@ -42,17 +48,17 @@ public struct DefaultSubtitleParserFactory: SubtitleParserFactory {
     public func create(format: Format) throws -> SubtitleParser {
         switch format.sampleMimeType {
         case .applicationTX3G:
-            return try Tx3gParser(initializationData: format.initializationData?.getInitializationData() ?? [])
+            try Tx3gParser(initializationData: format.initializationData?.getInitializationData() ?? [])
         case .textVTT:
-            return WebvttParser()
+            WebvttParser()
         case .applicationMP4VTT:
-            return Mp4WebvttParser()
+            Mp4WebvttParser()
         case let .some(mimeType) where mimeType == .applicationCEA608 || mimeType == .applicationMP4CEA608:
-            return Cea608Parser(mimeType: mimeType, accessibilityChannel: format.accessibilityChannel)
+            Cea608Parser(mimeType: mimeType, accessibilityChannel: format.accessibilityChannel)
         case .applicationCEA708:
-            return Cea708Parser(accessibilityChannel: format.accessibilityChannel)
+            Cea708Parser(accessibilityChannel: format.accessibilityChannel)
         case .applicationDVBSubs:
-            return try DvbParser(initializationData: format.initializationData?.getInitializationData() ?? [])
+            try DvbParser(initializationData: format.initializationData?.getInitializationData() ?? [])
         default:
             throw UnexpectedStateError()
         }

@@ -8,9 +8,9 @@
 import AVFoundation
 import DataSource
 import Extractor
+@testable import SEPlayer
 import SEPlayerCommon
 import Testing
-@testable import SEPlayer
 
 final class TestSEPlayerFactory {
     private static func loaderOperationQueue() -> OperationQueue {
@@ -34,8 +34,8 @@ final class TestSEPlayerFactory {
     private(set) var maxSeekToPreviousPositionMs: Int64
     private(set) var preloadConfiguration: PreloadConfiguration?
 
-    init(queue: Queue = playerSyncQueue) {
-        clock = FakeClock()
+    init(queue: Queue = playerSyncQueue) throws {
+        clock = try FakeClock()
         trackSelector = DefaultTrackSelector()
         loadControl = DefaultLoadControl(queue: queue)
         bandwidthMeter = DefaultBandwidthMeter()

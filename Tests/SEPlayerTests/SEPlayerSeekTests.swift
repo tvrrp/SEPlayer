@@ -7,8 +7,8 @@
 
 import CoreMedia
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 /// Every player in these tests plays on the same queue, so they run one at a time.
 @Suite(.serialized)
@@ -24,9 +24,9 @@ final class SEPlayerSeekTests {
     // MARK: - seekTo
 
     @Test
-    func `seekTo indexLargerThanPlaylist isIgnored`() async throws {
+    func `seekTo indexLargerThanPlaylist isIgnored`() throws {
         let player = try TestSEPlayerFactory().build()
-        player.set(mediaSource: try FakeMediaSource())
+        try player.set(mediaSource: FakeMediaSource())
 
         player.seek(to: ms(1000), of: 1)
 
@@ -50,7 +50,7 @@ final class SEPlayerSeekTests {
     func `seekTo callsOnPositionDiscontinuity`() async throws {
         let player = try TestSEPlayerFactory().build()
         let recorder = PlayerEventRecorder(player: player)
-        player.set(mediaSources: [try createFakeMediaSource(id: "id-0"), try createFakeMediaSource(id: "id-1")])
+        try player.set(mediaSources: [createFakeMediaSource(id: "id-0"), createFakeMediaSource(id: "id-1")])
 
         player.prepare()
         try await Helper.play(player, untilPositionAtLeastMs: 5000, mediaItemIndex: 0)
@@ -193,10 +193,10 @@ final class SEPlayerSeekTests {
         let player = try TestSEPlayerFactory().build()
         player.seek(to: ms(5000), of: 1)
         // A playlist of the two sources is the same timeline as the two concatenated.
-        player.set(
+        try player.set(
             mediaSources: [
-                try FakeMediaSource(timeline: timeline, formats: [SEPlayerTestRunner.videoFormat]),
-                try FakeMediaSource(timeline: timeline, formats: [SEPlayerTestRunner.videoFormat]),
+                FakeMediaSource(timeline: timeline, formats: [SEPlayerTestRunner.videoFormat]),
+                FakeMediaSource(timeline: timeline, formats: [SEPlayerTestRunner.videoFormat]),
             ],
             resetPosition: false
         )
@@ -218,9 +218,9 @@ final class SEPlayerSeekTests {
         let player = try TestSEPlayerFactory().build()
         let recorder = PlayerEventRecorder(player: player)
         let timeline = FakeTimeline(windowDefinitions: [
-            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: 3 * seekBackIncrementMs))
+            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: 3 * seekBackIncrementMs)),
         ])
-        player.set(mediaSource: try FakeMediaSource(timeline: timeline))
+        try player.set(mediaSource: FakeMediaSource(timeline: timeline))
 
         player.prepare()
         try await Helper.play(player, untilPositionAtLeastMs: 2 * seekBackIncrementMs, mediaItemIndex: 0)
@@ -243,9 +243,9 @@ final class SEPlayerSeekTests {
     func `seekBack pastZero seeksToZero`() async throws {
         let player = try TestSEPlayerFactory().build()
         let timeline = FakeTimeline(windowDefinitions: [
-            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: seekBackIncrementMs))
+            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: seekBackIncrementMs)),
         ])
-        player.set(mediaSource: try FakeMediaSource(timeline: timeline))
+        try player.set(mediaSource: FakeMediaSource(timeline: timeline))
 
         player.prepare()
         try await Helper.play(player, untilPositionAtLeastMs: seekBackIncrementMs / 2, mediaItemIndex: 0)
@@ -260,9 +260,9 @@ final class SEPlayerSeekTests {
         let player = try TestSEPlayerFactory().build()
         let recorder = PlayerEventRecorder(player: player)
         let timeline = FakeTimeline(windowDefinitions: [
-            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: 2 * seekForwardIncrementMs))
+            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: 2 * seekForwardIncrementMs)),
         ])
-        player.set(mediaSource: try FakeMediaSource(timeline: timeline))
+        try player.set(mediaSource: FakeMediaSource(timeline: timeline))
 
         player.prepare()
         try await Helper.advance(player, untilState: .ready)
@@ -285,9 +285,9 @@ final class SEPlayerSeekTests {
     func `seekForward pastDuration seeksToDuration`() async throws {
         let player = try TestSEPlayerFactory().build()
         let timeline = FakeTimeline(windowDefinitions: [
-            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: seekForwardIncrementMs / 2))
+            .init(isDynamic: true, durationUs: Time.msToUs(timeMs: seekForwardIncrementMs / 2)),
         ])
-        player.set(mediaSource: try FakeMediaSource(timeline: timeline))
+        try player.set(mediaSource: FakeMediaSource(timeline: timeline))
 
         player.prepare()
         try await Helper.advance(player, untilState: .ready)
@@ -300,9 +300,9 @@ final class SEPlayerSeekTests {
     // MARK: - seekToPrevious / seekToNext
 
     @Test
-    func `seekToPrevious withPreviousWindowAndCloseToStart seeksToPreviousWindow`() async throws {
+    func `seekToPrevious withPreviousWindowAndCloseToStart seeksToPreviousWindow`() throws {
         let player = try TestSEPlayerFactory().setMaxSeekToPreviousPositionMs(10_000).build()
-        player.append(mediaSources: [try FakeMediaSource(), try FakeMediaSource()])
+        try player.append(mediaSources: [FakeMediaSource(), FakeMediaSource()])
         player.seek(to: ms(10_000), of: 1)
 
         player.seekToPrevious()
@@ -313,9 +313,9 @@ final class SEPlayerSeekTests {
     }
 
     @Test
-    func `seekToPrevious notCloseToStart seeksToZero`() async throws {
+    func `seekToPrevious notCloseToStart seeksToZero`() throws {
         let player = try TestSEPlayerFactory().setMaxSeekToPreviousPositionMs(10_000).build()
-        player.append(mediaSources: [try FakeMediaSource(), try FakeMediaSource()])
+        try player.append(mediaSources: [FakeMediaSource(), FakeMediaSource()])
         player.seek(to: ms(10_001), of: 1)
 
         player.seekToPrevious()
@@ -326,9 +326,9 @@ final class SEPlayerSeekTests {
     }
 
     @Test
-    func `seekToNext withNextWindow seeksToNextWindow`() async throws {
+    func `seekToNext withNextWindow seeksToNextWindow`() throws {
         let player = try TestSEPlayerFactory().build()
-        player.append(mediaSources: [try FakeMediaSource(), try FakeMediaSource()])
+        try player.append(mediaSources: [FakeMediaSource(), FakeMediaSource()])
 
         player.seekToNext()
 
@@ -354,6 +354,6 @@ final class SEPlayerSeekTests {
     /// to get the pause through come to on the sped-up media time of the tests.
     private func isAroundPosition(_ positionMs: Int64, _ expectedMs: Int64) -> Bool {
         let lateMs = 20 + Int64(2 * FakeClock.mediaTimeRate)
-        return (expectedMs - 20...expectedMs + lateMs).contains(positionMs)
+        return (expectedMs - 20 ... expectedMs + lateMs).contains(positionMs)
     }
 }

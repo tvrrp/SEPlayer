@@ -50,11 +50,11 @@ final class TextRenderer: BaseSERenderer {
 
     override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
         if format.sampleMimeType == .applicationSEPlayerCues {
-            return .create(formatSupport: .handled)
+            .create(formatSupport: .handled)
         } else if format.sampleMimeType?.isText == true {
-            return .create(formatSupport: .unsupportedSubtype)
+            .create(formatSupport: .unsupportedSubtype)
         } else {
-            return .create(formatSupport: .unsupportedType)
+            .create(formatSupport: .unsupportedType)
         }
     }
 

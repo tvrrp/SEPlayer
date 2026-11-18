@@ -5,28 +5,28 @@
 //  Created by Damir Yackupov on 09.06.2025.
 //
 
-import UIKit
-import SwiftUI
 import SEPlayer
+import SwiftUI
+import UIKit
 
 final class ViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+
         let rootView = UrlListScreen(hostViewController: self)
-        let hosting  = UIHostingController(rootView: rootView)
-        
+        let hosting = UIHostingController(rootView: rootView)
+
         addChild(hosting)
         view.addSubview(hosting.view)
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        
+
         NSLayoutConstraint.activate([
             hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             hosting.view.topAnchor.constraint(equalTo: view.topAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        
+
         hosting.didMove(toParent: self)
     }
 }
@@ -35,7 +35,7 @@ struct UrlListScreen: View {
     weak var hostViewController: UIViewController?
 
     @State private var urls: [String] = [
-//        Bundle.main.url(forResource: "ts-file", withExtension: "mp4")!.absoluteString,
+        //        Bundle.main.url(forResource: "ts-file", withExtension: "mp4")!.absoluteString,
 //        "https://media.axprod.net/TestVectors/Hls/protected_hls_1080p_h264_singlekey/video-H264-1080-3000k_1.ts",
 //        "https://test-streams.mux.dev/x36xhzz/url_8/url_590/193039199_mp4_h264_aac_fhd_7.ts",
 //        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/v5/main.mp4",
@@ -84,7 +84,7 @@ struct UrlListScreen: View {
             }
         }
     }
-    
+
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -93,7 +93,7 @@ struct UrlListScreen: View {
                         .textFieldStyle(.roundedBorder)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    
+
                     Button {
                         addUrl()
                     } label: {
@@ -151,11 +151,11 @@ struct UrlListScreen: View {
         urls.append(trimmed)
         newUrl = ""
     }
-    
+
     private func delete(at offsets: IndexSet) {
         urls.remove(atOffsets: offsets)
     }
-    
+
     private func move(from source: IndexSet, to destination: Int) {
         urls.move(fromOffsets: source, toOffset: destination)
     }
@@ -163,14 +163,12 @@ struct UrlListScreen: View {
     private func openPlayer(urls: [String]) {
         guard
             let host = hostViewController,
-            let nav = host.navigationController
-        else { return }
-        
+            let nav = host.navigationController else { return }
+
         let sb = UIStoryboard(name: "Main", bundle: .main)
         guard
             let vc = sb.instantiateViewController(withIdentifier: "PlayerViewController")
-                as? PlayerViewController
-        else { return }
+            as? PlayerViewController else { return }
 
         vc.videoUrls = urls.compactMap(URL.init(string:))
         vc.seekParameters = seekParameters.seekParameters
@@ -181,17 +179,9 @@ struct UrlListScreen: View {
     private func openSiml() {
         guard
             let host = hostViewController,
-            let nav = host.navigationController
-        else { return }
+            let nav = host.navigationController else { return }
 
-        let vcs = [
-            PlayerViewController(),
-            PlayerViewController(),
-            PlayerViewController(),
-            PlayerViewController(),
-            PlayerViewController(),
-            PlayerViewController()
-        ]
+        let vcs = (0 ..< 6).compactMap { _ in (try? playerFactory.buildPlayer()).map(PlayerViewController.init(player:)) }
 
         for vc in vcs {
 //            vc.repeatMode = .all
@@ -212,6 +202,7 @@ private final class ContnainerVC: UIViewController {
         super.init(nibName: nil, bundle: nil)
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }

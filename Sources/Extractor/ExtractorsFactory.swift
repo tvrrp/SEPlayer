@@ -10,7 +10,7 @@ import SEPlayerCommon
 
 public protocol ExtractorsFactory {
     func createExtractors() throws -> [Extractor]
-    func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) throws -> [Extractor]
+    func createExtractors(url: URL?, httpHeaders: [AnyHashable: Any]) throws -> [Extractor]
 }
 
 public extension ExtractorsFactory {
@@ -28,17 +28,17 @@ public struct DefaultExtractorFactory: ExtractorsFactory {
         self.subtitleParserFactory = DefaultSubtitleParserFactory()
     }
 
-    public func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) throws -> [Extractor] {
+    public func createExtractors(url: URL?, httpHeaders: [AnyHashable: Any]) throws -> [Extractor] {
         var extractors = [Extractor]()
-//#if ExtractorMP4
+        // #if ExtractorMP4
         extractors.append(MP4Extractor(queue: queue, subtitleParserFactory: subtitleParserFactory))
-//#endif
-//#if ExtractorFMP4
+        // #endif
+        // #if ExtractorFMP4
         extractors.append(FragmentedMp4Extractor(queue: queue, subtitleParserFactory: subtitleParserFactory))
-//#endif
-//#if ExtractorTS
+        // #endif
+        // #if ExtractorTS
         try extractors.append(TsExtractor(queue: queue, subtitleParserFactory: subtitleParserFactory))
-//#endif
+        // #endif
         return extractors
     }
 }

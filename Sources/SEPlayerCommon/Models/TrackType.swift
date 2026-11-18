@@ -5,7 +5,8 @@
 //  Created by tvrrp on 13.02.2026.
 //
 
-@frozen public enum TrackType: Sendable {
+@frozen
+public enum TrackType: Sendable {
     case unknown
     case `default`
     case audio

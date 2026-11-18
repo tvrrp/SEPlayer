@@ -28,7 +28,7 @@ public final class Period {
         duration: CMTime,
         positionInWindow: CMTime,
         adPlaybackState: AdPlaybackState = .none,
-        isPlaceholder: Bool = false,
+        isPlaceholder: Bool = false
     ) -> Period {
         self.id = id
         self.uid = uid

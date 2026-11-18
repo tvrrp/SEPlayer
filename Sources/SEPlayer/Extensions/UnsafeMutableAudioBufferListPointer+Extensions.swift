@@ -11,7 +11,7 @@ extension UnsafeMutableAudioBufferListPointer {
     init(capacity: Int, individualBufferSize: Int) {
         self = AudioBufferList.allocate(maximumBuffers: capacity)
 
-        for index in 0..<self.count {
+        for index in 0 ..< self.count {
             let buffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: individualBufferSize)
             self[index].mData = UnsafeMutableRawPointer(buffer.baseAddress)
         }

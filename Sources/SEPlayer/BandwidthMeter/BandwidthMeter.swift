@@ -10,9 +10,7 @@ import Foundation
 import Network
 import SEPlayerCommon
 
-public protocol BandwidthMeterDelegate {
-
-}
+public protocol BandwidthMeterDelegate: AnyObject {}
 
 /// Provides estimates of the currently available bandwidth.
 ///

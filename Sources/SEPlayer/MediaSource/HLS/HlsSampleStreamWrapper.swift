@@ -3,6 +3,8 @@
 //  SEPlayer
 //
 
+// swiftlint:disable file_length
+
 import CoreMedia
 import DataSource
 import Extractor
@@ -601,7 +603,7 @@ private extension HlsSampleStreamWrapper {
     /// with their samples.
     func discardUpstream(_ state: inout State, preferredQueueSize: Int) {
         guard !loader.isLoading(), preferredQueueSize >= 0, preferredQueueSize < state.mediaChunks.count,
-              let newQueueSize = (preferredQueueSize..<state.mediaChunks.count)
+              let newQueueSize = (preferredQueueSize ..< state.mediaChunks.count)
                 .first(where: { canDiscardUpstreamMediaChunks(state, from: $0) }) else {
             return
         }
@@ -751,11 +753,12 @@ private extension HlsSampleStreamWrapper {
                 state.primaryTrackGroupIndex = index
             } else {
                 let isMuxedAudio = primaryExtractorTrackType == .video && sampleFormat.sampleMimeType?.isAudio == true
-                formats = [Self.deriveFormat(
+                let format = Self.deriveFormat(
                     playlistFormat: isMuxedAudio ? muxedAudioFormat : nil,
                     sampleFormat: sampleFormat,
                     propagateBitrates: false
-                )]
+                )
+                formats = [format]
             }
             if let group = try? TrackGroup(id: "\(uid):\(index)", formats: formats) {
                 trackGroups.append(group)

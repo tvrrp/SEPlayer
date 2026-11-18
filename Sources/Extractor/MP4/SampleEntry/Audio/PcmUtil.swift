@@ -32,16 +32,22 @@ enum PcmUtil {
         let format = MP4Box.BoxType(rawValue: rawFormat)
         var flags = kAudioFormatFlagIsPacked
         switch format {
-        case .fl32?, .fl64?:
+        case .fl32?,
+             .fl64?:
             flags |= kAudioFormatFlagIsFloat
-        case nil, .raw_?, .NONE?:
+        case nil,
+             .raw_?,
+             .NONE?:
             if sampleSize != 8 { flags |= kAudioFormatFlagIsSignedInteger }
         default:
             flags |= kAudioFormatFlagIsSignedInteger
         }
 
         switch format {
-        case .fl32?, .fl64?, .in24?, .in32?:
+        case .fl32?,
+             .fl64?,
+             .in24?,
+             .in32?:
             if !isLittleEndian { flags |= kAudioFormatFlagIsBigEndian }
         case .sowt?:
             break
@@ -50,7 +56,8 @@ enum PcmUtil {
         }
 
         let bitsPerChannel = switch format {
-        case .fl32?, .in32?: 32
+        case .fl32?,
+             .in32?: 32
         case .fl64?: 64
         case .in24?: 24
         default: sampleSize

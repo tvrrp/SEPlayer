@@ -51,7 +51,7 @@ public final class Format: Sendable {
     public let bitrate: Int
     public let codecs: String?
 
-    // Container specific.
+    /// Container specific.
     public let containerMimeType: MimeTypes?
 
     // Sample specific.
@@ -156,7 +156,8 @@ public extension Format {
     }
 
     /// The replacement behaviors for consecutive samples in an `MimeTypes.applicationSEPlayerCues` track.
-    @frozen enum CueReplacementBehavior: Hashable, Sendable {
+    @frozen
+    enum CueReplacementBehavior: Hashable, Sendable {
         /// Subtitle cues from each sample are shown until they are explicitly cleared (e.g. an empty
         /// sample) or their duration elapses.
         ///
@@ -324,7 +325,7 @@ extension Format {
         fileprivate var peakBitrate: Int
         fileprivate var codecs: String?
 
-        // Container specific.
+        /// Container specific.
         fileprivate var containerMimeType: MimeTypes?
 
         // Sample specific.
@@ -376,7 +377,7 @@ extension Format {
             rotationDegrees = .zero
             transform3D = CATransform3DIdentity
             pixelWidthHeightRatio = 1.0
-            maxSubLayers = Format.noValue;
+            maxSubLayers = Format.noValue
 
             // Audio specific.
             channelCount = Format.noValue
@@ -483,14 +484,14 @@ extension Format {
             return self
         }
 
-        // Container specific
+        /// Container specific
         @discardableResult
         public func setContainerMimeType(_ containerMimeType: MimeTypes?) -> Builder {
             self.containerMimeType = containerMimeType
             return self
         }
 
-        // Sample specific
+        /// Sample specific
         @discardableResult
         public func setSampleMimeType(_ sampleMimeType: MimeTypes?) -> Builder {
             self.sampleMimeType = sampleMimeType
@@ -527,7 +528,7 @@ extension Format {
             return self
         }
 
-        // Text specific
+        /// Text specific
         @discardableResult
         public func setCueReplacementBehavior(_ cueReplacementBehavior: CueReplacementBehavior) -> Builder {
             self.cueReplacementBehavior = cueReplacementBehavior
@@ -540,7 +541,7 @@ extension Format {
             return self
         }
 
-        // Video specific
+        /// Video specific
         @discardableResult
         public func setSize(width: Int, height: Int) -> Builder {
             self.width = width
@@ -584,7 +585,7 @@ extension Format {
             return self
         }
 
-        // Audio specific
+        /// Audio specific
         @discardableResult
         public func setChannelCount(_ channelCount: Int) -> Builder {
             self.channelCount = channelCount

@@ -31,13 +31,13 @@ public enum ExtractorReadResult: Equatable {
     public static func == (lhs: ExtractorReadResult, rhs: ExtractorReadResult) -> Bool {
         switch (lhs, rhs) {
         case (.continueRead, .continueRead):
-            return true
+            true
         case (.endOfInput, .endOfInput):
-            return true
+            true
         case (.seek(_), .seek(_)):
-            return true
+            true
         default:
-            return false
+            false
         }
     }
 }

@@ -386,11 +386,11 @@ public final class DvbParser: SubtitleParser {
             case DataType.eightBitString:
                 column = paintCodeString(&reader, bits: 8, entries: entries, map: nil, column: column, line: line, into: &canvas)
             case DataType.map2To4:
-                map2To4 = (0..<4).map { _ in reader.readBits(4) }
+                map2To4 = (0 ..< 4).map { _ in reader.readBits(4) }
             case DataType.map2To8:
-                map2To8 = (0..<4).map { _ in reader.readBits(8) }
+                map2To8 = (0 ..< 4).map { _ in reader.readBits(8) }
             case DataType.map4To8:
-                map4To8 = (0..<16).map { _ in reader.readBits(8) }
+                map4To8 = (0 ..< 16).map { _ in reader.readBits(8) }
             case DataType.endOfLine:
                 column = x
                 line += 2
@@ -623,7 +623,7 @@ private struct ClutDefinition {
     static let `default` = ClutDefinition(
         id: 0,
         entries2Bit: [0x0000_0000, 0xFFFF_FFFF, 0xFF00_0000, 0xFF7F_7F7F],
-        entries4Bit: (0..<16).map { index in
+        entries4Bit: (0 ..< 16).map { index in
             guard index > 0 else { return 0 }
             let value = index < 8 ? 0xFF : 0x7F
             return DvbParser.argb(
@@ -633,7 +633,7 @@ private struct ClutDefinition {
                 index & 0x04 != 0 ? value : 0
             )
         },
-        entries8Bit: (0..<256).map { index in
+        entries8Bit: (0 ..< 256).map { index in
             guard index > 0 else { return 0 }
             func component(_ low: Int, _ high: Int, _ lowValue: Int, _ highValue: Int, base: Int = 0) -> Int {
                 base + (index & low != 0 ? lowValue : 0) + (index & high != 0 ? highValue : 0)
@@ -711,14 +711,14 @@ private struct Canvas: ~Copyable {
         let end = min(x + length, visibleWidth)
         guard start < end else { return }
         let row = y * width
-        UnsafeMutableBufferPointer(rebasing: pixels[(row + start)..<(row + end)]).update(repeating: color)
+        UnsafeMutableBufferPointer(rebasing: pixels[(row + start) ..< (row + end)]).update(repeating: color)
     }
 
     /// Fills the transparent pixels of the visible part with `color`, as if under them.
     mutating func fillBehind(_ color: UInt32) {
-        for y in 0..<visibleHeight {
+        for y in 0 ..< visibleHeight {
             let row = y * width
-            for x in 0..<visibleWidth where pixels[row + x] >> 24 == 0 {
+            for x in 0 ..< visibleWidth where pixels[row + x] >> 24 == 0 {
                 pixels[row + x] = color
             }
         }

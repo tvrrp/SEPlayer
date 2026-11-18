@@ -65,7 +65,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         }
 
         public func copyWithFormat(_ format: Format) -> Variant {
-            return Variant(
+            Variant(
                 url: self.url,
                 format: format,
                 videoGroupId: self.videoGroupId,
@@ -166,7 +166,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         muxedAudioFormat: Format?,
         muxedCaptionFormats: [Format]?,
         hasIndependentSegments: Bool,
-        variableDefinitions: [String : String],
+        variableDefinitions: [String: String],
         sessionKeyDrmInitData: [Int],
         contentSteeringInfo: ContentSteeringInfo?,
         iFrameVariants: [Variant] = []

@@ -26,7 +26,7 @@ public enum Util {
     // TODO: make indexUset as nil
     @inline(__always)
     public static func binarySearchCeil<C: RandomAccessCollection>(array: C, value: C.Element, inclusive: Bool, stayInBounds: Bool) -> Int
-        where C.Element: Comparable, C.Index == Int {
+    where C.Element: Comparable, C.Index == Int {
         var index = array.binarySearch(value: value)
 
         if index < 0 {
@@ -46,7 +46,7 @@ public enum Util {
     // TODO: make indexUset as nil
     @inline(__always)
     public static func binarySearch<C: RandomAccessCollection>(array: C, value: C.Element, inclusive: Bool, stayInBounds: Bool) -> Int
-        where C.Element: Comparable, C.Index == Int {
+    where C.Element: Comparable, C.Index == Int {
         var index = array.binarySearch(value: value)
 
         if index < 0 {
@@ -65,7 +65,7 @@ public enum Util {
 
     @inline(__always)
     public static func scaleLargeTimestampsInPlace(_ timestamps: inout [Int64], multiplier: Int64, divisor: Int64) {
-        for index in 0..<timestamps.count {
+        for index in 0 ..< timestamps.count {
             timestamps[index] = scaleLargeTimestamp(timestamps[index], multiplier: multiplier, divisor: divisor)
         }
     }
@@ -87,15 +87,12 @@ public enum Util {
         if divisor >= multiplier, divisor % multiplier == 0 {
             let divisionFactor = Int64.divide(divisor, by: multiplier, roundingMode: .unnecessary)
             return Int64.divide(value, by: divisionFactor, roundingMode: roundingMode)
-
         } else if divisor < multiplier, multiplier % divisor == 0 {
             let multiplicationFactor = Int64.divide(multiplier, by: divisor, roundingMode: .unnecessary)
             return Int64.saturatedMultiply(value, multiplicationFactor)
-
         } else if divisor >= value, divisor % value == 0 {
             let divisionFactor = Int64.divide(divisor, by: value, roundingMode: .unnecessary)
             return Int64.divide(multiplier, by: divisionFactor, roundingMode: roundingMode)
-
         } else if divisor < value, value % divisor == 0 {
             let multiplicationFactor = Int64.divide(value, by: divisor, roundingMode: .unnecessary)
             return Int64.saturatedMultiply(multiplier, multiplicationFactor)
@@ -129,13 +126,11 @@ extension Util {
         let rounded: Decimal = {
             var tmp = decimalResult
             var result = Decimal()
-            let mode: NSDecimalNumber.RoundingMode = {
-                switch roundingMode {
-                case .down:        return .down
-                case .up:          return .up
-                case .unnecessary: return .plain
-                }
-            }()
+            let mode: NSDecimalNumber.RoundingMode = switch roundingMode {
+            case .down: .down
+            case .up: .up
+            case .unnecessary: .plain
+            }
             NSDecimalRound(&result, &tmp, 0, mode)
             return result
         }()
@@ -151,7 +146,6 @@ extension Util {
         if asDouble <= Double(Int64.min) { return Int64.min }
         return Int64(asDouble)
     }
-
 }
 
 private extension Int64 {

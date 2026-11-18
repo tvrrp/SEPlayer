@@ -13,7 +13,8 @@ protocol TestPlayerActor: Actor {
     static func runOnActor(body: @Sendable () throws -> Void) async rethrows
 }
 
-@globalActor actor TestableSyncPlayerActor: GlobalActor, TestPlayerActor {
+@globalActor
+actor TestableSyncPlayerActor: GlobalActor, TestPlayerActor {
     static let shared = TestableSyncPlayerActor()
     private init() {}
 
@@ -22,7 +23,7 @@ protocol TestPlayerActor: Actor {
         executor.asUnownedSerialExecutor()
     }
 
-    public static func run<T>(resultType: T.Type = T.self, body: @TestableSyncPlayerActor @Sendable () throws -> T) async rethrows -> T where T : Sendable {
+    static func run<T: Sendable>(resultType: T.Type = T.self, body: @TestableSyncPlayerActor @Sendable () throws -> T) async rethrows -> T {
         try await body()
     }
 

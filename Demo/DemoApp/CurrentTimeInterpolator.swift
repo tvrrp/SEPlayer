@@ -6,25 +6,23 @@
 //
 
 import CoreMedia
+import QuartzCore
 import SEPlayer
-import QuartzCore
-import QuartzCore
 
 @MainActor
 final class MediaTimeInterpolator {
-
     private let player: SEPlayer
 
-    private var anchorMedia: Double = 0        // seconds
+    private var anchorMedia: Double = 0 // seconds
     private var anchorHost: CFTimeInterval = 0 // CACurrentMediaTime domain
-    private var rate: Double = 0               // 0 == frozen (paused / stalled / idle)
+    private var rate: Double = 0 // 0 == frozen (paused / stalled / idle)
     private var periodicTimeObserver: AnyObject?
 
     init(player: SEPlayer) {
         self.player = player
         player.delegate.addDelegate(self)
         // TODO: subscribe to player events, call the methods below.
-        periodicTimeObserver = try! player.addPeriodicTimeObserver(for: CMTime(value: 1, timescale: 1), queue: .main) { [weak self] time in
+        periodicTimeObserver = try? player.addPeriodicTimeObserver(for: CMTime(value: 1, timescale: 1), queue: .main) { [weak self] time in
             self?.playbackTimeChanged(time)
         }
 
@@ -67,7 +65,7 @@ final class MediaTimeInterpolator {
         let predicted = anchorMedia + (host - anchorHost) * rate
         let error = media - predicted
 
-        guard abs(error) < 0.2 else {           // real discontinuity
+        guard abs(error) < 0.2 else { // real discontinuity
             anchor(media, host: host, rate: rate)
             return
         }
@@ -75,13 +73,13 @@ final class MediaTimeInterpolator {
         let bound = 0.05 * abs(rate)
         anchorMedia = predicted
         anchorHost = host
-        self.rate = rate + min(max(error, -bound), bound)  // error / 1s window
+        self.rate = rate + min(max(error, -bound), bound) // error / 1s window
     }
 
     /// 1 Hz tick from addPeriodicTimeObserver.
     private func playbackTimeChanged(_ time: CMTime) {
         guard time.isNumeric else { return }
-        guard rate != 0 else { return }   // frozen: ignore
+        guard rate != 0 else { return } // frozen: ignore
         correct(to: time.seconds, host: CACurrentMediaTime())
     }
 

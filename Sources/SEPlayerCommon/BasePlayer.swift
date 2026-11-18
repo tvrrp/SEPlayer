@@ -144,22 +144,22 @@ public extension BasePlayer {
     func moveMediaItem(from index: Int, to newIndex: Int) {
         if index != newIndex {
             moveMediaItems(
-                range: Range<Int>(index...index + 1),
+                range: Range<Int>(index ... index + 1),
                 to: newIndex
             )
         }
     }
 
     func replace(mediaItem: MediaItem, at index: Int) {
-        replace(mediaItems: [mediaItem], at: Range<Int>(index...index + 1))
+        replace(mediaItems: [mediaItem], at: Range<Int>(index ... index + 1))
     }
 
     func removeMediaItem(at index: Int) {
-        removeMediaItems(at: Range(index...index + 1))
+        removeMediaItems(at: Range(index ... index + 1))
     }
 
     func clearMediaItems() {
-        removeMediaItems(at: Range(0...Int.max - 1))
+        removeMediaItems(at: Range(0 ... Int.max - 1))
     }
 
     func play() {
@@ -276,7 +276,7 @@ private extension BasePlayer {
             isRepeatingCurrentItem: false,
             seekParameters: .default,
             completion: completion
-        ) 
+        )
     }
 
     func seekToCurrentItem(position: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
@@ -331,7 +331,7 @@ private extension BasePlayer {
             ignoreSeek(completion: completion)
             return
         }
-        
+
         if previousMediaItemIndex == currentMediaItemIndex {
             repeatCurrentMediaItem(completion: completion)
         } else {

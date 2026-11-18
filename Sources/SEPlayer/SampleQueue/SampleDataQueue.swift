@@ -91,7 +91,7 @@ final class SampleDataQueue: @unchecked Sendable {
         release(chunks[removed...])
         chunks.removeSubrange(removed...)
         if let last = chunks.last, chunks.count > firstChunk, last.end > totalBytesWritten {
-            let kept = try CMBlockBuffer(bufferReference: last.buffer, range: 0..<(totalBytesWritten - last.start))
+            let kept = try CMBlockBuffer(bufferReference: last.buffer, range: 0 ..< (totalBytesWritten - last.start))
             chunks[chunks.count - 1] = Chunk(start: last.start, buffer: kept)
         }
         self.totalBytesWritten = totalBytesWritten
@@ -108,7 +108,7 @@ final class SampleDataQueue: @unchecked Sendable {
         let first = chunks[index]
         // Most samples lie within one written buffer.
         if range.upperBound <= first.end {
-            return try CMBlockBuffer(bufferReference: first.buffer, range: (range.lowerBound - first.start)..<(range.upperBound - first.start))
+            return try CMBlockBuffer(bufferReference: first.buffer, range: (range.lowerBound - first.start) ..< (range.upperBound - first.start))
         }
 
         let buffer = try CMBlockBuffer()
@@ -116,7 +116,7 @@ final class SampleDataQueue: @unchecked Sendable {
         while position < range.upperBound {
             let chunk = chunks[index]
             let end = min(range.upperBound, chunk.end)
-            try buffer.append(bufferReference: chunk.buffer, range: (position - chunk.start)..<(end - chunk.start))
+            try buffer.append(bufferReference: chunk.buffer, range: (position - chunk.start) ..< (end - chunk.start))
             position = end
             index += 1
         }

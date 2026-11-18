@@ -6,10 +6,10 @@
 //
 
 import AVFAudio
-import UIKit
-import SEPlayer
-import MediaPlayer
 import DataSource
+import MediaPlayer
+import SEPlayer
+import UIKit
 
 /// A view whose layer is an `SEPlayerLayer`, so the video follows the view's animated size changes.
 final class PlayerLayerView: UIView {
@@ -55,15 +55,16 @@ class PlayerViewController: UIViewController {
     private var workingWithSlider = false
     private var runningSeek = false
 
-    init() {
-        player = playerFactory.buildPlayer()
+    init(player: SEPlayer) {
+        self.player = player
         playerView.playerLayer.player = player
         mediaTimeInterpolator = MediaTimeInterpolator(player: player)
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
-        player = playerFactory.buildPlayer()
+        guard let player = try? playerFactory.buildPlayer() else { return nil }
+        self.player = player
         playerView.playerLayer.player = player
         mediaTimeInterpolator = MediaTimeInterpolator(player: player)
         super.init(coder: coder)
@@ -170,9 +171,9 @@ class PlayerViewController: UIViewController {
         speedGestureRecogniser.minimumPressDuration = 0.3
         speedGestureRecogniser.addTarget(self, action: #selector(handleLongPress))
 
-//        try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-        try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
-        try! AVAudioSession.sharedInstance().setActive(true)
+        // Playback still works with the default session if these fail.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+        try? AVAudioSession.sharedInstance().setActive(true)
 
         playerView.playerLayer.videoGravity = .resizeAspect
 
@@ -205,7 +206,7 @@ class PlayerViewController: UIViewController {
         view.addGestureRecognizer(tapGesture)
 
         NSLayoutConstraint.activate([
-//            volumeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            //            volumeView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
 //            volumeView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
 //
 //            muteButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
@@ -223,11 +224,12 @@ class PlayerViewController: UIViewController {
             currentTimeLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32),
 
             durationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            durationLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
+            durationLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32),
         ])
     }
 
-    @objc private func hideControls() {
+    @objc
+    private func hideControls() {
         controlsContainerViewIsHidden.toggle()
 
         UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState]) { [self] in
@@ -248,7 +250,8 @@ class PlayerViewController: UIViewController {
         }
     }
 
-    @objc private func sliderTouchDown(_ sender: UISlider) {
+    @objc
+    private func sliderTouchDown(_ sender: UISlider) {
 //        print("🤬 sliderTouchDown")
 //        timer?.invalidate()
         shouldObserveTimer = false
@@ -279,7 +282,8 @@ class PlayerViewController: UIViewController {
         }
     }
 
-    @objc private func sliderTouchUp(_ sender: UISlider) {
+    @objc
+    private func sliderTouchUp(_ sender: UISlider) {
         print("🌈 FIIIIINISH value, = \(sender.value)")
 //        seekContinuation?.yield((sender.value, .exact))
         seekContinuation?.finish()
@@ -292,7 +296,8 @@ class PlayerViewController: UIViewController {
 //        updateTime()
     }
 
-    @objc private func sliderValueChanged(_ sender: UISlider) {
+    @objc
+    private func sliderValueChanged(_ sender: UISlider) {
         currentTimeLabel.text = "\(player.bufferedPosition.isNumeric ? Int(player.bufferedPosition.seconds) : 0)" + "|" + "\(Int64(sender.value))"
 
         let yieldResult = seekContinuation?.yield((sender.value, .closestSync))
@@ -303,11 +308,13 @@ class PlayerViewController: UIViewController {
 //        player.seek(to: Int64(sender.value))
     }
 
-    @objc private func volumeSliderDidChange(_ sender: UISlider) {
+    @objc
+    private func volumeSliderDidChange(_ sender: UISlider) {
         player.volume = sender.value
     }
 
-    @objc func handleLongPress(_ sender: UILongPressGestureRecognizer) {
+    @objc
+    func handleLongPress(_ sender: UILongPressGestureRecognizer) {
         switch sender.state {
         case .possible:
             feedback.prepare()
@@ -317,7 +324,9 @@ class PlayerViewController: UIViewController {
                 feedback.impactOccurred()
                 player.playbackParameters = PlaybackParameters(playbackRate: 2.0)
             }
-        case .ended, .cancelled, .failed:
+        case .ended,
+             .cancelled,
+             .failed:
             player.playbackParameters = PlaybackParameters(playbackRate: 1)
         default:
             return
@@ -330,7 +339,8 @@ class PlayerViewController: UIViewController {
         playButton.isHidden = false
     }
 
-    @objc func playPause() {
+    @objc
+    func playPause() {
         if player.playWhenReady {
             player.pause()
             playButton.configuration?.image = UIImage(systemName: "play.fill")?
@@ -342,25 +352,30 @@ class PlayerViewController: UIViewController {
         }
     }
 
-    @objc func backwardsTap() {
+    @objc
+    func backwardsTap() {
         player.seekBack(seekParameters: .exact)
 //        handleTimer()
     }
 
-    @objc func forwardsTap() {
+    @objc
+    func forwardsTap() {
         player.seekForward(seekParameters: .exact)
 //        handleTimer()
     }
 
-    @objc func backwardsButtonTap() {
+    @objc
+    func backwardsButtonTap() {
         player.seekToPreviousMediaItem()
     }
 
-    @objc func forwardsButtonTap() {
+    @objc
+    func forwardsButtonTap() {
         player.seekToNextMediaItem()
     }
 
-    @objc func muteTapped() {
+    @objc
+    func muteTapped() {
         if player.isMuted {
             muteButton.configuration = createButtonConfig(imageName: "speaker.wave.2.fill")
             player.isMuted = false

@@ -7,7 +7,8 @@
 
 @preconcurrency import CoreMedia.CMFormatDescription
 
-@frozen public enum ColorSpace: Int {
+@frozen
+public enum ColorSpace: Int {
     case bt709 = 2
     case bt2020 = 3
 
@@ -15,10 +16,10 @@
         switch isoColorPrimaries {
         case 1:
             self = .bt709
-        case 4: fallthrough // BT.470M.
-        case 5: fallthrough // BT.470BG.
-        case 6: fallthrough // SMPTE 170M.
-        case 7: // SMPTE 240M.
+        case 4, // BT.470M.
+             5, // BT.470BG.
+             6, // SMPTE 170M.
+             7: // SMPTE 240M.
             // bt607 is not supported
             return nil
         case 9:
@@ -43,7 +44,8 @@ public extension ColorSpace {
     }
 }
 
-@frozen public enum ColorTransfer: Int {
+@frozen
+public enum ColorTransfer: Int {
     case linear
     case sdr
     case sRGB
@@ -53,9 +55,9 @@ public extension ColorSpace {
 
     public init?(isoTransferCharacteristics: Int) {
         switch isoTransferCharacteristics {
-        case 1: fallthrough // BT.709.
-        case 6: fallthrough // SMPTE 170M
-        case 7: // SMPTE 240M.
+        case 1, // BT.709.
+             6, // SMPTE 170M
+             7: // SMPTE 240M.
             self = .sdr
         case 4:
             self = .gamma22
@@ -90,7 +92,8 @@ public extension ColorSpace {
     }
 }
 
-@frozen public enum ColorRange {
+@frozen
+public enum ColorRange {
     case limited
     case full
 }

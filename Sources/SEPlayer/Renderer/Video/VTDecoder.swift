@@ -158,11 +158,11 @@ final class VTDecoder {
 
     private func createDecompressionSession(with format: CMVideoFormatDescription) throws {
         var imageBufferAttributes: [CFString: Any] = [:]
-#if targetEnvironment(simulator)
+        #if targetEnvironment(simulator)
         imageBufferAttributes[kCVPixelBufferIOSurfacePropertiesKey] = [
-            kCVPixelBufferIOSurfaceCoreAnimationCompatibilityKey: true
+            kCVPixelBufferIOSurfaceCoreAnimationCompatibilityKey: true,
         ]
-#endif
+        #endif
 
         SELogger.info(.decoder, "Creating a video decoder for \(Self.describe(format))")
         let status = VTDecompressionSessionCreate(

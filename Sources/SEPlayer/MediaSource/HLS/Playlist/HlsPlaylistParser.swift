@@ -71,9 +71,9 @@ public struct HlsPlaylistParser {
 
         for line in lines {
             if line.hasPrefix(Tag.streamInf) {
-                return .multivariant(try parseMultivariantPlaylist(lines: lines, url: url))
+                return try .multivariant(parseMultivariantPlaylist(lines: lines, url: url))
             } else if Tag.mediaPlaylistTags.contains(where: { line.hasPrefix($0) }) {
-                return .media(try parseMediaPlaylist(lines: lines, url: url))
+                return try .media(parseMediaPlaylist(lines: lines, url: url))
             }
         }
         throw ParseError.notAPlaylist
@@ -136,12 +136,12 @@ private extension HlsPlaylistParser {
         var variants: [HlsMultivariantPlaylist.Variant] = []
         var seenUrls = Set<URL>()
         for info in variantInfos where seenUrls.insert(info.url).inserted {
-            variants.append(try makeVariant(info, index: variants.count, variables: variables))
+            try variants.append(makeVariant(info, index: variants.count, variables: variables))
         }
         var iFrameVariants: [HlsMultivariantPlaylist.Variant] = []
         var seenIFrameUrls = Set<URL>()
         for info in iFrameVariantInfos where seenIFrameUrls.insert(info.url).inserted {
-            iFrameVariants.append(try makeVariant(info, index: iFrameVariants.count, variables: variables))
+            try iFrameVariants.append(makeVariant(info, index: iFrameVariants.count, variables: variables))
         }
         // Renditions take their codecs from any variant of their group, including those left out as repeats: the
         // same playlist can be listed once for every audio group.
@@ -356,6 +356,7 @@ private extension HlsPlaylistParser {
 // MARK: - Media playlist
 
 private extension HlsPlaylistParser {
+    // swiftlint:disable:next function_body_length
     func parseMediaPlaylist(lines: [String], url: URL) throws -> HlsMediaPlaylist {
         var variables: [String: String] = [:]
         var tags: [String] = []
@@ -468,8 +469,8 @@ private extension HlsPlaylistParser {
                     nextPartByteRangeOffset = parsed.offset + parsed.length
                 }
                 let duration = CMTime(seconds: seconds, preferredTimescale: .microsecondsTimescale)
-                segmentParts.append(.init(
-                    url: try resolve(uri),
+                try segmentParts.append(.init(
+                    url: resolve(uri),
                     initializationSegment: initializationSegment,
                     duration: duration,
                     relativeDiscontinuitySequence: relativeDiscontinuitySequence,
@@ -488,8 +489,8 @@ private extension HlsPlaylistParser {
                 guard let uri = attributes["URI"] else {
                     throw ParseError.malformed(line)
                 }
-                renditionReports.append((
-                    url: try resolve(uri),
+                try renditionReports.append((
+                    url: resolve(uri),
                     lastMediaSequence: attributes["LAST-MSN"].flatMap { Int($0) },
                     lastPartIndex: attributes["LAST-PART"].flatMap { Int($0) }
                 ))
@@ -506,7 +507,7 @@ private extension HlsPlaylistParser {
                 guard first >= 0, first + count <= previous.segments.count else {
                     throw ParseError.deltaUpdateUnusable
                 }
-                for segment in previous.segments[first..<(first + count)] {
+                for segment in previous.segments[first ..< (first + count)] {
                     let discontinuity = previous.discontinuitySequence + segment.relativeDiscontinuitySequence
                         - discontinuitySequence
                     segments.append(segment.moved(
@@ -566,8 +567,8 @@ private extension HlsPlaylistParser {
                     length = parsed.length
                     offset = parsed.offset
                 }
-                initializationSegment = .init(
-                    url: try resolve(uri),
+                initializationSegment = try .init(
+                    url: resolve(uri),
                     byteRangeOffset: offset,
                     byteRangeLength: length,
                     encryption: encryption
@@ -584,7 +585,7 @@ private extension HlsPlaylistParser {
                         throw ParseError.malformed(line)
                     }
                     let iv = try attributes["IV"].map { try parseIV($0) }
-                    encryption = .init(keyUrl: try resolve(uri), iv: iv)
+                    encryption = try .init(keyUrl: resolve(uri), iv: iv)
                 default:
                     throw ParseError.unsupported("EXT-X-KEY METHOD=\(method) KEYFORMAT=\(keyFormat)")
                 }
@@ -605,8 +606,8 @@ private extension HlsPlaylistParser {
                 let byteRangeOffset = segmentByteRangeLength == nil ? 0 : segmentByteRangeOffset ?? nextByteRangeOffset
                 // An initialization section uses the encryption in effect where it's declared; it may be encrypted
                 // even if the segment isn't.
-                segments.append(.init(
-                    url: try resolve(line),
+                try segments.append(.init(
+                    url: resolve(line),
                     initializationSegment: initializationSegment,
                     duration: segmentDuration,
                     title: segmentTitle,
@@ -651,8 +652,8 @@ private extension HlsPlaylistParser {
            let uri = preloadHint["URI"] {
             let offset = preloadHint["BYTERANGE-START"].flatMap { Int($0) } ?? 0
             let length = preloadHint["BYTERANGE-LENGTH"].flatMap { Int($0) }
-            trailingParts.append(.init(
-                url: try resolve(uri),
+            try trailingParts.append(.init(
+                url: resolve(uri),
                 initializationSegment: initializationSegment,
                 duration: partTargetDuration,
                 relativeDiscontinuitySequence: relativeDiscontinuitySequence,
@@ -760,7 +761,7 @@ private extension HlsPlaylistParser {
                 result += remainder[start.lowerBound...]
                 return result
             }
-            let name = String(remainder[start.upperBound..<end])
+            let name = String(remainder[start.upperBound ..< end])
             result += variables[name] ?? "{$\(name)}"
             remainder = remainder[remainder.index(after: end)...]
         }
@@ -820,7 +821,7 @@ struct AttributeList: CustomStringConvertible {
             if remainder.first == "\"" {
                 let afterQuote = remainder.index(after: remainder.startIndex)
                 let closing = remainder[afterQuote...].firstIndex(of: "\"") ?? remainder.endIndex
-                value = remainder[afterQuote..<closing]
+                value = remainder[afterQuote ..< closing]
                 remainder = closing < remainder.endIndex ? remainder[remainder.index(after: closing)...] : ""
             } else {
                 let comma = remainder.firstIndex(of: ",") ?? remainder.endIndex
@@ -851,7 +852,9 @@ private extension CMTimeScale {
 extension HlsPlaylistParser.ParseError: PlaybackErrorCodeProviding {
     public var errorCode: PlaybackErrorCode {
         switch self {
-        case .notAPlaylist, .malformed, .deltaUpdateUnusable: .parsingManifestMalformed
+        case .notAPlaylist,
+             .malformed,
+             .deltaUpdateUnusable: .parsingManifestMalformed
         case .unsupported: .parsingManifestUnsupported
         }
     }

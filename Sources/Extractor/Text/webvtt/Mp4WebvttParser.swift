@@ -29,14 +29,14 @@ public final class Mp4WebvttParser: SubtitleParser {
             guard data.readableBytes >= MP4Box.headerSize else {
                 throw ParserError.createForMalformedContainer(message: "Incomplete Mp4Webvtt top level box header found.")
             }
-            let boxSize = Int(try data.readInt(as: UInt32.self))
-            let boxType = MP4Box.BoxType(rawValue: try data.readInt(as: UInt32.self))
+            let boxSize = try Int(data.readInt(as: UInt32.self))
+            let boxType = try MP4Box.BoxType(rawValue: data.readInt(as: UInt32.self))
             let payloadSize = boxSize - MP4Box.headerSize
             guard payloadSize >= 0, payloadSize <= data.readableBytes else {
                 throw ParserError.createForMalformedContainer(message: "Mp4Webvtt box is larger than the sample.")
             }
             if boxType == .vttc {
-                cues.append(try parseVttCueBox(&data, remainingCueBoxBytes: payloadSize))
+                try cues.append(parseVttCueBox(&data, remainingCueBoxBytes: payloadSize))
             } else {
                 // The peers of the cue box aren't supported.
                 data.moveReaderIndex(forwardBy: payloadSize)
@@ -54,14 +54,16 @@ public final class Mp4WebvttParser: SubtitleParser {
             guard remaining >= MP4Box.headerSize else {
                 throw ParserError.createForMalformedContainer(message: "Incomplete vtt cue box header found.")
             }
-            let boxSize = Int(try data.readInt(as: UInt32.self))
-            let boxType = MP4Box.BoxType(rawValue: try data.readInt(as: UInt32.self))
+            let boxSize = try Int(data.readInt(as: UInt32.self))
+            let boxType = try MP4Box.BoxType(rawValue: data.readInt(as: UInt32.self))
             remaining -= MP4Box.headerSize
             let payloadLength = boxSize - MP4Box.headerSize
             guard payloadLength >= 0, payloadLength <= remaining else {
                 throw ParserError.createForMalformedContainer(message: "vtt cue box child is larger than the box.")
             }
-            let payload = String(decoding: try data.readBytes(length: payloadLength), as: UTF8.self)
+            // Invalid UTF-8 becomes replacement characters rather than failing.
+            // swiftlint:disable:next optional_data_string_conversion
+            let payload = try String(decoding: data.readBytes(length: payloadLength), as: UTF8.self)
             remaining -= payloadLength
             if boxType == .sttg {
                 settingsCue = WebvttCueParser.parseCueSettings(payload)

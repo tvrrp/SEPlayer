@@ -5,17 +5,19 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
+// swiftlint:disable file_length
+
 import CoreMedia
 import DataSource
-import Testing
 @testable import SEPlayer
+import Testing
 
 /// Every player in these tests plays on the same queue, so they run one at a time.
 @Suite(.serialized)
 @TestableSyncPlayerActor
 class SEPlayerTests {
-    public let tag = "SEPlayerTests"
-    public let timeoutMs: UInt64 = 10_000
+    let tag = "SEPlayerTests"
+    let timeoutMs: UInt64 = 10_000
 
     private let placeholderTimeline: Timeline
 
@@ -30,7 +32,7 @@ class SEPlayerTests {
         let timeoutChecker = TimeoutChecker()
         let timeline = emptyTimeline
         let expectedMaskingTimeline = MaskingMediaSource.PlaceholderTimeline(mediaItem: FakeMediaSource.fakeMediaItem)
-        let renderer = FakeRenderer(trackType: .unknown, clock: FakeClock())
+        let renderer = try FakeRenderer(trackType: .unknown, clock: FakeClock())
         let player = try TestSEPlayerFactory().setRenderers([renderer]).build()
         let eventValidator = CollectablePlayerDelegateAsyncStream.EventValidator { event in
             if case let .didChangePlaybackState(state) = event {
@@ -65,17 +67,17 @@ class SEPlayerTests {
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[0] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: expectedMaskingTimeline) && reason == .playlistChanged
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: expectedMaskingTimeline) && reason == .playlistChanged
             } else {
-                return false
+                false
             }
         }())
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[1] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
             } else {
-                return false
+                false
             }
         }())
         #expect(
@@ -93,7 +95,7 @@ class SEPlayerTests {
     @Test
     func playSinglePeriodTimeline() async throws {
         let timeline = FakeTimeline()
-        let renderer = FakeRenderer(trackType: .video, clock: FakeClock())
+        let renderer = try FakeRenderer(trackType: .video, clock: FakeClock())
         let player = try TestSEPlayerFactory().setRenderers([renderer]).build()
 
         let eventValidator = CollectablePlayerDelegateAsyncStream.EventValidator { event in
@@ -124,17 +126,17 @@ class SEPlayerTests {
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[0] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: placeholderTimeline) && reason == .playlistChanged
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: placeholderTimeline) && reason == .playlistChanged
             } else {
-                return false
+                false
             }
         }())
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[1] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
             } else {
-                return false
+                false
             }
         }())
 
@@ -154,7 +156,7 @@ class SEPlayerTests {
     func playMultiPeriodTimeline() async throws {
         let timeoutChecker = TimeoutChecker()
         let timeline = FakeTimeline(windowCount: 3)
-        let renderer = FakeRenderer(trackType: .video, clock: FakeClock())
+        let renderer = try FakeRenderer(trackType: .video, clock: FakeClock())
         let player = try TestSEPlayerFactory().setRenderers([renderer]).build()
         let eventValidator = CollectablePlayerDelegateAsyncStream.EventValidator { event in
             if case let .didChangePlaybackState(state) = event {
@@ -189,19 +191,19 @@ class SEPlayerTests {
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[0] {
-                return TestUtil.timelinesAreSame(
+                TestUtil.timelinesAreSame(
                     lhs: newTimeline,
                     rhs: FakeMediaSource.InitialTimeline(timeline: timeline)
                 ) && reason == .playlistChanged
             } else {
-                return false
+                false
             }
         }())
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[1] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
             } else {
-                return false
+                false
             }
         }())
         #expect(
@@ -220,7 +222,7 @@ class SEPlayerTests {
     func playShortDurationPeriods() async throws {
         let timeoutChecker = TimeoutChecker()
         let timeline = FakeTimeline(windowDefinitions: [.init(periodCount: 100, id: 0)])
-        let renderer = FakeRenderer(trackType: .video, clock: FakeClock())
+        let renderer = try FakeRenderer(trackType: .video, clock: FakeClock())
         let player = try TestSEPlayerFactory().setRenderers([renderer]).build()
         let eventValidator = CollectablePlayerDelegateAsyncStream.EventValidator { event in
             if case let .didChangePlaybackState(state) = event {
@@ -252,17 +254,17 @@ class SEPlayerTests {
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[0] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: placeholderTimeline) && reason == .playlistChanged
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: placeholderTimeline) && reason == .playlistChanged
             } else {
-                return false
+                false
             }
         }())
 
         #expect({
             if case let .didChangeTimeline(newTimeline, reason) = filteredTimelinesChanges[1] {
-                return TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
+                TestUtil.timelinesAreSame(lhs: newTimeline, rhs: timeline) && reason == .sourceUpdate
             } else {
-                return false
+                false
             }
         }())
         #expect(
@@ -283,7 +285,7 @@ class SEPlayerTests {
     func `renderersLifecycle renderersThatAreNeverEnabled areNotReset`() async throws {
         let timeoutChecker = TimeoutChecker()
         let timeline = FakeTimeline()
-        let clock = FakeClock()
+        let clock = try FakeClock()
         let videoRenderer = FakeRenderer(trackType: .video, clock: clock)
         let audioRenderer = FakeRenderer(trackType: .audio, clock: clock)
         let player = try TestSEPlayerFactory().setRenderers([videoRenderer, audioRenderer]).build()
@@ -292,7 +294,7 @@ class SEPlayerTests {
             eventValidator: .waitForState(state: .ended)
         )
         playerEventsCollector.startCollecting()
-        player.set(mediaSource: try FakeMediaSource(
+        try player.set(mediaSource: FakeMediaSource(
             queue: playerSyncQueue,
             timeline: timeline,
             formats: [SEPlayerTestRunner.audioFormat]
@@ -315,9 +317,9 @@ class SEPlayerTests {
     }
 
     @Test(.disabled())
-    func `renderersLifecycle onlyRenderersThatAreEnabled areSetToFinal`() async throws {
+    func `renderersLifecycle onlyRenderersThatAreEnabled areSetToFinal`() {
 //        var videoStreamSetToFinalCount = 0
-//        let clock = FakeClock()
+//        let clock = try FakeClock()
 //        let videoRenderer = FakeRenderer(trackType: .video, clock: clock)
 //        let audioRenderer = FakeRenderer(trackType: .audio, clock: clock)
 //
@@ -416,7 +418,7 @@ class SEPlayerTests {
                     queue: queue,
                     trackGroups: trackGroups,
                     allocator: allocator,
-                    singleSampleTimeUs: FakeTimeline.TimelineWindowDefinition.defaultWindowOffsetInFirstPeriodUs,
+                    singleSampleTimeUs: FakeTimeline.TimelineWindowDefinition.defaultWindowOffsetInFirstPeriodUs
                 )
                 mediaPeriod.setDiscontinuityPositionUs(10)
                 return mediaPeriod
@@ -588,10 +590,10 @@ class SEPlayerTests {
 
     @Test
     func `stop correctMasking`() async throws {
-        var currentMediaItemIndex = Array<Int?>(repeating: nil, count: 3)
-        var currentPosition = Array<Int64>(repeating: .timeUnset, count: 3)
-        var bufferedPosition = Array<Int64>(repeating: .timeUnset, count: 3)
-        var totalBufferedDuration = Array<Int64>(repeating: .timeUnset, count: 3)
+        var currentMediaItemIndex = [Int?](repeating: nil, count: 3)
+        var currentPosition = [Int64](repeating: .timeUnset, count: 3)
+        var bufferedPosition = [Int64](repeating: .timeUnset, count: 3)
+        var totalBufferedDuration = [Int64](repeating: .timeUnset, count: 3)
         let mediaSource = try FakeMediaSource(
             queue: playerSyncQueue,
             timeline: FakeTimeline(),
@@ -651,10 +653,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo singlePeriod correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 9000, timescale: 1000)) },
@@ -679,10 +681,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo singlePeriod beyondBufferedData correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 9200, timescale: 1000)) },
@@ -707,10 +709,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo backwardsSinglePeriod correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 1000, timescale: 1000)) },
@@ -730,10 +732,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo backwardsMultiplePeriods correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 1000, timescale: 1000), of: 0) },
@@ -743,9 +745,9 @@ class SEPlayerTests {
             bufferedPositionUpdate: { bufferedPositions[$0] = $1 },
             totalBufferedDurationUpdate: { totalBufferedDuration[$0] = $1 },
             mediaSources: [
-                try FakeMediaSource(),
-                try FakeMediaSource(),
-                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 9200)
+                FakeMediaSource(),
+                FakeMediaSource(),
+                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 9200),
             ]
         )
 
@@ -757,10 +759,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo toUnbufferedPeriod correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 1000, timescale: 1000), of: 2) },
@@ -770,9 +772,9 @@ class SEPlayerTests {
             bufferedPositionUpdate: { bufferedPositions[$0] = $1 },
             totalBufferedDurationUpdate: { totalBufferedDuration[$0] = $1 },
             mediaSources: [
-                try FakeMediaSource(),
-                try FakeMediaSource(),
-                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 0)
+                FakeMediaSource(),
+                FakeMediaSource(),
+                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 0),
             ]
         )
 
@@ -784,10 +786,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo toLoadingPeriod correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 1000, timescale: 1000), of: 1) },
@@ -797,8 +799,8 @@ class SEPlayerTests {
             bufferedPositionUpdate: { bufferedPositions[$0] = $1 },
             totalBufferedDurationUpdate: { totalBufferedDuration[$0] = $1 },
             mediaSources: [
-                try FakeMediaSource(),
-                try FakeMediaSource()
+                FakeMediaSource(),
+                FakeMediaSource(),
             ]
         )
 
@@ -816,10 +818,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo toLoadingPeriod withinPartiallyBufferedData correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 1000, timescale: 1000), of: 1) },
@@ -829,8 +831,8 @@ class SEPlayerTests {
             bufferedPositionUpdate: { bufferedPositions[$0] = $1 },
             totalBufferedDurationUpdate: { totalBufferedDuration[$0] = $1 },
             mediaSources: [
-                try FakeMediaSource(),
-                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 4000)
+                FakeMediaSource(),
+                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 4000),
             ]
         )
 
@@ -847,10 +849,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo toLoadingPeriod beyondBufferedData correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 5000, timescale: 1000), of: 1) },
@@ -860,8 +862,8 @@ class SEPlayerTests {
             bufferedPositionUpdate: { bufferedPositions[$0] = $1 },
             totalBufferedDurationUpdate: { totalBufferedDuration[$0] = $1 },
             mediaSources: [
-                try FakeMediaSource(),
-                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 4000)
+                FakeMediaSource(),
+                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 4000),
             ]
         )
 
@@ -878,10 +880,10 @@ class SEPlayerTests {
 
     @Test
     func `seekTo toInnerFullyBufferedPeriod correctMaskingPosition`() async throws {
-        var mediaItemIndex = Array<Int?>(repeating: nil, count: 2)
-        var positionMs = Array<Int64?>(repeating: nil, count: 2)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 2)
-        var totalBufferedDuration = Array<Int64?>(repeating: nil, count: 2)
+        var mediaItemIndex = [Int?](repeating: nil, count: 2)
+        var positionMs = [Int64?](repeating: nil, count: 2)
+        var bufferedPositions = [Int64?](repeating: nil, count: 2)
+        var totalBufferedDuration = [Int64?](repeating: nil, count: 2)
 
         try await runPositionMaskingCapturingActionSchedule(
             callback: { $0.seek(to: CMTime(value: 5000, timescale: 1000), of: 1) },
@@ -891,9 +893,9 @@ class SEPlayerTests {
             bufferedPositionUpdate: { bufferedPositions[$0] = $1 },
             totalBufferedDurationUpdate: { totalBufferedDuration[$0] = $1 },
             mediaSources: [
-                try FakeMediaSource(),
-                try FakeMediaSource(),
-                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 4000)
+                FakeMediaSource(),
+                FakeMediaSource(),
+                createPartiallyBufferedMediaSource(maxBufferedPositionMs: 4000),
             ]
         )
 
@@ -913,8 +915,8 @@ class SEPlayerTests {
         let fakeTimeline = FakeTimeline()
         let mediaSource = try FakeMediaSource(timeline: fakeTimeline)
         var mediaItemIndex: Int?
-        var positionMs = Array<Int64?>(repeating: nil, count: 3)
-        var bufferedPositions = Array<Int64?>(repeating: nil, count: 3)
+        var positionMs = [Int64?](repeating: nil, count: 3)
+        var bufferedPositions = [Int64?](repeating: nil, count: 3)
         let actionSchedule = try ActionSchedule.Builder(tag: tag)
             .pause()
             .seek(mediaItemIndex: 1, positionMs: .timeUnset)
@@ -1079,7 +1081,7 @@ class SEPlayerTests {
                     defaultPositionUs: 0,
                     windowOffsetInFirstPeriodUs: windowOffsetInFirstPeriodUs,
                     adPlaybackStates: [.none]
-                )
+                ),
             ]
         )
 
@@ -1099,7 +1101,7 @@ class SEPlayerTests {
                     allocator: allocator,
                     trackDataFactory: TestTrackDataFactory(
                         windowOffsetInFirstPeriodUs: windowOffsetInFirstPeriodUs,
-                        maxBufferedPositionMs: maxBufferedPositionMs,
+                        maxBufferedPositionMs: maxBufferedPositionMs
                     ),
                     deferOnPrepared: false
                 )
@@ -1115,7 +1117,7 @@ class SEPlayerTests {
                         .init(
                             oneByteSample: windowOffsetInFirstPeriodUs + Time.msToUs(timeMs: maxBufferedPositionMs),
                             flags: .keyframe
-                        )
+                        ),
                     ]
                 }
             }

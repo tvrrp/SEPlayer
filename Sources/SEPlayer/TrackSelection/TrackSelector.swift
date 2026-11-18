@@ -60,6 +60,7 @@ public class TrackSelector {
     public func setParameters(_ parameters: TrackSelectionParameters, application: TrackSelectionApplication) {
         setParameters(parameters)
     }
+
     public func isSetParametersSupported() -> Bool { false }
     /// Takes the size the video output shows the picture at, in pixels, or `nil` without one, for the viewport.
     public func setVideoOutputSize(_ size: CGSize?) {}

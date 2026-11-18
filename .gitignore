@@ -13,6 +13,8 @@ Package.resolved
 !/Tests/
 !/Demo/
 !/Package.swift
+!/.swiftformat
+!/.swiftlint.yml
 !/README.md
 
 .DS_Store

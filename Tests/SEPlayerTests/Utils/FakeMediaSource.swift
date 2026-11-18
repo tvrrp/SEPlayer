@@ -8,8 +8,8 @@
 import CoreMedia
 import DataSource
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 class FakeMediaSource: BaseMediaSource {
     let queue: Queue
@@ -161,7 +161,7 @@ class FakeMediaSource: BaseMediaSource {
         if preparedSource {
             #expect(!releasedSource)
             timeline = newTimeline
-            try! self.finishSourcePreparation(sendManifestLoadEvents: sendManifestLoadEvents)
+            try self.finishSourcePreparation(sendManifestLoadEvents: sendManifestLoadEvents)
         } else {
             timeline = newTimeline
         }
@@ -208,7 +208,7 @@ extension FakeMediaSource {
     }
 
     static func buildTrackGroupArray(formats: [Format]) throws -> TrackGroupArray {
-        TrackGroupArray(trackGroups: try formats.map { try TrackGroup(formats: [$0]) })
+        try TrackGroupArray(trackGroups: formats.map { try TrackGroup(formats: [$0]) })
     }
 }
 

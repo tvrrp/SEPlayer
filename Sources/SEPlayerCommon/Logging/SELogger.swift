@@ -24,7 +24,7 @@ public enum SELogDomain: String, CaseIterable, Sendable {
 
 /// A topic of the logs. Each belongs to one domain, and can be switched on and off apart from the others of its domain.
 public enum SELogTopic: String, CaseIterable, Sendable {
-    // Data source
+    /// Data source
     /// HTTP requests, responses and downloads.
     case http
     /// The byte cache: blocks, eviction, memory the system took back, the budget.
@@ -38,7 +38,7 @@ public enum SELogTopic: String, CaseIterable, Sendable {
     /// Decryption of encrypted segments.
     case decryption
 
-    // Extractor
+    /// Extractor
     /// Choosing an extractor for the data.
     case sniffing
     /// MP4 and fragmented MP4.
@@ -48,7 +48,7 @@ public enum SELogTopic: String, CaseIterable, Sendable {
     /// Subtitle files.
     case subtitles
 
-    // Media source
+    /// Media source
     /// Progressive media: loading, the extraction window, seeks.
     case progressive
     /// HLS loading: chunks, variants, I-frames, scrubbing.
@@ -60,7 +60,7 @@ public enum SELogTopic: String, CaseIterable, Sendable {
     /// Loads, retries and cancellations.
     case loader
 
-    // Player
+    /// Player
     /// Playback state and play/pause.
     case playback
     /// Seeks: requests, coalescing, completion.
@@ -83,7 +83,7 @@ public enum SELogTopic: String, CaseIterable, Sendable {
     /// it logs every event the player handles.
     case scheduling
 
-    // Renderer
+    /// Renderer
     /// Renderer lifecycle: enabling, starting, stopping, resets, stream changes, readiness.
     case lifecycle
     /// Audio renderers.
@@ -103,11 +103,39 @@ public enum SELogTopic: String, CaseIterable, Sendable {
 
     public var domain: SELogDomain {
         switch self {
-        case .http, .cache, .diskCache, .file, .readAhead, .decryption: .dataSource
-        case .sniffing, .mp4, .transportStream, .subtitles: .extractor
-        case .progressive, .hls, .playlist, .sampleQueue, .loader: .mediaSource
-        case .playback, .seek, .periods, .loadControl, .bandwidth, .trackSelection, .clock, .events, .audioSession, .scheduling: .player
-        case .lifecycle, .audio, .video, .text, .decoder, .display, .sync, .recovery: .renderer
+        case .http,
+             .cache,
+             .diskCache,
+             .file,
+             .readAhead,
+             .decryption: .dataSource
+        case .sniffing,
+             .mp4,
+             .transportStream,
+             .subtitles: .extractor
+        case .progressive,
+             .hls,
+             .playlist,
+             .sampleQueue,
+             .loader: .mediaSource
+        case .playback,
+             .seek,
+             .periods,
+             .loadControl,
+             .bandwidth,
+             .trackSelection,
+             .clock,
+             .events,
+             .audioSession,
+             .scheduling: .player
+        case .lifecycle,
+             .audio,
+             .video,
+             .text,
+             .decoder,
+             .display,
+             .sync,
+             .recovery: .renderer
         }
     }
 
@@ -262,7 +290,8 @@ public enum SELogger {
         case .error: logger?.error("\(text, privacy: .public)")
         case .warning: logger?.notice("\(text, privacy: .public)")
         case .info: logger?.info("\(text, privacy: .public)")
-        case .debug, .verbose: logger?.debug("\(text, privacy: .public)")
+        case .debug,
+             .verbose: logger?.debug("\(text, privacy: .public)")
         }
 
         if printsMessages {

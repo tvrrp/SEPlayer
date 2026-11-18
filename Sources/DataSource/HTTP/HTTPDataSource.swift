@@ -5,8 +5,8 @@
 //  Created by tvrrp on 20.06.2026.
 //
 
-import Foundation
 import CoreMedia
+import Foundation
 import SEPlayerCommon
 
 /// A ``DataSource`` that reads an HTTP resource.
@@ -58,7 +58,7 @@ public final class HTTPDataSource: DataSource, @unchecked Sendable {
 
         do {
             // An empty read waits for the first response, which tells the length of the resource.
-            let emptyRange = dataSpec.position..<dataSpec.position
+            let emptyRange = dataSpec.position ..< dataSpec.position
             _ = try await resource.read(emptyRange, for: reader, isolation)
         } catch {
             try? await close(isolation)

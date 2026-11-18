@@ -395,8 +395,7 @@ public final class SEPlayerLayer: CALayer, VideoOutput, SEPlayerDelegate {
                 let animation = animation(forKey: key) as? CABasicAnimation,
                 let keyPath = animation.keyPath,
                 keyPath == "bounds.size" || keyPath == "bounds",
-                let from = size(from: animation.fromValue)
-            else {
+                let from = size(from: animation.fromValue) else {
                 continue
             }
 
@@ -555,8 +554,8 @@ public final class SEPlayerLayer: CALayer, VideoOutput, SEPlayerDelegate {
     }
 }
 
+@MainActor
 private extension SEPlayerLayer {
-    @MainActor
     func _set(player: SEPlayer?) {
         guard player !== _player else { return }
         let oldPlayer = _player

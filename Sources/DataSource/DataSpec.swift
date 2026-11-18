@@ -51,17 +51,17 @@ extension DataSpec: Hashable {
     }
 
     public static func == (lhs: DataSpec, rhs: DataSpec) -> Bool {
-        return lhs.url == rhs.url
-        && lhs.urlPositionOffset == rhs.urlPositionOffset
-        && lhs.httpMethod == rhs.httpMethod
-        && lhs.httpBody == rhs.httpBody
-        && lhs.allHTTPHeaderFields == rhs.allHTTPHeaderFields
-        && lhs.position == rhs.position
-        && lhs.length == rhs.length
-        && lhs.key == rhs.key
-        && lhs.flags == rhs.flags
-        && lhs.urlPositionOffset == rhs.urlPositionOffset
-        && lhs.customData == nil && rhs.customData == nil
+        lhs.url == rhs.url
+            && lhs.urlPositionOffset == rhs.urlPositionOffset
+            && lhs.httpMethod == rhs.httpMethod
+            && lhs.httpBody == rhs.httpBody
+            && lhs.allHTTPHeaderFields == rhs.allHTTPHeaderFields
+            && lhs.position == rhs.position
+            && lhs.length == rhs.length
+            && lhs.key == rhs.key
+            && lhs.flags == rhs.flags
+            && lhs.urlPositionOffset == rhs.urlPositionOffset
+            && lhs.customData == nil && rhs.customData == nil
     }
 }
 
@@ -72,9 +72,9 @@ public extension DataSpec {
 
     var range2: Range<Int> {
         if let length {
-            position..<(position + length)
+            position ..< (position + length)
         } else {
-            position..<position
+            position ..< position
         }
     }
 

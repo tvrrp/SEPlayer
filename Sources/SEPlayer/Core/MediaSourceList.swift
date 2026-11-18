@@ -47,14 +47,14 @@ final class MediaSourceList {
 
     @discardableResult
     func setMediaSource(holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) throws -> Timeline {
-        removeMediaSourcesInternal(range: 0..<mediaSourceHolders.count)
+        removeMediaSourcesInternal(range: 0 ..< mediaSourceHolders.count)
         return try addMediaSource(index: mediaSourceHolders.count, holders: holders, shuffleOrder: shuffleOrder)
     }
 
     func addMediaSource(index: Int, holders: [MediaSourceHolder], shuffleOrder: ShuffleOrder) throws -> Timeline {
         if !holders.isEmpty {
             self.shuffleOrder = shuffleOrder
-            for insertionIndex in index..<index + holders.count {
+            for insertionIndex in index ..< index + holders.count {
                 let holder = holders[insertionIndex - index]
                 if insertionIndex > 0 {
                     let previousHolder = mediaSourceHolders[insertionIndex - 1]
@@ -92,7 +92,7 @@ final class MediaSourceList {
 
     func moveMediaSource(from currentIndex: Int, to newIndex: Int, shuffleOrder: ShuffleOrder) -> Timeline {
         moveMediaSourceRange(
-            range: currentIndex..<(currentIndex + 1),
+            range: currentIndex ..< (currentIndex + 1),
             to: newIndex,
             shuffleOrder: shuffleOrder
         )
@@ -113,7 +113,7 @@ final class MediaSourceList {
         mediaSourceHolders.removeSubrange(range)
         mediaSourceHolders.insert(contentsOf: removed, at: newIndex)
 
-        for index in startIndex...endIndex {
+        for index in startIndex ... endIndex {
             let holder = mediaSourceHolders[index]
             holder.firstWindowIndexInChild = windowOffset
             windowOffset += holder.mediaSource.timeline.windowCount()
@@ -138,7 +138,7 @@ final class MediaSourceList {
         } else {
             self.shuffleOrder.cloneAndClear()
         }
-        removeMediaSourcesInternal(range: 0..<getSize())
+        removeMediaSourcesInternal(range: 0 ..< getSize())
         return createTimeline()
     }
 
@@ -275,7 +275,7 @@ private extension MediaSourceList {
     }
 
     func correctOffsets(start: Int, windowOffsetUpdate: Int) {
-        for index in start..<mediaSourceHolders.count {
+        for index in start ..< mediaSourceHolders.count {
             mediaSourceHolders[index].firstWindowIndexInChild += windowOffsetUpdate
         }
     }
@@ -339,7 +339,7 @@ extension MediaSourceList {
         }
 
         static func == (lhs: MediaPeriodHolder, rhs: MediaPeriodHolder) -> Bool {
-            return lhs.period === rhs.period
+            lhs.period === rhs.period
         }
     }
 

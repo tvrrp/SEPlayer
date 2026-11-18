@@ -34,7 +34,6 @@ public struct MediaItem: Hashable, Sendable {
     /// The media ``RequestMetadata``.
     public let requestMetadata: RequestMetadata
 
-
     fileprivate init(
         mediaId: String,
         clippingConfiguration: ClippingConfiguration,

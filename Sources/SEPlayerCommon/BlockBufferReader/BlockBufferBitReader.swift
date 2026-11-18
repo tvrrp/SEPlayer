@@ -39,10 +39,10 @@ public struct BlockBufferBitReader: Hashable {
 
     // The offset within the buffer, stored as the current byte offset, and the bit offset within
     // that byte (from 0 to 7).
-    @usableFromInline internal var byteOffset: Int
-    @usableFromInline internal var bitOffset: Int
+    @usableFromInline var byteOffset: Int
+    @usableFromInline var bitOffset: Int
 
-    internal var reader: BlockBufferReader
+    var reader: BlockBufferReader
 
     // MARK: - Init
 
@@ -176,7 +176,7 @@ public struct BlockBufferBitReader: Hashable {
     /// - Returns: Whether the bit is set.
     public mutating func readBit() throws -> Bool {
         guard bitsLeft >= 1 else { throw BlockBufferReaderErrors(.outOfBounds) }
-        let returnValue = (try byte(at: byteOffset) & (0x80 >> bitOffset)) != 0
+        let returnValue = try (byte(at: byteOffset) & (0x80 >> bitOffset)) != 0
         skipBit()
         return returnValue
     }
@@ -188,7 +188,7 @@ public struct BlockBufferBitReader: Hashable {
     ///            original the result is zero extended, so a 32 bit read never comes back negative.
     @discardableResult
     public mutating func readBits(_ numBits: Int) throws -> Int {
-        Int(try readBits32(numBits))
+        try Int(readBits32(numBits))
     }
 
     /// Reads up to 64 bits into an arbitrary fixed width integer.
@@ -202,7 +202,7 @@ public struct BlockBufferBitReader: Hashable {
     public mutating func readBits<T: FixedWidthInteger>(_ numBits: Int, as: T.Type = T.self) throws -> T {
         precondition(numBits >= 0 && numBits <= 64, "numBits: \(numBits), expected: range(0, 64)")
         if numBits <= 32 {
-            return T(truncatingIfNeeded: try readBits32(numBits))
+            return try T(truncatingIfNeeded: readBits32(numBits))
         }
         let mostSignificant = try readBits32(numBits - 32)
         let leastSignificant = try readBits32(32)
@@ -213,7 +213,7 @@ public struct BlockBufferBitReader: Hashable {
     /// the sign of a full 64 bit read.
     @discardableResult
     public mutating func readBitsToLong(_ numBits: Int) throws -> Int64 {
-        Int64(bitPattern: try readBits(numBits, as: UInt64.self))
+        try Int64(bitPattern: readBits(numBits, as: UInt64.self))
     }
 
     /// Returns the next `numBits` bits without moving the position.
@@ -242,7 +242,7 @@ public struct BlockBufferBitReader: Hashable {
 
         // Whole bytes.
         let to = offset + (numBits >> 3)
-        for index in offset..<to {
+        for index in offset ..< to {
             if bitOffset == 0 {
                 // Unlike the Java original we do not touch `data[byteOffset + 1]` here: the JVM
                 // version reads a byte it then shifts entirely away, which makes an aligned read of
@@ -344,7 +344,7 @@ public struct BlockBufferBitReader: Hashable {
             "destination of \(buffer.count) bytes is too small for \(length) bytes at offset \(offset)"
         )
         let bytes = try delegate { try $0.readBytes(length: length) }
-        buffer.replaceSubrange(offset..<(offset + length), with: bytes)
+        buffer.replaceSubrange(offset ..< (offset + length), with: bytes)
     }
 
     /// Reads the next `length` bytes as `Data`. Must only be called when the position is byte
@@ -376,13 +376,15 @@ public struct BlockBufferBitReader: Hashable {
     /// Reads the next `length` bytes as a UTF-8 string. Must only be called when the position is
     /// byte aligned.
     public mutating func readBytesAsString(length: Int) throws -> String {
-        String(decoding: try readBytes(length: length), as: UTF8.self)
+        // Invalid UTF-8 becomes replacement characters rather than failing.
+        // swiftlint:disable:next optional_data_string_conversion
+        try String(decoding: readBytes(length: length), as: UTF8.self)
     }
 
     /// Reads the next `length` bytes as a string in `encoding`. Must only be called when the
     /// position is byte aligned.
     public mutating func readBytesAsString(length: Int, encoding: String.Encoding) throws -> String? {
-        String(data: try readData(length: length), encoding: encoding)
+        try String(data: readData(length: length), encoding: encoding)
     }
 
     /// Reads a `String` decoding `length` bytes with `encoding`, moving the position appropriately.

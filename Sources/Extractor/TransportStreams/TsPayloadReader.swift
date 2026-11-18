@@ -25,11 +25,11 @@ public enum TsPayload {
             public var roleFlags: RoleFlags {
                 switch self {
                 case .hearingImpaired:
-                    return .enhancedDialogIntelligibility
+                    .enhancedDialogIntelligibility
                 case .visualImpairedCommentary:
-                    return .describesVideo
+                    .describesVideo
                 default:
-                    return []
+                    []
                 }
             }
         }

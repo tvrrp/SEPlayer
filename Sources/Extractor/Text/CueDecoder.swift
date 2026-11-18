@@ -45,33 +45,33 @@ public struct CueDecoder {
         try reader.forEachBox { type, payload in
             switch type {
             case .text:
-                builder.setText(try decodeText(&payload))
+                try builder.setText(decodeText(&payload))
                 hasContent = true
             case .image:
-                builder.setImage(try payload.readImage())
+                try builder.setImage(payload.readImage())
                 hasContent = true
             case .textAlignment:
-                builder.setTextAlignment(Cue.Alignment(rawValue: try payload.read()))
+                try builder.setTextAlignment(Cue.Alignment(rawValue: payload.read()))
             case .multiRowAlignment:
-                builder.setMultiRowAlignment(Cue.Alignment(rawValue: try payload.read()))
+                try builder.setMultiRowAlignment(Cue.Alignment(rawValue: payload.read()))
             case .line:
                 switch try payload.read(as: UInt8.self) {
-                case 0: builder.setLine(.fraction(try payload.readCGFloat()))
-                case 1: builder.setLine(.number(Int(try payload.read(as: Int64.self))))
+                case 0: try builder.setLine(.fraction(payload.readCGFloat()))
+                case 1: try builder.setLine(.number(Int(payload.read(as: Int64.self))))
                 default: break
                 }
             case .lineAnchor:
-                builder.setLineAnchor(Cue.Anchor(rawValue: try payload.read()))
+                try builder.setLineAnchor(Cue.Anchor(rawValue: payload.read()))
             case .position:
-                builder.setPosition(try payload.readCGFloat())
+                try builder.setPosition(payload.readCGFloat())
             case .positionAnchor:
-                builder.setPositionAnchor(Cue.Anchor(rawValue: try payload.read()))
+                try builder.setPositionAnchor(Cue.Anchor(rawValue: payload.read()))
             case .size:
-                builder.setSize(try payload.readCGFloat())
+                try builder.setSize(payload.readCGFloat())
             case .imageHeight:
-                builder.setImageHeight(try payload.readCGFloat())
+                try builder.setImageHeight(payload.readCGFloat())
             case .windowColor:
-                builder.setWindowColor(try payload.readColor())
+                try builder.setWindowColor(payload.readColor())
             case .textSize:
                 let kind = try payload.read(as: UInt8.self)
                 let size = try payload.readCGFloat()
@@ -82,11 +82,11 @@ public struct CueDecoder {
                 default: break
                 }
             case .verticalType:
-                builder.setVerticalType(Cue.VerticalType(rawValue: try payload.read()))
+                try builder.setVerticalType(Cue.VerticalType(rawValue: payload.read()))
             case .shearDegrees:
-                builder.setShearDegrees(try payload.readCGFloat())
+                try builder.setShearDegrees(payload.readCGFloat())
             case .zIndex:
-                builder.setZIndex(Int(try payload.read(as: Int32.self)))
+                try builder.setZIndex(Int(payload.read(as: Int32.self)))
             default:
                 break
             }
@@ -104,9 +104,9 @@ public struct CueDecoder {
             case .string:
                 string = try payload.readString()
             case .span:
-                let location = Int(try payload.read(as: UInt32.self))
-                let length = Int(try payload.read(as: UInt32.self))
-                spans.append((location, length, try decodeAttributes(&payload)))
+                let location = try Int(payload.read(as: UInt32.self))
+                let length = try Int(payload.read(as: UInt32.self))
+                try spans.append((location, length, decodeAttributes(&payload)))
             default:
                 break
             }
@@ -118,7 +118,7 @@ public struct CueDecoder {
         for span in spans where span.location + span.length <= scalarCount {
             let start = scalars.index(scalars.startIndex, offsetBy: span.location)
             let end = scalars.index(start, offsetBy: span.length)
-            text[start..<end].mergeAttributes(span.attributes)
+            text[start ..< end].mergeAttributes(span.attributes)
         }
         return text
     }
@@ -147,12 +147,12 @@ public struct CueDecoder {
             case .absoluteFontSize:
                 attributes.cueAbsoluteFontSize = try payload.readCGFloat()
             case .ruby:
-                let position = Cue.AnnotationPosition(rawValue: try payload.read())
-                attributes.cueRuby = Cue.Ruby(text: try payload.readString(), position: position)
+                let position = try Cue.AnnotationPosition(rawValue: payload.read())
+                attributes.cueRuby = try Cue.Ruby(text: payload.readString(), position: position)
             case .textEmphasis:
-                let markShape = Cue.TextEmphasis.MarkShape(rawValue: try payload.read()) ?? .none
-                let markFill = Cue.TextEmphasis.MarkFill(rawValue: try payload.read())
-                let position = Cue.AnnotationPosition(rawValue: try payload.read())
+                let markShape = try Cue.TextEmphasis.MarkShape(rawValue: payload.read()) ?? .none
+                let markFill = try Cue.TextEmphasis.MarkFill(rawValue: payload.read())
+                let position = try Cue.AnnotationPosition(rawValue: payload.read())
                 attributes.cueTextEmphasis = Cue.TextEmphasis(markShape: markShape, markFill: markFill, position: position)
             case .horizontalInVertical:
                 attributes.cueHorizontalInVertical = try payload.readBool()

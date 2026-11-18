@@ -5,11 +5,13 @@
 //  Created by Damir Yackupov on 02.08.2026.
 //
 
+// swiftlint:disable file_length
+
 import CoreMedia
 import DataSource
 import Decoder
-import Foundation
 import Extractor
+import Foundation
 import os
 import SEPlayerCommon
 
@@ -143,7 +145,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
             var trackEnabledStates = state.trackState.trackEnabledState
             let oldEnabledTrackCount = state.enabledTrackCount
 
-            for index in 0..<selections.count {
+            for index in 0 ..< selections.count {
                 if streams[index] != nil, selections[index] == nil || !mayRetainStreamFlags[index] {
                     let track = (streams[index] as! SampleStreamHolder).track
                     assert(trackEnabledStates[track])
@@ -193,7 +195,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
                 }
             } else if seekRequired {
                 position = try seek(&state, position: position)
-                for index in 0..<streams.count where streams[index] != nil {
+                for index in 0 ..< streams.count where streams[index] != nil {
                     streamResetFlags[index] = true
                 }
             }
@@ -290,7 +292,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
 
             if state.notifyDiscontinuity,
                state.loadingFinished
-                || getExtractedSamplesCount(state) > state.extractedSamplesCountAtStartOfLoad {
+               || getExtractedSamplesCount(state) > state.extractedSamplesCountAtStartOfLoad {
                 state.notifyDiscontinuity = false
                 return state.lastSeekPosition
             }
@@ -589,15 +591,14 @@ private extension ProgressiveMediaPeriod {
         effects.append(.continueLoadingRequested)
     }
 
-    func maybeNotifyDownstreamFormat(_ state: inout State, track: Int) {
-    }
+    func maybeNotifyDownstreamFormat(_ state: inout State, track: Int) {}
 
     func suppressRead(_ state: State) -> Bool {
         state.notifyDiscontinuity || isPendingReset(state)
     }
 
     func prepareTrackOutput(_ state: inout State, id: Int) throws -> TrackOutput {
-        for index in 0..<state.sampleQueues.count where id == state.sampleQueueTrackIds[index] {
+        for index in 0 ..< state.sampleQueues.count where id == state.sampleQueueTrackIds[index] {
             return state.sampleQueues[index]
         }
 
@@ -637,7 +638,7 @@ private extension ProgressiveMediaPeriod {
         var trackGroups: [TrackGroup] = []
         var isAudioOrVideo: [Bool] = []
 
-        for index in 0..<state.sampleQueues.count {
+        for index in 0 ..< state.sampleQueues.count {
             guard let format = state.sampleQueues[index].getUpstreamFormat() else {
                 continue
             }

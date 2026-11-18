@@ -90,7 +90,7 @@ enum WebvttCueParser {
                 let expressionStart = ltPosition + (isClosingTag ? 2 : 1)
                 let expressionEnd = isVoidTag ? position - 2 : (characters[position - 1] == .tagEnd ? position - 1 : position)
                 guard expressionStart < expressionEnd else { continue }
-                let fullTagExpression = String(characters[expressionStart..<expressionEnd])
+                let fullTagExpression = String(characters[expressionStart ..< expressionEnd])
                 guard !fullTagExpression.trimmingCharacters(in: .whitespaces).isEmpty else {
                     continue
                 }
@@ -120,7 +120,7 @@ enum WebvttCueParser {
                 case (nil, nil): nil
                 }
                 if let entityEndIndex {
-                    applyEntity(String(characters[(position + 1)..<entityEndIndex]), to: &text)
+                    applyEntity(String(characters[(position + 1) ..< entityEndIndex]), to: &text)
                     if entityEndIndex == spaceEndIndex {
                         text.append(AttributedString(" "))
                     }
@@ -147,7 +147,7 @@ enum WebvttCueParser {
     private static func range(of text: AttributedString, from start: Int, to end: Int) -> Range<AttributedString.Index> {
         let scalars = text.unicodeScalars
         let lowerBound = scalars.index(scalars.startIndex, offsetBy: start)
-        return lowerBound..<scalars.index(lowerBound, offsetBy: max(0, end - start))
+        return lowerBound ..< scalars.index(lowerBound, offsetBy: max(0, end - start))
     }
 
     // MARK: - Cues
@@ -240,7 +240,8 @@ enum WebvttCueParser {
         switch string {
         case "start": .start
         case "line-left" where !isLine: .start
-        case "center", "middle": .middle
+        case "center",
+             "middle": .middle
         case "end": .end
         case "line-right" where !isLine: .end
         default: nil
@@ -259,7 +260,8 @@ enum WebvttCueParser {
         switch string {
         case "start": .start
         case "left": .left
-        case "center", "middle": .center
+        case "center",
+             "middle": .center
         case "end": .end
         case "right": .right
         default: .center
@@ -292,7 +294,14 @@ enum WebvttCueParser {
 
     private static func isSupportedTag(_ tagName: String) -> Bool {
         switch tagName {
-        case .tagBold, .tagClass, .tagItalic, .tagLang, .tagRuby, .tagRubyText, .tagUnderline, .tagVoice: true
+        case .tagBold,
+             .tagClass,
+             .tagItalic,
+             .tagLang,
+             .tagRuby,
+             .tagRubyText,
+             .tagUnderline,
+             .tagVoice: true
         default: false
         }
     }
@@ -327,7 +336,8 @@ enum WebvttCueParser {
             if !startTag.voice.isEmpty {
                 text[range].cueVoice = startTag.voice
             }
-        case .tagLang, "":
+        case .tagLang,
+             "":
             break
         default:
             return
@@ -562,7 +572,7 @@ struct WebvttCueInfoBuilder {
     func toCueBuilder() -> Cue.Builder {
         let position = position ?? Self.derivePosition(textAlignment)
         let positionAnchor = positionAnchor ?? Self.derivePositionAnchor(textAlignment)
-        let builder = Cue.Builder()
+        return Cue.Builder()
             .setText(text ?? AttributedString())
             .setTextAlignment(Self.convertTextAlignment(textAlignment))
             .setLine(computeLine())
@@ -571,7 +581,6 @@ struct WebvttCueInfoBuilder {
             .setPositionAnchor(positionAnchor)
             .setSize(min(size, Self.deriveMaxSize(positionAnchor: positionAnchor, position: position)))
             .setVerticalType(verticalType)
-        return builder
     }
 
     /// The line of the cue: a fraction out of range moves to the bottom, and an unset fraction is the bottom. An
@@ -580,7 +589,7 @@ struct WebvttCueInfoBuilder {
         if snapToLines {
             return line.map { .number(Int($0)) }
         }
-        guard let line, (0...1).contains(line) else { return .fraction(1) }
+        guard let line, (0 ... 1).contains(line) else { return .fraction(1) }
         return .fraction(line)
     }
 
@@ -588,23 +597,29 @@ struct WebvttCueInfoBuilder {
         switch textAlignment {
         case .left: 0
         case .right: 1
-        case .start, .center, .end: 0.5
+        case .start,
+             .center,
+             .end: 0.5
         }
     }
 
     private static func derivePositionAnchor(_ textAlignment: TextAlignment) -> Cue.Anchor {
         switch textAlignment {
-        case .left, .start: .start
-        case .right, .end: .end
+        case .left,
+             .start: .start
+        case .right,
+             .end: .end
         case .center: .middle
         }
     }
 
     private static func convertTextAlignment(_ textAlignment: TextAlignment) -> Cue.Alignment {
         switch textAlignment {
-        case .start, .left: .leading
+        case .start,
+             .left: .leading
         case .center: .center
-        case .end, .right: .trailing
+        case .end,
+             .right: .trailing
         }
     }
 

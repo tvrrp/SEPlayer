@@ -39,6 +39,8 @@ public final class Tx3gParser: SubtitleParser {
                 | UInt32(initializationBytes[27]) << 16
                 | UInt32(initializationBytes[28]) << 8
                 | UInt32(initializationBytes[29])
+            // Invalid UTF-8 becomes replacement characters rather than failing.
+            // swiftlint:disable:next optional_data_string_conversion
             let fontFamily = String(decoding: initializationBytes[43...], as: UTF8.self)
             defaultFontFamily = fontFamily == Self.tx3gSerif ? Self.serifName : Self.sansSerifName
             // font size (initializationBytes[25]) is 5% of video height
@@ -82,7 +84,7 @@ public final class Tx3gParser: SubtitleParser {
 
         // Attach default styles.
         var cueText = AttributedString(cueTextString)
-        let fullRange = cueText.startIndex..<cueText.endIndex
+        let fullRange = cueText.startIndex ..< cueText.endIndex
         attachFontFace(&cueText, fontFace: defaultFontFace, defaultFontFace: Self.defaultFontFace, range: fullRange)
         attachColor(&cueText, colorRgba: defaultColorRgba, defaultColorRgba: Self.defaultColor, range: fullRange)
         attachFontFamily(&cueText, fontFamily: defaultFontFamily, range: fullRange)
@@ -96,7 +98,7 @@ public final class Tx3gParser: SubtitleParser {
             if atomType == Self.typeStyl {
                 try checkArgument(data.readableBytes >= Self.sizeShort)
                 let styleRecordCount = try data.readInt(as: UInt16.self)
-                for _ in 0..<styleRecordCount {
+                for _ in 0 ..< styleRecordCount {
                     try applyStyleRecord(data: &data, cueText: &cueText, cueTextString: cueTextString)
                 }
             } else if atomType == Self.typeTbox, customVerticalPlacement, let calculatedVideoTrackHeight {
@@ -163,7 +165,7 @@ public final class Tx3gParser: SubtitleParser {
             return
         }
 
-        guard let range = Self.range(in: cueText, of: cueTextString, utf16Offsets: start..<end) else {
+        guard let range = Self.range(in: cueText, of: cueTextString, utf16Offsets: start ..< end) else {
             return
         }
         attachFontFace(&cueText, fontFace: fontFace, defaultFontFace: defaultFontFace, range: range)
@@ -179,8 +181,8 @@ public final class Tx3gParser: SubtitleParser {
         let utf16 = string.utf16
         let scalars = string.unicodeScalars
         guard let start = utf16.index(utf16.startIndex, offsetBy: offsets.lowerBound, limitedBy: utf16.endIndex)?
-                .samePosition(in: scalars),
-              let end = utf16.index(utf16.startIndex, offsetBy: offsets.upperBound, limitedBy: utf16.endIndex)?
+            .samePosition(in: scalars),
+            let end = utf16.index(utf16.startIndex, offsetBy: offsets.upperBound, limitedBy: utf16.endIndex)?
                 .samePosition(in: scalars) else {
             return nil
         }
@@ -188,7 +190,7 @@ public final class Tx3gParser: SubtitleParser {
         let textScalars = text.unicodeScalars
         let textStart = textScalars.index(textScalars.startIndex, offsetBy: scalars.distance(from: scalars.startIndex, to: start))
         let textEnd = textScalars.index(textScalars.startIndex, offsetBy: scalars.distance(from: scalars.startIndex, to: end))
-        return textStart..<textEnd
+        return textStart ..< textEnd
     }
 
     private func attachFontFace(

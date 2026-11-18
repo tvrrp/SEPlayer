@@ -96,16 +96,16 @@ struct Av1Configuration {
         let type = Int((header >> 3) & 0x0F)
         if header & 0x04 != 0 { try reader.skip(1) } // obu_extension_header
         guard header & 0x02 != 0 else {
-            return (type, try reader.readSlice(length: reader.readableBytes))
+            return try (type, reader.readSlice(length: reader.readableBytes))
         }
         // leb128() of AV1 4.10.5.
         var size = 0
-        for index in 0..<8 {
+        for index in 0 ..< 8 {
             let byte = try reader.readInt(as: UInt8.self)
             size |= Int(byte & 0x7F) << (7 * index)
             if byte & 0x80 == 0 { break }
         }
-        return (type, try reader.readSlice(length: size))
+        return try (type, reader.readSlice(length: size))
     }
 
     /// The color_config of a sequence_header_obu, AV1 5.5.
@@ -133,7 +133,7 @@ struct Av1Configuration {
             }
             let initialDisplayDelayPresent = try bits.readBits(1) == 1
             let operatingPointCount = try bits.readBits(5) + 1
-            for _ in 0..<operatingPointCount {
+            for _ in 0 ..< operatingPointCount {
                 try bits.skipBits(throwing: 12) // operating_point_idc
                 if try bits.readBits(5) > 7 { // seq_level_idx
                     try bits.skipBits(throwing: 1) // seq_tier
@@ -184,14 +184,13 @@ struct Av1Configuration {
             transfer = try bits.readBits(8)
             matrix = try bits.readBits(8)
         }
-        let isFullRange: Bool
-        if isMonochrome {
-            isFullRange = try bits.readBits(1) == 1
+        let isFullRange: Bool = if isMonochrome {
+            try bits.readBits(1) == 1
         } else if primaries == 1, transfer == 13, matrix == 0 {
             // sRGB is full range.
-            isFullRange = true
+            true
         } else {
-            isFullRange = try bits.readBits(1) == 1
+            try bits.readBits(1) == 1
         }
         return ColorConfig(colorPrimaries: primaries, transferCharacteristics: transfer, matrixCoefficients: matrix, isFullRange: isFullRange)
     }

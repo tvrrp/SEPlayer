@@ -5,8 +5,8 @@
 //  Created by Damir Yackupov on 05.11.2025.
 //
 
-import Testing
 @testable import SEPlayer
+import Testing
 
 final class ActionSchedule {
     protocol Callback: AnyObject {
@@ -227,10 +227,10 @@ final class ActionNode {
     func run(isolation: isolated (any Actor)? = #isolation) async throws {
         // The player here answers on the queue the actions run on, so what an action causes can be
         // reported before the next action listens. Waiting actions start listening now.
-        await next?.action.prepareToRun(player: try #require(player))
+        try await next?.action.prepareToRun(player: #require(player))
         try await action.doActionAndScheduleNext(
-            player: try #require(player),
-            trackSelector: try #require(trackSelector),
+            player: #require(player),
+            trackSelector: #require(trackSelector),
             view: view,
             nextAction: next,
             isolation: isolation
@@ -244,8 +244,8 @@ final class ActionNode {
             }
 
             try await action.doActionAndScheduleNext(
-                player: try #require(player),
-                trackSelector: try #require(trackSelector),
+                player: #require(player),
+                trackSelector: #require(trackSelector),
                 view: view,
                 nextAction: nil,
                 isolation: isolation

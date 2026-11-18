@@ -12,6 +12,8 @@ import SEPlayerCommon
 struct ElementaryStreamDescriptor {
     /// The objectTypeIndication of the DecoderConfigDescriptor, Table 5, such as 0x40 for MPEG-4 audio.
     let objectTypeIndication: Int
+    /// The streamType of the DecoderConfigDescriptor, Table 6, 5 for audio.
+    let streamType: Int
     let maxBitrate: Int
     let averageBitrate: Int
     /// The DecoderSpecificInfo, such as an AudioSpecificConfig.
@@ -23,7 +25,9 @@ struct ElementaryStreamDescriptor {
         case decoderSpecificInfo = 0x05
     }
 
-    init?(esds: BlockBufferReader) {
+    /// - Parameter readsClockReference: Whether OCR_ES_Id follows its flag. Audio decoders read the flag alone, so
+    ///   descriptors of their streams are read as they read them.
+    init?(esds: BlockBufferReader, readsClockReference: Bool = true) {
         var reader = esds
         // ES_Descriptor: ES_ID (2), flags (1), and what the flags announce.
         do {
@@ -31,18 +35,19 @@ struct ElementaryStreamDescriptor {
             try reader.skip(2) // ES_ID
             let flags = try reader.readInt(as: UInt8.self)
             if flags & 0x80 != 0 { try reader.skip(2) } // dependsOn_ES_ID
-            if flags & 0x40 != 0 { try reader.skip(Int(try reader.readInt(as: UInt8.self))) } // URL
-            if flags & 0x20 != 0 { try reader.skip(2) } // OCR_ES_Id
+            if flags & 0x40 != 0 { try reader.skip(Int(reader.readInt(as: UInt8.self))) } // URL
+            if flags & 0x20 != 0, readsClockReference { try reader.skip(2) } // OCR_ES_Id
 
             // DecoderConfigDescriptor: objectTypeIndication (1), streamType (6), upStream (1), reserved (1),
             // bufferSizeDB (3), maxBitrate (4), avgBitrate (4), then a DecoderSpecificInfo.
             guard try reader.readDescriptorHeader(tag: Tag.decoderConfig.rawValue) >= 13 else {
                 return nil
             }
-            objectTypeIndication = Int(try reader.readInt(as: UInt8.self))
-            try reader.skip(4)
-            maxBitrate = Int(try reader.readInt(as: UInt32.self))
-            averageBitrate = Int(try reader.readInt(as: UInt32.self))
+            objectTypeIndication = try Int(reader.readInt(as: UInt8.self))
+            streamType = try Int(reader.readInt(as: UInt8.self) >> 2)
+            try reader.skip(3) // bufferSizeDB
+            maxBitrate = try Int(reader.readInt(as: UInt32.self))
+            averageBitrate = try Int(reader.readInt(as: UInt32.self))
             decoderSpecificInfo = (try? reader.readDescriptorHeader(tag: Tag.decoderSpecificInfo.rawValue))
                 .flatMap { try? reader.readSlice(length: $0) }
         } catch {
@@ -59,7 +64,7 @@ extension BlockBufferReader {
     mutating func readDescriptorHeader(tag: UInt8) throws -> Int {
         guard try readInt(as: UInt8.self) == tag else { throw EndOfFileError() }
         var size = 0
-        for _ in 0..<4 {
+        for _ in 0 ..< 4 {
             let byte = try readInt(as: UInt8.self)
             size = size << 7 | Int(byte & 0x7F)
             if byte & 0x80 == 0 { break }

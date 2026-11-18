@@ -181,32 +181,37 @@ public extension Player {
     }
 }
 
-@frozen public enum PlayerState: Equatable {
+@frozen
+public enum PlayerState: Equatable {
     case idle
     case buffering
     case ready
     case ended
 }
 
-@frozen public enum PlayWhenReadyChangeReason {
+@frozen
+public enum PlayWhenReadyChangeReason {
     case userRequest
     case audioSessionInterruption
     case routeChanged
     case endOfMediaItem
 }
 
-@frozen public enum PlaybackSuppressionReason {
+@frozen
+public enum PlaybackSuppressionReason {
     case none
     case audioSessionLoss
 }
 
-@frozen public enum RepeatMode {
+@frozen
+public enum RepeatMode {
     case off
     case one
     case all
 }
 
-@frozen public enum DiscontinuityReason {
+@frozen
+public enum DiscontinuityReason {
     case autoTransition
     case seek
     case seekAdjustment
@@ -215,7 +220,8 @@ public extension Player {
     case `internal`
 }
 
-@frozen public enum TimelineChangeReason {
+@frozen
+public enum TimelineChangeReason {
     case playlistChanged
     case sourceUpdate
 }
@@ -248,7 +254,8 @@ public struct PositionInfo: Hashable {
     }
 }
 
-@frozen public enum MediaItemTransitionReason {
+@frozen
+public enum MediaItemTransitionReason {
     case `repeat`
     case auto
     case seek

@@ -13,7 +13,7 @@ public struct LoadingInfo: Hashable {
     let lastRebufferRealtime: CMTime
 
     func rebufferedSince(realtime: CMTime) -> Bool {
-        return lastRebufferRealtime.isValid
+        lastRebufferRealtime.isValid
             && realtime.isValid
             && lastRebufferRealtime >= realtime
     }

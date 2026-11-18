@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+// swiftlint:disable file_length
+
 import CoreMedia.CMSync
 import QuartzCore
 import SEPlayerCommon
@@ -174,7 +176,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         let mediaSourceList = MediaSourceList(playerId: identifier)
         self.mediaSourceList = mediaSourceList
         periodQueue = MediaPeriodQueue(mediaPeriodBuilder: { info, rendererPositionOffset in
-            try! MediaPeriodHolder(
+            try MediaPeriodHolder(
                 queue: queue,
                 rendererCapabilities: renderers.map { $0.getCapabilities() },
                 rendererPositionOffset: rendererPositionOffset,
@@ -314,15 +316,15 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     }
 
     nonisolated func removeMediaSources(range: Range<Int>, shuffleOrder: ShuffleOrder) {
-        post("removeMediaSources") { $0.removeMediaSourcesInternal(range: range, shuffleOrder: shuffleOrder) }
+        post("removeMediaSources") { try $0.removeMediaSourcesInternal(range: range, shuffleOrder: shuffleOrder) }
     }
 
     nonisolated func moveMediaSources(range: Range<Int>, to newIndex: Int, shuffleOrder: ShuffleOrder) {
-        post("moveMediaSources") { $0.moveMediaSourcesInternal(range: range, to: newIndex, shuffleOrder: shuffleOrder) }
+        post("moveMediaSources") { try $0.moveMediaSourcesInternal(range: range, to: newIndex, shuffleOrder: shuffleOrder) }
     }
 
     nonisolated func setShuffleOrder(_ shuffleOrder: ShuffleOrder) {
-        post("setShuffleOrder") { $0.setShuffleOrderInternal(shuffleOrder) }
+        post("setShuffleOrder") { try $0.setShuffleOrderInternal(shuffleOrder) }
     }
 
     nonisolated func updateMediaSources(with mediaItems: [MediaItem], range: Range<Int>) {
@@ -530,7 +532,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 playbackError = playbackError.copy(with: playing.info.id)
             }
             stopInternal(forceResetRenderers: false, acknowledgeStop: false)
-        case .unexpected, .remote:
+        case .unexpected,
+             .remote:
             stopInternal(forceResetRenderers: true, acknowledgeStop: false)
         }
         playbackInfo = playbackInfo.setPlaybackError(playbackError)
@@ -567,7 +570,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         )
         loadControl.onPrepared(playerId: identifier)
         setState(playbackInfo.timeline.isEmpty ? .ended : .buffering)
-        try! mediaSourceList.prepare(mediaTransferListener: bandwidthMeter.transferListener)
+        try mediaSourceList.prepare(mediaTransferListener: bandwidthMeter.transferListener)
         try mediaClock.getTimebase().addTimer(eventTimer)
         try mediaClock.getTimebase().addTimer(periodEndTimer)
         setRendererTimeSource(mediaClock.getRendererTimeSource())
@@ -591,7 +594,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             )
         }
         let timeline = try mediaSourceList.setMediaSource(holders: mediaSources, shuffleOrder: shuffleOrder)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+        try handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
     }
 
     private func insertMediaSourcesInternal(
@@ -606,42 +609,42 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             holders: mediaSources,
             shuffleOrder: shuffleOrder
         )
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+        try handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
     }
 
-    private func moveMediaSourcesInternal(range: Range<Int>, to newIndex: Int, shuffleOrder: ShuffleOrder) {
+    private func moveMediaSourcesInternal(range: Range<Int>, to newIndex: Int, shuffleOrder: ShuffleOrder) throws {
         assert(queue.isCurrent())
         playbackInfoUpdate.incrementPendingOperationAcks(1)
         let timeline = mediaSourceList.moveMediaSourceRange(range: range, to: newIndex, shuffleOrder: shuffleOrder)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+        try handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
     }
 
-    private func removeMediaSourcesInternal(range: Range<Int>, shuffleOrder: ShuffleOrder) {
+    private func removeMediaSourcesInternal(range: Range<Int>, shuffleOrder: ShuffleOrder) throws {
         assert(queue.isCurrent())
         playbackInfoUpdate.incrementPendingOperationAcks(1)
         let timeline = mediaSourceList.removeMediaSource(range: range, shuffleOrder: shuffleOrder)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+        try handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
     }
 
     private func mediaSourceListUpdateRequestedInternal() throws {
-        handleMediaSourceListInfoRefreshed(
+        try handleMediaSourceListInfoRefreshed(
             timeline: mediaSourceList.createTimeline(),
             isSourceRefresh: true
         )
     }
 
-    private func setShuffleOrderInternal(_ shuffleOrder: ShuffleOrder) {
+    private func setShuffleOrderInternal(_ shuffleOrder: ShuffleOrder) throws {
         assert(queue.isCurrent())
         playbackInfoUpdate.incrementPendingOperationAcks(1)
         let timeline = mediaSourceList.setShuffleOrder(new: shuffleOrder)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+        try handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
     }
 
     private func updateMediaSourcesInternal(with mediaItems: [MediaItem], range: Range<Int>) throws {
         assert(queue.isCurrent())
         playbackInfoUpdate.incrementPendingOperationAcks(1)
         let timeline = try mediaSourceList.updateMediaSources(with: mediaItems, range: range)
-        handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
+        try handleMediaSourceListInfoRefreshed(timeline: timeline, isSourceRefresh: false)
     }
 
     private func notifyTrackSelectionPlayWhenReadyChanged(_ playWhenReady: Bool) {
@@ -658,7 +661,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         _ playWhenReady: Bool,
         playbackSuppressionReason: PlaybackSuppressionReason,
         operationAck: Bool,
-        playWhenReadyChangeReason: PlayWhenReadyChangeReason,
+        playWhenReadyChangeReason: PlayWhenReadyChangeReason
     ) throws {
         SELogger.info(.playback, "Play when ready \(playWhenReady), reason \(playWhenReadyChangeReason), suppression \(playbackSuppressionReason)")
         playbackInfoUpdate.incrementPendingOperationAcks(operationAck ? 1 : 0)
@@ -683,8 +686,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         playbackSuppressionReason: PlaybackSuppressionReason
     ) throws {
         guard playbackInfo.playWhenReady != playWhenReady ||
-              playbackInfo.playbackSuppressionReason != playbackSuppressionReason ||
-              playbackInfo.playWhenReadyChangeReason != playWhenReadyChangeReason else {
+            playbackInfo.playbackSuppressionReason != playbackSuppressionReason ||
+            playbackInfo.playWhenReadyChangeReason != playWhenReadyChangeReason else {
             return
         }
 
@@ -697,13 +700,13 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         updateRebufferingState(isRebuffering: false, resetLastRebufferRealtime: false)
         notifyTrackSelectionPlayWhenReadyChanged(playWhenReady)
         if !shouldPlayWhenReady() {
-            stopRenderers()
-            try! updatePlaybackPositionsInternal()
+            try stopRenderers()
+            try updatePlaybackPositionsInternal()
             periodQueue.reevaluateBuffer(rendererPosition: rendererPosition)
         } else {
             if playbackInfo.state == .ready {
-                mediaClock.start()
-                try! startRenderers()
+                try mediaClock.start()
+                try startRenderers()
             }
         }
     }
@@ -724,7 +727,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         assert(queue.isCurrent())
         let result = periodQueue.updateRepeatMode(new: repeatMode, timeline: playbackInfo.timeline)
         if result.contains(.alteredReadingPeriod) {
-            try! seekToCurrentPosition(sendDiscontinuity: true)
+            try seekToCurrentPosition(sendDiscontinuity: true)
         } else if result.contains(.alteredPrewarmingPeriod) {
             disableAndResetPrewarmingRenderers()
         }
@@ -735,7 +738,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         assert(queue.isCurrent())
         let result = periodQueue.updateShuffleMode(new: shuffleModeEnabled, timeline: playbackInfo.timeline)
         if result.contains(.alteredReadingPeriod) {
-            try! seekToCurrentPosition(sendDiscontinuity: true)
+            try seekToCurrentPosition(sendDiscontinuity: true)
         } else if result.contains(.alteredPrewarmingPeriod) {
             disableAndResetPrewarmingRenderers()
         }
@@ -797,7 +800,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             return
         }
         let trackSelectorResult = playingPeriodHolder.trackSelectorResults
-        for index in 0..<renderers.count {
+        for index in 0 ..< renderers.count {
             if !trackSelectorResult.isRendererEnabled(for: index) {
                 continue
             }
@@ -806,8 +809,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         }
     }
 
-    private func stopRenderers() {
-        mediaClock.stop()
+    private func stopRenderers() throws {
+        try mediaClock.stop()
         renderers.forEach { $0.stop() }
     }
 
@@ -1092,7 +1095,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
                 try maybeContinueLoading()
             }
-            try! resetRendererPosition(periodPosition: discontinuityPosition)
+            try resetRendererPosition(periodPosition: discontinuityPosition)
             if discontinuityPosition != playbackInfo.position {
                 playbackInfo = handlePositionDiscontinuity(
                     mediaPeriodId: playbackInfo.periodId,
@@ -1107,7 +1110,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             rendererPosition = mediaClock
                 .syncAndGetPosition(isReadingAhead: playingPeriodHolder !== periodQueue.reading)
             var periodPosition = playingPeriodHolder.toPeriodTime(rendererTime: rendererPosition)
-
 
             if playingPeriodHolder.info.duration.isValid {
                 periodPosition = periodPosition.convertScale(
@@ -1246,7 +1248,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         if finishedRendering, playingPeriodHolder.info.isFinal {
             SELogger.info(.playback, "Ended at \(playbackInfo.position.seconds)")
             setState(.ended)
-            stopRenderers()
+            try stopRenderers()
         } else if playbackInfo.state == .buffering,
                   shouldTransitionToReadyState(renderersReadyOrEnded: renderersAllowPlayback) {
             SELogger.info(.playback, "Ready at \(playbackInfo.position.seconds), buffered to \(playbackInfo.bufferedPosition.seconds)")
@@ -1262,7 +1264,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                     isRebuffering: false,
                     resetLastRebufferRealtime: false
                 )
-                mediaClock.start()
+                try mediaClock.start()
                 try startRenderers()
             }
         } else if playbackInfo.state == .ready,
@@ -1277,7 +1279,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                     livePlaybackSpeedControl.notifyRebuffer()
                 }
             }
-            stopRenderers()
+            try stopRenderers()
         }
 
         var playbackMaybeStuck = false
@@ -1617,13 +1619,13 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     private func seekToPeriodPosition(
         periodId: MediaPeriodId,
         periodPosition: CMTime,
-        forceBufferingState: Bool,
+        forceBufferingState: Bool
     ) throws -> CMTime {
         try seekToPeriodPosition(
             periodId: periodId,
             periodPosition: periodPosition,
             forceDisableRenderers: periodQueue.playing !== periodQueue.reading,
-            forceBufferingState: forceBufferingState,
+            forceBufferingState: forceBufferingState
         )
     }
 
@@ -1663,7 +1665,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         if loadsBeforeStoppingOutput {
             renderers.forEach { $0.stop() }
         } else {
-            stopRenderers()
+            try stopRenderers()
         }
         updateRebufferingState(isRebuffering: false, resetLastRebufferRealtime: true)
         if forceBufferingState || playbackInfo.state == .ready {
@@ -1702,7 +1704,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             if loadsBeforeStoppingOutput {
                 // The clock still runs from the old position: loading decides from the new one.
                 try maybeContinueLoading(from: newPlayingPeriodHolder.toRendererTime(periodTime: periodPosition))
-                mediaClock.stop()
+                try mediaClock.stop()
                 try resetRendererPosition(periodPosition: periodPosition)
             } else {
                 try resetRendererPosition(periodPosition: periodPosition)
@@ -1730,7 +1732,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         try renderers.forEach {
             try $0.resetPosition(for: playingMediaPeriod, position: rendererPosition)
         }
-        mediaClock.resetPosition(position: rendererPosition)
+        try mediaClock.resetPosition(position: rendererPosition)
         syncOutboundTimebase()
         notifyTrackSelectionDiscontinuity()
     }
@@ -1746,7 +1748,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     private func setPlaybackParametersInternal(_ playbackParameters: PlaybackParameters) throws {
         assert(queue.isCurrent())
         try mediaClock.setPlaybackParameters(new: playbackParameters)
-        try! handlePlaybackParameters(
+        try handlePlaybackParameters(
             playbackParameters: mediaClock.getPlaybackParameters(),
             acknowledgeCommand: true
         )
@@ -1792,9 +1794,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             released = true
             workQueue.invalidate()
             continuation.resume()
-        } catch {
-            
-        }
+        } catch {}
     }
 
     private func resetInternal(
@@ -1809,7 +1809,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         delayedRendererRecoveries.removeAll()
         cancelRecoveryTimeouts()
         updateRebufferingState(isRebuffering: false, resetLastRebufferRealtime: true)
-        mediaClock.stop()
+        do {
+            try mediaClock.stop()
+        } catch {
+            // The reset goes on regardless.
+            SELogger.error(.lifecycle, "Stopping the clock failed: \(error)")
+        }
         rendererPosition = MediaPeriodQueue.initialRendererPositionOffset
 
         do {
@@ -2042,8 +2047,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
 
     private func disableRenderers() throws {
         assert(queue.isCurrent())
-        for index in 0..<renderers.count {
-            try! disableRenderer(rendererIndex: index)
+        for index in 0 ..< renderers.count {
+            try disableRenderer(rendererIndex: index)
         }
 
         prewarmingMediaPeriodDiscontinuity = .invalid
@@ -2052,7 +2057,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     private func disableRenderer(rendererIndex: Int) throws {
         assert(queue.isCurrent())
         let renderersBeforeDisabling = renderers[rendererIndex].enabledRendererCount
-        try! renderers[rendererIndex].disable(mediaClock: mediaClock)
+        try renderers[rendererIndex].disable(mediaClock: mediaClock)
         maybeTriggerOnRendererReadyChanged(rendererIndex: rendererIndex, allowsPlayback: false)
         enabledRendererCount -= renderersBeforeDisabling
     }
@@ -2401,7 +2406,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 || !shouldPlayWhenReady())
     }
 
-    private func handleMediaSourceListInfoRefreshed(timeline: Timeline, isSourceRefresh: Bool) {
+    private func handleMediaSourceListInfoRefreshed(timeline: Timeline, isSourceRefresh: Bool) throws {
         let positionUpdate = resolvePositionForPlaylistChange(
             timeline: timeline,
             playbackInfo: playbackInfo,
@@ -2453,7 +2458,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             )
 
             if updateQueuedPeriodsResult.contains(.alteredReadingPeriod) {
-                try! seekToCurrentPosition(sendDiscontinuity: false)
+                try seekToCurrentPosition(sendDiscontinuity: false)
             } else if updateQueuedPeriodsResult.contains(.alteredPrewarmingPeriod) {
                 disableAndResetPrewarmingRenderers()
             }
@@ -2470,14 +2475,14 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 periodHolder = unwrappedPeriodHolder.next
             }
 
-            newPosition = try! seekToPeriodPosition(
+            newPosition = try seekToPeriodPosition(
                 periodId: newPeriodId,
                 periodPosition: newPosition,
                 forceBufferingState: forceBufferingState
             )
         }
 
-        try! updatePlaybackSpeedSettingsForNewPeriod(
+        try updatePlaybackSpeedSettingsForNewPeriod(
             newTimeline: timeline,
             newPeriodId: newPeriodId,
             oldTimeline: playbackInfo.timeline,
@@ -2490,9 +2495,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             let oldPeriodId = playbackInfo.periodId.periodId
             let oldTimeline = playbackInfo.timeline
             let reportDiscontinuity = periodPositionChanged
-            && isSourceRefresh
-            && !oldTimeline.isEmpty
-            && !oldTimeline.periodById(oldPeriodId, period: period).isPlaceholder
+                && isSourceRefresh
+                && !oldTimeline.isEmpty
+                && !oldTimeline.periodById(oldPeriodId, period: period).isPlaceholder
 
             playbackInfo = handlePositionDiscontinuity(
                 mediaPeriodId: newPeriodId,
@@ -2593,12 +2598,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 isReadingAhead: periodQueue.playing !== periodQueue.reading
             )
 
-        let loadingPeriodChanged = try! maybeUpdateLoadingPeriod()
-        try! maybeUpdatePrewarmingPeriod()
-        try! maybeUpdateReadingPeriod()
-        try! maybeUpdateReadingRenderers()
-        try! maybeUpdatePlayingPeriod()
-        try! maybeUpdatePreloadPeriods(loadingPeriodChanged: loadingPeriodChanged)
+        let loadingPeriodChanged = try maybeUpdateLoadingPeriod()
+        try maybeUpdatePrewarmingPeriod()
+        try maybeUpdateReadingPeriod()
+        try maybeUpdateReadingRenderers()
+        try maybeUpdatePlayingPeriod()
+        try maybeUpdatePreloadPeriods(loadingPeriodChanged: loadingPeriodChanged)
         try updateTriggersForPeriods()
     }
 
@@ -2607,7 +2612,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         periodQueue.reevaluateBuffer(rendererPosition: rendererPosition)
         if periodQueue.shouldLoadNextMediaPeriod(),
            let info = periodQueue.nextMediaPeriodInfo(rendererPosition: rendererPosition, playbackInfo: playbackInfo) {
-            let mediaPeriodHolder = try! periodQueue.enqueueNextMediaPeriodHolder(info: info)
+            let mediaPeriodHolder = try periodQueue.enqueueNextMediaPeriodHolder(info: info)
             SELogger.info(.periods, "Loading a period from \(info.startPosition.seconds)\(info.endPosition.isValid ? " to \(info.endPosition.seconds)" : "")\(info.isFinal ? ", the last" : "")")
             if !mediaPeriodHolder.prepareCalled {
                 mediaPeriodHolder.prepare(callback: self, on: info.startPosition)
@@ -2616,7 +2621,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             }
 
             if periodQueue.playing === mediaPeriodHolder {
-                try! resetRendererPosition(periodPosition: info.startPosition)
+                try resetRendererPosition(periodPosition: info.startPosition)
             }
 
             handleLoadingMediaPeriodChanged(loadingTrackSelectionChanged: false)
@@ -2649,7 +2654,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         }
 
         periodQueue.advancePrewarmingPeriod()
-        try! maybePrewarmRenderers()
+        try maybePrewarmRenderers()
     }
 
     private func maybePrewarmRenderers() throws {
@@ -2662,7 +2667,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             if trackSelectorResult.isRendererEnabled(for: index),
                renderer.hasSecondary, !renderer.isPrewarming {
                 renderer.startPrewarming()
-                try! enableRenderer(
+                try enableRenderer(
                     periodHolder: prewarmingPeriod,
                     rendererIndex: index,
                     wasRendererEnabled: false,
@@ -2689,10 +2694,10 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         guard let next = readingPeriodHolder.next, !pendingPauseAtEndOfPeriod else {
             if readingPeriodHolder.info.isFinal || pendingPauseAtEndOfPeriod {
                 for renderer in renderers where
-                renderer.isReading(from: readingPeriodHolder) &&
-                renderer.didReadStreamToEnd(for: readingPeriodHolder) {
+                    renderer.isReading(from: readingPeriodHolder) &&
+                    renderer.didReadStreamToEnd(for: readingPeriodHolder) {
                     let streamEndPosition: CMTime = if readingPeriodHolder.info.duration.isValid,
-                                                      !readingPeriodHolder.info.duration.isPositiveInfinity {
+                                                       !readingPeriodHolder.info.duration.isPositiveInfinity {
                         readingPeriodHolder.renderPositionOffset + readingPeriodHolder.info.duration
                     } else {
                         .invalid
@@ -2725,7 +2730,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         SELogger.info(.periods, "Renderers read the next period, from \(readingPeriodHolder.info.startPosition.seconds)")
         let newTrackSelectorResult = readingPeriodHolder.trackSelectorResults
 
-        try! updatePlaybackSpeedSettingsForNewPeriod(
+        try updatePlaybackSpeedSettingsForNewPeriod(
             newTimeline: playbackInfo.timeline,
             newPeriodId: readingPeriodHolder.info.id,
             oldTimeline: playbackInfo.timeline,
@@ -2736,7 +2741,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
 
         if readingPeriodHolder.isPrepared,
            (hasSecondaryRenderers && prewarmingMediaPeriodDiscontinuity.isValid) ||
-            (readingPeriodHolder.mediaPeriod.readDiscontinuity().isValid) {
+           (readingPeriodHolder.mediaPeriod.readDiscontinuity().isValid) {
             prewarmingMediaPeriodDiscontinuity = .invalid
 
             var arePrewarmingRenderersHandlingDiscontinuity = hasSecondaryRenderers && !isPrewarmingDisabledUntilNextTransition
@@ -2780,7 +2785,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             return
         }
 
-        if try! updateRenderersForTransition() {
+        if try updateRenderersForTransition() {
             readingPeriod.allRenderersInCorrectState = true
         }
     }
@@ -2792,7 +2797,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
 
         for renderer in renderers {
             let enabledRendererPreTransition = renderer.enabledRendererCount
-            let result = try! renderer.replaceStreamsOrDisableRendererForTransition(
+            let result = try renderer.replaceStreamsOrDisableRendererForTransition(
                 readingPeriodHolder: readingMediaPeriod,
                 newTrackSelectorResult: newTrackSelectorResult,
                 mediaClock: mediaClock
@@ -2805,7 +2810,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         if allUpdated {
             for (index, renderer) in renderers.enumerated() {
                 if newTrackSelectorResult.isRendererEnabled(for: index), !renderer.isReading(from: readingMediaPeriod) {
-                    try! enableRenderer(
+                    try enableRenderer(
                         periodHolder: readingMediaPeriod,
                         rendererIndex: index,
                         wasRendererEnabled: false,
@@ -2825,7 +2830,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
 
         if loadingPeriodChanged || !playbackInfo.timeline.equals(to: lastPreloadPoolInvalidationTimeline) {
             lastPreloadPoolInvalidationTimeline = playbackInfo.timeline
-            try! periodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
+            try periodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
         }
 
         maybeContinuePreloading()
@@ -2837,10 +2842,10 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
               !preloading.prepareCalled, preloading.isPrepared,
               !preloading.mediaPeriod.isLoading,
               loadControl.shouldContinuePreloading(
-                timeline: playbackInfo.timeline,
-                mediaPeriodId: preloading.info.id,
-                bufferedDuration: preloading.isPrepared ? preloading.mediaPeriod.getBufferedPosition() : .zero)
-        else {
+                  timeline: playbackInfo.timeline,
+                  mediaPeriodId: preloading.info.id,
+                  bufferedDuration: preloading.isPrepared ? preloading.mediaPeriod.getBufferedPosition() : .zero
+              ) else {
             return
         }
 
@@ -2887,14 +2892,14 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             )
 
             resetPendingPauseAtEndOfPeriod()
-            try! updatePlaybackPositionsInternal()
+            try updatePlaybackPositionsInternal()
             syncOutboundTimebase()
             if areRenderersPrewarming(), newPlayingPeriodHolder == periodQueue.prewarming {
-                try! maybeHandlePrewarmingTransition()
+                try maybeHandlePrewarmingTransition()
             }
 
             if playbackInfo.state == .ready {
-                try! startRenderers()
+                try startRenderers()
             }
 
             allowRenderersToRenderStartOfStreams()
@@ -2913,12 +2918,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             // timer set in the past would fire at once, again and again.
             let nextPeriodTime = nextPlayingPeriodHolder.getStartPositionRendererTime()
             let timebase = mediaClock.getTimebase()
-            try! timebase.setTimerNextFireTime(eventTimer, fireTime: nextPeriodTime > timebase.time ? nextPeriodTime : .invalid)
+            try timebase.setTimerNextFireTime(eventTimer, fireTime: nextPeriodTime > timebase.time ? nextPeriodTime : .invalid)
         }
     }
 
     private func maybeHandlePrewarmingTransition() throws {
-        try! renderers.forEach { try! $0.maybeHandlePrewarmingTransition() }
+        try renderers.forEach { try $0.maybeHandlePrewarmingTransition() }
     }
 
     private func allowRenderersToRenderStartOfStreams() {
@@ -2977,7 +2982,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             guard let loadingPeriod = periodQueue.loading else {
                 return
             }
-            try! handleLoadingPeriodPrepared(loadingPeriodHolder: loadingPeriod)
+            try handleLoadingPeriodPrepared(loadingPeriodHolder: loadingPeriod)
 
             // The "buffered enough to play" trigger needs a prepared period, so install it now.
             if playbackInfo.state == .buffering {
@@ -3023,8 +3028,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         )
 
         if loadingPeriodHolder === periodQueue.playing {
-            try! resetRendererPosition(periodPosition: loadingPeriodHolder.info.startPosition)
-            try! enableRenderers()
+            try resetRendererPosition(periodPosition: loadingPeriodHolder.info.startPosition)
+            try enableRenderers()
             loadingPeriodHolder.allRenderersInCorrectState = true
             playbackInfo = handlePositionDiscontinuity(
                 mediaPeriodId: playbackInfo.periodId,
@@ -3118,7 +3123,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     }
 
     private func handlePlaybackParameters(playbackParameters: PlaybackParameters, acknowledgeCommand: Bool) throws {
-        try! handlePlaybackParameters(
+        try handlePlaybackParameters(
             playbackParameters: playbackParameters,
             currentPlaybackSpeed: playbackParameters.playbackRate,
             updatePlaybackInfo: true,
@@ -3139,8 +3144,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             playbackInfo = playbackInfo.playbackParameters(playbackParameters)
         }
         updateTrackSelectionPlaybackSpeed(playbackSpeed: playbackParameters.playbackRate)
-        try! renderers.forEach {
-            try! $0.setPlaybackSpeed(current: currentPlaybackSpeed, target: playbackParameters.playbackRate)
+        try renderers.forEach {
+            try $0.setPlaybackSpeed(current: currentPlaybackSpeed, target: playbackParameters.playbackRate)
         }
     }
 
@@ -3526,7 +3531,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     }
 
     func shouldPlayWhenReady() -> Bool {
-        return playbackInfo.playWhenReady && playbackInfo.playbackSuppressionReason == .none
+        playbackInfo.playWhenReady && playbackInfo.playbackSuppressionReason == .none
     }
 
     /// Throws the error of the stream a renderer reads from the playing period, if it can't provide more samples.
@@ -3539,7 +3544,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             try renderer.maybeThrowStreamError(for: playing)
         } catch {
             switch renderer.trackType {
-            case .text, .metadata:
+            case .text,
+                 .metadata:
                 let current = playing.trackSelectorResults
                 let format = current.selections[rendererIndex].map { "\($0.selectedFormat)" } ?? "none"
                 SELogger.warning(.trackSelection, "Disabling track \(format) due to error: \(error)")
@@ -3864,7 +3870,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         return nil
     }
 
-    internal func resolveSubsequentPeriod(
+    func resolveSubsequentPeriod(
         window: Window,
         period: Period,
         repeatMode: RepeatMode,
@@ -3876,7 +3882,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         let oldWindowIndex = oldTimeline.periodById(oldPeriodId, period: period).windowIndex
         let oldWindowId = oldTimeline.getWindow(windowIndex: oldWindowIndex, window: window).id
 
-        for index in 0..<newTimeline.windowCount() {
+        for index in 0 ..< newTimeline.windowCount() {
             if newTimeline.getWindow(windowIndex: index, window: window).id == oldWindowId {
                 return index
             }
@@ -3885,7 +3891,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         var oldPeriodIndex = oldTimeline.indexOfPeriod(by: oldPeriodId)
         var newPeriodIndex: Int?
 
-        for _ in 0..<oldTimeline.periodCount() {
+        for _ in 0 ..< oldTimeline.periodCount() {
             if newPeriodIndex == nil {
                 if let unwrappedOldPeriodIndex = oldPeriodIndex {
                     oldPeriodIndex = oldTimeline.nextPeriodIndex(
@@ -3997,7 +4003,7 @@ extension SEPlayerImplInternal {
             if !lhsResolved { return true }
 
             return lhs.resolvedPeriodIndex == rhs.resolvedPeriodIndex
-            && lhs.resolvedPeriodTime == rhs.resolvedPeriodTime
+                && lhs.resolvedPeriodTime == rhs.resolvedPeriodTime
         }
 
         static func < (lhs: PendingMessageInfo, rhs: PendingMessageInfo) -> Bool {

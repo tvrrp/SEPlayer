@@ -61,11 +61,11 @@ public final class SignalQueue: Queue, Sendable {
 
     public func isCurrent() -> Bool {
         if DispatchQueue.getSpecific(key: QueueSpecificKey) === specific {
-            return true
+            true
         } else if specialIsMainQueue && Thread.isMainThread {
-            return true
+            true
         } else {
-            return false
+            false
         }
     }
 
@@ -93,9 +93,9 @@ public final class SignalQueue: Queue, Sendable {
 
     public func sync<T>(_ f: () throws -> T) rethrows -> T {
         if isCurrent() {
-            return try f()
+            try f()
         } else {
-            return try nativeQueue.sync(execute: f)
+            try nativeQueue.sync(execute: f)
         }
     }
 

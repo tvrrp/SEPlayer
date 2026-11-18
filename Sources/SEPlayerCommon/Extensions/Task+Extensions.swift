@@ -7,11 +7,11 @@
 
 import Foundation
 
+@available(tvOS, deprecated: 16.0, renamed: "Task.sleep(for:tolerance:clock:)")
+@available(watchOS, deprecated: 9.0, renamed: "Task.sleep(for:tolerance:clock:)")
+@available(macOS, deprecated: 13.0, renamed: "Task.sleep(for:tolerance:clock:)")
+@available(iOS, deprecated: 16.0, renamed: "Task.sleep(for:tolerance:clock:)")
 public extension Task where Success == Never, Failure == Never {
-    @available(iOS, deprecated: 16.0, renamed: "Task.sleep(for:tolerance:clock:)")
-    @available(macOS, deprecated: 13.0, renamed: "Task.sleep(for:tolerance:clock:)")
-    @available(watchOS, deprecated: 9.0, renamed: "Task.sleep(for:tolerance:clock:)")
-    @available(tvOS, deprecated: 16.0, renamed: "Task.sleep(for:tolerance:clock:)")
     static func sleep(for interval: DispatchTimeInterval, leeway: DispatchTimeInterval = .zero, queue: DispatchQueue? = nil) async throws {
         let queue = queue ?? DispatchQueue(label: "com.seplayer.timer", qos: .userInitiated)
         let timer = DispatchSource.makeTimerSource(queue: queue)

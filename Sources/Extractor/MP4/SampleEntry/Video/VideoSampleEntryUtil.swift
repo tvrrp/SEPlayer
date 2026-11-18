@@ -35,7 +35,7 @@ enum VideoSampleEntryUtil {
 
         init(entry fullEntry: BlockBufferReader) throws {
             var reader = fullEntry
-            let declaredSize = Int(try reader.readInt(as: UInt32.self))
+            let declaredSize = try Int(reader.readInt(as: UInt32.self))
             guard declaredSize >= VideoSampleEntryUtil.headerSize, declaredSize <= fullEntry.readableBytes else {
                 throw EndOfFileError()
             }
@@ -47,20 +47,20 @@ enum VideoSampleEntryUtil {
             vendor = try reader.readInt(as: UInt32.self)
             temporalQuality = try reader.readInt(as: Int32.self)
             spatialQuality = try reader.readInt(as: Int32.self)
-            width = Int(try reader.readInt(as: UInt16.self))
-            height = Int(try reader.readInt(as: UInt16.self))
+            width = try Int(reader.readInt(as: UInt16.self))
+            height = try Int(reader.readInt(as: UInt16.self))
             try reader.skip(14) // horizontal and vertical resolution (8), data size (4), frame count (2)
 
             // The name of the compressor, a Pascal string of up to 31 characters in 32 bytes, or the format in quotes.
             let nameField = try reader.readBytes(length: 32)
             let nameLength = Int(nameField[0])
-            if (1...31).contains(nameLength), let name = String(bytes: nameField[1...nameLength], encoding: .macOSRoman) {
+            if (1 ... 31).contains(nameLength), let name = String(bytes: nameField[1 ... nameLength], encoding: .macOSRoman) {
                 formatName = name
             } else {
                 formatName = "'\(rawFormat.fourCharacterCode)'"
             }
 
-            depth = Int(try reader.readInt(as: Int16.self))
+            depth = try Int(reader.readInt(as: Int16.self))
             colorTableID = try reader.readInt(as: Int16.self)
         }
     }
@@ -204,7 +204,8 @@ enum VideoSampleEntryUtil {
     ) {
         let type = (try? payload.getInt(at: 0, as: UInt32.self)).flatMap(MP4Box.BoxType.init(rawValue:))
         switch type {
-        case .nclc? where payload.readableBytes == 10, .nclx? where payload.readableBytes == 11:
+        case .nclc? where payload.readableBytes == 10,
+             .nclx? where payload.readableBytes == 11:
             var reader = payload
             guard let color = try? ColorInfo(reader: &reader) else {
                 return
@@ -214,7 +215,8 @@ enum VideoSampleEntryUtil {
             if type == .nclx {
                 extensions.addFirst(color.isFullRange, for: SampleDescriptionExtensionKey.fullRangeVideo)
             }
-        case .prof?, .rICC?:
+        case .prof?,
+             .rICC?:
             guard let profile = try? payload.slice(from: 4), let data = try? Data(buffer: profile) else {
                 return
             }
@@ -228,11 +230,11 @@ enum VideoSampleEntryUtil {
     /// where their denominator isn't 1.
     static func cleanAperture(_ payload: BlockBufferReader) -> [String: Any]? {
         guard payload.readableBytes == 32,
-              let fields = try? (0..<8).map({ try payload.getInt(at: $0 * 4, as: UInt32.self) }) else {
+              let fields = try? (0 ..< 8).map({ try payload.getInt(at: $0 * 4, as: UInt32.self) }) else {
             return nil
         }
         // widthN, widthD, heightN, heightD, horizOffN, horizOffD, vertOffN, vertOffD
-        guard !fields[0..<4].contains(0), fields[5] != 0, fields[7] != 0 else {
+        guard !fields[0 ..< 4].contains(0), fields[5] != 0, fields[7] != 0 else {
             return nil
         }
         let number = { (value: UInt32) in SampleDescriptionExtensions.number(Int32(bitPattern: value)) }
@@ -279,12 +281,38 @@ enum VideoSampleEntryUtil {
 
         init?(codecType: MP4Box.BoxType) {
             switch codecType {
-            case .avc1, .avc3, .cavc, .qavc, .qave, .drmi, .eavc, .ftvc, .zavc:
+            case .avc1,
+                 .avc3,
+                 .cavc,
+                 .qavc,
+                 .qave,
+                 .drmi,
+                 .eavc,
+                 .ftvc,
+                 .zavc:
                 self = .h264
-            case .hvc1, .hev1, .dvh1, .dvhe, .chvc, .qhvc, .qhev, .cdh1, .qdh1, .qdhe, .dmux, .ftvh, .ftvp, .muxa, .ohvc,
-                 .qdmx, .qmux:
+            case .hvc1,
+                 .hev1,
+                 .dvh1,
+                 .dvhe,
+                 .chvc,
+                 .qhvc,
+                 .qhev,
+                 .cdh1,
+                 .qdh1,
+                 .qdhe,
+                 .dmux,
+                 .ftvh,
+                 .ftvp,
+                 .muxa,
+                 .ohvc,
+                 .qdmx,
+                 .qmux:
                 self = .h265
-            case .av01, .dav1, .qav1, .qdav:
+            case .av01,
+                 .dav1,
+                 .qav1,
+                 .qdav:
                 self = .av1
             default:
                 return nil
@@ -314,7 +342,8 @@ enum VideoSampleEntryUtil {
                 return nil
             }
             return .avc1
-        case .hev1, .dvhe:
+        case .hev1,
+             .dvhe:
             let types = [HevcUtil.videoParameterSetType, HevcUtil.sequenceParameterSetType, HevcUtil.pictureParameterSetType]
             guard let hvcC = extensions.unknownBoxPayloads(of: .hvcC).first,
                   let arrays = HevcUtil.nalUnits(hvcC: hvcC),

@@ -75,7 +75,7 @@ final class DiskCacheEntry: @unchecked Sendable {
     /// one isn't recorded for the current one.
     private var storedResourceVersion = 0
 
-    // Used on the cache's I/O queue only.
+    /// Used on the cache's I/O queue only.
     private var fileDescriptor: Int32?
 
     init(cache: DiskCache, key: String, name: String, metadata: Metadata?) {

@@ -67,10 +67,10 @@ struct SoundDescription {
             try reader.skip(4) // size
             rawFormat = try reader.readInt(as: UInt32.self)
             try reader.skip(8) // reserved (6), data reference index (2)
-            version = Int(try reader.readInt(as: Int16.self))
+            version = try Int(reader.readInt(as: Int16.self))
             try reader.skip(6) // revision level (2), vendor (4)
-            channelCount = Int(try reader.readInt(as: UInt16.self))
-            sampleSize = Int(try reader.readInt(as: UInt16.self))
+            channelCount = try Int(reader.readInt(as: UInt16.self))
+            sampleSize = try Int(reader.readInt(as: UInt16.self))
             compressionID = try reader.readInt(as: Int16.self)
             try reader.skip(2) // packet size
             sampleRateField = try reader.readInt(as: UInt32.self)
@@ -87,28 +87,28 @@ struct SoundDescription {
                 guard !(isISO && isQuickTime) else { return nil }
                 layout = isISO ? .isoVersion1 : .quickTimeVersion1
                 extensionsOffset = isISO ? 36 : 52
-                version1 = isISO ? nil : Version1Fields(
-                    samplesPerPacket: try reader.readInt(as: UInt32.self),
-                    bytesPerPacket: try reader.readInt(as: UInt32.self),
-                    bytesPerFrame: try reader.readInt(as: UInt32.self)
+                version1 = try isISO ? nil : Version1Fields(
+                    samplesPerPacket: reader.readInt(as: UInt32.self),
+                    bytesPerPacket: reader.readInt(as: UInt32.self),
+                    bytesPerFrame: reader.readInt(as: UInt32.self)
                 )
                 version2 = nil
             case 2 where isQuickTime:
-                let structSize = Int(try reader.readInt(as: UInt32.self))
+                let structSize = try Int(reader.readInt(as: UInt32.self))
                 guard structSize >= 72 else { return nil }
                 layout = .version2
                 extensionsOffset = structSize
                 version1 = nil
-                let sampleRate = Double(bitPattern: try reader.readInt(as: UInt64.self))
+                let sampleRate = try Double(bitPattern: reader.readInt(as: UInt64.self))
                 let channelCount = try reader.readInt(as: UInt32.self)
                 try reader.skip(4) // always 0x7F000000
-                version2 = Version2Fields(
+                version2 = try Version2Fields(
                     sampleRate: sampleRate,
                     channelCount: channelCount,
-                    bitsPerChannel: try reader.readInt(as: UInt32.self),
-                    formatFlags: try reader.readInt(as: UInt32.self),
-                    bytesPerPacket: try reader.readInt(as: UInt32.self),
-                    framesPerPacket: try reader.readInt(as: UInt32.self)
+                    bitsPerChannel: reader.readInt(as: UInt32.self),
+                    formatFlags: reader.readInt(as: UInt32.self),
+                    bytesPerPacket: reader.readInt(as: UInt32.self),
+                    framesPerPacket: reader.readInt(as: UInt32.self)
                 )
             default:
                 return nil

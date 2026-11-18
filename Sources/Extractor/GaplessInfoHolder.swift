@@ -7,7 +7,7 @@
 
 import SEPlayerCommon
 
-public  struct GaplessInfoHolder {
+public struct GaplessInfoHolder {
     public let encoderDelay: Int
     public let encoderPadding: Int
 

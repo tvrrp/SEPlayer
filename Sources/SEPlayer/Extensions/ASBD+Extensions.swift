@@ -14,7 +14,7 @@ extension AudioStreamBasicDescription {
         case pcmFixed824
     }
 
-    // from CAStreamBasicDescription
+    /// from CAStreamBasicDescription
     init(format: CommonPCMFormats, sampleRate: Double, numOfChannels: UInt32, isInterleaved: Bool = true) {
         let wordsize: UInt32
 

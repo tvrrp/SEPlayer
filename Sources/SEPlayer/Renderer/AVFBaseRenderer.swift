@@ -104,7 +104,7 @@ class AVFBaseRenderer: BaseSERenderer {
         let mimeTypes = [
             format.containerMimeType?.rawValue,
             format.sampleMimeType?.rawValue,
-            "video/mp4"   // fallback probe
+            "video/mp4", // fallback probe
         ].compactMap { $0 }
 
         let result = mimeTypes.contains { mime in
@@ -423,7 +423,8 @@ class AVFBaseRenderer: BaseSERenderer {
             return nil
         case let .didReadBuffer(buffer) where joins(buffer):
             return buffer
-        case .didReadBuffer, .didReadFormat:
+        case .didReadBuffer,
+             .didReadFormat:
             carriedRead = result
             return nil
         }
@@ -581,7 +582,7 @@ class AVFBaseRenderer: BaseSERenderer {
             // the buffer itself: `singleSampleBuffers()` returns copies.
             if trackType == .video, buffer.duration.isNumeric,
                buffer.outputPresentationTimeStamp + buffer.duration <= getLastResetPosition() {
-                for index in 0..<buffer.numSamples {
+                for index in 0 ..< buffer.numSamples {
                     buffer.perSampleAttachments[index][.doNotDisplay] = true
                 }
             }
@@ -704,7 +705,7 @@ class AVFBaseRenderer: BaseSERenderer {
 
     private var logTimes: String {
         // The renderer's own timebase is the synchronizer's for audio; the control timebase is the player's.
-        return String(
+        String(
             format: "host=%.3f renderer=%.3f player=%.3f",
             CACurrentMediaTime(),
             getTimebase()?.time.seconds ?? .nan,
@@ -748,7 +749,7 @@ class AVFBaseRenderer: BaseSERenderer {
         let generation = pumpGeneration
         sampleQueueToken = stream.installTrigger(
             condition: .whenDataBecomesReady
-        ) { [weak self] token in
+        ) { [weak self] _ in
             guard let self else { return }
 
             queue.justDispatch { [weak self] in
@@ -766,7 +767,7 @@ class AVFBaseRenderer: BaseSERenderer {
         let generation = pumpGeneration
         outputAvailableToken = try decodeBufferQueue.installTrigger(
             condition: .whenDataBecomesReady
-        ) { [weak self] token in
+        ) { [weak self] _ in
             guard let self else { return }
 
             queue.justDispatch { [weak self] in

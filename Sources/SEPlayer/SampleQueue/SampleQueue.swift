@@ -6,8 +6,8 @@
 //
 
 import CoreMedia
-import Foundation
 import Extractor
+import Foundation
 import SEPlayerCommon
 
 protocol SampleQueueDelegate: AnyObject {
@@ -88,7 +88,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
 
     private var sharedSampleMetadata: SpannedData<Format>
 
-    private var _backBufferDuration: CMTime? = nil
+    private var _backBufferDuration: CMTime?
     /// Media loaded beyond the queued samples but not extracted yet: it counts as buffered.
     private var unextractedDuration: CMTime = .zero
 
@@ -189,7 +189,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         let totalBytesWritten = lock.withWriteLock {
             SELogger.debug(.sampleQueue, "Discarding \(getWriteIndexLocked() - discardFromIndex) samples from \(discardFromIndex) on")
             return
-            discardUpstreamSampleMetadataLocked(discardFromIndex: discardFromIndex)
+                discardUpstreamSampleMetadataLocked(discardFromIndex: discardFromIndex)
         }
         try sampleDataQueue.discardUpstreamSampleBytes(totalBytesWritten: totalBytesWritten)
     }
@@ -303,7 +303,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
             sampleDataQueue.discardDownstreamTo(absolutePosition: backBufferDiscardPosition)
         }
 
-        if case .didReadBuffer(_) = result {
+        if case .didReadBuffer = result {
             evaluateTriggers()
         }
 
@@ -586,7 +586,7 @@ private extension SampleQueue {
         if !hasNextSample() {
             if loadingFinished || isLastSampleQueued {
                 return try (.didReadBuffer(.createEndOfStream()), nil)
-            } else if let upstreamFormat, (formatRequired || upstreamFormat != downstreamFormat) {
+            } else if let upstreamFormat, formatRequired || upstreamFormat != downstreamFormat {
                 downstreamFormat = upstreamFormat
                 return (.didReadFormat(format: upstreamFormat), nil)
             } else {
@@ -617,7 +617,7 @@ private extension SampleQueue {
 
         sampleBuffer.flags = flags
 
-        return (.didReadBuffer(sampleBuffer), sampleInfo.offset..<(sampleInfo.offset + sampleInfo.size))
+        return (.didReadBuffer(sampleBuffer), sampleInfo.offset ..< (sampleInfo.offset + sampleInfo.size))
     }
 
     func setUpstreamFormatLocked(_ format: Format) -> Bool {
@@ -664,8 +664,8 @@ private extension SampleQueue {
 
             let beforeWrap = capacity - relativeFirstIndex
             let afterWrap = relativeFirstIndex
-            newArray.replaceSubrange(0..<beforeWrap, with: samples[relativeFirstIndex..<capacity])
-            newArray.replaceSubrange(beforeWrap..<(beforeWrap + afterWrap), with: samples[0..<afterWrap])
+            newArray.replaceSubrange(0 ..< beforeWrap, with: samples[relativeFirstIndex ..< capacity])
+            newArray.replaceSubrange(beforeWrap ..< (beforeWrap + afterWrap), with: samples[0 ..< afterWrap])
 
             samples = newArray
             relativeFirstIndex = 0
@@ -705,7 +705,7 @@ private extension SampleQueue {
         var sampleCountToTarget = -1
         var searchIndex = relativeStartIndex
 
-        for i in 0..<length {
+        for i in 0 ..< length {
             // Samples are in decode order: one after a later one can still be before `time`.
             if samples[searchIndex].time.presentationTimeStamp <= time,
                !keyframe || samples[searchIndex].flags.contains(.keyframe) {
@@ -727,7 +727,7 @@ private extension SampleQueue {
 
     func findSampleAfter(relativeStartIndex: Int, length: Int, time: CMTime, allowTimeBeyondBuffer: Bool) -> Int {
         var searchIndex = relativeStartIndex
-        for i in 0..<length {
+        for i in 0 ..< length {
             if samples[searchIndex].time.presentationTimeStamp >= time {
                 return i
             }
@@ -780,7 +780,7 @@ private extension SampleQueue {
         var largestTimestamp = CMTime.negativeInfinity
         var relativeSampleIndex = getRelativeIndex(offset: length - 1)
 
-        for _ in 0..<length {
+        for _ in 0 ..< length {
             largestTimestamp = max(largestTimestamp, samples[relativeSampleIndex].time.presentationTimeStamp)
             if samples[relativeSampleIndex].flags.contains(.keyframe) {
                 break

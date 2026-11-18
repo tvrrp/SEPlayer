@@ -5,7 +5,6 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-
 public struct TrackGroup: Hashable, Sendable {
     public var length: Int { formats.count }
     public let id: String
@@ -21,7 +20,7 @@ public struct TrackGroup: Hashable, Sendable {
         id: String = "",
         formats: [Format]
     ) throws(TrackGroupError) {
-        guard !formats.isEmpty else { throw .emptyFormats  }
+        guard !formats.isEmpty else { throw .emptyFormats }
         self.id = id
         self.formats = formats
 
@@ -52,7 +51,7 @@ public struct TrackGroup: Hashable, Sendable {
     }
 
     public static func == (lhs: TrackGroup, rhs: TrackGroup) -> Bool {
-        return lhs.id == rhs.id && lhs.formats == rhs.formats
+        lhs.id == rhs.id && lhs.formats == rhs.formats
     }
 }
 
@@ -62,11 +61,9 @@ extension TrackGroup: Collection {
     public var startIndex: Int { formats.startIndex }
     public var endIndex: Int { formats.endIndex }
 
-    public subscript(index: Index) -> Iterator.Element {
-        get { return formats[index] }
-    }
+    public subscript(index: Index) -> Iterator.Element { formats[index] }
 
     public func index(after i: Index) -> Index {
-        return formats.index(after: i)
+        formats.index(after: i)
     }
 }

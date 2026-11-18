@@ -6,8 +6,8 @@
 //
 
 import CoreMedia
-import Testing
 @testable import SEPlayer
+import Testing
 
 /// Reads samples like a real renderer and counts them instead of showing them.
 ///
@@ -115,9 +115,9 @@ class FakeRenderer: BaseSERenderer {
 
     override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
         if format.sampleMimeType?.trackType == trackType {
-            return .create(formatSupport: .handled, adaptiveSupport: .seamless, tunnelingSupport: .notSupported)
+            .create(formatSupport: .handled, adaptiveSupport: .seamless, tunnelingSupport: .notSupported)
         } else {
-            return .create(formatSupport: .unsupportedType)
+            .create(formatSupport: .unsupportedType)
         }
     }
 

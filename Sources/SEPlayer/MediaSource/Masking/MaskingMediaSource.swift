@@ -161,18 +161,18 @@ final class MaskingMediaSource: WrappingMediaSource {
     private func internalPeriodId(for externalPeriodId: AnyHashable) -> AnyHashable {
         if let replacedInternalPeriodId = timeline.replacedInternalPeriodId,
            externalPeriodId == MaskingTimeline.maskingExternalPeriodId {
-            return replacedInternalPeriodId
+            replacedInternalPeriodId
         } else {
-            return externalPeriodId
+            externalPeriodId
         }
     }
 
     private func externalPeriodId(for internalPeriodId: AnyHashable) -> AnyHashable {
         if let replacedInternalPeriodId = timeline.replacedInternalPeriodId,
            replacedInternalPeriodId == internalPeriodId {
-            return MaskingTimeline.maskingExternalPeriodId
+            MaskingTimeline.maskingExternalPeriodId
         } else {
-            return internalPeriodId
+            internalPeriodId
         }
     }
 
@@ -253,7 +253,7 @@ extension MaskingMediaSource {
             MaskingTimeline(
                 timeline: PlaceholderTimeline(mediaItem: mediaItem),
                 replacedInternalWindowId: Window.singleWindowId,
-                replacedInternalPeriodId: Self.maskingExternalPeriodId
+                replacedInternalPeriodId: maskingExternalPeriodId
             )
         }
 

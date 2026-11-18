@@ -7,8 +7,8 @@
 
 import CoreMedia
 import Foundation
-import Testing
 @testable import SEPlayer
+import Testing
 
 final class FakeTimeline: Timeline, @unchecked Sendable {
     private var windowDefinitions: [TimelineWindowDefinition]
@@ -24,7 +24,7 @@ final class FakeTimeline: Timeline, @unchecked Sendable {
         self.shuffleOrder = shuffleOrder ?? DefaultShuffleOrder(length: self.windowDefinitions.count)
         var periodOffsets = Array(repeating: 0, count: self.windowDefinitions.count + 1)
         periodOffsets[0] = 0
-        for index in 0..<self.windowDefinitions.count {
+        for index in 0 ..< self.windowDefinitions.count {
             periodOffsets[index + 1] = periodOffsets[index] + self.windowDefinitions[index].periodCount
         }
         self.periodOffsets = periodOffsets
@@ -66,7 +66,7 @@ final class FakeTimeline: Timeline, @unchecked Sendable {
         var windowDurationUs = Int64.zero
         let period = Period()
 
-        for index in periodOffsets[windowIndex]..<periodOffsets[windowIndex + 1] {
+        for index in periodOffsets[windowIndex] ..< periodOffsets[windowIndex + 1] {
             let periodDuration = getPeriod(periodIndex: index, period: period).duration
             guard periodDuration.isValid else {
                 windowDurationUs = .timeUnset
@@ -136,7 +136,7 @@ final class FakeTimeline: Timeline, @unchecked Sendable {
     }
 
     func indexOfPeriod(by id: AnyHashable) -> Int? {
-        (0..<periodCount()).first(where: { self.id(for: $0) == id })
+        (0 ..< periodCount()).first(where: { self.id(for: $0) == id })
     }
 
     func id(for periodIndex: Int) -> AnyHashable {
@@ -198,7 +198,7 @@ extension FakeTimeline {
 
 extension FakeTimeline {
     static func createDefaultWindowDefinitions(windowCount: Int) -> [TimelineWindowDefinition] {
-        (0..<windowCount).map { TimelineWindowDefinition(id: $0) }
+        (0 ..< windowCount).map { TimelineWindowDefinition(id: $0) }
     }
 }
 

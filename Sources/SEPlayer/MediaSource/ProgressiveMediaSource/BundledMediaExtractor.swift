@@ -6,8 +6,8 @@
 //
 
 import CoreMedia
-import Foundation.NSURLSession
 import Extractor
+import Foundation.NSURLSession
 import SEPlayerCommon
 
 final class BundledMediaExtractor: ProgressiveMediaExtractor {
