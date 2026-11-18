@@ -45,13 +45,13 @@ final class H264Reader: ElementaryStreamReader {
         allowNonIdrKeyframes: Bool,
         detectAccessUnits: Bool,
         containerMimeType: MimeTypes,
-        memoryPool: CMMemoryPool = CMMemoryPoolCreate(options: nil)
+        memoryPool: CMMemoryPool = CMMemoryPool()
     ) throws {
         self.seiReader = seiReader
         self.allowNonIdrKeyframes = allowNonIdrKeyframes
         self.detectAccessUnits = detectAccessUnits
         self.containerMimeType = containerMimeType
-        self.allocator = CMMemoryPoolGetAllocator(memoryPool)
+        self.allocator = memoryPool.allocator
         self.sps = try NalUnitTargetBuffer(targetType: NalUnitUtil.H264NalUnitType.sps, memoryPool: memoryPool)
         self.pps = try NalUnitTargetBuffer(targetType: NalUnitUtil.H264NalUnitType.pps, memoryPool: memoryPool)
         self.sei = try NalUnitTargetBuffer(targetType: NalUnitUtil.H264NalUnitType.sei, memoryPool: memoryPool)
@@ -84,9 +84,8 @@ final class H264Reader: ElementaryStreamReader {
 
     func createTracks(
         output: any ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws {
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws {
         idGenerator.generateNewId()
         formatId = try idGenerator.getFormatId()
         let trackOutput = try output.track(for: idGenerator.getTrackId(), trackType: .video)
@@ -97,10 +96,9 @@ final class H264Reader: ElementaryStreamReader {
             detectAccessUnits: detectAccessUnits,
             accumulator: accumulator
         )
-        try await seiReader.createTracks(
+        try seiReader.createTracks(
             extractorOutput: output,
-            idGenerator: idGenerator,
-            isolation
+            idGenerator: idGenerator
         )
     }
 
@@ -116,49 +114,54 @@ final class H264Reader: ElementaryStreamReader {
         }
     }
 
-    func consume(data: inout BlockBufferReader, _ isolation: isolated any Actor) async throws {
+    func consume(data: inout BlockBufferReader) throws {
         try checkTracksCreated()
         guard data.readableBytes > 0 else { return }
-        // TODO: why to create data?
-        let data = try! data.readSlice(length: data.readableBytes)
-
         let view = data.readableBytesView
         var offset = view.startIndex
         let limit = view.endIndex
+        // The readable bytes are consumed whatever happens.
+        defer { data.moveReaderIndex(to: limit) }
 
         totalBytesWritten += view.count
 
         // Scan the appended data, processing NAL units as they are encountered
         while true {
-            var nalUnitOffset = NalUnitUtil.findNalUnit(
-                view,
-                offset: offset,
-                limit: limit,
-                prefixFlags: &prefixFlags
-            )
+            // The scan reads the bytes in memory: through the view, every byte is a lookup in the block buffer.
+            let (nalUnitOffset, nalUnitType, prefixSize) = try data.withUnsafeReadableBuffer { raw in
+                // The memory starts at the view's start.
+                let base = view.startIndex
+                let bytes = raw.assumingMemoryBound(to: UInt8.self)
+                var nalUnitOffset = NalUnitUtil.findNalUnit(
+                    bytes,
+                    offset: offset - base,
+                    limit: limit - base,
+                    prefixFlags: &prefixFlags
+                )
+                guard nalUnitOffset < limit - base else { return (limit, 0, 0) }
+                // We've seen the start of a NAL unit of the following type.
+                let nalUnitType = Int(bytes[nalUnitOffset + 3] & 0x1F)
+                // Case of a 4 byte start code prefix 0x00000001, recoil NAL unit offset by one byte
+                // to avoid previous byte being assigned to the previous access unit.
+                var prefixSize = 3
+                if nalUnitOffset > 0, bytes[nalUnitOffset - 1] == 0x00 {
+                    nalUnitOffset -= 1
+                    prefixSize = 4
+                }
+                return (base + nalUnitOffset, nalUnitType, prefixSize)
+            }
 
             if nalUnitOffset == limit {
                 // We've scanned to the end of the data without finding the start of another NAL unit.
-                try! nalUnitData(view, from: offset, to: limit)
+                try nalUnitData(view, from: offset, to: limit)
                 return
-            }
-
-            // We've seen the start of a NAL unit of the following type.
-            let nalUnitType = Int(view[nalUnitOffset + 3] & 0x1F)
-
-            // Case of a 4 byte start code prefix 0x00000001, recoil NAL unit offset by one byte
-            // to avoid previous byte being assigned to the previous access unit.
-            var prefixSize = 3
-            if nalUnitOffset > view.startIndex, view[nalUnitOffset - 1] == 0x00 {
-                nalUnitOffset -= 1
-                prefixSize = 4
             }
 
             // This is the number of bytes from the current offset to the start of the next NAL unit.
             // It may be negative if the NAL unit started in the previously consumed data.
             let lengthToNalUnit = nalUnitOffset - offset
             if lengthToNalUnit > 0 {
-                try! nalUnitData(view, from: offset, to: nalUnitOffset)
+                try nalUnitData(view, from: offset, to: nalUnitOffset)
             }
 
             let bytesWrittenPastPosition = limit - nalUnitOffset;
@@ -166,15 +169,14 @@ final class H264Reader: ElementaryStreamReader {
             // Indicate the end of the previous NAL unit. If the length to the start of the next unit
             // is negative then we wrote too many bytes to the NAL buffers. Discard the excess bytes
             // when notifying that the unit has ended.
-            try! await endNalUnit(
+            try endNalUnit(
                 position: absolutePosition,
                 offset: bytesWrittenPastPosition,
                 discardPadding: lengthToNalUnit < 0 ? -lengthToNalUnit : 0,
-                pesTime: pesTime,
-                isolation
+                pesTime: pesTime
             )
             // Indicate the start of the next NAL unit.
-            try! startNalUnit(
+            try startNalUnit(
                 position: absolutePosition,
                 nalUnitType: nalUnitType,
                 pesTime: pesTime,
@@ -185,20 +187,21 @@ final class H264Reader: ElementaryStreamReader {
         }
     }
 
-    func endOfInputReached(_ isolation: isolated any Actor) async throws {
+    func endOfInputReached() throws {
         try checkTracksCreated()
         try seiReader.flush()
+        try seiReader.writePendingSamples()
         // Simulate end of current NAL unit and start an AUD one to trigger output of current sample
-        try await endNalUnit(position: totalBytesWritten, offset: 0, discardPadding: 0, pesTime: pesTime, isolation)
+        try endNalUnit(position: totalBytesWritten, offset: 0, discardPadding: 0, pesTime: pesTime)
         try startNalUnit(
             position: totalBytesWritten,
             nalUnitType: NalUnitUtil.H264NalUnitType.aud.rawValue,
             pesTime: pesTime,
             pesDecodeTime: pesDecodeTime
         )
-        try await endNalUnit(position: totalBytesWritten, offset: 0, discardPadding: 0, pesTime: pesTime, isolation)
+        try endNalUnit(position: totalBytesWritten, offset: 0, discardPadding: 0, pesTime: pesTime)
         // No further sample will arrive to provide the last sample's duration, so release it now.
-        try await sampleReader?.flushPendingSample(isolation)
+        try sampleReader?.flushPendingSample()
     }
 
     private func startNalUnit(
@@ -232,21 +235,20 @@ final class H264Reader: ElementaryStreamReader {
 
         let slice = data[offset..<limit]
         if !hasOutputFormat || sampleReader.needsSpsPps() {
-            try! sps.appendToNalUnit(slice)
-            try! pps.appendToNalUnit(slice)
+            try sps.appendToNalUnit(slice)
+            try pps.appendToNalUnit(slice)
         }
-        try! accumulator.append(slice)
-        try! sei.appendToNalUnit(slice)
-        try! sampleReader.appendToNalUnit(slice)
+        try accumulator.append(slice)
+        try sei.appendToNalUnit(slice)
+        try sampleReader.appendToNalUnit(slice)
     }
 
     private func endNalUnit(
         position: Int,
         offset: Int,
         discardPadding: Int,
-        pesTime: CMTime,
-        _ isolation: isolated any Actor
-    ) async throws {
+        pesTime: CMTime
+    ) throws {
         guard let sampleReader, let output, let formatId else { return }
         if !hasOutputFormat || sampleReader.needsSpsPps() {
             sps.endNalUnit(discardPadding: discardPadding)
@@ -256,12 +258,12 @@ final class H264Reader: ElementaryStreamReader {
                 if sps.isCompleted, pps.isCompleted {
                     let spsView = BlockBufferReader(sps.nalBuffer).bytesView
                     let ppsView = BlockBufferReader(pps.nalBuffer).bytesView
-                    let spsData = try! NalUnitUtil.parseSpsNalUnit(
+                    let spsData = try NalUnitUtil.parseSpsNalUnit(
                         nalData: spsView,
                         nalOffset: 3,
                         nalLimit: sps.nalLength
                     )
-                    let ppsData = try! NalUnitUtil.parsePpsNalUnit(
+                    let ppsData = try NalUnitUtil.parsePpsNalUnit(
                         nalData: ppsView,
                         nalOffset: 3,
                         nalLimit: pps.nalLength
@@ -275,7 +277,7 @@ final class H264Reader: ElementaryStreamReader {
 
                     // The parameter sets go in without the start code and with emulation
                     // prevention bytes intact, so the 3-byte prefix is dropped here.
-                    let formatDescription = try! CMFormatDescription(
+                    let formatDescription = try CMFormatDescription(
                         h264ParameterSets: [
                             Data(spsView[3...]),
                             Data(ppsView[3...])
@@ -283,7 +285,7 @@ final class H264Reader: ElementaryStreamReader {
                         nalUnitHeaderLength: 4
                     )
 
-                    try! output.setFormat(
+                    try output.setFormat(
                         Format.Builder()
                             .setId(formatId)
                             .setContainerMimeType(containerMimeType)
@@ -295,11 +297,10 @@ final class H264Reader: ElementaryStreamReader {
                                 FormatInitializationData(formatDescription: formatDescription)
                             )
                             .setMaxNumReorderSamples(spsData.maxNumReorderFrames)
-                            .build(),
-                        isolation: isolation
+                            .build()
                     )
                     hasOutputFormat = true
-                    try! seiReader.setReorderingQueueSize(spsData.maxNumReorderFrames)
+                    try seiReader.setReorderingQueueSize(spsData.maxNumReorderFrames)
                     sampleReader.putSps(spsData)
                     sampleReader.putPps(ppsData)
                     sps.reset()
@@ -326,7 +327,7 @@ final class H264Reader: ElementaryStreamReader {
         }
 
         if sei.endNalUnit(discardPadding: discardPadding) {
-            let unescaped = try! NalUnitUtil.unescapeStream(
+            let unescaped = try NalUnitUtil.unescapeStream(
                 sei.nalBuffer,
                 length: sei.nalLength,
                 allocator: allocator
@@ -334,11 +335,12 @@ final class H264Reader: ElementaryStreamReader {
             var seiBuffer = BlockBufferReader(unescaped)
             // NAL prefix and nal_unit() header.
             seiBuffer.moveReaderIndex(to: 4)
-            try! seiReader.consume(pesTime: pesTime, seiBuffer: &seiBuffer)
+            try seiReader.consume(pesTime: pesTime, seiBuffer: &seiBuffer)
+            try seiReader.writePendingSamples()
         }
 
-        try accumulator.finishNalUnit()
-        let sampleIsKeyFrame = try! await sampleReader.endNalUnit(hasOutputFormat: hasOutputFormat, isolation)
+        try accumulator.finishNalUnit(discardPadding: discardPadding)
+        let sampleIsKeyFrame = try sampleReader.endNalUnit(hasOutputFormat: hasOutputFormat)
         if sampleIsKeyFrame {
             // This is either an IDR frame or the first I-frame since the random access indicator, so mark
             // it as a keyframe. Clear the flag so that subsequent non-IDR I-frames are not marked as
@@ -515,7 +517,9 @@ private final class SampleReader {
         var deltaPicOrderCnt0 = 0
         var deltaPicOrderCnt1 = 0
         if spsData.picOrderCountType == 0 {
-            guard bitArray.canReadBits(spsData.picOrderCntLsbLength) else { return }
+            guard bitArray.canReadBits(spsData.picOrderCntLsbLength) else {
+                return
+            }
             picOrderCntLsb = try bitArray.readBits(spsData.picOrderCntLsbLength)
             if ppsData.bottomFieldPicOrderInFramePresentFlag, !fieldPicFlag {
                 guard try bitArray.canReadExpGolombCodedNum() else { return }
@@ -551,14 +555,13 @@ private final class SampleReader {
 
     @discardableResult
     func endNalUnit(
-        hasOutputFormat: Bool,
-        _ isolation: isolated any Actor
-    ) async throws -> Bool {
+        hasOutputFormat: Bool
+    ) throws -> Bool {
         if nalUnitType == NalUnitUtil.H264NalUnitType.aud
             || (detectAccessUnits && sliceHeader.isFirstVclNalUnitOfPicture(previousSliceHeader)) {
             // If the NAL unit ending is the start of a new sample, output the previous one.
             if hasOutputFormat, readingSample {
-                try await completeSample(isolation)
+                try completeSample()
             }
             samplePosition = nalUnitStartPosition
             sampleTime = nalUnitTime
@@ -584,9 +587,11 @@ private final class SampleReader {
 
     /// Takes ownership of the sample that just ended and outputs the previously held back one, whose
     /// duration is now known.
-    private func completeSample(_ isolation: isolated any Actor) async throws {
+    private func completeSample() throws {
         guard let blockBuffer = try accumulator.commit() else { return }
-        guard sampleTime.isNumeric, nalUnitStartPosition != samplePosition else { return }
+        guard sampleTime.isNumeric, nalUnitStartPosition != samplePosition else {
+            return
+        }
 
         let sample = PendingSample(
             data: blockBuffer,
@@ -596,37 +601,35 @@ private final class SampleReader {
         )
 
         if let pendingSample {
-            try await output(pendingSample, followedBy: sample, isolation)
+            try output(pendingSample, followedBy: sample)
         }
         pendingSample = sample
     }
 
     /// Outputs the sample held back for duration derivation, estimating its duration. Called when no
     /// further sample will follow it, i.e. at the end of the input.
-    func flushPendingSample(_ isolation: isolated any Actor) async throws {
+    func flushPendingSample() throws {
         guard let sample = pendingSample else { return }
         pendingSample = nil
-        try await output(sample, followedBy: nil, isolation)
+        try output(sample, followedBy: nil)
     }
 
     private func output(
         _ sample: PendingSample,
-        followedBy next: PendingSample?,
-        _ isolation: isolated any Actor
-    ) async throws {
+        followedBy next: PendingSample?
+    ) throws {
         let duration = duration(of: sample, followedBy: next)
         lastSampleDuration = duration
 
-        try await trackOutput.sampleData(data: sample.data, isolation: trackOutput.isolation)
-        try await trackOutput.sampleMetadata(
+        try trackOutput.sampleData(data: sample.data)
+        try trackOutput.sampleMetadata(
             time: CMSampleTimingInfo(
                 duration: duration,
                 presentationTimeStamp: sample.time,
                 decodeTimeStamp: sample.decodeTime
             ),
             flags: sample.flags,
-            range: 0..<sample.data.dataLength,
-            isolation: trackOutput.isolation
+            range: 0..<sample.data.dataLength
         )
     }
 

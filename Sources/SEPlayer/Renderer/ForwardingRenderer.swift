@@ -38,8 +38,18 @@ open class ForwardingRenderer: SERenderer {
         renderer.getTimebase()
     }
 
+    open func getRenderSynchronizer() -> (any PlaybackSynchronizer)? {
+        renderer.getRenderSynchronizer()
+    }
+
     open func getState() -> SERendererState {
         renderer.getState()
+    }
+
+    open func getRecoveryContext() -> RendererRecoveryContext { renderer.getRecoveryContext() }
+    open var isRecoveringWhileTimelineAdvances: Bool { renderer.isRecoveringWhileTimelineAdvances }
+    open func recoverOutput(at position: CMTime, reason: RendererRecoveryReason) throws -> Bool {
+        try renderer.recoverOutput(at: position, reason: reason)
     }
 
     public func enable(
@@ -136,6 +146,10 @@ open class ForwardingRenderer: SERenderer {
 
     open func isEnded() -> Bool {
         renderer.isEnded()
+    }
+
+    open func hasPresentedOutput() -> Bool {
+        renderer.hasPresentedOutput()
     }
 
     open func stop() {

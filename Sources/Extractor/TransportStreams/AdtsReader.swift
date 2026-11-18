@@ -64,6 +64,8 @@ final class AdtsReader: ElementaryStreamReader {
 
     private var currentOutput: TrackOutput?
     private var currentSampleDuration: CMTime = .zero
+    /// Where the frames are copied to: about 4 s of 128 kbit/s audio a block.
+    private let sampleMemory = SampleMemory(blockSize: 64 * 1024) // 64 KB
 
     /// - Parameters:
     ///   - exposeId3: True if the reader should expose ID3 information.
@@ -96,9 +98,8 @@ final class AdtsReader: ElementaryStreamReader {
 
     func createTracks(
         output: any ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws {
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws {
         idGenerator.generateNewId()
         formatId = try idGenerator.getFormatId()
         let trackOutput = try output.track(for: idGenerator.getTrackId(), trackType: .audio)
@@ -108,13 +109,12 @@ final class AdtsReader: ElementaryStreamReader {
         guard exposeId3 else { return }
         idGenerator.generateNewId()
         let id3Output = try output.track(for: idGenerator.getTrackId(), trackType: .metadata)
-        try await id3Output.setFormat(
+        try id3Output.setFormat(
             Format.Builder()
                 .setId(idGenerator.getFormatId())
                 .setContainerMimeType(containerMimeType)
                 .setSampleMimeType(.applicationID3)
-                .build(),
-            isolation: id3Output.isolation
+                .build()
         )
         self.id3Output = id3Output
     }
@@ -123,7 +123,7 @@ final class AdtsReader: ElementaryStreamReader {
         time = pesTime
     }
 
-    func consume(data: inout BlockBufferReader, _ isolation: isolated any Actor) async throws {
+    func consume(data: inout BlockBufferReader) throws {
         try checkTracksCreated()
 
         while data.readableBytes > 0 {
@@ -134,15 +134,15 @@ final class AdtsReader: ElementaryStreamReader {
                 try checkAdtsHeader(&data)
             case .readingId3Header:
                 if try continueRead(source: &data, targetLength: .id3HeaderSize) {
-                    try await parseId3Header(isolation)
+                    try parseId3Header()
                 }
             case .readingAdtsHeader:
                 let targetLength = hasCrc ? Int.headerSize + .crcSize : .headerSize
                 if try continueRead(source: &data, targetLength: targetLength) {
-                    try await parseAdtsHeader(isolation)
+                    try parseAdtsHeader()
                 }
             case .readingSample:
-                try await readSample(&data, isolation)
+                try readSample(&data)
             }
         }
     }
@@ -365,12 +365,16 @@ final class AdtsReader: ElementaryStreamReader {
             return Self.isAdtsSyncBytes(0xFF, nextSecondSyncByte)
                 && Int((nextSecondSyncByte & 0x8) >> 3) == currentFrameVersion
         } else {
-            guard data[nextSyncPosition] == UInt8(ascii: "I") else { return false }
+            guard data[nextSyncPosition] == UInt8(ascii: "I") else {
+                return false
+            }
             guard nextSyncPosition + 1 < dataLimit else {
                 // Insufficient data for further checks.
                 return true
             }
-            guard data[nextSyncPosition + 1] == UInt8(ascii: "D") else { return false }
+            guard data[nextSyncPosition + 1] == UInt8(ascii: "D") else {
+                return false
+            }
             guard nextSyncPosition + 2 < dataLimit else {
                 // Insufficient data for further checks.
                 return true
@@ -384,11 +388,10 @@ final class AdtsReader: ElementaryStreamReader {
     }
 
     /// Parses the Id3 header.
-    private func parseId3Header(_ isolation: isolated any Actor) async throws {
+    private func parseId3Header() throws {
         if let id3Output {
-            try await id3Output.sampleData(
-                data: headerBuffer.blockBuffer,
-                isolation: id3Output.isolation
+            try id3Output.sampleData(
+                data: headerBuffer.blockBuffer
             )
         }
         headerBuffer.moveReaderIndex(to: .id3SizeOffset)
@@ -402,7 +405,7 @@ final class AdtsReader: ElementaryStreamReader {
     }
 
     /// Parses the sample header.
-    private func parseAdtsHeader(_ isolation: isolated any Actor) async throws {
+    private func parseAdtsHeader() throws {
         let output = try output.checkNotNil()
         var header = BlockBufferBitReader(reader: headerBuffer)
 
@@ -416,7 +419,10 @@ final class AdtsReader: ElementaryStreamReader {
                 // contains AAC-LC or HE-AAC. Since indicating AAC-LC works for HE-AAC streams, we
                 // pretend that we're dealing with AAC-LC and hope for the best. In practice this
                 // often works.
-                // TODO: log "Detected audio object type: \(audioObjectType), but assuming AAC LC."
+                SELogger.warning(
+                    .transportStream,
+                    "Detected audio object type \(audioObjectType), but assuming AAC LC"
+                )
                 audioObjectType = 2
             }
 
@@ -449,7 +455,7 @@ final class AdtsReader: ElementaryStreamReader {
                 value: CMTimeValue(Int.samplesPerFrame),
                 timescale: CMTimeScale(aacConfig.sampleRate)
             )
-            try await output.setFormat(format, isolation: output.isolation)
+            try output.setFormat(format)
             hasOutputFormat = true
         } else {
             header.skipBits(10)
@@ -475,13 +481,17 @@ final class AdtsReader: ElementaryStreamReader {
     }
 
     /// Reads the rest of the sample
-    private func readSample(_ data: inout BlockBufferReader, _ isolation: isolated any Actor) async throws {
+    private func readSample(_ data: inout BlockBufferReader) throws {
         let bytesToRead = min(data.readableBytes, sampleSize - bytesRead)
         if bytesToRead > 0 {
             if let currentOutput {
-                try await currentOutput.sampleData(
-                    data: data.readSlice(length: bytesToRead).blockBuffer,
-                    isolation: currentOutput.isolation
+                let sampleData = try sampleMemory.copy(
+                    data.blockBuffer,
+                    range: data.readerIndex..<(data.readerIndex + bytesToRead)
+                )
+                data.moveReaderIndex(forwardBy: bytesToRead)
+                try currentOutput.sampleData(
+                    data: sampleData
                 )
             } else {
                 data.moveReaderIndex(forwardBy: bytesToRead)
@@ -493,15 +503,14 @@ final class AdtsReader: ElementaryStreamReader {
         // packetStarted method must be called before reading samples.
         try checkArgument(time.isNumeric)
         if let currentOutput {
-            try await currentOutput.sampleMetadata(
+            try currentOutput.sampleMetadata(
                 time: CMSampleTimingInfo(
                     duration: currentSampleDuration,
                     presentationTimeStamp: time,
                     decodeTimeStamp: .invalid
                 ),
                 flags: .keyframe,
-                range: 0..<sampleSize,
-                isolation: currentOutput.isolation
+                range: 0..<sampleSize
             )
         }
         time = time + currentSampleDuration
@@ -547,10 +556,8 @@ private extension AdtsReader {
         let formatDescription: CMFormatDescription
 
         init(audioSpecificConfig: [UInt8]) throws {
-            // TODO: move from ESDescriptor
-            formatDescription = try BoxParser.ESDescriptor(
-                esdt: Data.esDescriptor(audioSpecificConfig: audioSpecificConfig)
-            ).codecInfo
+            let esds = try BlockBufferReader(bytes: [UInt8].esDescriptor(audioSpecificConfig: audioSpecificConfig))
+            formatDescription = try Mpeg4AudioUtil.formatDescription(esds: esds)
         }
 
         func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {
@@ -569,8 +576,9 @@ private extension BlockBufferReader {
     }
 }
 
-private extension Data {
-    static func esDescriptor(audioSpecificConfig: [UInt8]) -> Data {
+private extension [UInt8] {
+    /// An elementary stream descriptor of ISO/IEC 14496-1 for MPEG-4 audio of `audioSpecificConfig`.
+    static func esDescriptor(audioSpecificConfig: [UInt8]) -> [UInt8] {
         // Start of the DecoderSpecificInfo.
         let decoderSpecificInfo: [UInt8] = [
             .decoderSpecificInfoTag, UInt8(audioSpecificConfig.count),
@@ -594,7 +602,7 @@ private extension Data {
             + decoderConfigDescriptor
             + [.slConfigDescriptorTag, 0x01, .slConfigPredefinedMP4]
 
-        return Data([.esDescriptorTag, UInt8(esDescriptor.count)] + esDescriptor)
+        return [.esDescriptorTag, UInt8(esDescriptor.count)] + esDescriptor
     }
 }
 

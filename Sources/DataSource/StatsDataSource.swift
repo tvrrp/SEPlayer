@@ -23,23 +23,12 @@ public final class StatsDataSource: DataSource {
         self.dataSource = dataSource
     }
 
-//    public func open(dataSpec: DataSpec, isolation: isolated any Actor) async throws -> Int? {
-//        lastOpenedUrl = dataSpec.url
-//        lastUrlResponse = nil
-//
-//        let result = try await dataSource.open(dataSpec: dataSpec, isolation: isolation)
-////        TODO: if let lastOpenedUrl = dataSource.url {
-////            self.lastOpenedUrl = lastOpenedUrl
-////        }
-//
-//        if let lastUrlResponse = dataSource.getURLResponse(isolation: isolation) {
-//            self.lastUrlResponse = lastUrlResponse
-//        }
-//
-//        return result
-//    }
-    public func canHandle(new dataSpec: DataSpec, _ isolation: isolated any Actor) -> Bool {
-        dataSource.canHandle(new: dataSpec, isolation)
+    public func open(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> Int? {
+        lastOpenedUrl = dataSpec.url
+        lastUrlResponse = nil
+        let length = try await dataSource.open(dataSpec: dataSpec, isolation)
+        lastUrlResponse = dataSource.getURLResponse(isolation)
+        return length
     }
 
     public func close(_ isolation: isolated any Actor) async throws {
@@ -48,6 +37,10 @@ public final class StatsDataSource: DataSource {
 
     public func getURLResponse(_ isolation: isolated any Actor) -> HTTPURLResponse? {
         dataSource.getURLResponse(isolation)
+    }
+
+    public func setReadAhead(_ readAhead: ReadAhead?) {
+        dataSource.setReadAhead(readAhead)
     }
 
     public func read(range: Range<Int>, _ isolation: isolated any Actor) async throws -> CMBlockBuffer? {

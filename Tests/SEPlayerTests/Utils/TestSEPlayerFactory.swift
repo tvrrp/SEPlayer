@@ -8,6 +8,7 @@
 import AVFoundation
 import DataSource
 import Extractor
+import SEPlayerCommon
 import Testing
 @testable import SEPlayer
 
@@ -140,7 +141,6 @@ final class TestSEPlayerFactory {
         return try SEPlayerImpl(
             identifier: UUID(),
             workQueue: queue,
-            applicationQueue: queue,
             clock: clock,
             renderersFactory: #require(renderersFactory),
             trackSelector: trackSelector,
@@ -150,13 +150,17 @@ final class TestSEPlayerFactory {
                 workQueue: queue,
                 loaderQueue: loaderQueue,
                 // Tests set their own media sources; this one is never asked for data.
-                dataSourceFactory: DefaultDataSourceFactory(
-                    syncActor: loaderSyncActor,
-                    networkLoader: PlayerSessionLoader(configuration: .ephemeral, queue: Self.loaderOperationQueue())
-                ),
-                extractorsFactory: DefaultExtractorFactory(queue: queue)
+                makeDataSourceFactory: {
+                    DefaultDataSourceFactory(
+                        syncActor: loaderSyncActor,
+                        networkLoader: PlayerSessionLoader(configuration: .ephemeral, queue: Self.loaderOperationQueue())
+                    )
+                },
+                extractorsFactory: DefaultExtractorFactory(queue: queue),
+                decryptionMemoryPool: CMMemoryPool()
             ),
-            audioSessionManager: AudioSessionManager.shared,
+            // The tests don't touch the app's audio session.
+            audioSessionController: AudioSessionController(session: UnusedAudioSession()),
             useLazyPreparation: useLazyPreparation,
             seekBackIncrement: CMTime(value: seekBackIncrementMs, timescale: 1000),
             seekForwardIncrement: CMTime(value: seekForwardIncrementMs, timescale: 1000),
@@ -171,8 +175,23 @@ private struct MockRenderersFactory: RenderersFactory {
     func createRenderers(
         queue: any Queue,
         clock: SEClock,
-        renderSynchronizer: AVSampleBufferRenderSynchronizer
+        renderSynchronizer: any PlaybackSynchronizer,
+        textOutput: TextOutput,
+        videoListener: VideoRendererEventListener,
+        audioListener: AudioRendererEventListener
     ) -> [any SERenderer] {
         renderers
     }
+}
+
+/// An audio session that accepts any setup and does nothing.
+private final class UnusedAudioSession: AudioSessionInterface {
+    func setCategory(
+        _ category: AVAudioSession.Category,
+        mode: AVAudioSession.Mode,
+        policy: AVAudioSession.RouteSharingPolicy,
+        options: AVAudioSession.CategoryOptions
+    ) throws {}
+
+    func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {}
 }

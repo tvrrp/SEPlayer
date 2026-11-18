@@ -55,6 +55,15 @@ open class ParserError: IOError, @unchecked Sendable {
         ParserError(message: message, cause: cause, contentIsMalformed: false, dataType: .media)
     }
 
+    open override var errorCode: PlaybackErrorCode {
+        switch (dataType, contentIsMalformed) {
+        case (.manifest, true): .parsingManifestMalformed
+        case (.manifest, false): .parsingManifestUnsupported
+        case (_, true): .parsingContainerMalformed
+        case (_, false): .parsingContainerUnsupported
+        }
+    }
+
     open override func getMessage() -> String? {
         var string = String()
         if let message {

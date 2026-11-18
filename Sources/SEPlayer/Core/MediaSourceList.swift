@@ -203,6 +203,13 @@ final class MediaSourceList {
         }
     }
 
+    /// Throws the error of a source that failed to tell what it plays.
+    func maybeThrowSourceInfoRefreshError() throws {
+        for childSource in childSources.values {
+            try childSource.source.maybeThrowSourceInfoRefreshError()
+        }
+    }
+
     func release() {
         childSources.values.forEach { $0.source.releaseSource(delegate: $0.delegate) }
         childSources.removeAll()

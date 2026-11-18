@@ -15,7 +15,19 @@ public protocol SampleStream: AnyObject, TriggerableSampleStream {
     func maybeThrowError() throws
     func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult
     func skipData(position: CMTime) throws -> Int
+    /// Repositions only this stream in retained data. Failure must leave it unchanged.
+    func seekWithinBuffer(to position: CMTime) throws -> SampleStreamSeekResult
     func isEqual(to other: any SampleStream) -> Bool
+}
+
+public enum SampleStreamSeekResult: Equatable {
+    case success(startPosition: CMTime)
+    case unavailable
+    case unsupported
+}
+
+public extension SampleStream {
+    func seekWithinBuffer(to position: CMTime) throws -> SampleStreamSeekResult { .unsupported }
 }
 
 extension SampleStream {

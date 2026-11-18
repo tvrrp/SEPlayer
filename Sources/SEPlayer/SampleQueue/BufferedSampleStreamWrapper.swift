@@ -91,6 +91,16 @@ final class BufferedSampleStreamWrapper: SampleStream {
         return try stream.skipData(position: position)
     }
 
+    func seekWithinBuffer(to position: CMTime) throws -> SampleStreamSeekResult {
+        let result = try stream.seekWithinBuffer(to: position)
+        if case .success = result {
+            bufferedSamples.removeAll(keepingCapacity: true)
+            currentFormat = nil
+            nextStreamFormat = nil
+        }
+        return result
+    }
+
     private func flush(endOfStreamBuffer: CMSampleBuffer? = nil) throws -> CMSampleBuffer {
         if bufferedSamples.isEmpty, let endOfStreamBuffer {
             return endOfStreamBuffer
@@ -118,10 +128,7 @@ final class BufferedSampleStreamWrapper: SampleStream {
         )
 
         for (index, buffer) in bufferedSamples.enumerated() {
-            if buffer.flags.contains(.lastSample) {
-                print()
-            }
-            sampleBuffer.sampleAttachments[index] = buffer.sampleAttachments[0]
+            sampleBuffer.perSampleAttachments[index] = buffer.perSampleAttachments[0]
             buffer.propagateAttachments(to: sampleBuffer)
         }
 

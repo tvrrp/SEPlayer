@@ -129,7 +129,9 @@ final class MaskingMediaSource: WrappingMediaSource {
                 period: period,
                 windowIndex: 0,
                 windowPosition: windowStartPosition
-            ) else { return }
+            ) else {
+                return
+            }
 
             timeline = if hasRealTimeline {
                 timeline.clone(with: newTimeline)

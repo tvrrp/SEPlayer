@@ -85,7 +85,6 @@ public extension DataSpec {
         request.timeoutInterval = 8
 
         if position > 0 || length != nil {
-            request.cachePolicy = .reloadIgnoringLocalCacheData
             // `Range` is inclusive on both ends, so the last byte is position + length - 1.
             var rangeString = "bytes=\(position)-"
             if let length, length > 0 {
@@ -112,7 +111,17 @@ public extension DataSpec {
         public static let allowGzip = Flags(rawValue: 1)
         public static let dontCacheIfLengthUnknown = Flags(rawValue: 1 << 1)
         public static let allowCacheFragmentation = Flags(rawValue: 1 << 2)
+        /// The server may hold the response, or send it as fast as it makes it, rather than as fast as the network
+        /// allows, as for a part an HLS preload hint announces or a blocking playlist reload: the transfer doesn't
+        /// measure the network.
         public static let mightNotUseFullNetworkSpeed = Flags(rawValue: 1 << 3)
+        /// The loaded bytes may be kept after the data source closes, for another to read them again, as after a
+        /// seek. Only for resources that don't change, unlike a live playlist.
+        public static let keepLoadedBytes = Flags(rawValue: 1 << 4)
+        /// The loaded bytes may be kept on storage, by the ``DiskCache`` of the data source factory, for playing the
+        /// resource again without the network. Only for resources that don't change and aren't secret, unlike a live
+        /// playlist or a key.
+        public static let storeOnDisk = Flags(rawValue: 1 << 5)
     }
 
     struct Builder {

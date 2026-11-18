@@ -19,7 +19,7 @@ final class CountDownLatch {
     }
 
     func awaitResult(timeoutMs: UInt64, isolation: isolated (any Actor)? = #isolation) async throws {
-        guard count > 0 else { return } 
+        guard count > 0 else { return }
         let timeoutTask = Task {
             try Task.checkCancellation()
             if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {

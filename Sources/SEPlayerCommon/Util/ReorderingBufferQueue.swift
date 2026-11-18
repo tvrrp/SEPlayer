@@ -27,6 +27,11 @@ public final class ReorderingBufferQueue {
 
     public init() {}
 
+    /// Sets what receives the buffers as they leave the queue.
+    public func setOutputConsumer(_ outputConsumer: OutputConsumer?) {
+        self.outputConsumer = outputConsumer
+    }
+
     /// Sets the max size of the re-ordering queue.
     ///
     /// The size is defined in terms of the number of unique presentation timestamps, rather than

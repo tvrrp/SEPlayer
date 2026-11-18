@@ -12,20 +12,19 @@ public protocol ElementaryStreamReader {
     func seek()
     func createTracks(
         output: ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws
     func packetStarted(
         pesTime: CMTime,
         decodeTime: CMTime,
         flags: TsPayload.PacketIndicators
     )
-    func consume(data: inout BlockBufferReader, _ isolation: isolated any Actor) async throws
-    func packetFinished(_ isolation: isolated any Actor) async throws
-    func endOfInputReached(_ isolation: isolated any Actor) async throws
+    func consume(data: inout BlockBufferReader) throws
+    func packetFinished() throws
+    func endOfInputReached() throws
 }
 
 public extension ElementaryStreamReader {
-    func packetFinished(_ isolation: isolated any Actor) async throws {}
-    func endOfInputReached(_ isolation: isolated any Actor) async throws {}
+    func packetFinished() throws {}
+    func endOfInputReached() throws {}
 }

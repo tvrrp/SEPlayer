@@ -50,7 +50,7 @@ final class FakeSampleStream: SampleStream {
             guard let sampleInfo = fakeSampleStreamItem.sampleInfo else {
                 let format = try #require(fakeSampleStreamItem.format)
                 if writtenFirstFormat {
-                    sampleQueue.setFormat(format, isolation: isolation)
+                    sampleQueue.setFormat(format)
                 } else {
                     pendingFirstFormat = format
                 }
@@ -65,17 +65,16 @@ final class FakeSampleStream: SampleStream {
 
             if sampleInfo.timeUs >= startPositionUs && index >= sampleStreamItemsWritePosition {
                 if !writtenFirstFormat {
-                    try sampleQueue.setFormat(#require(pendingFirstFormat), isolation: isolation)
+                    try sampleQueue.setFormat(#require(pendingFirstFormat))
                     writtenFirstFormat = true
                 }
 
                 let time = CMTime.time(us: sampleInfo.timeUs)
-                try sampleQueue.sampleData(data: Self.makeBlockBuffer(sampleInfo.data), isolation: isolation)
+                try sampleQueue.sampleData(data: Self.makeBlockBuffer(sampleInfo.data))
                 try sampleQueue.sampleMetadata(
                     time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
                     flags: sampleInfo.flags,
-                    range: 0..<sampleInfo.data.count,
-                    isolation: isolation
+                    range: 0..<sampleInfo.data.count
                 )
             }
         }
@@ -84,6 +83,10 @@ final class FakeSampleStream: SampleStream {
 
     func seekTo(positionUs: Int64, allowTimeBeyondBuffer: Bool) -> Bool {
         sampleQueue.seek(time: .time(us: positionUs), allowTimeBeyondBuffer: allowTimeBeyondBuffer)
+    }
+
+    func seekWithinBuffer(to position: CMTime) throws -> SampleStreamSeekResult {
+        sampleQueue.seekWithinBuffer(to: position)
     }
 
     func reset() throws {

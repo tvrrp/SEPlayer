@@ -169,7 +169,7 @@ final class TsDurationReader {
         // from an incomplete TS packet.
         var searchPosition = searchEndPosition - Int(TSConstants.syncByte)
         while searchPosition >= searchStartPosition {
-            if try! !TsUtil.isStartOfTsPacket(
+            if try !TsUtil.isStartOfTsPacket(
                 packetBuffer,
                 startPosition: searchStartPosition,
                 limitPosition: searchEndPosition,
@@ -178,7 +178,7 @@ final class TsDurationReader {
                 searchPosition -= 1
                 continue
             }
-            if let pcrValue = try! TsUtil.readPcrFromPacket(
+            if let pcrValue = try TsUtil.readPcrFromPacket(
                 packetBuffer,
                 startOfPacket: searchPosition,
                 pcrPid: pcrPid

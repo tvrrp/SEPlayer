@@ -5,7 +5,7 @@
 //  Created by tvrrp on 24.02.2026.
 //
 
-open class IOError: Error, @unchecked Sendable {
+open class IOError: PlaybackErrorCodeProviding, @unchecked Sendable {
     public let message: String?
     public let cause: Error?
 
@@ -13,6 +13,9 @@ open class IOError: Error, @unchecked Sendable {
         self.message = message
         self.cause = cause
     }
+
+    /// What failed. A load that fails for no more specific reason fails as ``PlaybackErrorCode/ioUnspecified``.
+    open var errorCode: PlaybackErrorCode { .ioUnspecified }
 
     open func getMessage() -> String? {
         var description = String()

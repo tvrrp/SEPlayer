@@ -7,38 +7,28 @@
 
 import CoreMedia
 
-public typealias TriggerCondition = CMBufferQueue.TriggerCondition
-//@frozen public enum TriggerCondition {
-//    /// Fires when buffered-ahead duration drops below the threshold.
-//    case whenDurationBecomesLessThan(Int64)
-//    case whenDurationBecomesLessThanOrEqualTo(Int64)
-//    /// Fires when buffered-ahead duration rises above the threshold.
-//    case whenDurationBecomesGreaterThan(Int64)
-//    case whenDurationBecomesGreaterThanOrEqualTo(Int64)
-//    /// Fires each time the earliest readable timestamp changes.
-//    case whenMinPresentationTimestampChanges
-//    /// Fires each time the latest queued timestamp changes.
-//    case whenMaxPresentationTimestampChanges
-//    /// Fires when at least one sample becomes readable.
-//    case whenDataBecomesReady
-//    /// Fires when upstream has finished writing and all samples have been read.
-//    case whenEndOfDataReached
-//    /// Fires immediately on reset() / release() — not edge-detected.
-//    case whenReset
-//    case whenSampleCountBecomesLessThan(Int)
-//    case whenSampleCountBecomesGreaterThan(Int)
-//}
+/// When a trigger of a queue of media fires.
+public enum TriggerCondition: Sendable, Hashable {
+    /// When the duration of the queue drops below the threshold.
+    case whenDurationBecomesLessThan(CMTime)
+    case whenDurationBecomesLessThanOrEqualTo(CMTime)
+    /// When the duration of the queue rises above the threshold.
+    case whenDurationBecomesGreaterThan(CMTime)
+    case whenDurationBecomesGreaterThanOrEqualTo(CMTime)
+    /// Each time the earliest presentation time changes.
+    case whenMinPresentationTimeStampChanges
+    /// Each time the latest presentation time changes.
+    case whenMaxPresentationTimeStampChanges
+    /// When the latest presentation time reaches the time: the queue holds media up to it.
+    case whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(CMTime)
+    /// When the next buffer to dequeue is ready.
+    case whenDataBecomesReady
+    /// When the queue has been marked as ended and is empty.
+    case whenEndOfDataReached
+    /// When the queue is reset.
+    case whenReset
+    case whenBufferCountBecomesLessThan(Int)
+    case whenBufferCountBecomesGreaterThan(Int)
+}
 
 public typealias QueueTriggerToken = UUID
-
-//public struct QueueTriggerToken: Hashable, Sendable {
-//    public let id: UUID
-//
-//    public init() {
-//        id = UUID()
-//    }
-//
-////    public init(cmTrigger: CMBufferQueueTriggerToken) {
-////        id = .cmTrigger(cmTrigger)
-////    }
-//}

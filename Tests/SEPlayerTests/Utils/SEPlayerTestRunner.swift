@@ -133,7 +133,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
                     timeline = FakeTimeline()
                 }
                 guard let timeline else {
-                    throw ErrorBuilder.illegalState
+                    throw ErrorBuilder.illegalState()
                 }
                 try mediaSources.append(FakeMediaSource(
                     queue: queue,

@@ -16,7 +16,7 @@ protocol ProgressiveMediaExtractor {
         url: URL,
         response: HTTPURLResponse?,
         position: Int,
-        lenght: Int?,
+        length: Int?,
         output: ExtractorOutput,
         _ isolation: isolated any Actor
     ) async throws

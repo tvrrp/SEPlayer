@@ -72,11 +72,6 @@ open class TriggerableQueue {
                     refMinPTS: trigger.referenceMinPTS, refMaxPTS: trigger.referenceMaxPTS
                 )
 
-                if case .whenDurationBecomesLessThanOrEqualTo = trigger.condition, newResult {
-                    print()
-                    print(bufferedAheadDuration)
-                }
-
                 if newResult && !trigger.lastResult {
                     // false → true transition: schedule callback and re-arm
                     // "changes" triggers by snapshotting the new reference values.
@@ -139,6 +134,8 @@ open class TriggerableQueue {
             return snapshot.minPTS != refMinPTS
         case .whenMaxPresentationTimeStampChanges:
             return snapshot.maxPTS != refMaxPTS
+        case .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(let t):
+            return snapshot.maxPTS.map { $0 >= t } ?? false
         case .whenDataBecomesReady:
 //            print("ℹ️ IS READY = \(snapshot.hasData)")
             return snapshot.hasData

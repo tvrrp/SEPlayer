@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SEPlayerCommon
 
 public final class URLSessionDataSourceError: DataSourceError, @unchecked Sendable {
     /// URL which caused a load to fail
@@ -27,7 +28,7 @@ public final class URLSessionDataSourceError: DataSourceError, @unchecked Sendab
             backgroundTaskCancelledReason = nil
             networkUnavailableReason = nil
 
-            super.init(reason: .customError(error), message: error.localizedDescription)
+            super.init(reason: .customError(error), message: error.localizedDescription, errorCode: .ioUnspecified)
             return
         }
 
@@ -39,7 +40,7 @@ public final class URLSessionDataSourceError: DataSourceError, @unchecked Sendab
             self.failedURL = nil
         }
 
-        if let failedHandshakeRef = error.userInfo[NSURLErrorFailingURLErrorKey] as? CFTypeRef,
+        if let failedHandshakeRef = error.userInfo[NSURLErrorFailingURLPeerTrustErrorKey] as? CFTypeRef,
            CFGetTypeID(failedHandshakeRef) == SecTrustGetTypeID() {
             self.failedHandshake = (failedHandshakeRef as! SecTrust)
         } else {
@@ -58,7 +59,11 @@ public final class URLSessionDataSourceError: DataSourceError, @unchecked Sendab
             nil
         }
 
-        super.init(reason: .customError(error), message: error.localizedDescription)
+        super.init(
+            reason: .customError(error),
+            message: error.localizedDescription,
+            errorCode: errorReason?.errorCode ?? .ioUnspecified
+        )
     }
 
     init(
@@ -75,7 +80,7 @@ public final class URLSessionDataSourceError: DataSourceError, @unchecked Sendab
         self.networkUnavailableReason = networkUnavailableReason
 
         if let errorReason {
-            super.init(reason: .customError(errorReason))
+            super.init(reason: .customError(errorReason), errorCode: errorReason.errorCode)
         } else {
             super.init(reason: .unknown)
         }
@@ -282,5 +287,40 @@ public extension URLSessionDataSourceError {
         case expensive = 1
         case constrained = 2
         case ultraConstrained = 3
+    }
+}
+
+extension URLSessionDataSourceError.ErrorReason {
+    var errorCode: PlaybackErrorCode {
+        switch self {
+        case .timedOut:
+            .ioNetworkConnectionTimeout
+        case .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed, .notConnectedToInternet,
+             .internationalRoamingOff, .callIsActive, .dataNotAllowed, .cannotLoadFromNetwork, .secureConnectionFailed,
+             .serverCertificateHasBadDate, .serverCertificateUntrusted, .serverCertificateHasUnknownRoot,
+             .serverCertificateNotYetValid, .clientCertificateRejected, .clientCertificateRequired:
+            .ioNetworkConnectionFailed
+        case .appTransportSecurityRequiresSecureConnection:
+            .ioCleartextNotPermitted
+        case .fileDoesNotExist:
+            .ioFileNotFound
+        case .noPermissionsToReadFile, .userAuthenticationRequired, .userCancelledAuthentication:
+            .ioNoPermission
+        default:
+            .ioUnspecified
+        }
+    }
+
+    /// Whether loading again can't succeed: the request itself is wrong, not the network.
+    public var isPermanent: Bool {
+        switch self {
+        case .badURL, .unsupportedURL, .httpTooManyRedirects, .redirectToNonExistentLocation,
+             .appTransportSecurityRequiresSecureConnection, .fileDoesNotExist, .fileIsDirectory,
+             .noPermissionsToReadFile, .userAuthenticationRequired, .userCancelledAuthentication,
+             .dataLengthExceedsMaximum:
+            true
+        default:
+            false
+        }
     }
 }

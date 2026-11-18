@@ -6,7 +6,7 @@
 //
 
 import CoreMedia
-import Foundation.NSUUID
+import Foundation
 
 public final class Window {
     public var id: AnyHashable
@@ -34,6 +34,15 @@ public final class Window {
 
     public var isLive: Bool {
         liveConfiguration != nil
+    }
+
+    /// The current wall clock time, on the clock of ``windowStartTime``: the device's, corrected by
+    /// ``elapsedRealtimeEpochOffset`` when the media gives it.
+    public var currentUnixTime: CMTime {
+        if elapsedRealtimeEpochOffset.isNumeric {
+            return CMClock.hostTimeClock.time + elapsedRealtimeEpochOffset
+        }
+        return CMTime(seconds: Date().timeIntervalSince1970, preferredTimescale: 1_000_000)
     }
 
     public init() {

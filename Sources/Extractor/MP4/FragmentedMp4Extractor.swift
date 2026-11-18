@@ -12,14 +12,14 @@ import SEPlayerCommon
 
 public final class FragmentedMp4Extractor: Extractor {
     private let queue: Queue
-    private let subtitleParserFactory: Void // TODO: add
+    private let subtitleParserFactory: SubtitleParserFactory
     private let flags: Flags
     private let sideloadedTrack: Track?
 
     private let closedCaptionFormats: Array<Format>
     private var trackBundles: OrderedDictionary<Int, TrackBundle> = .init()
 
-    private let timestampAdjuster: TimestampAdjuster?
+    private let timestampSession: TimestampAdjuster.Session?
     private let eventMessageEncoder: Void = ()
 
     private var containerAtoms: [ContainerBox] = []
@@ -47,12 +47,15 @@ public final class FragmentedMp4Extractor: Extractor {
     private var sampleSize = 0
     private var sampleBytesWritten = 0
     private var sampleCurrentNalBytesRemaining = 0
-    private var isSampleDependedOn = false
     private var processSeiNalUnitPayload = false
 
     private var extractorOutput: ExtractorOutput
     private var emsgTrackOutputs: [TrackOutput] = []
     private var ceaTrackOutputs: [TrackOutput] = []
+    /// Reads the closed captions in the SEI messages of the video samples, when the stream declares some.
+    private var seiReader: SeiReader?
+    /// The id of the first track the extractor adds to those of the file, as for closed captions.
+    private static let firstExtraTrackId = 100
 
     private var haveOutputSeekMap = false
     private var upfrontSidxScanComplete = false
@@ -60,17 +63,20 @@ public final class FragmentedMp4Extractor: Extractor {
 
     private let boxParser = BoxParser()
 
-    init(
+    /// - Parameter timestampSession: Maps sample times, as when segments of an HLS stream share one timeline.
+    public init(
         queue: Queue,
+        subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory(),
         flags: Flags = [],
-        timestampAdjuster: TimestampAdjuster? = nil,
+        timestampSession: TimestampAdjuster.Session? = nil,
         sideloadedTrack: Track? = nil,
         closedCaptionFormats: [Format] = [],
         additionalEmsgTrackOutput: TrackOutput? = nil
     ) {
         self.queue = queue
-        self.flags = flags
-        self.timestampAdjuster = timestampAdjuster
+        self.subtitleParserFactory = subtitleParserFactory
+        self.flags = flags.union([.readWithinGopSampleDependencies, .readWithinGopSampleDependenciesH265])
+        self.timestampSession = timestampSession
         self.sideloadedTrack = sideloadedTrack
         self.closedCaptionFormats = closedCaptionFormats
         self.additionalEmsgTrackOutput = additionalEmsgTrackOutput
@@ -90,7 +96,7 @@ public final class FragmentedMp4Extractor: Extractor {
         return flags
     }
 
-    public func shiff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
+    public func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
         assert(queue.isCurrent())
         let sniffFailures = try await Sniffer().sniffFragmented(input: input, isolation)
         if let sniffFailures {
@@ -105,10 +111,16 @@ public final class FragmentedMp4Extractor: Extractor {
     }
 
     public func initialize(output: any ExtractorOutput, _ isolation: isolated any Actor) async throws {
-        // TODO: subtitles
-        extractorOutput = output
+        extractorOutput = if flags.contains(.emitRawSubtitleData) {
+            output
+        } else {
+            SubtitleTranscodingExtractorOutput(
+                delegate: output,
+                subtitleParserFactory: subtitleParserFactory
+            )
+        }
         enterReadingAtomHeaderState()
-        initExtraTracks()
+        try initExtraTracks()
 
         if let sideloadedTrack {
             let formatBuilder = sideloadedTrack.format.buildUpon()
@@ -146,10 +158,12 @@ public final class FragmentedMp4Extractor: Extractor {
     }
 
     public func seek(to position: Int, time: CMTime, _ isolation: isolated any Actor) throws {
+        SELogger.debug(.mp4, "Fragmented seek to byte \(position) for \(time.seconds)")
         trackBundles.values.forEach { $0.resetFragmentInfo() }
         pendingMetadataSampleInfos.removeAll()
         pendingMetadataSampleBytes = .zero
         reorderingBufferQueue.removeAll()
+        seiReader?.clear()
         pendingSeekTime = time
         containerAtoms.removeAll()
         enterReadingAtomHeaderState()
@@ -163,6 +177,7 @@ public final class FragmentedMp4Extractor: Extractor {
                 if try await !readAtomHeader(input: input, isolation) {
                     if let seekPositionBeforeSidxProcessing {
                         self.seekPositionBeforeSidxProcessing = nil
+                        SELogger.debug(.mp4, "Read the sidx boxes: seeking back to \(seekPositionBeforeSidxProcessing)")
                         extractorOutput.seekMap(seekMap: chunkIndexMerger.merge())
                         upfrontSidxScanComplete = true
                         return .seek(offset: seekPositionBeforeSidxProcessing)
@@ -235,7 +250,7 @@ public final class FragmentedMp4Extractor: Extractor {
         if seekPositionBeforeSidxProcessing != nil {
             if atomType == .sidx {
                 var scratch = try atomHeader.getSlice(at: 0, length: MP4Box.headerSize)
-                try! await scratch.extend(with: input.readFully(
+                try await scratch.extend(with: input.readFully(
                     length: Int(atomSize) - atomHeaderBytesRead,
                     isolation
                 ))
@@ -243,7 +258,7 @@ public final class FragmentedMp4Extractor: Extractor {
                 let (_, chunkIndex) = try parseSidx(atom: &scratch, inputPosition: input.getPeekPosition(isolation))
                 chunkIndexMerger.add(chunkIndex)
             } else {
-                try! input.skip(
+                try input.skip(
                     length: Int(atomSize) - atomHeaderBytesRead,
                     allowEndOfInput: true,
                     isolation
@@ -428,7 +443,7 @@ public final class FragmentedMp4Extractor: Extractor {
             for sampleTable in sampleTables {
                 let track = sampleTable.track
                 let output = try extractorOutput.track(for: track.id, trackType: track.type)
-                await output.setDuration(track.duration, isolation: output.isolation)
+                output.setDuration(track.duration)
                 let formatBuilder = track.format.buildUpon()
                 formatBuilder.setContainerMimeType(containerMimeType)
                 // TODO: MetadataUtil.setFormatGaplessInfo
@@ -445,6 +460,7 @@ public final class FragmentedMp4Extractor: Extractor {
                     isolation
                 )
 
+                SELogger.debug(.mp4, "Fragmented track \(track.id), \(track.type): \(track.duration.seconds)s, \(track.format)")
                 trackBundles[track.id] = trackBundle
                 if duration.isNumeric {
                     duration = max(duration, track.duration)
@@ -453,8 +469,10 @@ public final class FragmentedMp4Extractor: Extractor {
                 }
             }
 
+            SELogger.info(.mp4, "Fragmented moov: \(trackBundles.count) tracks, \(duration.seconds)s")
             extractorOutput.endTracks()
         } else {
+            SELogger.debug(.mp4, "Another moov for \(sampleTables.count) tracks")
             assert(trackBundles.count == sampleTables.count)
             for sampleTable in sampleTables {
                 let track = sampleTable.track
@@ -474,16 +492,16 @@ public final class FragmentedMp4Extractor: Extractor {
         defaultSampleValues: [Int: DefaultSampleValues],
         trackId: Int
     ) throws -> DefaultSampleValues {
-        if defaultSampleValues.count == 1 {
-            // Ignore track id if there is only one track to cope with non-matching track indices.
-            return defaultSampleValues.first!.value
+        // With a single track the id is ignored, to cope with track ids that don't match.
+        if defaultSampleValues.count == 1, let onlyValues = defaultSampleValues.first?.value {
+            return onlyValues
         }
-
-        if let result = defaultSampleValues[trackId] {
-            return result
-        } else {
-            fatalError() // TODO: throw error
+        guard let result = defaultSampleValues[trackId] else {
+            throw ParserError.createForMalformedContainer(
+                message: "Track \(trackId) of the fragment has no default sample values."
+            )
         }
+        return result
     }
 
     private func onMoofContainerAtomRead(moof: ContainerBox) throws {
@@ -503,8 +521,50 @@ public final class FragmentedMp4Extractor: Extractor {
         }
     }
 
-    private func initExtraTracks() {
-        // TODO: impl
+    /// Adds the tracks the file doesn't declare: the closed captions the stream says its video carries.
+    private func initExtraTracks() throws {
+        guard !closedCaptionFormats.isEmpty else { return }
+        let reader = SeiReader(closedCaptionFormats: closedCaptionFormats, containerMimeType: .videoMP4)
+        try reader.createTracks(
+            extractorOutput: extractorOutput,
+            idGenerator: TsPayload.TrackIdGenerator(firstTrackId: Self.firstExtraTrackId, trackIdIncrement: 1)
+        )
+        seiReader = reader
+    }
+
+    /// Passes the SEI messages of a video sample to the closed caption reader, at the sample's presentation time.
+    private func consumeSeiMessages(of sample: CMBlockBuffer, track: Track, presentationTime: CMTime, seiReader: SeiReader) throws {
+        let headerLength = NalUnitUtil.numberOfBytesInNalUnitHeader(format: track.format)
+        let lengthFieldLength = track.nalUnitLengthFieldLength
+        guard headerLength > 0, [1, 2, 4].contains(lengthFieldLength), presentationTime.isNumeric else {
+            return
+        }
+        let reorderingDepth = track.format.maxNumReorderSamples == Format.noValue ? 0 : track.format.maxNumReorderSamples
+        try seiReader.setReorderingQueueSize(reorderingDepth)
+
+        var reader = BlockBufferReader(sample)
+        while reader.readableBytes >= lengthFieldLength {
+            let length = switch lengthFieldLength {
+            case 1: Int(try reader.readInt(as: UInt8.self))
+            case 2: Int(try reader.readInt(as: UInt16.self))
+            default: Int(try reader.readInt(as: UInt32.self))
+            }
+            guard length > headerLength, length <= reader.readableBytes else {
+                break
+            }
+            let start = reader.readerIndex
+            let firstByte = try reader.getBytes(at: start, length: 1)[0]
+            // H.264 SEI, or HEVC prefix SEI.
+            let isSei = headerLength == 1 ? firstByte & 0x1F == 6 : (firstByte >> 1) & 0x3F == 39
+            reader.moveReaderIndex(forwardBy: length)
+            guard isSei else { continue }
+
+            let nalUnit = try CMBlockBuffer(bufferReference: sample, range: start..<(start + length))
+            let unescaped = try NalUnitUtil.unescapeStream(nalUnit, length: length)
+            var payload = BlockBufferReader(unescaped)
+            payload.moveReaderIndex(to: headerLength)
+            try seiReader.consume(pesTime: presentationTime, seiBuffer: &payload)
+        }
     }
 
     private func onEmsgLeafAtomRead(atom: BlockBufferReader) throws {
@@ -629,10 +689,6 @@ public final class FragmentedMp4Extractor: Extractor {
             )
             trunIndex += 1
         }
-    }
-
-    private func parseSaiz() {
-        fatalError()
     }
 
     private func parseSaio(saio: inout BlockBufferReader, out: inout TrackFragment) throws {
@@ -891,7 +947,7 @@ public final class FragmentedMp4Extractor: Extractor {
         offset: Int = 0,
         out: inout TrackFragment
     ) throws {
-        fatalError()
+        throw ParserError.createForUnsupportedContainerFeature(message: "Sample encryption is not supported.")
     }
 
     private func parseSampleGroups(
@@ -899,7 +955,6 @@ public final class FragmentedMp4Extractor: Extractor {
         schemeType: String?,
         out: inout TrackFragment
     ) throws {
-        //fatalError()
         // TODO: parseSampleGroups
     }
 
@@ -968,34 +1023,9 @@ public final class FragmentedMp4Extractor: Extractor {
         )
     }
 
+    /// Sample encryption isn't supported: no track has encryption data to read before its samples.
     private func readEncryptionData(input: ExtractorInput, _ isolation: isolated any Actor) async throws {
-        var nextTrackBundle: TrackBundle?
-        var nextDataOffset = Int.max
-        for trackBundle in trackBundles.values {
-            let trackFragment = trackBundle.fragment
-            // TODO:
-//            if trackFragment.sampleEncryptionDataNeedsFill,
-//               trackFragment.auxiliaryDataPosition < nextDataOffset {
-//                nextDataOffset = trackFragment.auxiliaryDataPosition
-//                nextTrackBundle = trackBundle
-//            }
-        }
-
-        guard let nextTrackBundle else {
-            parserState = .readingSampleStart
-            return
-        }
-
-        fatalError()
-        let bytesToSkip = nextDataOffset - input.getPosition(isolation)
-        if bytesToSkip < 0 {
-            throw ParserError.createForMalformedContainer(
-                message: "Offset to encryption data was negative."
-            )
-        }
-
-        try input.skip(length: bytesToSkip, isolation)
-        // TODO: nextTrackBundle.fragment.fillEncryptionData(input)
+        parserState = .readingSampleStart
     }
 
     private func readSample(input: ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
@@ -1031,9 +1061,6 @@ public final class FragmentedMp4Extractor: Extractor {
 
         if parserState == .readingSampleStart {
             sampleSize = trackBundle.getCurrentSampleSize()
-            isSampleDependedOn = !canReadWithinGopSampleDependencies(
-                format: trackBundle.moovSampleTable.track.format
-            )
 
             if trackBundle.currentSampleIndex < trackBundle.firstSampleToOutputIndex {
                 try input.skip(length: sampleSize, isolation)
@@ -1064,31 +1091,43 @@ public final class FragmentedMp4Extractor: Extractor {
 
 //        let track = trackBundle.moovSampleTable.track
         let output = trackBundle.output
-        let sampleTimingInfo = trackBundle.getCurrentSampleTimingInfo()
-//        if let timestampAdjuster {
-            // TODO: sampleTime = timestampAdjuster.adjustSampleTimestamp
-//        }
+        var sampleTimingInfo = trackBundle.getCurrentSampleTimingInfo()
+        if let timestampSession, sampleTimingInfo.presentationTimeStamp.isNumeric {
+            // One offset for both times, taken from the presentation time as the session expects.
+            let presentationTime = sampleTimingInfo.presentationTimeStamp
+            let offset = timestampSession.adjust(presentationTime) - presentationTime
+            sampleTimingInfo.presentationTimeStamp = presentationTime + offset
+            if sampleTimingInfo.decodeTimeStamp.isNumeric {
+                sampleTimingInfo.decodeTimeStamp = sampleTimingInfo.decodeTimeStamp + offset
+            }
+        }
 
         // TODO: nalUnitRead
 
         let buffer = try await input.readFully(length: sampleSize - sampleBytesWritten, isolation)
-        if buffer.dataLength == 0 {
-            print()
+        try await trackBundle.takeParameterSets(of: buffer)
+        try output.sampleData(data: buffer)
+        if let seiReader, trackBundle.moovSampleTable.track.type == .video {
+            try consumeSeiMessages(
+                of: buffer,
+                track: trackBundle.moovSampleTable.track,
+                presentationTime: sampleTimingInfo.presentationTimeStamp,
+                seiReader: seiReader
+            )
+            try seiReader.writePendingSamples()
         }
-        try! await output.sampleData(data: buffer, isolation: output.isolation)
 
         var sampleFlags = trackBundle.getCurrentSampleFlags()
-        if !isSampleDependedOn {
+        if try !isSampleDependedOn(buffer, track: trackBundle.moovSampleTable.track) {
             sampleFlags.insert(.notDependedOn)
         }
 
         // TODO: cryptoData
 
-        try await output.sampleMetadata(
+        try output.sampleMetadata(
             time: sampleTimingInfo,
             flags: sampleFlags,
-            range: 0..<sampleSize,
-            isolation: output.isolation
+            range: 0..<sampleSize
         )
 
         // After we have the sampleTimingInfo, we can commit all the pending metadata samples
@@ -1098,6 +1137,19 @@ public final class FragmentedMp4Extractor: Extractor {
         }
         parserState = .readingSampleStart
         return true
+    }
+
+    /// Whether a later frame may depend on the sample. Without reading the dependencies within a GOP for its codec,
+    /// every sample may be depended on.
+    private func isSampleDependedOn(_ sample: CMBlockBuffer, track: Track) throws -> Bool {
+        guard canReadWithinGopSampleDependencies(format: track.format) else {
+            return true
+        }
+        return try NalUnitUtil.isSampleDependedOn(
+            BlockBufferReader(sample),
+            nalUnitLengthFieldLength: track.nalUnitLengthFieldLength,
+            format: track.format
+        )
     }
 
     private func canReadWithinGopSampleDependencies(format: Format) -> Bool {
@@ -1121,9 +1173,6 @@ public final class FragmentedMp4Extractor: Extractor {
             .min { $0.getCurrentSampleOffset() < $1.getCurrentSampleOffset() }
     }
 
-    private func drmInitDataFromAtoms(leafChildren: [LeafBox]) {
-        fatalError()
-    }
 }
 
 public extension FragmentedMp4Extractor {
@@ -1179,10 +1228,18 @@ private extension FragmentedMp4Extractor {
 
         var currentlyInFragment: Bool = false
 
+        /// The parameter sets the samples carry, when the sample entry has none.
+        private var inBandParameterSets: InBandParameterSets?
+
         var hasRemainingSamples: Bool {
             currentlyInFragment
                 ? currentTrackRunIndex < fragment.trunCount
                 : currentSampleIndex < moovSampleTable.sampleCount
+        }
+
+        /// The format of the samples: the base format, with the parameter sets the samples carried once they have.
+        private var format: Format {
+            (try? inBandParameterSets?.format(updating: baseFormat)) ?? baseFormat
         }
 
         init(
@@ -1197,6 +1254,11 @@ private extension FragmentedMp4Extractor {
             self.defaultSampleValues = defaultSampleValues
             self.baseFormat = baseFormat
             fragment = TrackFragment()
+            if InBandParameterSets.areCarried(by: baseFormat) {
+                inBandParameterSets = InBandParameterSets(
+                    nalUnitLengthFieldLength: moovSampleTable.track.nalUnitLengthFieldLength
+                )
+            }
 
             try await reset(moovSampleTable: moovSampleTable, defaultSampleValues: defaultSampleValues, isolation)
         }
@@ -1208,8 +1270,19 @@ private extension FragmentedMp4Extractor {
         ) async throws {
             self.moovSampleTable = moovSampleTable
             self.defaultSampleValues = defaultSampleValues
-            try await output.setFormat(baseFormat, isolation: output.isolation)
+            // Parameter sets already seen stay: the samples after a seek need not repeat them.
+            try output.setFormat(format)
             resetFragmentInfo()
+        }
+
+        /// Takes the parameter sets `sample` carries in band, and gives the track the format with them when they changed.
+        func takeParameterSets(of sample: CMBlockBuffer) async throws {
+            guard var parameterSets = inBandParameterSets else { return }
+            let changed = try parameterSets.update(from: sample)
+            inBandParameterSets = parameterSets
+            if changed {
+                try output.setFormat(format)
+            }
         }
 
         func resetFragmentInfo() {

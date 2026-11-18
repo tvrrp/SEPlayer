@@ -9,55 +9,91 @@ import Foundation
 import CoreMedia
 import SEPlayerCommon
 
-/// One consumer's reader of an HTTP resource.
+/// A ``DataSource`` that reads an HTTP resource.
 ///
-/// Data sources of the same URL share one ``HTTPResource``, and with it the downloaded bytes and
-/// the running downloads, so several consumers can read the resource at the same time. Closing a
-/// data source leaves the others untouched.
+/// The bytes are loaded with range requests and cached by an ``HTTPResource``. Data sources of one factory that read
+/// the same URL share that resource, so the bytes one of them loaded are not requested again by another.
 public final class HTTPDataSource: DataSource, @unchecked Sendable {
     public let components = DataSourceOpaque(isNetwork: true)
     public var isolation: any Actor { queue.playerActor() }
 
     private let queue: any Queue
-    private let resource: HTTPResource
-    private let reader: HTTPResource.Reader
-    private var isClosed = false
+    /// Returns the resource of a data spec, shared with the other data sources of the factory.
+    private let resourceProvider: (DataSpec) -> HTTPResource
+    private var resource: HTTPResource?
+    private var reader: HTTPResource.Reader?
+    private var readAhead: ReadAhead?
 
     init(
         queue: any Queue,
-        resource: HTTPResource,
-        position: Int,
-        _ isolation: isolated any Actor
-    ) async throws {
+        transferListener: TransferListener? = nil,
+        resourceProvider: @escaping (DataSpec) -> HTTPResource
+    ) {
         self.queue = queue
-        self.resource = resource
-        reader = resource.addReader(at: position)
-        reader.dataSource = self
-        transferInitializing(source: self)
-
-        // Waits for the response, so the content length is known before the first read.
-        _ = try await resource.read(position..<position, for: reader, isolation)
+        self.resourceProvider = resourceProvider
+        if let transferListener {
+            addTransferListener(transferListener)
+        }
     }
 
     deinit {
-        resource.remove(reader)
+        if let reader {
+            resource?.remove(reader)
+        }
+    }
+
+    public func open(dataSpec: DataSpec, _ isolation: isolated any Actor) async throws -> Int? {
+        guard reader == nil else {
+            throw DataSourceError(reason: .alreadyOpened)
+        }
+
+        let resource = resourceProvider(dataSpec)
+        // Requests end where the data spec ends, or at the end of the resource for one without a length.
+        let end = dataSpec.length.map { dataSpec.position + $0 }
+        let reader = resource.addReader(at: dataSpec.position, end: end, readAhead: readAhead)
+        reader.dataSource = self
+        self.resource = resource
+        self.reader = reader
+        transferInitializing(source: self)
+
+        do {
+            // An empty read waits for the first response, which tells the length of the resource.
+            let emptyRange = dataSpec.position..<dataSpec.position
+            _ = try await resource.read(emptyRange, for: reader, isolation)
+        } catch {
+            try? await close(isolation)
+            throw error
+        }
+
+        guard let resourceLength = resource.response?.resourceLength else {
+            return dataSpec.length
+        }
+
+        let available = max(0, resourceLength - dataSpec.position)
+        return dataSpec.length.map { min($0, available) } ?? available
     }
 
     public func read(range: Range<Int>, _ isolation: isolated any Actor) async throws -> CMBlockBuffer? {
-        guard !isClosed else { throw DataSourceError(reason: .connectionNotOpened) }
+        guard let resource, let reader else {
+            throw DataSourceError(reason: .connectionNotOpened)
+        }
+
         return try await resource.read(range, for: reader, isolation)
     }
 
     public func close(_ isolation: isolated any Actor) async throws {
-        isClosed = true
-        resource.remove(reader)
+        if let reader {
+            resource?.remove(reader)
+        }
+        reader = nil
+        resource = nil
     }
 
     public func getURLResponse(_ isolation: isolated any Actor) -> HTTPURLResponse? {
-        resource.response
+        resource?.response
     }
 
-    public func canHandle(new dataSpec: DataSpec, _ isolation: isolated any Actor) -> Bool {
-        resource.canServe(dataSpec)
+    public func setReadAhead(_ readAhead: ReadAhead?) {
+        self.readAhead = readAhead
     }
 }

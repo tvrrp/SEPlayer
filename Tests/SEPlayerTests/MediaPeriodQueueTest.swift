@@ -50,7 +50,7 @@ class MediaPeriodQueueTest {
 
         mediaPeriodQueue = MediaPeriodQueue(preloadConfiguration: .default)
         mediaPeriodQueue.setMediaPeriodBuilder { [weak self] info, rendererPositionOffset in
-            guard let self else { throw ErrorBuilder.illegalState }
+            guard let self else { throw ErrorBuilder.illegalState() }
             TestableSyncPlayerActor.shared.assertIsolated()
 
             mediaPeriodHolderFactoryInfos.append(info)

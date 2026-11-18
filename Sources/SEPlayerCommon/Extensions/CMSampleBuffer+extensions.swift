@@ -13,61 +13,53 @@ public extension CMSampleBuffer {
         set { attach(flags: newValue) }
     }
 
-    static func createEndOfStream() throws -> CMSampleBuffer {
-        let buffer = try CMSampleBuffer(
-            dataBuffer: nil,
-            formatDescription: nil,
-            numSamples: 0,
-            sampleTimings: [],
-            sampleSizes: []
-        )
-
-        buffer.attachments.merge([
-            CMSampleBuffer.AttachmentKey.permanentEmptyMedia.rawValue as String : true
-        ], mode: .shouldPropagate)
-
-        return buffer
+    /// A buffer without samples that tells the consumer the media ended.
+    static func createEndOfStream() throws(SampleBufferError) -> CMSampleBuffer {
+        try marker(with: [.permanentEmptyMedia: true])
     }
 
+    /// A buffer without samples that carries `attachments` to the consumer, such as an instruction to drain.
     static func marker(
-        with attachments: [String: Any],
+        with attachments: [SampleBufferAttachments.Key: Any],
         sampleTiming: CMSampleTimingInfo? = nil,
-        mode: CMAttachmentBearerAttachments.Mode = .shouldPropagate
-    ) throws -> CMSampleBuffer {
-        let sampleTimingsArray: [CMSampleTimingInfo] = if let sampleTiming { [sampleTiming] } else { [] }
-
+        mode: SampleBufferAttachments.Mode = .shouldPropagate
+    ) throws(SampleBufferError) -> CMSampleBuffer {
         let buffer = try CMSampleBuffer(
             dataBuffer: nil,
             formatDescription: nil,
             numSamples: 0,
-            sampleTimings: sampleTimingsArray,
+            sampleTimings: sampleTiming.map { [$0] } ?? [],
             sampleSizes: []
         )
-
-        buffer.attachments.merge(attachments, mode: mode)
+        buffer.bufferAttachments.merge(attachments, mode: mode)
         return buffer
     }
 
     private func getFlags() -> SampleFlags {
+        // Read on every sample on its way to the outputs: the values are compared as Core Foundation Booleans, not
+        // bridged to Swift.
         var flags = SampleFlags()
 
-        if (sampleAttachments[0][.notSync] as? Bool) == false {
-            flags.insert(.keyframe)
+        if CMSampleBufferGetNumSamples(self) > 0 {
+            let sample = perSampleAttachments[0]
+            if sample.bool(for: .notSync) == false {
+                flags.insert(.keyframe)
+            }
+            if sample.bool(for: .dependsOnOthers) == false {
+                flags.insert(.notDependedOn)
+            }
         }
 
-        if (sampleAttachments[0][.dependsOnOthers] as? Bool) == false {
-            flags.insert(.notDependedOn)
-        }
-
-        if (attachments[.firstSample]?.value as? Bool) == true {
+        let attachments = bufferAttachments
+        if attachments.bool(for: .firstSample) == true {
             flags.insert(.firstSample)
         }
 
-        if (attachments[.lastSample]?.value as? Bool) == true {
+        if attachments.bool(for: .lastSample) == true {
             flags.insert(.lastSample)
         }
 
-        if (attachments[.permanentEmptyMedia]?.value as? Bool) == true {
+        if attachments.bool(for: .permanentEmptyMedia) == true {
             flags.insert(.endOfStream)
         }
 
@@ -75,55 +67,29 @@ public extension CMSampleBuffer {
     }
 
     private func attach(flags: SampleFlags) {
-        if flags.contains(.keyframe) {
-            sampleAttachments[0][.notSync] = false
-        } else {
-            sampleAttachments[0][.notSync] = true
-        }
-
-        if flags.contains(.notDependedOn) {
-            sampleAttachments[0][.isDependedOnByOthers] = false
+        if !perSampleAttachments.isEmpty {
+            let sample = perSampleAttachments[0]
+            sample[.notSync] = !flags.contains(.keyframe)
+            if flags.contains(.notDependedOn) {
+                sample[.isDependedOnByOthers] = false
+            }
         }
 
         if flags.contains(.firstSample) {
-            attachments.merge([
-                CMSampleBuffer.AttachmentKey.firstSample.rawValue as String : true
-            ], mode: .shouldPropagate)
+            bufferAttachments[.firstSample] = true
         }
 
         if flags.contains(.lastSample) {
-            attachments.merge([
-                CMSampleBuffer.AttachmentKey.lastSample.rawValue as String : true
-            ], mode: .shouldPropagate)
+            bufferAttachments[.lastSample] = true
         }
 
         if flags.contains(.endOfStream) {
-            attachments.merge([
-                CMSampleBuffer.AttachmentKey.permanentEmptyMedia.rawValue as String : true
-            ], mode: .shouldPropagate)
+            bufferAttachments[.permanentEmptyMedia] = true
         }
-    }
-
-    func getAttachments(for mode: CMAttachmentBearerAttachments.Mode = .shouldPropagate) -> [CMSampleBuffer.AttachmentKey] {
-//        let attachmets = mode == .shouldPropagate ? attachments.propagated : attachments.nonPropagated
-//
-//        return attachmets.compactMap { key, _ in
-//            if let key = CMSampleBuffer.AttachmentKey(rawValue: key as CFString) {
-//                return key
-//            } else {
-//                return nil
-//            }
-//        }
-        return []
     }
 }
 
-private extension CMSampleBuffer.AttachmentKey {
-    static let firstSample = CMSampleBuffer.AttachmentKey(
-        rawValue:"com.seplayer.firstSampleKey" as CFString
-    )
-
-    static let lastSample = CMSampleBuffer.AttachmentKey(
-        rawValue:"com.seplayer.lastSampleKey" as CFString
-    )
+private extension SampleBufferAttachments.Key {
+    static let firstSample = Self(rawValue: "com.seplayer.firstSampleKey" as CFString)
+    static let lastSample = Self(rawValue: "com.seplayer.lastSampleKey" as CFString)
 }

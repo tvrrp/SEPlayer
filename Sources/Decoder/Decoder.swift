@@ -27,16 +27,16 @@ public protocol Decoder<InputBuffer, OutputBuffer, DecoderError>: AnyObject {
     /// If the condition is already true, `body` is called immediately before
     /// this method returns. The returned token can be used with `testTrigger`
     /// and `removeTrigger`; it is safe to discard if neither is needed.
-    func installTrigger(condition: CMBufferQueue.TriggerCondition, _ body: CMBufferQueueTriggerHandler?) throws -> CMBufferQueue.TriggerToken
+    func installTrigger(condition: TriggerCondition, _ body: CMBufferQueueTriggerHandler?) throws -> CMBufferQueueTriggerToken
     /// Removes a previously installed trigger.
-    func removeTrigger(_ triggerToken: CMBufferQueue.TriggerToken) throws
+    func removeTrigger(_ triggerToken: CMBufferQueueTriggerToken) throws
     /// Returns the current (level) state of the condition — no side effects.
     /// Returns false if the token is not installed on this queue.
-    func testTrigger(_ triggerToken: CMBufferQueue.TriggerToken) -> Bool
+    func testTrigger(_ triggerToken: CMBufferQueueTriggerToken) -> Bool
 }
 
 public extension Decoder {
-    func installTrigger(condition: CMBufferQueue.TriggerCondition) throws -> CMBufferQueue.TriggerToken {
+    func installTrigger(condition: TriggerCondition) throws -> CMBufferQueueTriggerToken {
         try installTrigger(condition: condition, nil)
     }
 }

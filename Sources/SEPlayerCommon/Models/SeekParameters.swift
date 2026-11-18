@@ -45,6 +45,13 @@ extension SeekParameters {
 }
 
 extension SeekParameters {
+    /// Whether the seek may land elsewhere than the position asked for.
+    public var allowsTolerance: Bool {
+        toleranceBefore > .zero || toleranceAfter > .zero
+    }
+}
+
+extension SeekParameters {
     public static let exact = SeekParameters(toleranceBefore: .zero, toleranceAfter: .zero)
     public static let closestSync = SeekParameters(toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
     public static let previousSync = SeekParameters(toleranceBefore: .positiveInfinity, toleranceAfter: .zero)

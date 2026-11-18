@@ -11,9 +11,8 @@ public protocol SectionPayloadReader {
     func initialize(
         session: TimestampAdjuster.Session,
         extractorOutput: ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws
 
-    func consume(sectionData: inout BlockBufferReader, _ isolation: isolated any Actor) async throws
+    func consume(sectionData: inout BlockBufferReader) throws
 }

@@ -9,7 +9,10 @@ import AVFoundation
 import SEPlayerCommon
 
 final class DefaultMediaClock: MediaClock {
-    private let standaloneClock: StandaloneClock
+    /// Runs the player's synchronizer when there is one, so the video stays in it with audio or without.
+    private let standaloneClock: any StandaloneMediaClock
+    /// The synchronizer the standalone clock runs.
+    private let renderSynchronizer: (any PlaybackSynchronizer)?
     private var rendererTimebase: CMTimebase
 
     private var rendererClock: MediaClock?
@@ -26,86 +29,67 @@ final class DefaultMediaClock: MediaClock {
     /// Called once the renderer clock reaches the standalone clock while `syncClock` waits for it
     /// to take over. The owner should sync again; nothing else would wake it.
     var onRendererClockCaughtUp: (() -> Void)?
-    private let catchUpTimer = DispatchSource.makeTimerSource()
+    /// Called when ``getRendererTimeSource()`` changes: the owner hands the new source to the renderers.
+    var onRendererTimeSourceChanged: ((RendererTimeSource) -> Void)?
+    private var reportedTimeSource: RendererTimeSource?
+    // Activated as soon as it's made: the initializer can throw, and releasing a source that was never activated traps.
+    private let catchUpTimer: DispatchSourceTimer = {
+        let timer = DispatchSource.makeTimerSource()
+        timer.activate()
+        return timer
+    }()
     private var catchUpTimebase: CMTimebase?
 
     private var baselineTime: CMTime = .zero
-    private var timeObservers = Set<TimebaseTimeObserver>()
 
-    init(clock: SEClock, outboundTimebase: CMTimebase) throws {
-        standaloneClock = try StandaloneClock(clock: clock)
+    init(clock: SEClock, outboundTimebase: CMTimebase, renderSynchronizer: (any PlaybackSynchronizer)? = nil) throws {
+        self.renderSynchronizer = renderSynchronizer
+        if let renderSynchronizer {
+            standaloneClock = SynchronizerClock(synchronizer: renderSynchronizer)
+        } else {
+            standaloneClock = try StandaloneClock(clock: clock)
+        }
         rendererTimebase = try CMTimebase(sourceTimebase: standaloneClock.timebase)
         timebaseSource = standaloneClock.timebase
-        outboundTimebase.source = rendererTimebase
+        try outboundTimebase.setSource(rendererTimebase)
 
         catchUpTimer.setEventHandler { [weak self] in
             self?.onRendererClockCaughtUp?()
         }
-        catchUpTimer.activate()
     }
 
     deinit {
         catchUpTimer.cancel()
     }
 
-    func addPeriodicTimeObserver(
-        for interval: CMTime,
-        queue: DispatchQueue,
-        block: @escaping (CMTime) -> Void
-    ) throws -> AnyObject {
-        let observer = try TimebaseTimeObserver(
-            queue: queue,
-            timebase: rendererTimebase,
-            sourceType: .periodic(interval),
-            block: block
-        )
-        timeObservers.insert(observer)
-        return observer
-    }
-
-    func addBoundaryTimeObserver(
-        for times: [CMTime],
-        queue: DispatchQueue,
-        block: @escaping (CMTime) -> Void
-    ) throws -> AnyObject {
-        let observer = try TimebaseTimeObserver(
-            queue: queue,
-            timebase: rendererTimebase,
-            sourceType: .boundary(times),
-            block: block
-        )
-        timeObservers.insert(observer)
-        return observer
-    }
-
-    func removeTimeObserver(_ observer: AnyObject) {
-        guard let observer = observer as? TimebaseTimeObserver else {
-            return
-        }
-
-        timeObservers.remove(observer)
-    }
-
     func getTimebase() -> CMTimebase {
         rendererTimebase
     }
 
+    /// What the renderers play to. While the standalone clock is in use, its synchronizer. While a renderer's
+    /// clock is, that renderer's synchronizer if it has one, so the video starts and changes rate with the audio;
+    /// otherwise ``getTimebase()``.
+    func getRendererTimeSource() -> RendererTimeSource {
+        let synchronizer = isUsingStandaloneClock ? renderSynchronizer : renderClockSource?.getRenderSynchronizer()
+        return synchronizer.map { .synchronizer($0) } ?? .timebase(rendererTimebase)
+    }
+
     func start() {
         // The source already runs at the playback speed, so this timebase only follows it.
-        try! rendererTimebase.setRate(1)
+        try! rendererTimebase.setRate(to: 1)
         standaloneClockIsStarted = true
         standaloneClock.start()
     }
 
     func stop() {
-        try! rendererTimebase.setRate(.zero)
+        try! rendererTimebase.setRate(to: .zero)
         standaloneClockIsStarted = false
         standaloneClock.stop()
     }
 
     func resetPosition(position: CMTime) {
 //        baselineTime = position
-        try! rendererTimebase.setTime(position)
+        try! rendererTimebase.setTime(to: position)
 //        if rendererTimebase.rate != 0 {
 //            try! rendererTimebase.setTime(baselineTime)
 //        }
@@ -125,17 +109,28 @@ final class DefaultMediaClock: MediaClock {
 
     func onRendererDisabled(renderer: SERenderer) {
         if renderer === renderClockSource {
+            SELogger.debug(.clock, "media clock: renderer clock disabled (\(type(of: renderer))), standalone at \(standaloneClock.timebase.time.seconds) rate \(standaloneClock.timebase.rate)")
             rendererClock = nil
             renderClockSource = nil
             isUsingStandaloneClock = true
             setTimebaseSource(standaloneClock.timebase)
             wakeWhenRendererClockReaches(nil, on: nil)
+            reportRendererTimeSourceIfChanged()
         }
     }
 
     func syncAndGetPosition(isReadingAhead: Bool) -> CMTime {
         syncClock(isReadingAhead: isReadingAhead)
+        reportRendererTimeSourceIfChanged()
         return getPosition()
+    }
+
+    private func reportRendererTimeSourceIfChanged() {
+        let source = getRendererTimeSource()
+        guard !source.isIdentical(to: reportedTimeSource) else { return }
+        SELogger.debug(.clock, "media clock: renderer time source -> \(source.synchronizer != nil ? "synchronizer" : "timebase")")
+        reportedTimeSource = source
+        onRendererTimeSourceChanged?(source)
     }
 
     func getPosition() -> CMTime {
@@ -157,52 +152,6 @@ final class DefaultMediaClock: MediaClock {
     func getPlaybackParameters() -> PlaybackParameters {
         rendererClock?.getPlaybackParameters() ?? standaloneClock.getPlaybackParameters()
     }
-
-//    private func syncClock(isReadingAhead: Bool) {
-//        if shouldUseStandaloneClock(isReadingAhead: isReadingAhead) {
-//            isUsingStandaloneClock = true
-//            if standaloneClockIsStarted {
-//                standaloneClock.start()
-//            }
-//            return
-//        }
-//
-//        guard let rendererClock else { return }
-//        let rendererClockPosition = rendererClock.getPosition()
-//
-//        if isUsingStandaloneClock {
-//            if rendererClockPosition < standaloneClock.getPosition() {
-//                standaloneClock.stop()
-//                return
-//            }
-//
-//            isUsingStandaloneClock = false
-//            if standaloneClockIsStarted {
-//                standaloneClock.start()
-//            }
-//        }
-//
-//        standaloneClock.resetPosition(position: rendererClockPosition)
-////        standaloneClock.resetPosition(position: rendererClock.getPosition())
-////        let rendererClockPosition = rendererClock.getPositionUs()
-////        if isUsingStandaloneClock {
-////            if rendererClockPosition < standaloneClock.getPositionUs() {
-////                standaloneClock.stop()
-////                return
-////            }
-////            isUsingStandaloneClock = false
-////            if standaloneClockIsStarted {
-////                standaloneClock.start()
-////            }
-////        }
-//
-////        standaloneClock.resetPosition(positionUs: rendererClockPosition)
-////        try! rendererTimebase.setTime(.from(microseconds: rendererClockPosition))
-//        let playbackParameters = rendererClock.getPlaybackParameters()
-//        if playbackParameters != standaloneClock.getPlaybackParameters() {
-//            standaloneClock.setPlaybackParameters(new: playbackParameters)
-//        }
-//    }
 
     private func syncClock(isReadingAhead: Bool) {
         if shouldUseStandaloneClock(isReadingAhead: isReadingAhead) {
@@ -265,13 +214,22 @@ final class DefaultMediaClock: MediaClock {
     /// Runs `rendererTimebase` on `source`, at the source's time.
     private func setTimebaseSource(_ source: CMTimebase) {
         guard source !== timebaseSource else { return }
+        SELogger.debug(.clock, "media clock: renderer timebase source -> \(source === standaloneClock.timebase ? "standalone" : "renderer") at \(source.time.seconds) rate \(source.rate)")
         timebaseSource = source
-        rendererTimebase.source = source
-        try? rendererTimebase.setTime(source.time)
+        try? rendererTimebase.setSource(source)
+        try? rendererTimebase.setTime(to: source.time)
     }
 
     private func shouldUseStandaloneClock(isReadingAhead: Bool) -> Bool {
         guard let renderClockSource else { return true }
+        if renderClockSource.isRecoveringWhileTimelineAdvances { return false }
+
+        // A synchronizer's timebase keeps going after its audio ends or runs short, until the renderer stops it, so
+        // it stays the clock; leaving it would take the video out of the synchronizer at every item boundary. Only a
+        // renderer enabled ahead for the next item, not yet started, can't drive the item still playing.
+        if renderClockSource.getRenderSynchronizer() != nil {
+            return isReadingAhead && renderClockSource.getState() != .started
+        }
 
         return renderClockSource.isEnded()
             || (isReadingAhead && renderClockSource.getState() != .started)

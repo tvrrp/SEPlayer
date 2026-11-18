@@ -5,8 +5,6 @@
 //  Created by Damir Yackupov on 11.08.2026.
 //
 
-//#if ExtractorTS
-
 import CoreMedia
 import OrderedCollections
 import SEPlayerCommon
@@ -32,7 +30,7 @@ public final class TsExtractor: Extractor {
 
     private var tsPacketBuffer: BlockBufferReader
     private var continuityCounters: OrderedDictionary<Int, Int>
-    private let subtitleParserFactory: Void
+    private let subtitleParserFactory: SubtitleParserFactory
     private let durationReader: TsDurationReader
 
     private var tsBinarySearchSeeker: TsBinarySearchSeeker?
@@ -40,11 +38,12 @@ public final class TsExtractor: Extractor {
     private var pendingSeekToStart: Bool = false
     private var bytesSinceLastSync: Int = 0
 
-    init(
+    /// - Parameter session: Maps sample times. In ``Mode/hls`` mode, segments of one discontinuity share it.
+    public init(
         queue: Queue,
         mode: Mode = .singlePMT,
         extractorFlags: Flags = [],
-        subtitleParserFactory: Void,
+        subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory(),
         session: TimestampAdjuster.Session? = nil,
         payloadReaderFactory: TsPayload.Factory = DefaultTsPayloadReaderFactory(),
         timestampSearchBytes: Int = TSConstants.timestampSearchBytes
@@ -78,7 +77,7 @@ public final class TsExtractor: Extractor {
         try resetPayloadReaders()
     }
 
-    public func shiff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
+    public func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
         let buffer = try await BlockBufferReader(input.peekFully(
             length: TSConstants.packetSize * TSConstants.sniffPacketCount,
             isolation
@@ -104,7 +103,14 @@ public final class TsExtractor: Extractor {
     }
 
     public func initialize(output: any ExtractorOutput, _ isolation: isolated any Actor) async throws {
-        state.output = output // TODO: SubtitleTranscodingExtractorOutput
+        state.output = if extractorFlags.contains(.emitRawSubtitleData) {
+            output
+        } else {
+            SubtitleTranscodingExtractorOutput(
+                delegate: output,
+                subtitleParserFactory: subtitleParserFactory
+            )
+        }
     }
 
     public func seek(to position: Int, time: CMTime, _ isolation: isolated any Actor) throws {
@@ -145,19 +151,18 @@ public final class TsExtractor: Extractor {
         if state.tracksEnded {
             let canReadDuration = inputLength != nil && !isModeHls
             if canReadDuration, !durationReader.isDurationReadFinished {
-                return try! await durationReader.readDuration(
+                return try await durationReader.readDuration(
                     input: input,
                     pcrPid: state.pcrPid,
                     isolation
                 )
             }
 
-            guard let inputLength else { return .endOfInput }
             maybeOutputSeekMap(inputLength: inputLength)
 
             if pendingSeekToStart {
                 pendingSeekToStart = false
-                try! seek(to: .zero, time: .zero, isolation)
+                try seek(to: .zero, time: .zero, isolation)
 
                 if input.getPosition(isolation) != 0 {
                     return .seek(offset: .zero)
@@ -169,20 +174,20 @@ public final class TsExtractor: Extractor {
             }
         }
 
-        if try! await !fillBufferWithAtLeastOnePacket(from: input, isolation) {
+        if try await !fillBufferWithAtLeastOnePacket(from: input, isolation) {
             // Send a synthesized empty pusi to allow for packetFinished to be triggered on the last unit.
             for payloadReader in state.tsPayloadReaders.values {
                 if let pesReader = payloadReader as? PesReader,
                     try pesReader.canConsumeSynthesizedEmptyPusi(isModeHls: isModeHls) {
-                    var empty = try! BlockBufferReader()
-                    try! await pesReader.consume(data: &empty, flags: .payloadUnitStart, isolation)
+                    var empty = try BlockBufferReader()
+                    try pesReader.consume(data: &empty, flags: .payloadUnitStart)
                 }
             }
 
             return .endOfInput
         }
 
-        let endOfPacket = try! findEndOfFirstTsPacketInBuffer()
+        let endOfPacket = try findEndOfFirstTsPacketInBuffer()
         let capacity = tsPacketBuffer.capacity
         if endOfPacket > capacity {
             return .continueRead
@@ -190,7 +195,7 @@ public final class TsExtractor: Extractor {
 
         var packetHeaderFlags = TsPayload.PacketIndicators()
         // Note: See ISO/IEC 13818-1, section 2.4.3.2 for details of the header format.
-        let tsPacketHeader = try! Int(tsPacketBuffer.readInt(as: UInt32.self))
+        let tsPacketHeader = try Int(tsPacketBuffer.readInt(as: UInt32.self))
         if (tsPacketHeader & 0x800000) != 0 { // transport_error_indicator
             // There are uncorrectable errors in this packet.
             tsPacketBuffer.moveReaderIndex(to: endOfPacket)
@@ -206,7 +211,6 @@ public final class TsExtractor: Extractor {
         let adaptationFieldExists = (tsPacketHeader & 0x20) != 0
         let payloadExists = (tsPacketHeader & 0x10) != 0
 
-        print("PID = \(pid)")
         guard let payloadReader = payloadExists ? state.tsPayloadReaders[pid] : nil else {
             tsPacketBuffer.moveReaderIndex(to: endOfPacket)
             return .continueRead
@@ -229,15 +233,21 @@ public final class TsExtractor: Extractor {
 
         // Skip the adaptation field.
         if adaptationFieldExists {
-            let adaptationFieldLength: UInt8 = try! tsPacketBuffer.readInt()
-            let adaptationFieldFlags: UInt8 = try! tsPacketBuffer.readInt()
-
-            // random_access_indicator.
-            if adaptationFieldFlags & 0x40 != 0 {
-                packetHeaderFlags.insert(.randomAccess)
+            let adaptationFieldLength = try Int(tsPacketBuffer.readInt(as: UInt8.self))
+            let payloadStart = tsPacketBuffer.readerIndex + adaptationFieldLength
+            guard payloadStart <= endOfPacket else {
+                // The field can't be longer than the packet: the packet is damaged.
+                tsPacketBuffer.moveReaderIndex(to: endOfPacket)
+                return .continueRead
             }
-            // The flags byte has already been consumed.
-            tsPacketBuffer.moveReaderIndex(forwardBy: Int(adaptationFieldLength) - 1)
+            if adaptationFieldLength > 0 {
+                let adaptationFieldFlags: UInt8 = try tsPacketBuffer.readInt()
+                // random_access_indicator.
+                if adaptationFieldFlags & 0x40 != 0 {
+                    packetHeaderFlags.insert(.randomAccess)
+                }
+            }
+            tsPacketBuffer.moveReaderIndex(to: payloadStart)
         }
 
         // Read the payload.
@@ -247,10 +257,9 @@ public final class TsExtractor: Extractor {
                 length: endOfPacket - tsPacketBuffer.readerIndex
             )
 
-            try await payloadReader.consume(
+            try payloadReader.consume(
                 data: &packetBuffer,
-                flags: packetHeaderFlags,
-                isolation
+                flags: packetHeaderFlags
             )
         }
 
@@ -265,11 +274,12 @@ public final class TsExtractor: Extractor {
         return .continueRead
     }
 
-    private func maybeOutputSeekMap(inputLength: Int) {
+    private func maybeOutputSeekMap(inputLength: Int?) {
         guard !hasOutputSeekMap else { return }
 
         hasOutputSeekMap = true
-        if durationReader.getDuration().isNumeric {
+        // The duration is only read when the length is known.
+        if durationReader.getDuration().isNumeric, let inputLength {
             let tsBinarySearchSeeker = TsBinarySearchSeeker(
                 streamDuration: durationReader.getDuration(),
                 inputLength: inputLength,
@@ -277,11 +287,10 @@ public final class TsExtractor: Extractor {
                 timestampSearchBytes: timestampSearchBytes
             )
             self.tsBinarySearchSeeker = tsBinarySearchSeeker
+            SELogger.debug(.transportStream, "Seekable by binary search, \(durationReader.getDuration().seconds)s")
             state.output.seekMap(seekMap: tsBinarySearchSeeker.seekMap)
         } else {
-            state.output.seekMap(seekMap: Unseekable(
-                duration: durationReader.getDuration(),
-            ))
+            state.output.seekMap(seekMap: Unseekable(duration: durationReader.getDuration()))
         }
     }
 
@@ -289,11 +298,10 @@ public final class TsExtractor: Extractor {
         from input: any ExtractorInput,
         _ isolation: isolated any Actor
     ) async throws -> Bool {
-        // TODO: move bufferSize here
         if tsPacketBuffer.readerIndex >= TSConstants.bufferSize {
             let bytesLeft = tsPacketBuffer.readableBytes
             if bytesLeft > 0 {
-                tsPacketBuffer = try! BlockBufferReader(
+                tsPacketBuffer = try BlockBufferReader(
                     reader: tsPacketBuffer,
                     range: tsPacketBuffer.readerIndex..<tsPacketBuffer.capacity,
                     permitEmptyReference: true
@@ -308,14 +316,14 @@ public final class TsExtractor: Extractor {
             if block.dataLength == 0 {
                 return false
             }
-            try! tsPacketBuffer.extend(with: block)
+            try tsPacketBuffer.extend(with: block)
         }
         return true
     }
 
     private func findEndOfFirstTsPacketInBuffer() throws -> Int {
         let searchStart = tsPacketBuffer.readerIndex
-        let limit = tsPacketBuffer.readableBytes
+        let limit = tsPacketBuffer.capacity
         let syncBytePosition = try TsUtil.findSyncBytePosition(
             tsPacketBuffer,
             startPosition: searchStart,
@@ -386,7 +394,8 @@ private extension TsExtractor {
     final class PatReader: SectionPayloadReader {
         static let patID = 0
 
-        private let state: TsExtractor.State
+        /// Unowned: the state holds the reader among its payload readers, and outlives it.
+        private unowned let state: TsExtractor.State
 
         init(state: TsExtractor.State) {
             self.state = state
@@ -395,13 +404,12 @@ private extension TsExtractor {
         func initialize(
             session: TimestampAdjuster.Session,
             extractorOutput: any ExtractorOutput,
-            idGenerator: TsPayload.TrackIdGenerator,
-            _ isolation: isolated any Actor
-        ) async throws {
+            idGenerator: TsPayload.TrackIdGenerator
+        ) throws {
             // Do nothing
         }
 
-        func consume(sectionData: inout BlockBufferReader, _ isolation: isolated any Actor) async throws {
+        func consume(sectionData: inout BlockBufferReader) throws {
             let tableId = try sectionData.readInt(as: UInt8.self)
             if tableId != 0x00 { // program_association_section
                 // See ISO/IEC 13818-1, section 2.4.4.4 for more information on table id assignment.
@@ -469,7 +477,8 @@ private final class PmtReader: SectionPayloadReader {
     }
 
     private let pid: Int
-    private let state: TsExtractor.State
+    /// Unowned: the state holds the reader among its payload readers, and outlives it.
+    private unowned let state: TsExtractor.State
     private var trackIdToReaderScratch: OrderedDictionary<Int, TsPayload.Reader>
     private var trackIdToPidScratch: OrderedDictionary<Int, Int>
 
@@ -483,13 +492,12 @@ private final class PmtReader: SectionPayloadReader {
     func initialize(
         session: TimestampAdjuster.Session,
         extractorOutput: any ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws {
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws {
         // Do nothing.
     }
 
-    func consume(sectionData: inout BlockBufferReader, _ isolation: isolated any Actor) async throws {
+    func consume(sectionData: inout BlockBufferReader) throws {
         let tableId = try sectionData.readInt(as: UInt8.self)
         if tableId != 0x02 { // TS_program_map_section
             // See ISO/IEC 13818-1, section 2.4.4.4 for more information on table id assignment.
@@ -525,6 +533,9 @@ private final class PmtReader: SectionPayloadReader {
         let programInfoLength = try pmtScratch.readBits(12)
 
         // Skip the descriptors.
+        guard programInfoLength <= sectionData.readableBytes else {
+            throw ParserError.createForMalformedContainer(message: "The program info is longer than its section.")
+        }
         sectionData.moveReaderIndex(forwardBy: programInfoLength)
 
         if state.mode == .hls || state.id3Reader == nil {
@@ -542,15 +553,14 @@ private final class PmtReader: SectionPayloadReader {
                 .payloadReaderFactory
                 .createPayloadReader(streamType: TSStreamType.id3, esInfo: id3EsInfo)
 
-            try await state.id3Reader?.initialize(
+            try state.id3Reader?.initialize(
                 session: session,
                 extractorOutput: state.output,
                 idGenerator: .init(
                     programNumber: Int(programNumber),
                     firstTrackId: TSStreamType.id3.rawValue,
                     trackIdIncrement: TSConstants.maxPidPlusOne
-                ),
-                isolation
+                )
             )
         }
 
@@ -565,7 +575,7 @@ private final class PmtReader: SectionPayloadReader {
             let elementaryPid = try entryScratch.readBits(13)
             entryScratch.skipBits(4) // reserved
             let esInfoLength = try entryScratch.readBits(12)  // ES_info_length.
-            let esInfo = try! readEsInfo(&sectionData, length: esInfoLength)
+            let esInfo = try readEsInfo(&sectionData, length: esInfoLength)
 
             if streamType == 0x06 || streamType == 0x05 {
                 streamType = esInfo.streamType?.rawValue ?? -1
@@ -581,6 +591,11 @@ private final class PmtReader: SectionPayloadReader {
                 try state.payloadReaderFactory
                     .createPayloadReader(streamType: .init(rawValue: streamType), esInfo: esInfo)
             }
+            let readerName = reader.map { "\(type(of: $0))" } ?? "not read"
+            SELogger.debug(
+                .transportStream,
+                "PMT stream type 0x\(String(streamType, radix: 16)) on PID \(elementaryPid): \(readerName)"
+            )
 
             if state.mode != .hls
                 || elementaryPid < (trackIdToPidScratch[trackId] ?? TSConstants.maxPidPlusOne) {
@@ -594,17 +609,18 @@ private final class PmtReader: SectionPayloadReader {
             state.trackIds.insert(trackId)
             state.trackPids.insert(trackPid)
 
-            guard let reader = trackIdToReaderScratch[trackId] ?? nil else { continue }
+            guard let reader = trackIdToReaderScratch[trackId] ?? nil else {
+                continue
+            }
             if reader !== state.id3Reader {
-                try await reader.initialize(
+                try reader.initialize(
                     session: session,
                     extractorOutput: state.output,
                     idGenerator: TsPayload.TrackIdGenerator(
                         programNumber: Int(programNumber),
                         firstTrackId: trackId,
                         trackIdIncrement: TSConstants.maxPidPlusOne
-                    ),
-                    isolation
+                    )
                 )
             }
             state.tsPayloadReaders[trackPid] = reader
@@ -612,6 +628,10 @@ private final class PmtReader: SectionPayloadReader {
 
         if state.mode == .hls {
             if !state.tracksEnded {
+                SELogger.info(
+                    .transportStream,
+                    "Tracks of program \(programNumber): \(state.tsPayloadReaders.count) readers"
+                )
                 state.output.endTracks()
                 state.remainingPmts = 0
                 state.tracksEnded = true
@@ -620,6 +640,7 @@ private final class PmtReader: SectionPayloadReader {
             state.tsPayloadReaders.removeValue(forKey: pid)
             state.remainingPmts = state.mode == .singlePMT ? 0 : state.remainingPmts - 1
             if state.remainingPmts == 0 {
+                SELogger.info(.transportStream, "Tracks of all programs: \(state.tsPayloadReaders.count) readers")
                 state.output.endTracks()
                 state.tracksEnded = true
             }
@@ -629,6 +650,9 @@ private final class PmtReader: SectionPayloadReader {
     private func readEsInfo(_ data: inout BlockBufferReader, length: Int) throws -> TsPayload.ESInfo {
         let descriptorsStartPosition = data.readerIndex
         let descriptorsEndPosition = descriptorsStartPosition + length
+        guard descriptorsEndPosition <= data.capacity else {
+            throw ParserError.createForMalformedContainer(message: "The descriptors are longer than their section.")
+        }
         var streamType: TSStreamType?
         var language: String?
         var audioType: TsPayload.ESInfo.AudioType = .undefined
@@ -703,11 +727,7 @@ private final class PmtReader: SectionPayloadReader {
 
         data.moveReaderIndex(to: descriptorsEndPosition)
 
-        let descriptorBytes = Data(
-            data.bytesView[
-                descriptorsStartPosition..<descriptorsEndPosition
-            ]
-        )
+        let descriptorBytes = Data(data.bytesView[descriptorsStartPosition..<descriptorsEndPosition])
 
         return TsPayload.ESInfo(
             streamType: streamType,
@@ -718,4 +738,3 @@ private final class PmtReader: SectionPayloadReader {
         )
     }
 }
-//#endif

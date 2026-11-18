@@ -20,6 +20,12 @@ class CompositeMediaSource<ID: AnyObject>: BaseMediaSource {
         self.mediaTransferListener = mediaTransferListener
     }
 
+    override func maybeThrowSourceInfoRefreshError() throws {
+        for childSource in childSourcesEnumerator {
+            try childSource.mediaSource.maybeThrowSourceInfoRefreshError()
+        }
+    }
+
     override func enableInternal() {
         for childSource in childSourcesEnumerator {
             childSource.mediaSource.enable(delegate: childSource.delegate)

@@ -9,6 +9,10 @@ import CoreMedia
 import SEPlayerCommon
 
 public protocol ExtractorInput: DataReader {
+    /// Reads up to `length` bytes from the input.
+    ///
+    /// - Returns: The bytes read, which may be fewer than `length`, or an empty buffer if the end of the input has been
+    ///   reached.
     @discardableResult
     func read(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer
 

@@ -555,14 +555,18 @@ extension BoxParser {
 
             if copyMetadata {
                 let count = endIndex - startIndex
-                editedOffsets.replaceSubrange(sampleIndex..<sampleIndex + count,
-                                              with: offsets[startIndex..<endIndex])
-                editedSizes.replaceSubrange(sampleIndex..<sampleIndex + count,
-                                            with: sizes[startIndex..<endIndex])
-                editedFlags.replaceSubrange(sampleIndex..<sampleIndex + count,
-                                            with: samplesFlags[startIndex..<endIndex])
-                editedDurations.replaceSubrange(sampleIndex..<sampleIndex + count,
-                                                with: sampleDurations[startIndex..<endIndex])
+                editedOffsets.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: offsets[startIndex..<endIndex]
+                )
+                editedSizes.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: sizes[startIndex..<endIndex]
+                )
+                editedFlags.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: samplesFlags[startIndex..<endIndex]
+                )
+                editedDurations.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: sampleDurations[startIndex..<endIndex]
+                )
             }
 
             for j in startIndex..<endIndex {

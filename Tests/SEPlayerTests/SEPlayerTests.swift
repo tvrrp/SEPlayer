@@ -10,7 +10,7 @@ import DataSource
 import Testing
 @testable import SEPlayer
 
-/// Every player in these tests plays on the same queue, so they run one at a time, as in ExoPlayer.
+/// Every player in these tests plays on the same queue, so they run one at a time.
 @Suite(.serialized)
 @TestableSyncPlayerActor
 class SEPlayerTests {
@@ -804,7 +804,7 @@ class SEPlayerTests {
 
         #expect(mediaItemIndex[0] == 1)
         #expect(positionMs[0] == 1000)
-        // ExoPlayer leaves the masking of the buffered properties unchecked here (b/160450903).
+        // The masking of the buffered properties is left unchecked here.
 
         #expect(mediaItemIndex[1] == mediaItemIndex[0])
         #expect(positionMs[1] == positionMs[0])
@@ -899,7 +899,7 @@ class SEPlayerTests {
 
         #expect(mediaItemIndex[0] == 1)
         #expect(positionMs[0] == 5000)
-        // ExoPlayer leaves the masking of the buffered properties unchecked here (b/160450903).
+        // The masking of the buffered properties is left unchecked here.
 
         #expect(mediaItemIndex[1] == mediaItemIndex[0])
         #expect(positionMs[1] == positionMs[0])
@@ -1025,7 +1025,7 @@ class SEPlayerTests {
 
     @TestableSyncPlayerActor
     private func runPositionMaskingCapturingActionSchedule(
-        callback: @escaping (SEPlayer) async throws -> Void,
+        callback: @escaping (SEPlayer) throws -> Void,
         pauseMediaItemIndex: Int,
         mediaItemIndexUpdate: @escaping (Int, Int) -> Void,
         positionMsUpdate: @escaping (Int, Int64) -> Void,
@@ -1035,12 +1035,15 @@ class SEPlayerTests {
     ) async throws {
         let actionSchedule = try ActionSchedule.Builder(tag: tag)
             .playUntilPosition(mediaItemIndex: pauseMediaItemIndex, positionMs: 8000)
-            .executeClosure(callback)
             .executeClosure { player in
-                mediaItemIndexUpdate(0, player.currentMediaItemIndex)
-                positionMsUpdate(0, player.currentPosition.milliseconds)
-                bufferedPositionUpdate(0, player.bufferedPosition.milliseconds)
-                totalBufferedDurationUpdate(0, player.totalBufferedDuration.milliseconds)
+                // In one block of the player's queue: what the player does with the call can't run before the reads.
+                try playerSyncQueue.sync {
+                    try callback(player)
+                    mediaItemIndexUpdate(0, player.currentMediaItemIndex)
+                    positionMsUpdate(0, player.currentPosition.milliseconds)
+                    bufferedPositionUpdate(0, player.bufferedPosition.milliseconds)
+                    totalBufferedDurationUpdate(0, player.totalBufferedDuration.milliseconds)
+                }
             }
             .waitForPendingPlayerCommands()
             .executeClosure { player in
@@ -1125,7 +1128,7 @@ class SEPlayerTests {
     }
 }
 
-/// ExoPlayer's `createPlaceholderWrapperTimeline`: the timeline with every period a placeholder.
+/// The timeline with every period a placeholder.
 private final class PlaceholderWrapperTimeline: ForwardingTimeline, @unchecked Sendable {
     override func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
         let superPeriod = super.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)

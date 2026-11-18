@@ -129,6 +129,9 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
     public let mediaPlaylistUrls: [URL]
     /// The variants declared by the playlist.
     public let variants: [Variant]
+    /// The I-frame variants declared by the playlist (#EXT-X-I-FRAME-STREAM-INF tags): playlists of single keyframes,
+    /// for showing frames without loading whole segments.
+    public let iFrameVariants: [Variant]
     /// The video renditions declared by the playlist.
     public let videos: [Rendition]
     /// The audio renditions declared by the playlist.
@@ -143,7 +146,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
     /// The format of the closed captions declared by the playlist. May be empty if the playlist
     /// explicitly declares no captions are available, or null if the playlist does not declare any
     /// captions information.
-    public let muxedCaptionFormats: Format?
+    public let muxedCaptionFormats: [Format]?
     /// Contains variable definitions, as defined by the #EXT-X-DEFINE tag.
     public let variableDefinitions: [String: String]
     /// DRM initialization data derived from #EXT-X-SESSION-KEY tags.
@@ -161,18 +164,19 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         subtitles: [Rendition],
         closedCaptions: [Rendition],
         muxedAudioFormat: Format?,
-        muxedCaptionFormats: Format?,
+        muxedCaptionFormats: [Format]?,
         hasIndependentSegments: Bool,
         variableDefinitions: [String : String],
         sessionKeyDrmInitData: [Int],
-        contentSteeringInfo: ContentSteeringInfo?
+        contentSteeringInfo: ContentSteeringInfo?,
+        iFrameVariants: [Variant] = []
     ) {
         self.baseUrl = baseUrl
         self.tags = tags
         self.hasIndependentSegments = hasIndependentSegments
 
         self.mediaPlaylistUrls = Self.getMediaPlaylistUrls(
-            variants: variants,
+            variants: variants + iFrameVariants,
             videos: videos,
             audios: audios,
             subtitles: subtitles,
@@ -180,6 +184,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         )
 
         self.variants = variants
+        self.iFrameVariants = iFrameVariants
         self.videos = videos
         self.audios = audios
         self.subtitles = subtitles
@@ -194,15 +199,11 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
     /// Creates a playlist with a single variant.
     /// - Parameter variantUrl: The url of the single variant.
     /// - Returns: A multivariant playlist with a single variant for the provided url.
-    public func createSingleVariantMultivariantPlaylist(from variantUrl: String) throws -> Self? {
-        guard let url = URL(string: variantUrl) else {
-            return nil
-        }
-
-        return HlsMultivariantPlaylist(
+    public static func createSingleVariantMultivariantPlaylist(variantUrl: URL) -> Self {
+        HlsMultivariantPlaylist(
             baseUrl: "",
             tags: [],
-            variants: [Variant.createMediaPlaylistVariantUrl(url)],
+            variants: [Variant.createMediaPlaylistVariantUrl(variantUrl)],
             videos: [],
             audios: [],
             subtitles: [],

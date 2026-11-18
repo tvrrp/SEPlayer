@@ -8,113 +8,37 @@
 import Foundation
 import SEPlayerCommon
 
-public protocol AllocationNode: AnyObject {
-    func getAllocation() -> Allocation?
-    func next() -> AllocationNode?
-}
-
+/// Counts the bytes of media the sample queues of a player hold, for the memory limit of the load control.
+///
+/// Sample data references the buffers it was read into rather than copies of them, so there is nothing to allocate
+/// here: the queues report what they hold.
 public protocol Allocator: AnyObject, Sendable {
+    /// The bytes held now.
     var totalBytesAllocated: Int { get }
-    var individualAllocationSize: Int { get }
-    func allocate() -> Allocation
-    func release(allocation: Allocation)
-    func release(allocationNode: AllocationNode)
-    func trim()
+    /// Records that `bytes` more are held.
+    func allocate(bytes: Int)
+    /// Records that `bytes` are no longer held.
+    func release(bytes: Int)
 }
 
 final class DefaultAllocator: Allocator, @unchecked Sendable {
     var totalBytesAllocated: Int {
-        lock.withLock { return allocatedCount * individualAllocationSize }
+        lock.withLock { bytes }
     }
 
-    let individualAllocationSize: Int
+    private let lock = UnfairLock()
+    private var bytes = 0
 
-    private let trimOnReset: Bool
-    private let lock: UnfairLock
-
-    private var allocatedCount = 0
-    private var availableCount = 0
-    private var targetBufferSize = 0
-
-    private var availableAllocations: Array<Allocation?>
-
-    init(
-        trimOnReset: Bool = true,
-        individualAllocationSize: Int = Int(2 * getpagesize()),
-        initialAllocationCount: Int = 0
-    ) {
-        self.trimOnReset = trimOnReset
-        self.individualAllocationSize = individualAllocationSize
-        self.lock = UnfairLock()
-
-        let capacity = initialAllocationCount + .availableExtraCapacity
-        availableAllocations = Array(repeating: nil, count: capacity)
+    func allocate(bytes: Int) {
+        guard bytes > 0 else { return }
+        lock.withLock { self.bytes += bytes }
     }
 
-    func reset() {
-        if trimOnReset {
-            setTargetBufferSize(new: 0)
+    func release(bytes: Int) {
+        guard bytes > 0 else { return }
+        lock.withLock {
+            assert(self.bytes >= bytes, "Released more bytes than were held")
+            self.bytes = max(0, self.bytes - bytes)
         }
     }
-
-    func setTargetBufferSize(new targetBufferSize: Int) {
-        lock.lock()
-        let didReduceBufferSize = targetBufferSize < self.targetBufferSize
-        self.targetBufferSize = targetBufferSize
-        lock.unlock()
-        if didReduceBufferSize {
-            trim()
-        }
-    }
-
-    func allocate() -> Allocation {
-        lock.lock(); defer { lock.unlock() }
-        allocatedCount += 1
-
-        let allocation: Allocation
-        if availableCount > 0 {
-            availableCount -= 1
-            allocation = availableAllocations[availableCount].take()!
-        } else {
-            allocation = Allocation(capacity: individualAllocationSize)
-            if allocatedCount > availableAllocations.count {
-                for _ in 0..<availableAllocations.count { availableAllocations.append(nil) }
-            }
-        }
-
-        return allocation
-    }
-
-    func release(allocation: Allocation) {
-        lock.lock(); defer { lock.unlock() }
-        availableAllocations[availableCount] = allocation
-        availableCount += 1
-        allocatedCount -= 1
-    }
-
-    func release(allocationNode: AllocationNode) {
-        lock.lock(); defer { lock.unlock() }
-        var allocationNode: AllocationNode? = allocationNode
-        while let allocationNodeToClear = allocationNode {
-            availableAllocations[availableCount] = allocationNodeToClear.getAllocation()
-            availableCount += 1
-            allocatedCount -= 1
-            allocationNode = allocationNodeToClear.next()
-        }
-    }
-
-    func trim() {
-        lock.lock(); defer { lock.unlock() }
-        let targetAllocationCount = (targetBufferSize + individualAllocationSize - 1) / individualAllocationSize
-        let targetAvailableCount = max(0, targetAllocationCount - allocatedCount)
-        guard targetAvailableCount < availableCount else { return }
-
-        let newArray = Array<Allocation?>(repeating: nil, count: (targetAvailableCount..<availableCount).count)
-        availableAllocations.replaceSubrange(targetAvailableCount..<availableCount, with: newArray)
-        availableCount = targetAvailableCount
-    }
-}
-
-private extension Int {
-    static let availableExtraCapacity: Int = 100
 }

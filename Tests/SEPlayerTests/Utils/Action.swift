@@ -322,9 +322,7 @@ final class WaitForPendingPlayerCommands: Action {
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
-        guard let nextAction else {
-            return
-        }
+        guard let nextAction else { return }
 
         await withCheckedContinuation { continuation in
             player

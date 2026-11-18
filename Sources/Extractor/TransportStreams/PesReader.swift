@@ -42,14 +42,12 @@ final class PesReader: TsPayload.Reader {
     func initialize(
         session: TimestampAdjuster.Session,
         extractorOutput: any ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws {
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws {
         self.timestampAdjuster = session
-        try await reader.createTracks(
+        try reader.createTracks(
             output: extractorOutput,
-            idGenerator: idGenerator,
-            isolation
+            idGenerator: idGenerator
         )
     }
 
@@ -61,9 +59,8 @@ final class PesReader: TsPayload.Reader {
 
     func consume(
         data: inout BlockBufferReader,
-        flags: TsPayload.PacketIndicators,
-        _ isolation: isolated any Actor
-    ) async throws {
+        flags: TsPayload.PacketIndicators
+    ) throws {
         let timestampAdjuster = try timestampAdjuster.checkNotNil()
 
         if flags.contains(.payloadUnitStart) {
@@ -72,23 +69,25 @@ final class PesReader: TsPayload.Reader {
                 // Expected.
                 break
             case .readingHeaderExtension:
-                // TODO: log Unexpected start indicator reading extended header
-                break
+                SELogger.warning(.transportStream, "Unexpected start indicator while reading an extended header")
             case .readingBody:
                 // If payloadSize is unset then the length of the previous packet was unspecified, and so
                 // we only know that it's finished now that we've seen the start of the next one. This is
                 // expected. If payloadSize is set, then the length of the previous packet was known, but
                 // we didn't receive that amount of data. This is not expected.
-                if payloadSize != nil {
-                    // TODO: log "Unexpected start indicator: expected \(payloadSize) more bytes");
+                if let payloadSize {
+                    SELogger.warning(
+                        .transportStream,
+                        "Unexpected start indicator: expected \(payloadSize) more bytes"
+                    )
                 }
 
                 // Either way, notify the reader that it has now finished.
-                try await reader.packetFinished(isolation)
+                try reader.packetFinished()
             }
 
             if data.readableBytes == 0 {
-                try await reader.endOfInputReached(isolation)
+                try reader.endOfInputReached()
             }
 
             try setState(.readingHeader)
@@ -123,13 +122,13 @@ final class PesReader: TsPayload.Reader {
                     data = try data.getSliceIgnoringReaderOffset(at: 0, length: data.readerIndex + readLength)
                 }
 
-                try! await reader.consume(data: &data, isolation)
+                try reader.consume(data: &data)
 
                 if let payloadSize {
                     // There are bytes left in data, see above, so this is not the end of input
                     self.payloadSize = payloadSize - readLength
                     if (payloadSize - readLength) == 0 {
-                        try await reader.packetFinished(isolation)
+                        try reader.packetFinished()
                         try setState(.readingHeader)
                     }
                 }
@@ -138,15 +137,9 @@ final class PesReader: TsPayload.Reader {
     }
 
     func canConsumeSynthesizedEmptyPusi(isModeHls: Bool) throws -> Bool {
-        // Pusi only payload to trigger end of sample data is only applicable if
-        // pes does not have a length field and body is being read, another exclusion
-        // is due to H262 streams possibly having, in HLS mode, a pes across more than one segment
-        // which would trigger committing an unfinished sample in the middle of the access unit
-        guard state == .readingBody,
-              payloadSize == nil,
-              !(isModeHls && false /* TODO: reader is H262Reader */) else {
-            return false
-        }
+        // A payload unit start without a payload ends the sample data only for a PES without a length field
+        // whose body is being read.
+        guard state == .readingBody, payloadSize == nil else { return false }
 
         // Only call parseHeader if isModeHls is true and can parse header as some HLS streams may
         // contain packages.
@@ -184,8 +177,8 @@ final class PesReader: TsPayload.Reader {
         // the header.
         var header = BlockBufferBitReader(reader: pesScratch)
         let startCodePrefix = try header.readBits(24)
-        if (startCodePrefix != 0x000001) {
-            // TODO: log "Unexpected start code prefix: \(startCodePrefix)"
+        if startCodePrefix != 0x000001 {
+            SELogger.warning(.transportStream, "Unexpected start code prefix: \(startCodePrefix)")
             payloadSize = nil
             return false
         }
@@ -211,7 +204,7 @@ final class PesReader: TsPayload.Reader {
                 - extendedHeaderLength
 
             if payloadSize < 0 {
-                // TODO log "Found negative packet payload size: \(payloadSize)"
+                SELogger.warning(.transportStream, "Found negative packet payload size: \(payloadSize)")
                 self.payloadSize = nil
             } else {
                 self.payloadSize = payloadSize

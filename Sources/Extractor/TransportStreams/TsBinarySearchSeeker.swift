@@ -66,7 +66,9 @@ private final class TsPcrSeeker: TimestampSeeker {
         _ isolation: isolated any Actor
     ) async throws -> TimestampSearchResult {
         let inputPosition = input.getPosition(isolation)
-        guard let inputLength = input.getLength(isolation) else { return .noTimestamp }
+        guard let inputLength = input.getLength(isolation) else {
+            return .noTimestamp
+        }
         let bytesToSearch = min(timestampSearchBytes, inputLength - inputPosition)
 
         var packetBuffer = BlockBufferReader(

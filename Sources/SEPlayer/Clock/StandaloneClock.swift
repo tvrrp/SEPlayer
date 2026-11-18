@@ -29,9 +29,9 @@ final class StandaloneClock: MediaClock {
 
         do {
 //            try timebase.setTime(baselineTime)
-            try timebase.setRate(Double(playbackParameters.playbackRate))
+            try timebase.setRate(to: Double(playbackParameters.playbackRate))
         } catch {
-            print(error)
+            SELogger.error(.clock, "Starting the clock failed: \(error)")
         }
 
         started = true
@@ -43,19 +43,19 @@ final class StandaloneClock: MediaClock {
         started = false
 
         do {
-            try timebase.setRate(.zero)
+            try timebase.setRate(to: .zero)
         } catch {
-            print(error)
+            SELogger.error(.clock, "Stopping the clock failed: \(error)")
         }
     }
 
     func resetPosition(position: CMTime) {
         do {
-            try timebase.setTime(position)
+            try timebase.setTime(to: position)
 //            baselineTime = position
 //            if timebase.rate != 0 { try timebase.setTime(position) }
         } catch {
-            print(error)
+            SELogger.error(.clock, "Setting the clock to \(position.seconds) failed: \(error)")
         }
     }
 
@@ -66,7 +66,7 @@ final class StandaloneClock: MediaClock {
     func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
         if started {
             if self.playbackParameters != playbackParameters {
-                try! timebase.setRate(Double(playbackParameters.playbackRate))
+                try! timebase.setRate(to: Double(playbackParameters.playbackRate))
             }
         }
         self.playbackParameters = playbackParameters

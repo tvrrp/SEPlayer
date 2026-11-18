@@ -10,14 +10,20 @@ import SEPlayerCommon
 private typealias Support = RendererCapabilities.Support
 
 public class MappingTrackSelector: TrackSelector {
-    public var currentMappedTrackInfo: MappedTrackInfo?
+    /// The mapping of the selection playing now. The player activates selections from any thread.
+    public var currentMappedTrackInfo: MappedTrackInfo? {
+        mappedTrackInfoLock.withLock { _currentMappedTrackInfo }
+    }
+
+    private var _currentMappedTrackInfo: MappedTrackInfo? // Guarded by mappedTrackInfoLock.
+    private let mappedTrackInfoLock = UnfairLock()
 
     public final override func onSelectionActivated(info: Any?) {
         guard let info = info as? MappedTrackInfo else {
             return
         }
 
-        currentMappedTrackInfo = info
+        mappedTrackInfoLock.withLock { _currentMappedTrackInfo = info }
     }
 
     public override func selectTracks(

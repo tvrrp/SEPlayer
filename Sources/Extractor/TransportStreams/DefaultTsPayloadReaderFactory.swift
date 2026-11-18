@@ -67,7 +67,7 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
                 )
             )
         case .h264, .h264Encrypted:
-            guard !flags.contains(.ignoreAACStream) else { return nil }
+            guard !flags.contains(.ignoreH264Stream) else { return nil }
 
             return try PesReader(
                 reader: H264Reader(
@@ -77,6 +77,8 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
                     containerMimeType: .videoMP2T
                 )
             )
+        case .dvbSubs:
+            return try PesReader(reader: DvbSubtitleReader(subtitleInfos: esInfo.dvbSubtitleInfos))
         case .none:
             return nil
         default:
@@ -92,8 +94,44 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
         )
     }
 
+    /// The closed captions of a video stream: those given, unless its caption service descriptor (ATSC A/65) says
+    /// which there are.
     private func getClosedCaptionFormats(from esInfo: TsPayload.ESInfo) -> [Format] {
-        return []
-//        fatalError()
+        guard !flags.contains(.overrideCaptionDescriptors) else {
+            return closedCaptionFormats
+        }
+
+        var formats = closedCaptionFormats
+        var data = Array(esInfo.descriptorBytes)[...]
+        while data.count >= 2 {
+            let tag = data.removeFirst()
+            let length = Int(data.removeFirst())
+            guard data.count >= length else { break }
+            var descriptor = data.prefix(length)
+            data = data.dropFirst(length)
+            guard tag == Self.captionServiceDescriptorTag, let header = descriptor.popFirst() else {
+                continue
+            }
+
+            formats = []
+            let serviceCount = Int(header & 0x1F)
+            for _ in 0..<serviceCount {
+                guard descriptor.count >= 6 else { break }
+                let language = String(bytes: descriptor.prefix(3), encoding: .ascii)
+                descriptor = descriptor.dropFirst(3)
+                let captionType = descriptor.removeFirst()
+                let isDigital = captionType & 0x80 != 0
+                descriptor = descriptor.dropFirst(2) // easy_reader, wide_aspect_ratio, reserved
+                formats.append(Format.Builder()
+                    .setSampleMimeType(isDigital ? .applicationCEA708 : .applicationCEA608)
+                    .setLanguage(language)
+                    .setAccessibilityChannel(isDigital ? Int(captionType & 0x3F) : 1)
+                    .build())
+            }
+            SELogger.debug(.transportStream, "Caption service descriptor: \(formats.count) services")
+        }
+        return formats
     }
+
+    private static let captionServiceDescriptorTag: UInt8 = 0x86
 }

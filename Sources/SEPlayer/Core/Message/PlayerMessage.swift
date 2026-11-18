@@ -56,12 +56,6 @@ public final class PlayerMessage {
         self.deleteAfterDelivery = true
     }
 
-//    deinit {
-//        _isDelivered.destroy()
-//        _isProcessed.destroy()
-//        _isCanceled.destroy()
-//    }
-
     @discardableResult
     public func setType(_ messageType: Int) -> PlayerMessage {
         assert(!isSent)

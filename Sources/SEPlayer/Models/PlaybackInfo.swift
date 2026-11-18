@@ -37,7 +37,7 @@ struct PlaybackInfo {
 
     var object = NSObject()
 
-    var isPlaying: Bool { state == .ready && playWhenReady }
+    var isPlaying: Bool { state == .ready && playWhenReady && playbackSuppressionReason == .none }
 
     init(
         clock: SEClock,

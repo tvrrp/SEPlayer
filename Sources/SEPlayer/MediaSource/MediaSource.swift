@@ -30,14 +30,6 @@ public protocol MediaSource: AnyObject {
     func releaseSource(delegate: MediaSourceDelegate)
 }
 
-//protocol MediaSourceEventListener: AnyObject {
-//    func loadStarted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-//    func loadCompleted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-//    func loadCancelled(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-//    func loadError(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void, error: Error, wasCancelled: Bool)
-//    func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void)
-//}
-
 public protocol MediaSourceDelegate: AnyObject {
     func mediaSource(_ source: any MediaSource, sourceInfo refreshed: Timeline) throws
 }

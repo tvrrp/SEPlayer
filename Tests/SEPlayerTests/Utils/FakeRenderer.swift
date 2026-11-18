@@ -11,7 +11,7 @@ import Testing
 
 /// Reads samples like a real renderer and counts them instead of showing them.
 ///
-/// The player has no timer: like `AVFBaseRenderer2`, the renderer reads when something wakes
+/// The player has no timer: like `AVFBaseRenderer`, the renderer reads when something wakes
 /// it — a new stream, a position reset, data arriving in the stream, or the time reaching the
 /// next sample — and tells the player when it becomes ready, stalls or ends.
 class FakeRenderer: BaseSERenderer {
@@ -45,10 +45,10 @@ class FakeRenderer: BaseSERenderer {
     }
 
     override func handleMessage(_ message: RendererMessage) throws {
-        if case let .setControlTimebase(timebase) = message, timebase !== controlTimebase {
+        if case let .setTimeSource(source) = message, source?.timebase !== controlTimebase {
             try controlTimebase?.removeTimer(readAheadTimer)
-            controlTimebase = timebase
-            try timebase?.addTimer(readAheadTimer)
+            controlTimebase = source?.timebase
+            try controlTimebase?.addTimer(readAheadTimer)
         }
         try super.handleMessage(message)
     }
@@ -143,7 +143,9 @@ class FakeRenderer: BaseSERenderer {
 
     private func readStreamThrowing() throws {
         assert(queue.isCurrent())
-        guard [.enabled, .started].contains(getState()), !_isEnded else { return }
+        guard [.enabled, .started].contains(getState()), !_isEnded else {
+            return
+        }
 
         // Between `render` calls the time comes from the timebase the player plays on.
         if let controlTimebase, getState() == .started {
@@ -204,7 +206,9 @@ class FakeRenderer: BaseSERenderer {
 
     private func installStreamTrigger() {
         // After the end of the stream only marking it final or replacing it wakes the renderer.
-        guard streamToken == nil, !didReadStreamToEnd(), let stream = getStream() else { return }
+        guard streamToken == nil, !didReadStreamToEnd(), let stream = getStream() else {
+            return
+        }
         streamToken = stream.installTrigger(condition: .whenDataBecomesReady) { [weak self] _ in
             guard let self else { return }
             queue.justDispatch {

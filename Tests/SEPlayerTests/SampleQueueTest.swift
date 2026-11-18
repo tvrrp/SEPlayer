@@ -22,7 +22,7 @@ class SampleQueueTest {
         .setInitializationData(FakeInitializationData()).build()
 
     private lazy var dataCapacity = allocationSize * 10
-    private lazy var data = TestUtil.buildTestData(lenght: dataCapacity)
+    private lazy var data = TestUtil.buildTestData(length: dataCapacity)
 
     private lazy var sampleSizes: [Int] = [
         allocationSize - 1,
@@ -70,6 +70,41 @@ class SampleQueueTest {
     init() throws {
         sampleQueue = try SampleQueue(queue: playerSyncQueue)
         inputBuffer = TestInputBuffer()
+    }
+
+    @Test
+    func failedRecoveryAndOrdinarySeeksPreserveAdvancedCursor() throws {
+        try writeTestData()
+        sampleQueue.skip(count: 3)
+        let original = sampleQueue.getReadIndex()
+        #expect(sampleQueue.seekWithinBuffer(to: CMTime(value: -1, timescale: 1)) == .unavailable)
+        #expect(sampleQueue.getReadIndex() == original)
+        #expect(!sampleQueue.seek(time: CMTime(value: 100, timescale: 1), allowTimeBeyondBuffer: false))
+        #expect(sampleQueue.getReadIndex() == original)
+        #expect(!sampleQueue.seek(to: -1))
+        #expect(sampleQueue.getReadIndex() == original)
+    }
+
+    @Test
+    func recoverySeekRestoresVideoDecodePointAndFormat() throws {
+        try writeTestData()
+        sampleQueue.skip(count: sampleTimestamps.count)
+        let result = sampleQueue.seekWithinBuffer(to: CMTime(value: 6500, timescale: 1_000_000))
+        #expect(result == .success(startPosition: CMTime(value: 4000, timescale: 1_000_000)))
+        try assertReadFormat(formatRequired: false, format: format2)
+        #expect(sampleQueue.getReadIndex() == dataSecondKeyframeIndex)
+    }
+
+    @Test
+    func recoverySeekIsRepeatableAndRetainsPacketBeforePlayhead() throws {
+        try writeSyncSamplesOnlyTestData()
+        sampleQueue.skip(count: sampleTimestamps.count)
+        for _ in 0..<2 {
+            let result = sampleQueue.seekWithinBuffer(to: CMTime(value: 6500, timescale: 1_000_000))
+            #expect(result == .success(startPosition: CMTime(value: 6000, timescale: 1_000_000)))
+            #expect(sampleQueue.getReadIndex() == 6)
+            sampleQueue.skip(count: 2)
+        }
     }
 
     @Test
@@ -1586,27 +1621,22 @@ extension SampleQueue {
         return time.microseconds
     }
 
-    func setFormat(_ format: Format) {
-        onQueue { setFormat(format, isolation: $0) }
-    }
-
     func sampleData(data: ByteBuffer, length: Int, isolation: TestableSyncPlayerActor) throws {
         let bytes = Array(data.readableBytesView.prefix(length))
         // Writing nothing writes nothing; a block buffer can't be empty.
         guard !bytes.isEmpty else { return }
         let blockBuffer = try CMBlockBuffer(length: bytes.count, flags: .assureMemoryNow)
         try bytes.withUnsafeBytes { try blockBuffer.replaceDataBytes(with: $0) }
-        try onQueue { try sampleData(data: blockBuffer, isolation: $0) }
+        onQueue { _ in sampleData(data: blockBuffer) }
     }
 
     func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int) {
         let time = Self.time(time)
-        try! onQueue {
+        try! onQueue { _ in
             try sampleMetadata(
                 time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
                 flags: flags,
-                range: offset..<(offset + size),
-                isolation: $0
+                range: offset..<(offset + size)
             )
         }
     }

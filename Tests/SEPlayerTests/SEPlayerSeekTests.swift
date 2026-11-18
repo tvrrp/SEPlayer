@@ -2,7 +2,7 @@
 //  SEPlayerSeekTests.swift
 //  SEPlayer
 //
-//  Seeking tests from ExoPlayer's `ExoPlayerTest`, driving the player directly.
+//  Seeking tests, driving the player directly.
 //
 
 import CoreMedia
@@ -10,7 +10,7 @@ import Foundation
 import Testing
 @testable import SEPlayer
 
-/// Every player in these tests plays on the same queue, so they run one at a time, as in ExoPlayer.
+/// Every player in these tests plays on the same queue, so they run one at a time.
 @Suite(.serialized)
 @MainActor
 final class SEPlayerSeekTests {
@@ -192,7 +192,7 @@ final class SEPlayerSeekTests {
         let timeline = FakeTimeline()
         let player = try TestSEPlayerFactory().build()
         player.seek(to: ms(5000), of: 1)
-        // ExoPlayer concatenates two sources into one; a playlist of the two is the same timeline.
+        // A playlist of the two sources is the same timeline as the two concatenated.
         player.set(
             mediaSources: [
                 try FakeMediaSource(timeline: timeline, formats: [SEPlayerTestRunner.videoFormat]),
@@ -343,12 +343,12 @@ final class SEPlayerSeekTests {
         CMTime(value: value, timescale: 1000)
     }
 
-    /// ExoPlayer's `createFakeMediaSource(id)`: a timeline with one window of that id.
+    /// A timeline with one window of that id.
     private func createFakeMediaSource(id: AnyHashable) throws -> FakeMediaSource {
         try FakeMediaSource(timeline: FakeTimeline(windowDefinitions: [.init(id: id)]))
     }
 
-    /// ExoPlayer checks positions reached by playing within 20ms before the position, as its
+    /// Positions reached by playing are checked within 20ms before the position, as the
     /// position lags its clock. Here playback is paused on the timebase once the position is
     /// reached, so it stops after it: by as much, plus what a couple of milliseconds of real time
     /// to get the pause through come to on the sped-up media time of the tests.

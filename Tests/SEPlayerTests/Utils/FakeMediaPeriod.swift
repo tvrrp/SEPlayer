@@ -15,6 +15,10 @@ final class FakeMediaPeriod: MediaPeriod {
 
     var trackGroups: TrackGroupArray
     let isLoading: Bool = false
+    /// Whether streams take new selections of their group, as HLS variants do.
+    var allowsSelectionUpdatesKeepingBuffer = false
+    private(set) var selectionUpdatesKeepingBuffer = 0
+    private(set) var createdStreamCount = 0
 
     private let queue: Queue
     private let sampleStreams: NSHashTable<FakeSampleStream>
@@ -110,7 +114,13 @@ final class FakeMediaPeriod: MediaPeriod {
                 streams[i] = nil
             }
 
+            if streams[i] != nil, selections[i] != nil, allowsSelectionUpdatesKeepingBuffer {
+                // A kept stream starts over with the media of its new selection.
+                streamResetFlags[i] = true
+            }
+
             if streams[i] == nil, let selection = selections[i] {
+                createdStreamCount += 1
                 // TODO: assert(selection.count
                 // TODO: other assertions
                 let sampleStreamItems = trackDataFactory.create(
@@ -128,6 +138,15 @@ final class FakeMediaPeriod: MediaPeriod {
         }
 
         return try seek(position: position)
+    }
+
+    var keepsStreamsForSelectionsInSameGroup: Bool { allowsSelectionUpdatesKeepingBuffer }
+
+    func updateSelectionsKeepingBuffer(_ selections: [SETrackSelection?], streams: [SampleStream?]) -> Bool {
+        assert(queue.isCurrent())
+        guard allowsSelectionUpdatesKeepingBuffer else { return false }
+        selectionUpdatesKeepingBuffer += 1
+        return true
     }
 
     func discardBuffer(position: CMTime, toKeyframe: Bool) throws {
@@ -174,6 +193,10 @@ final class FakeMediaPeriod: MediaPeriod {
         return .time(us: seekPositionUs)
     }
 
+    func seekForRecovery(position: CMTime) throws -> CMTime {
+        try seek(position: position)
+    }
+
     func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
         let positionUs = position.microseconds
@@ -215,8 +238,10 @@ final class FakeMediaPeriod: MediaPeriod {
         var progressMade = false
         queue.playerActor().assumeIsolated { isolation in
             for sampleStream in sampleStreams.allObjects {
+                // From where the period starts or was sought to: a period that loads ahead of playback starts after
+                // the playback position.
                 try! sampleStream.writeData(
-                    startPositionUs: loadingInfo.playbackPosition.microseconds,
+                    startPositionUs: lastSeekPositionUs,
                     isolation: isolation
                 )
                 progressMade = true

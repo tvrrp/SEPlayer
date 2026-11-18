@@ -10,8 +10,10 @@ import Foundation
 public final class MulticastDelegate<T> {
     private let isThreadSafe: Bool
     private let delegates = NSHashTable<AnyObject>.weakObjects()
-    private let queue = DispatchQueue(label: "com.seplayer.multicast.\(type(of: T.self))",
-                                      attributes: .concurrent)
+    private let queue = DispatchQueue(
+        label: "com.seplayer.multicast.\(type(of: T.self))",
+        attributes: .concurrent
+    )
 
     public var count: Int {
         queue.sync {

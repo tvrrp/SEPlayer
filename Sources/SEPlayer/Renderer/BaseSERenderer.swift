@@ -1,5 +1,5 @@
 //
-//  BaseSERenderer2.swift
+//  BaseSERenderer.swift
 //  SEPlayer
 //
 //  Created by Damir Yackupov on 21.04.2025.
@@ -15,8 +15,17 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         set { lock.withLock { _listener = newValue } }
     }
     final weak var delegate: SERendererDelegate?
-    var name: String { String(describing: self) }
+    var name: String { String(describing: type(of: self)) }
     let trackType: TrackType
+    /// The topic this renderer logs its own events under.
+    var logTopic: SELogTopic {
+        switch trackType {
+        case .audio: .audio
+        case .video: .video
+        case .text: .text
+        default: .lifecycle
+        }
+    }
 
     let queue: Queue
     private let lock: UnfairLock
@@ -34,6 +43,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     private var readingPosition: CMTime = .positiveInfinity
     private var streamOffset: CMTime = .zero
     private var timeline: Timeline
+    private var recoveryContext = RendererRecoveryContext(generation: 0, mediaPeriodId: nil)
 
     init(queue: Queue, trackType: TrackType, clock: SEClock) {
         self.queue = queue
@@ -51,6 +61,30 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     final func getState() -> SERendererState { state }
 
+    final func getRecoveryContext() -> RendererRecoveryContext { lock.withLock { recoveryContext } }
+    var isRecoveringWhileTimelineAdvances: Bool { false }
+    func recoverOutput(at position: CMTime, reason: RendererRecoveryReason) throws -> Bool { false }
+
+    private func invalidateRecovery(mediaPeriodId: MediaPeriodId? = nil) {
+        lock.withLock {
+            recoveryContext = .init(
+                generation: recoveryContext.generation &+ 1,
+                mediaPeriodId: mediaPeriodId ?? recoveryContext.mediaPeriodId
+            )
+        }
+    }
+
+    /// Unlike a user seek, output recovery retains the final-stream marker and the clock.
+    final func rewindSourceForRecovery(to position: CMTime) throws -> Bool {
+        guard let sampleStream else { return false }
+        guard case .success = try sampleStream.seekWithinBuffer(to: position - streamOffset) else {
+            return false
+        }
+        readingPosition = position
+        lastResetPosition = position
+        return true
+    }
+
     func enable(
         formats: [Format],
         stream: any SampleStream,
@@ -63,21 +97,24 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         delegate: any SERendererDelegate
     ) throws {
         assert(queue.isCurrent() && state == .disabled)
+        SELogger.info(.lifecycle, "\(name) enabled at \(position.seconds)\(joining ? ", joining" : ""), offset \(offset.seconds): \(formats.map(\.description).joined(separator: "; "))")
         self.delegate = delegate
         var stream = stream
         try willChangeStream(oldStream: sampleStream, newStream: &stream)
         state = .enabled
         self.sampleStream = stream
         self.formats = formats
-        try! onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
-        try! replaceStream(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-        try! resetPosition(new: startPosition, joining: joining)
+        invalidateRecovery(mediaPeriodId: mediaPeriodId)
+        try onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
+        try replaceStream(formats: formats, stream: stream, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
+        try resetPosition(new: startPosition, joining: joining)
     }
 
     final func start() throws {
         assert(queue.isCurrent() && state == .enabled)
+        SELogger.debug(.lifecycle, "\(name) started")
         state = .started
-        try! onStarted()
+        try onStarted()
     }
 
     func replaceStream(
@@ -87,6 +124,8 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws {
+        invalidateRecovery(mediaPeriodId: mediaPeriodId)
+        SELogger.debug(.lifecycle, "\(name) reads a new stream from \(startPosition.seconds), offset \(offset.seconds)")
         var stream = stream
         try willChangeStream(oldStream: sampleStream, newStream: &stream)
         self.sampleStream = stream
@@ -95,7 +134,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         }
         self.formats = formats
         streamOffset = offset
-        try! onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
+        try onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
     }
 
     final func getStream() -> SampleStream? { sampleStream }
@@ -113,37 +152,45 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     }
 
     final func resetPosition(new position: CMTime) throws {
-        try! resetPosition(new: position, joining: false)
+        try resetPosition(new: position, joining: false)
     }
 
     private func resetPosition(new position: CMTime, joining: Bool) throws {
+        SELogger.debug(.lifecycle, "\(name) reset to \(position.seconds)")
+        invalidateRecovery()
         streamIsFinal = false
         lastResetPosition = position
         readingPosition = position
-        try! onPositionReset(position: position, joining: joining)
+        try onPositionReset(position: position, joining: joining)
     }
 
     func render(position: CMTime, elapsedRealtime: CMTime) throws {}
     func isReady() -> Bool { false }
     func isEnded() -> Bool { true }
+    func hasPresentedOutput() -> Bool { false }
     func getMediaClock() -> MediaClock? { return nil }
     func getTimebase() -> CMTimebase? { return nil }
+    func getRenderSynchronizer() -> (any PlaybackSynchronizer)? { nil }
     func setPlaybackSpeed(current: Float, target: Float) throws {}
     func enableRenderStartOfStream() {}
 
     final func stop() {
         assert(queue.isCurrent() && state == .started)
+        SELogger.debug(.lifecycle, "\(name) stopped")
         state = .enabled
         onStopped()
     }
 
     final func disable() {
         assert(queue.isCurrent() && state == .enabled)
+        SELogger.info(.lifecycle, "\(name) disabled")
+        invalidateRecovery()
         state = .disabled
+        // The subclass must still be able to unregister triggers from its old stream.
+        onDisabled()
         sampleStream = nil
         formats.removeAll()
         streamIsFinal = false
-        onDisabled()
     }
 
     final func reset() {
@@ -153,6 +200,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     final func release() {
         assert(queue.isCurrent() && state == .disabled)
+        SELogger.debug(.lifecycle, "\(name) released")
         onRelease()
     }
 
@@ -200,8 +248,8 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
                 return streamIsFinal ? .didReadBuffer(buffer) : .nothingRead
             }
 
-            try buffer.setOutputPresentationTimeStamp(buffer.presentationTimeStamp + streamOffset)
-            readingPosition = max(readingPosition, buffer.presentationTimeStamp)
+            try buffer.setOutputPresentationTimeStamp(to: buffer.presentationTimeStamp + streamOffset)
+            readingPosition = max(readingPosition, buffer.outputPresentationTimeStamp)
         }
 
         return result

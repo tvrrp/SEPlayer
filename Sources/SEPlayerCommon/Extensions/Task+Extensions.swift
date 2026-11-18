@@ -19,11 +19,8 @@ public extension Task where Success == Never, Failure == Never {
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                guard !Task.isCancelled else {
-                    continuation.resume(throwing: _Concurrency.CancellationError())
-                    return
-                }
-
+                // The timer is activated even when the task is already cancelled: releasing a source that was never
+                // activated traps. A cancel that came first runs the cancel handler once the timer is activated.
                 timer.schedule(
                     deadline: .now() + interval,
                     repeating: .never,

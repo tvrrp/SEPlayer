@@ -15,15 +15,21 @@ public protocol SEClock {
     var microseconds: Int64 { get }
     var nanoseconds: Int64 { get }
 
-    func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper
+    /// What runs the player's work on `queue`.
+    func makeScheduler(queue: Queue) -> PlayerScheduler
     /// A timebase for media time to run on, following this clock.
     func makeTimebase() throws -> CMTimebase
+    /// Whether media time runs on the player's render synchronizer, which follows the audio clock. A clock whose
+    /// timebases run apart from it, as faster than real time, keeps media time on ``makeTimebase()``.
+    var runsOnRenderSynchronizer: Bool { get }
 }
 
 public extension SEClock {
     func makeTimebase() throws -> CMTimebase {
         try CMTimebase(sourceClock: clock)
     }
+
+    var runsOnRenderSynchronizer: Bool { true }
 }
 
 public struct DefaultSEClock: SEClock {
@@ -40,7 +46,7 @@ public struct DefaultSEClock: SEClock {
         clock = CMClock.hostTimeClock
     }
 
-    public func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper {
-        DefaultHandlerWrapper(handler: Handler(queue: queue, looper: looper))
+    public func makeScheduler(queue: Queue) -> PlayerScheduler {
+        DispatchPlayerScheduler(queue: queue)
     }
 }

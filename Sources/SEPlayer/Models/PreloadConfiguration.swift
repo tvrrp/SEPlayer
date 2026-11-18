@@ -8,7 +8,12 @@
 import CoreMedia
 
 public struct PreloadConfiguration: Equatable {
-    let targetPreloadDuration: CMTime
+    /// How much of the next item to load ahead; `.invalid` doesn't preload.
+    public let targetPreloadDuration: CMTime
+
+    public init(targetPreloadDuration: CMTime) {
+        self.targetPreloadDuration = targetPreloadDuration
+    }
 
     public static let `default` = PreloadConfiguration(targetPreloadDuration: .invalid)
 }

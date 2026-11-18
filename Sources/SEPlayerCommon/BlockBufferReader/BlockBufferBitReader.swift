@@ -51,7 +51,7 @@ public struct BlockBufferBitReader: Hashable {
         self.reader = try BlockBufferReader()
         self.byteOffset = 0
         self.bitOffset = 0
-        self.byteLimit = self.reader.blockBuffer.endIndex
+        self.byteLimit = self.reader.blockBuffer.dataLength
     }
 
     /// Creates a new instance that wraps an existing `CMBlockBuffer`.
@@ -60,10 +60,10 @@ public struct BlockBufferBitReader: Hashable {
     ///   - blockBuffer: The buffer to wrap.
     ///   - limit: The limit in bytes. Defaults to the full length of `blockBuffer`.
     public init(_ blockBuffer: CMBlockBuffer, limit: Int? = nil) {
-        let limit = limit ?? blockBuffer.endIndex
+        let limit = limit ?? blockBuffer.dataLength
         precondition(
-            limit >= 0 && limit <= blockBuffer.endIndex,
-            "limit: \(limit), expected: range(0, \(blockBuffer.endIndex))"
+            limit >= 0 && limit <= blockBuffer.dataLength,
+            "limit: \(limit), expected: range(0, \(blockBuffer.dataLength))"
         )
         self.reader = BlockBufferReader(blockBuffer)
         self.byteOffset = 0
@@ -83,7 +83,7 @@ public struct BlockBufferBitReader: Hashable {
         self.reader = reader
         self.byteOffset = start
         self.bitOffset = 0
-        self.byteLimit = reader.blockBuffer.endIndex
+        self.byteLimit = reader.blockBuffer.dataLength
     }
 
     /// Creates a new instance backed by a fresh `CMBlockBuffer` referencing `range` of `reader`'s
@@ -92,7 +92,7 @@ public struct BlockBufferBitReader: Hashable {
         self.reader = try BlockBufferReader(reader: reader, range: range)
         self.byteOffset = 0
         self.bitOffset = 0
-        self.byteLimit = self.reader.blockBuffer.endIndex
+        self.byteLimit = self.reader.blockBuffer.dataLength
     }
 
     /// Creates a new instance sharing storage, position and limit with `bitReader`.
@@ -106,7 +106,7 @@ public struct BlockBufferBitReader: Hashable {
         self.reader = try BlockBufferReader(reader: bitReader.reader, range: range)
         self.byteOffset = 0
         self.bitOffset = 0
-        self.byteLimit = self.reader.blockBuffer.endIndex
+        self.byteLimit = self.reader.blockBuffer.dataLength
     }
 
     // MARK: - Reset
@@ -131,7 +131,7 @@ public struct BlockBufferBitReader: Hashable {
     /// untouched.
     public mutating func extend(with blockBuffer: CMBlockBuffer, permitEmptyReference: Bool = false) throws {
         try reader.extend(with: blockBuffer, permitEmptyReference: permitEmptyReference)
-        byteLimit = reader.blockBuffer.endIndex
+        byteLimit = reader.blockBuffer.dataLength
     }
 
     // MARK: - Positioning
@@ -235,7 +235,9 @@ public struct BlockBufferBitReader: Hashable {
             offset >= 0 && offset + (numBits + 7) / 8 <= buffer.count,
             "destination of \(buffer.count) bytes is too small for \(numBits) bits at offset \(offset)"
         )
-        guard numBits <= bitsLeft else { throw BlockBufferReaderErrors(.outOfBounds) }
+        guard numBits <= bitsLeft else {
+            throw BlockBufferReaderErrors(.outOfBounds)
+        }
         guard numBits > 0 else { return }
 
         // Whole bytes.
@@ -386,7 +388,9 @@ public struct BlockBufferBitReader: Hashable {
     /// Reads a `String` decoding `length` bytes with `encoding`, moving the position appropriately.
     /// Must only be called when the position is byte aligned.
     public mutating func readString(length: Int, encoding: String.Encoding) -> String? {
-        guard bitOffset == 0, length >= 0, length <= bytesLeft else { return nil }
+        guard bitOffset == 0, length >= 0, length <= bytesLeft else {
+            return nil
+        }
         return delegate { $0.readString(length: length, encoding: encoding) }
     }
 
@@ -402,7 +406,9 @@ public struct BlockBufferBitReader: Hashable {
     public mutating func putInt<T: FixedWidthInteger>(_ value: T, numBits: Int) throws {
         precondition(numBits >= 0 && numBits <= 32, "numBits: \(numBits), expected: range(0, 32)")
         guard numBits > 0 else { return }
-        guard numBits <= bitsLeft else { throw BlockBufferReaderErrors(.outOfBounds) }
+        guard numBits <= bitsLeft else {
+            throw BlockBufferReaderErrors(.outOfBounds)
+        }
 
         var value = UInt32(truncatingIfNeeded: value)
         if numBits < 32 {
@@ -444,7 +450,9 @@ public struct BlockBufferBitReader: Hashable {
     private mutating func readBits32(_ numBits: Int) throws -> UInt32 {
         guard numBits != 0 else { return 0 }
         precondition(numBits > 0 && numBits <= 32, "numBits: \(numBits), expected: range(0, 32)")
-        guard numBits <= bitsLeft else { throw BlockBufferReaderErrors(.outOfBounds) }
+        guard numBits <= bitsLeft else {
+            throw BlockBufferReaderErrors(.outOfBounds)
+        }
 
         var returnValue: UInt32 = 0
         bitOffset += numBits
@@ -477,8 +485,10 @@ public struct BlockBufferBitReader: Hashable {
 
     @inline(__always)
     private func modifyByte(at index: Int, _ body: (UInt8) -> UInt8) throws {
-        guard index >= 0, index < byteLimit else { throw BlockBufferReaderErrors(.outOfBounds) }
-        try reader.blockBuffer._withUnsafeMutableBytes(atOffset: index) { pointer in
+        guard index >= 0, index < byteLimit else {
+            throw BlockBufferReaderErrors(.outOfBounds)
+        }
+        try reader.blockBuffer.withUnsafeMutableBlockBytes(at: index) { pointer in
             precondition(!pointer.isEmpty, "empty contiguous run at offset \(index)")
             pointer[0] = body(pointer[0])
         }
@@ -500,7 +510,9 @@ public struct BlockBufferBitReader: Hashable {
     @inline(__always)
     private func checkByteAligned(length: Int) throws {
         precondition(bitOffset == 0, "BlockBufferBitReader: position \(position) is not byte aligned")
-        guard length >= 0, length <= bytesLeft else { throw BlockBufferReaderErrors(.outOfBounds) }
+        guard length >= 0, length <= bytesLeft else {
+            throw BlockBufferReaderErrors(.outOfBounds)
+        }
     }
 
     private func assertValidOffset() {

@@ -14,7 +14,7 @@ public struct BlockBufferReader: Hashable {
 
     public var readableBytes: Int {
         // this cannot under/overflow because both are positive and writer >= reader (checked on ingestion of bytes).
-        Int(blockBuffer.endIndex &- self._readerIndex)
+        Int(blockBuffer.dataLength &- self._readerIndex)
     }
 
     public var capacity: Int {
@@ -24,15 +24,9 @@ public struct BlockBufferReader: Hashable {
     public var blockBuffer: CMBlockBuffer
     internal var _readerIndex: Int
 
-    public init() throws {
-        do {
-            self.blockBuffer = try CMBlockBuffer()
-            _readerIndex = .zero
-        } catch {
-            throw BlockBufferReaderErrors(.unknownCoreMedia(
-                OSStatus((error as NSError).code)
-            ))
-        }
+    public init() throws(BlockBufferError) {
+        self.blockBuffer = try CMBlockBuffer()
+        _readerIndex = .zero
     }
 
     public init(_ blockBuffer: CMBlockBuffer) {
@@ -40,65 +34,58 @@ public struct BlockBufferReader: Hashable {
         _readerIndex = .zero
     }
 
-    public init(reader: sending BlockBufferReader, range: Range<Int>? = nil, permitEmptyReference: Bool = false) throws {
-        do {
-            self.blockBuffer = try CMBlockBuffer()
-            let range = range ?? reader.blockBuffer.startIndex..<reader.blockBuffer.dataLength
-            try! blockBuffer._append(
-                bufferReference: reader.blockBuffer[range],
-                flags: permitEmptyReference ? .permitEmptyReference : []
-            )
-            _readerIndex = .zero
-        } catch {
-            if error is BlockBufferReaderErrors {
-                throw error
-            } else {
-                throw BlockBufferReaderErrors(.unknownCoreMedia(
-                    OSStatus((error as NSError).code)
-                ))
-            }
+    /// A reader of a copy of `bytes`.
+    public init<Bytes: Collection<UInt8>>(bytes: Bytes) throws(BlockBufferError) {
+        let bytes = Array(bytes)
+        self.blockBuffer = try CMBlockBuffer()
+        _readerIndex = .zero
+        guard !bytes.isEmpty else { return }
+        let copy = try CMBlockBuffer(length: bytes.count, flags: .assureMemoryNow)
+        let status = bytes.withUnsafeBytes { bytes in
+            CMBlockBufferReplaceDataBytes(with: bytes.baseAddress!, blockBuffer: copy, offsetIntoDestination: 0, dataLength: bytes.count)
         }
+        guard status == noErr else { throw BlockBufferError(status: status) }
+        blockBuffer = copy
+    }
+
+    public init(reader: sending BlockBufferReader, range: Range<Int>? = nil, permitEmptyReference: Bool = false) throws(BlockBufferError) {
+        self.blockBuffer = try CMBlockBuffer()
+        try blockBuffer.append(
+            bufferReference: reader.blockBuffer,
+            range: range ?? 0..<reader.blockBuffer.dataLength,
+            flags: permitEmptyReference ? .permitEmptyReference : []
+        )
+        _readerIndex = .zero
+    }
+
+    /// The readable bytes.
+    private var readableRange: Range<Int> {
+        _readerIndex..<blockBuffer.dataLength
     }
 
     public func withUnsafeReadableBlockBuffer<R>(_ body: (CMBlockBuffer) throws -> R) throws -> R {
-        return try body(CMBlockBuffer(bufferReference: blockBuffer[_readerIndex...]))
+        try body(CMBlockBuffer(bufferReference: blockBuffer, range: readableRange))
     }
 
     public func withUnsafeReadableBuffer<R>(
         makeContigiousWith allocator: CFAllocator? = nil,
         _ body: (UnsafeRawBufferPointer) throws -> R
     ) throws -> R {
-        let blockBuffer = if let allocator {
-            try blockBuffer[_readerIndex...].makeContiguous(allocator: allocator)
-        } else {
-            try CMBlockBuffer(bufferReference: blockBuffer[_readerIndex...])
+        if let allocator {
+            return try blockBuffer.makeContiguous(range: readableRange, allocator: allocator).withContiguousStorage(body)
         }
-
-        return try blockBuffer._withContiguousStorage { buffer in
-            try body(buffer)
-        }
+        return try blockBuffer.withContiguousStorage(in: readableRange, body)
     }
 
-    public func extend(with blockBuffer: CMBlockBuffer, permitEmptyReference: Bool = false) throws {
-        do {
-            try self.blockBuffer.append(
-                bufferReference: blockBuffer,
-                flags: permitEmptyReference ? [.permitEmptyReference] : []
-            )
-        } catch {
-            throw BlockBufferReaderErrors(.emptyBlockBuffer)
-        }
+    public func extend(with blockBuffer: CMBlockBuffer, permitEmptyReference: Bool = false) throws(BlockBufferError) {
+        try self.blockBuffer.append(
+            bufferReference: blockBuffer,
+            flags: permitEmptyReference ? [.permitEmptyReference] : []
+        )
     }
 
-    public func extend(with reader: BlockBufferReader, permitEmptyReference: Bool = false) throws {
-        do {
-            try self.blockBuffer.append(
-                bufferReference: reader.blockBuffer,
-                flags: permitEmptyReference ? [.permitEmptyReference] : []
-            )
-        } catch {
-            throw BlockBufferReaderErrors(.emptyBlockBuffer)
-        }
+    public func extend(with reader: BlockBufferReader, permitEmptyReference: Bool = false) throws(BlockBufferError) {
+        try extend(with: reader.blockBuffer, permitEmptyReference: permitEmptyReference)
     }
 
     @_specialize(where T == BlockBufferView)
@@ -106,31 +93,18 @@ public struct BlockBufferReader: Hashable {
         with data: T,
         permitEmptyReference: Bool = false
     ) throws where T.Element == UInt8 {
-        do {
-            let blockBuffer = try data.withContiguousStorageIfAvailable {
-                let blockBuffer = try CMBlockBuffer(length: $0.count, flags: .assureMemoryNow)
-                try blockBuffer.replaceDataBytes(with: UnsafeRawBufferPointer($0))
-                return blockBuffer
-            }
-
-            try self.blockBuffer.append(
-                bufferReference: blockBuffer ?? CMBlockBuffer(),
-                flags: permitEmptyReference ? [.permitEmptyReference] : []
-            )
-        } catch {
-            throw BlockBufferReaderErrors(.emptyBlockBuffer)
+        let blockBuffer = try data.withContiguousStorageIfAvailable {
+            let blockBuffer = try CMBlockBuffer(length: $0.count, flags: .assureMemoryNow)
+            try blockBuffer.replaceDataBytes(with: UnsafeRawBufferPointer($0))
+            return blockBuffer
         }
+        guard let blockBuffer else { return }
+        try extend(with: blockBuffer, permitEmptyReference: permitEmptyReference)
     }
 
-    public mutating func clear() throws {
-        do {
-            self.blockBuffer = try CMBlockBuffer()
-            _readerIndex = .zero
-        } catch {
-            throw BlockBufferReaderErrors(.unknownCoreMedia(
-                OSStatus((error as NSError).code)
-            ))
-        }
+    public mutating func clear() throws(BlockBufferError) {
+        self.blockBuffer = try CMBlockBuffer()
+        _readerIndex = .zero
     }
 
     /// Move the reader index forward by `offset` bytes.
@@ -143,8 +117,8 @@ public struct BlockBufferReader: Hashable {
     public mutating func moveReaderIndex(forwardBy offset: Int) {
         let newIndex = self._readerIndex + offset
         precondition(
-            newIndex >= 0 && newIndex <= blockBuffer.endIndex,
-            "new readerIndex: \(newIndex), expected: range(0, \(blockBuffer.endIndex))"
+            newIndex >= 0 && newIndex <= blockBuffer.dataLength,
+            "new readerIndex: \(newIndex), expected: range(0, \(blockBuffer.dataLength))"
         )
         self._moveReaderIndex(to: newIndex)
     }
@@ -158,8 +132,8 @@ public struct BlockBufferReader: Hashable {
     ///   - offset: The offset in bytes to set the reader index to.
     public mutating func moveReaderIndex(to offset: Int) {
         precondition(
-            offset >= 0 && offset <= blockBuffer.endIndex,
-            "new readerIndex: \(offset), expected: range(0, \(blockBuffer.endIndex))"
+            offset >= 0 && offset <= blockBuffer.dataLength,
+            "new readerIndex: \(offset), expected: range(0, \(blockBuffer.dataLength))"
         )
         self._moveReaderIndex(to: offset)
     }
@@ -197,22 +171,15 @@ public struct BlockBufferReader: Hashable {
         if T.self == UInt8.self {
             assert(range.count == 1)
             // ok as CMBlockBuffer should always contain one byte at every index
-            return try blockBuffer._withUnsafeMutableBytes(atOffset: startIndex) { ptr in
+            return try blockBuffer.withUnsafeMutableBlockBytes(at: startIndex) { ptr in
                 unsafeBitCast(ptr[0], to: T.self)
             }
         }
 
         var value: T = 0
-        let status = withUnsafeMutableBytes(of: &value) { valuePtr -> OSStatus in
-            CMBlockBufferCopyDataBytes(
-                blockBuffer,
-                atOffset: startIndex,
-                dataLength: range.count,
-                destination: valuePtr.baseAddress!
-            )
+        try withUnsafeMutableBytes(of: &value) { valuePtr throws(BlockBufferError) in
+            try blockBuffer.copyDataBytes(atOffset: startIndex, to: valuePtr)
         }
-
-        guard status == kCMBlockBufferNoErr else { throw BlockBufferReaderErrors(.outOfBounds) }
 
         return _toEndianness(value: value, endianness: endianness)
     }
@@ -291,23 +258,25 @@ public struct BlockBufferReader: Hashable {
             throw BlockBufferReaderErrors(.outOfBounds)
         }
 
-        let blockBufferRange = blockBuffer[index0 ..< (index0 + length)]
+        let range = index0..<(index0 + length)
         let doCopy: Bool
         switch byteTransferStrategy {
         case .copy:
             doCopy = true
         case .noCopy:
-            doCopy = !blockBufferRange.isContiguous
+            doCopy = !blockBuffer.isContiguous(in: range)
         case .automatic:
-            doCopy = !blockBufferRange.isContiguous || length <= 256 * 1024
+            doCopy = !blockBuffer.isContiguous(in: range) || length <= 256 * 1024
         }
 
         if doCopy {
-            return try blockBufferRange._dataBytes()
+            return try blockBuffer.dataBytes(in: range)
         } else {
-            return try blockBuffer._withUnsafeMutableBytes(atOffset: index0) { ptr in
-                precondition(ptr.count >= length,
-                                "noCopy requested but contiguous run at offset \(index0) is only \(ptr.count) bytes, need \(length)")
+            return try blockBuffer.withUnsafeMutableBlockBytes(at: index0) { ptr in
+                precondition(
+                    ptr.count >= length,
+                    "noCopy requested but contiguous run at offset \(index0) is only \(ptr.count) bytes, need \(length)"
+                )
                 let storageRef = Unmanaged<CMBlockBuffer>.passRetained(blockBuffer)
                 return Data(
                     bytesNoCopy: UnsafeMutableRawPointer(mutating: ptr.baseAddress!),
@@ -329,14 +298,13 @@ public struct BlockBufferReader: Hashable {
         let range = try self.rangeWithinReadableBytes(index: index, length: length)
         let startIndex = range.startIndex + readerIndex
         let blockBufferRange = startIndex..<startIndex + range.count
-        let blockBuffer = blockBuffer[blockBufferRange]
 
-        if blockBuffer.isContiguous {
-            return try blockBuffer._withContiguousStorage { ptr in
+        if blockBuffer.isContiguous(in: blockBufferRange) {
+            return try blockBuffer.withContiguousStorage(in: blockBufferRange) { ptr in
                 [UInt8](ptr.bindMemory(to: UInt8.self))
             }
         } else {
-            return try [UInt8](blockBuffer._dataBytes())
+            return try [UInt8](blockBuffer.dataBytes(in: blockBufferRange))
         }
     }
 
@@ -404,12 +372,7 @@ public struct BlockBufferReader: Hashable {
             throw BlockBufferReaderErrors(.outOfBounds)
         }
 
-        do {
-            let blockBuffer = try CMBlockBuffer(bufferReference: blockBuffer[index..<(index + length)])
-            return BlockBufferReader(blockBuffer)
-        } catch {
-            throw BlockBufferReaderErrors(.unknownCoreMedia(OSStatus((error as NSError).code)))
-        }
+        return try BlockBufferReader(CMBlockBuffer(bufferReference: blockBuffer, range: index..<(index + length)))
     }
 
     public mutating func readSlice(length: Int) throws -> BlockBufferReader {
@@ -446,14 +409,14 @@ public struct BlockBufferReader: Hashable {
     } 
 
     mutating func _moveReaderIndex(to newIndex: Int) {
-        assert(newIndex >= 0 && newIndex <= blockBuffer.endIndex)
+        assert(newIndex >= 0 && newIndex <= blockBuffer.dataLength)
         self._readerIndex = newIndex
     }
 }
 
 public extension Data {
     init(buffer: BlockBufferReader) throws {
-        self = try buffer.blockBuffer._dataBytes()
+        self = try buffer.blockBuffer.dataBytes()
     }
 }
 
@@ -472,90 +435,11 @@ extension BlockBufferReader {
 
 public final class BlockBufferReaderErrors: IOError, @unchecked Sendable {
     public enum Cause {
+        /// The bytes asked for are not readable.
         case outOfBounds
-        case emptyBlockBuffer
-        case unknownCoreMedia(OSStatus)
     }
 
     public init(_ cause: Cause) {
-        switch cause {
-        case let .unknownCoreMedia(osStatus):
-            super.init(
-                message: nil,
-                cause: NSError(domain: NSOSStatusErrorDomain, code: Int(osStatus))
-            )
-        case .outOfBounds, .emptyBlockBuffer:
-            super.init(message: nil, cause: nil)
-        }
-    }
-}
-
-extension CMBlockBuffer {
-    @inlinable
-    func _withUnsafeMutableBytes<R>(atOffset offset: Int = 0, _ body: (UnsafeMutableRawBufferPointer) -> R) throws(BlockBufferReaderErrors) -> R {
-        do {
-            return try withUnsafeMutableBytes(atOffset: offset) { body($0) }
-        } catch {
-            let errorCode = OSStatus((error as NSError).code)
-            switch errorCode {
-            case kCMBlockBufferBadOffsetParameterErr,
-                kCMBlockBufferBadLengthParameterErr,
-                kCMBlockBufferBadPointerParameterErr,
-                kCMBlockBufferEmptyBBufErr,
-                kCMBlockBufferUnallocatedBlockErr,
-                kCMBlockBufferInsufficientSpaceErr:
-                throw BlockBufferReaderErrors(.outOfBounds)
-            default:
-                throw BlockBufferReaderErrors(.unknownCoreMedia(errorCode))
-            }
-        }
-    }
-
-    @inlinable
-    func _append(bufferReference: CMBlockBufferProtocol, flags: CMBlockBuffer.Flags = []) throws(BlockBufferReaderErrors) {
-        do {
-            try append(bufferReference: bufferReference, flags: flags)
-        } catch {
-            throw BlockBufferReaderErrors(.emptyBlockBuffer)
-        }
-    }
-}
-
-extension CMBlockBufferProtocol {
-    @inlinable
-    func _dataBytes() throws(BlockBufferReaderErrors) -> Data {
-        do {
-            return try dataBytes()
-        } catch {
-            let errorCode = OSStatus((error as NSError).code)
-            switch errorCode {
-            case kCMBlockBufferEmptyBBufErr,
-                kCMBlockBufferUnallocatedBlockErr,
-                kCMBlockBufferInsufficientSpaceErr:
-                throw BlockBufferReaderErrors(.outOfBounds)
-            default:
-                throw BlockBufferReaderErrors(.unknownCoreMedia(errorCode))
-            }
-        }
-    }
-
-    @inlinable
-    func _withContiguousStorage<R>(_ body: (UnsafeRawBufferPointer) throws -> R) throws(BlockBufferReaderErrors) -> R {
-        do {
-            return try withContiguousStorage(body)
-        } catch {
-            let errorCode = OSStatus((error as NSError).code)
-            switch errorCode {
-            case kCMBlockBufferBadOffsetParameterErr,
-                kCMBlockBufferBadLengthParameterErr,
-                kCMBlockBufferBadPointerParameterErr,
-                kCMBlockBufferEmptyBBufErr,
-                kCMBlockBufferUnallocatedBlockErr,
-                kCMBlockBufferInsufficientSpaceErr:
-                throw BlockBufferReaderErrors(.outOfBounds)
-            default:
-                throw BlockBufferReaderErrors(.unknownCoreMedia(errorCode))
-            }
-        }
+        super.init(message: "\(cause)", cause: nil)
     }
 }

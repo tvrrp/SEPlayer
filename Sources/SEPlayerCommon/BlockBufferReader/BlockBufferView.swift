@@ -67,8 +67,8 @@ public struct BlockBufferView: RandomAccessCollection {
 
     public func withContiguousStorageIfAvailable<R>(_ body: (UnsafeBufferPointer<UInt8>) throws -> R) rethrows -> R? {
         do {
-            let buffer = try _buffer.blockBuffer[_range].makeContiguous()
-            return try buffer.withContiguousStorage {
+            // Copies only when the range spans blocks.
+            return try _buffer.blockBuffer.withContiguousStorage(in: _range) {
                 try body($0.assumingMemoryBound(to: UInt8.self))
             }
         } catch {

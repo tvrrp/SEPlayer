@@ -111,14 +111,12 @@ public enum TsPayload {
         func initialize(
             session: TimestampAdjuster.Session,
             extractorOutput: ExtractorOutput,
-            idGenerator: TrackIdGenerator,
-            _ isolation: isolated any Actor
-        ) async throws
+            idGenerator: TrackIdGenerator
+        ) throws
         func seek()
         func consume(
             data: inout BlockBufferReader,
-            flags: TsPayload.PacketIndicators,
-            _ isolation: isolated any Actor
-        ) async throws
+            flags: TsPayload.PacketIndicators
+        ) throws
     }
 }

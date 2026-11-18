@@ -5,48 +5,67 @@
 //  Created by tvrrp on 23.02.2026.
 //
 
+import CoreMedia
 import DataSource
 import Foundation
 import SEPlayerCommon
 
-public class Chunk: Loadable {
+/// An abstract base class for ``Loadable`` implementations that load chunks of data required for the playback of
+/// streams.
+open class Chunk: Loadable, @unchecked Sendable {
+    /// Identifies the load task for this loadable.
     public let loadTaskId: Int
+    /// The data spec that defines the data to be loaded.
     public let dataSpec: DataSpec
-    public let dataType: Void // TODO: dataType
-    public let trackFormat: Format
+    /// The data type of the chunk.
+    public let dataType: DataType
+    /// The format of the track to which this chunk belongs.
+    public let trackFormat: Format?
+    /// One of the selection reasons if the chunk belongs to a track.
     public let trackSelectionReason: TrackSelectionReason
+    /// Optional data associated with the selection of the track to which this chunk belongs.
     public let trackSelectionData: Any?
-    public let startTimeUs: Int64
-    public let endTimeUs: Int64
-    public let dataSource: StatsDataSource
+    /// The start time of the media contained by the chunk, or `.invalid` if the data being loaded does not contain
+    /// media samples.
+    public let startTime: CMTime
+    /// The end time of the media contained by the chunk, or `.invalid` if the data being loaded does not contain
+    /// media samples.
+    public let endTime: CMTime
 
-    public var durationUs: Int64 { endTimeUs - startTimeUs }
-    public var bytesLoaded: Int { dataSource.bytesRead }
-    public var url: URL? { dataSource.lastOpenedUrl }
-    public var urlResponse: URLResponse? { dataSource.lastUrlResponse }
+    /// The duration of the media contained by the chunk.
+    public var duration: CMTime { endTime - startTime }
+
+    /// The number of bytes that have been loaded.
+    public var bytesLoaded: Int { bytesLock.withLock { _bytesLoaded } }
+
+    private let bytesLock = UnfairLock()
+    private var _bytesLoaded = 0 // guarded by bytesLock
 
     public init(
-        dataSource: DataSource,
         dataSpec: DataSpec,
-        dataType: Void,
-        trackFormat: Format,
+        dataType: DataType,
+        trackFormat: Format?,
         trackSelectionReason: TrackSelectionReason,
         trackSelectionData: Any?,
-        startTimeUs: Int64,
-        endTimeUs: Int64
+        startTime: CMTime,
+        endTime: CMTime
     ) {
-        self.dataSource = StatsDataSource(dataSource: dataSource)
         self.dataSpec = dataSpec
         self.dataType = dataType
         self.trackFormat = trackFormat
         self.trackSelectionReason = trackSelectionReason
         self.trackSelectionData = trackSelectionData
-        self.startTimeUs = startTimeUs
-        self.endTimeUs = endTimeUs
+        self.startTime = startTime
+        self.endTime = endTime
         loadTaskId = LoadEventInfo.nextLoadId()
     }
 
-    public func load(_ isolation: isolated any Actor) async throws {
-        fatalError()
+    open func load(_ isolation: isolated any Actor) async throws {
+        fatalError("To override")
+    }
+
+    /// Counts loaded bytes.
+    public final func addBytesLoaded(_ count: Int) {
+        bytesLock.withLock { _bytesLoaded += count }
     }
 }

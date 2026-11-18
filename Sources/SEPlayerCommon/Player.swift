@@ -8,8 +8,11 @@
 import CoreMedia
 import Dispatch
 
+/// A player, usable from any thread. Its delegates hear the changes on the main queue.
 public protocol Player: AnyObject, Sendable {
     @MainActor var delegate: MulticastDelegate<SEPlayerDelegate> { get }
+    /// The values below as of one moment: read several of them from here, as the player may change between reads.
+    var snapshot: PlayerSnapshot { get }
     var playbackState: PlayerState { get }
     var isPlaying: Bool { get }
     var playWhenReady: Bool { get set }
@@ -17,6 +20,8 @@ public protocol Player: AnyObject, Sendable {
     var shuffleModeEnabled: Bool { get set }
     var volume: Float { get set }
     var isMuted: Bool { get set }
+    /// How the player shares the app's audio session with other players and with the audio of other apps.
+    var audioSessionPolicy: AudioSessionPolicy { get set }
     var isLoading: Bool { get }
     var seekBackIncrement: CMTime { get }
     var seekForwardIncrement: CMTime { get }
@@ -41,6 +46,27 @@ public protocol Player: AnyObject, Sendable {
     var contentDuration: CMTime { get }
     var contentPosition: CMTime { get }
     var contentBufferedPosition: CMTime { get }
+
+    /// The tracks of the current media item, with whether each is supported and selected. Empty until they are
+    /// known.
+    ///
+    /// Every track of an adaptive selection counts as selected: which of them plays changes with the network.
+    var currentTracks: Tracks { get }
+
+    /// The parameters constraining the track selection.
+    ///
+    /// Setting them reselects the tracks for the media loaded from now on: what is buffered plays out first, so
+    /// playback isn't interrupted. Calls ``SEPlayerDelegate/player(_:didChangeTrackSelectionParameters:)``.
+    var trackSelectionParameters: TrackSelectionParameters { get set }
+
+    /// The metadata of the current media item: what its ``MediaItem`` says.
+    var mediaMetadata: MediaMetadata { get }
+
+    /// The metadata of the playlist, as set by the app.
+    var playlistMetadata: MediaMetadata { get set }
+
+    /// The size of the video being played: ``VideoSize/unknown`` before there is video.
+    var videoSize: VideoSize { get }
 
     func set(mediaItems: [MediaItem])
     func set(mediaItems: [MediaItem], resetPosition: Bool)

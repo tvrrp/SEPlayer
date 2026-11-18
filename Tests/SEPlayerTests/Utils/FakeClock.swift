@@ -6,31 +6,31 @@
 //
 
 import CoreMedia
+import SEPlayerCommon
 import Testing
 @testable import SEPlayer
 
-final class FakeClock: SEClock {
-    let clock: CMClock = CMClockGetHostTimeClock()
+final class FakeClock: SEClock, @unchecked Sendable {
+    let clock: CMClock = CMClock.hostTimeClock
 
     var time: CMTime {
         CMTime(value: milliseconds, timescale: 1000)
     }
 
-    /// How much faster media time runs than real time. The player plays on a timebase rather than
-    /// on the messages this clock delivers, so tests would otherwise play media in real time.
     static let mediaTimeRate: Float64 = 30
 
-    /// The source of every timebase the player makes: the host clock, sped up.
     private let mediaTimeSource: CMTimebase = {
-        let timebase = try! CMTimebase(sourceClock: CMClockGetHostTimeClock())
-        try! timebase.setTime(.zero)
-        try! timebase.setRate(FakeClock.mediaTimeRate)
+        let timebase = try! CMTimebase(sourceClock: CMClock.hostTimeClock)
+        try! timebase.setTime(to: .zero)
+        try! timebase.setRate(to: FakeClock.mediaTimeRate)
         return timebase
     }()
 
     func makeTimebase() throws -> CMTimebase {
         try CMTimebase(sourceTimebase: mediaTimeSource)
     }
+
+    var runsOnRenderSynchronizer: Bool { false }
 
     var milliseconds: Int64 {
         lock.withLock { bootTimeMs + timeSinceBootMs }
@@ -44,304 +44,54 @@ final class FakeClock: SEClock {
         Time.msToUs(timeMs: milliseconds) * 1000
     }
 
-    private static var messageIdProvider = 0
-    private static let messageIdLock = UnfairLock()
-
-    private let isAutoAdvancing: Bool
-    private var handlerMessages: NSHashTable<ClockMessage>
-    private var busyLoopers: NSHashTable<Looper>
     private var bootTimeMs: Int64
     private var timeSinceBootMs: Int64
-    private var waitingForMessage: Bool
     private let lock: UnfairLock
 
-    init(
-        bootTimeMs: Int64 = 0,
-        initialTimeMs: Int64 = 0,
-        isAutoAdvancing: Bool = true
-    ) {
+    init(bootTimeMs: Int64 = 0, initialTimeMs: Int64 = 0) {
         self.bootTimeMs = bootTimeMs
         self.timeSinceBootMs = initialTimeMs
-        self.isAutoAdvancing = isAutoAdvancing
-        handlerMessages = NSHashTable<ClockMessage>()
-        busyLoopers = NSHashTable<Looper>()
-        waitingForMessage = false
         lock = UnfairLock()
     }
 
     func advanceTime(_ timeDiffMs: Int64) {
-        advanceTimeInternal(timeDiffMs: timeDiffMs)
-        maybeTriggerMessage()
-    }
-
-    func createHandler(queue: Queue, looper: Looper?) -> HandlerWrapper {
-        ClockHandler(
-            queue: queue,
-            looper: looper,
-            pendingHandlerMessageClosure: { [weak self] message in
-                guard let self else { return }
-                addPendingHandlerMessage(message)
-            },
-            removePendingHandlerMessagesClosure: { [weak self] hander, what in
-                guard let self else { return }
-                removePendingHandlerMessages(handler: hander, what: what)
-            },
-            uptimeMsGetter: { [weak self] in
-                guard let self else { return .zero }
-                return timeSinceBootMs
-            }
-        )
-    }
-
-    private func addPendingHandlerMessage(_ message: ClockMessage) {
-        lock.withLock {
-            handlerMessages.add(message)
-            if !waitingForMessage {
-                waitingForMessage = true
-
-                DispatchQueue.main.async { [weak self] in
-                    self?.onMessageHandled()
-                }
-            }
-        }
-    }
-
-    private func removePendingHandlerMessages(handler: ClockHandler, what: MessageKind) {
-        lock.withLock {
-            for message in handlerMessages.allObjects.reversed() {
-                if message.handler === handler, message.what.isEqual(to: what) {
-                    handlerMessages.remove(message)
-                }
-            }
-
-            handler.handler.removeMessages(what)
-        }
-    }
-
-    private func hasPendingMessage(handler: ClockHandler, what: MessageKind) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        for message in handlerMessages.allObjects {
-            if message.target === handler, message.what.isEqual(to: what) {
-                return true
-            }
-        }
-
-//            TODO: return handler.handler.h
-        return false
-    }
-
-    private func maybeTriggerMessage() {
-        lock.lock()
-        guard !waitingForMessage else {
-            lock.unlock()
-            return
-        }
-        guard handlerMessages.count > 0 else {
-            lock.unlock()
-            return
-        }
-
-        let objects = handlerMessages.allObjects.sorted()
-        let message = objects[0]
-
-        if message.timeMs > timeSinceBootMs {
-            if isAutoAdvancing {
-                lock.unlock()
-                advanceTimeInternal(timeDiffMs: Int64(message.timeMs) - timeSinceBootMs)
-                lock.lock()
-            } else {
-                return
-            }
-        }
-
-        handlerMessages.remove(message)
-        waitingForMessage = true
-        lock.unlock()
-        var messageSent = false
-        let realHandler = message.handler.handler
-        if let callback = message.callback {
-            messageSent = realHandler.post(callback)
-        } else {
-            messageSent = realHandler.sendMessage(realHandler.obtainMessage(what: message.what))
-        }
-        messageSent = messageSent && message.handler.internalHandler.post { [weak self] in
-            self?.onMessageHandled()
-        }
-
-        if !messageSent {
-            onMessageHandled()
-        }
-    }
-
-    private func onMessageHandled() {
-        lock.withLock {
-            waitingForMessage = false
-        }
-        maybeTriggerMessage()
-    }
-
-    func advanceTimeInternal(timeDiffMs: Int64) {
         lock.withLock { timeSinceBootMs += timeDiffMs }
     }
 
-    static func nextMessageId() -> Int {
-        messageIdLock.withLock {
-            let messageIdProvider = Self.messageIdProvider
-            Self.messageIdProvider += 1
-            return messageIdProvider
-        }
+    /// Moves the time forward to `milliseconds`, if it is behind.
+    fileprivate func advanceTime(to milliseconds: Int64) {
+        lock.withLock { timeSinceBootMs = max(timeSinceBootMs, milliseconds - bootTimeMs) }
+    }
+
+    func makeScheduler(queue: Queue) -> PlayerScheduler {
+        FakeScheduler(queue: queue, clock: self)
     }
 }
 
-private final class ClockMessage: HandlerWrapperMessage, Hashable, Comparable {
-    var target: HandlerWrapper? { handler }
+/// Runs the player's work on its queue, but only once the main queue is free, in the order it was posted: a test on the
+/// main actor sees the player's state as its commands left it until it awaits. Delayed work runs as soon as it is
+/// reached, moving the time of the clock forward to when it was due: the tests don't wait for timers.
+private final class FakeScheduler: PlayerScheduler, @unchecked Sendable {
+    private let queue: Queue
+    private let clock: FakeClock
 
-    let messageId: Int
-    let handler: ClockHandler
-    let callback: (() -> Void)?
-    let timeMs: Int64
-    let what: MessageKind
-    let pendingHandlerMessageClosure: (ClockMessage) -> Void
-
-    init(
-        timeMs: Int64,
-        handler: ClockHandler,
-        what: MessageKind,
-        pendingHandlerMessageClosure: @escaping (ClockMessage) -> Void,
-        callback: (() -> Void)? = nil
-    ) {
-        self.messageId = FakeClock.nextMessageId()
-        self.timeMs = timeMs
-        self.handler = handler
-        self.what = what
-        self.pendingHandlerMessageClosure = pendingHandlerMessageClosure
-        self.callback = callback
+    init(queue: Queue, clock: FakeClock) {
+        self.queue = queue
+        self.clock = clock
     }
 
-    func sendToTarget() {
-        pendingHandlerMessageClosure(self)
+    func post(_ work: @escaping @Sendable () -> Void) {
+        DispatchQueue.main.async { [queue] in queue.justDispatch(work) }
     }
 
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(self))
-    }
-
-    static func == (lhs: ClockMessage, rhs: ClockMessage) -> Bool {
-        return lhs === rhs
-    }
-
-    static func < (lhs: ClockMessage, rhs: ClockMessage) -> Bool {
-        if lhs.timeMs != rhs.timeMs {
-            return lhs.timeMs < rhs.timeMs
+    func post(after delay: DispatchTimeInterval, _ work: @escaping @Sendable () -> Void) -> DispatchWorkItem {
+        let dueMs = clock.milliseconds + Int64(delay.totalMilliseconds)
+        let item = DispatchWorkItem(block: work)
+        post { [clock] in
+            guard !item.isCancelled else { return }
+            clock.advanceTime(to: dueMs)
+            item.perform()
         }
-
-        if lhs.timeMs == .min {
-            return lhs.messageId > rhs.messageId
-        } else {
-            return lhs.messageId < rhs.messageId
-        }
-    }
-}
-
-private final class ClockHandler: HandlerWrapper {
-    var callback: Handler.Callback? {
-        get { handler.callback }
-        set { handler.callback = newValue }
-    }
-
-    var looper: Looper { handler.looper }
-
-    let handler: Handler
-    let internalHandler: Handler
-
-    private let pendingHandlerMessageClosure: (ClockMessage) -> Void
-    private let removePendingHandlerMessagesClosure: (ClockHandler, MessageKind) -> Void
-    private let uptimeMsGetter: (() -> Int64)
-
-    init(
-        queue: Queue,
-        looper: Looper?,
-        pendingHandlerMessageClosure: @escaping (ClockMessage) -> Void,
-        removePendingHandlerMessagesClosure: @escaping (ClockHandler, MessageKind) -> Void,
-        uptimeMsGetter: @escaping (() -> Int64)
-    ) {
-        handler = Handler(queue: queue, looper: looper)
-        internalHandler = Handler(queue: queue, looper: looper)
-        self.pendingHandlerMessageClosure = pendingHandlerMessageClosure
-        self.removePendingHandlerMessagesClosure = removePendingHandlerMessagesClosure
-        self.uptimeMsGetter = uptimeMsGetter
-    }
-
-    func hasMessage(_ what: MessageKind) -> Bool {
-        return false // TODO: fixme
-    }
-
-    func obtainMessage(what: MessageKind) -> HandlerWrapperMessage {
-        ClockMessage(
-            timeMs: uptimeMsGetter(),
-            handler: self,
-            what: what,
-            pendingHandlerMessageClosure: pendingHandlerMessageClosure
-        )
-    }
-
-    func sendMessageAtFrontOfQueue(_ msg: HandlerWrapperMessage) -> Bool {
-        guard let message = msg as? ClockMessage else {
-            return false
-        }
-
-        ClockMessage(
-            timeMs: .min,
-            handler: self,
-            what: message.what,
-            pendingHandlerMessageClosure: message.pendingHandlerMessageClosure
-        ).sendToTarget()
-
-        return true
-    }
-
-    func sendEmptyMessage(_ what: MessageKind) -> Bool {
-        sendEmptyMessageAtTime(
-            what,
-            timeNs: .init(uptimeNanoseconds: UInt64(uptimeMsGetter() * 1000))
-        )
-    }
-
-    func sendEmptyMessageDelayed(_ what: MessageKind, delayMs: Int) -> Bool {
-        sendEmptyMessageAtTime(
-            what,
-            timeNs: .init(uptimeNanoseconds: UInt64((Int(uptimeMsGetter()) + delayMs)  * 1000))
-        )
-    }
-
-    func sendEmptyMessageAtTime(_ what: MessageKind, timeNs: DispatchTime) -> Bool {
-        ClockMessage(
-            timeMs: Int64(timeNs.uptimeNanoseconds / 1000),
-            handler: self,
-            what: what,
-            pendingHandlerMessageClosure: pendingHandlerMessageClosure
-        ).sendToTarget()
-        return true
-    }
-
-    func removeMessages(_ what: MessageKind) {
-        removePendingHandlerMessagesClosure(self, what)
-    }
-
-    func post(_ callback: @escaping () -> Void) {
-        ClockMessage(
-            timeMs: Int64(DispatchTime.now().uptimeNanoseconds),
-            handler: self,
-            what: CallbackMessageKind(),
-            pendingHandlerMessageClosure: pendingHandlerMessageClosure,
-            callback: callback
-        ).sendToTarget()
-    }
-}
-
-/// The `what` of a posted callback.
-private struct CallbackMessageKind: MessageKind {
-    func isEqual(to other: MessageKind) -> Bool {
-        other is CallbackMessageKind
+        return item
     }
 }

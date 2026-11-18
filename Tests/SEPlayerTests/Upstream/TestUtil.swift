@@ -9,16 +9,16 @@ import CoreMedia
 @testable import SEPlayer
 
 struct TestUtil {
-    public static func buildTestData(lenght: Int) -> ByteBuffer {
-        buildTestData(lenght: lenght, seed: lenght)
+    public static func buildTestData(length: Int) -> ByteBuffer {
+        buildTestData(length: length, seed: length)
     }
 
-    public static func buildTestData(lenght: Int, seed: Int) -> ByteBuffer {
+    public static func buildTestData(length: Int, seed: Int) -> ByteBuffer {
         var buffer = ByteBuffer()
-        buffer.reserveCapacity(minimumWritableBytes: lenght)
+        buffer.reserveCapacity(minimumWritableBytes: length)
         let seed: UInt8 = seed <= Int(UInt8.max) ? UInt8(seed) : UInt8.max
 
-        for _ in 0..<lenght {
+        for _ in 0..<length {
             let randomNumber = UInt8.random(in: 0..<seed)
             buffer.writeInteger(randomNumber)
         }

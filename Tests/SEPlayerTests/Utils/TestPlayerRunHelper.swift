@@ -8,16 +8,21 @@ import Foundation
 import Testing
 @testable import SEPlayer
 
-/// Runs a player until something happens, after ExoPlayer's `TestPlayerRunHelper`.
+/// Runs a player until something happens.
 ///
 /// Tests using it run on the main actor: the player's commands go to its queue, and reading its
-/// state waits for them, as ExoPlayer's masking does. Events reach the main queue afterwards.
+/// state waits for them. Events reach the main queue afterwards.
 @MainActor
 enum TestPlayerRunHelper {
     static let defaultTimeoutMs: UInt64 = 10_000
 
     /// Lets the player handle every command sent so far, and deliver the events they caused.
     static func runUntilPendingCommandsAreFullyHandled(_ player: SEPlayer) async {
+        // The commands run on the playback queue in the order they were sent: a message sent now runs after them.
+        await withCheckedContinuation { continuation in
+            player.createMessage { _, _ in continuation.resume() }.send()
+        }
+        // What they changed reaches the player's queue, and its events the main queue.
         await withCheckedContinuation { continuation in
             playerSyncQueue.async {
                 DispatchQueue.main.async { continuation.resume() }
@@ -75,21 +80,45 @@ enum TestPlayerRunHelper {
 /// Plays until the media item plays at the position, then pauses.
 ///
 /// Watched on the timebase the player plays on: the player itself has no timer to deliver a message
-/// at a position.
+/// at a position. A boundary observer fires as playback passes the position. Its time is placed on the item as the
+/// player knows it when the observer is added, which can be before the timeline is, so it is added again whenever the
+/// periodic observer reports playback starting, stopping or jumping: its interval is longer than any test. That also
+/// catches a position passed already.
 func playUntilPosition(player: SEPlayer, mediaItemIndex: Int, positionMs: Int64) async throws {
     let target = CMTime(value: positionMs, timescale: 1000)
     let observerQueue = DispatchQueue(label: "PlayUntilPosition")
     let reachedPosition = AsyncStream<Void>.makeStream()
-    nonisolated(unsafe) var observer: AnyObject?
-    observer = try player.addPeriodicTimeObserver(for: CMTime(value: 10, timescale: 1000), queue: observerQueue) { _ in
-        guard observer != nil,
-              player.currentMediaItemIndex == mediaItemIndex,
-              player.currentPosition >= target else { return }
+    // Used on observerQueue only.
+    nonisolated(unsafe) var isWatching = true
+    nonisolated(unsafe) var periodicObserver: AnyObject?
+    nonisolated(unsafe) var boundaryObserver: AnyObject?
+
+    nonisolated(unsafe) var check: (CMTime) -> Void = { _ in }
+    func watchBoundary() throws {
+        boundaryObserver.map(player.removeTimeObserver)
+        boundaryObserver = try player.addBoundaryTimeObserver(for: [target], queue: observerQueue, block: check)
+    }
+    check = { _ in
+        guard isWatching else { return }
+        guard player.currentMediaItemIndex == mediaItemIndex, player.currentPosition >= target else {
+            try? watchBoundary()
+            return
+        }
+        isWatching = false
         player.pause()
-        if let observer { player.removeTimeObserver(observer) }
-        observer = nil
+        periodicObserver.map(player.removeTimeObserver)
+        boundaryObserver.map(player.removeTimeObserver)
         reachedPosition.continuation.yield()
         reachedPosition.continuation.finish()
+    }
+
+    try observerQueue.sync {
+        try watchBoundary()
+        periodicObserver = try player.addPeriodicTimeObserver(
+            for: CMTime(value: 3600, timescale: 1),
+            queue: observerQueue,
+            block: check
+        )
     }
 
     player.play()
@@ -109,7 +138,7 @@ func withTimeout<T: Sendable>(_ timeoutMs: UInt64, _ body: @escaping @Sendable (
     }
 }
 
-/// Records what the player reports, as ExoPlayer's tests do with a mocked listener.
+/// Records what the player reports.
 @MainActor
 final class PlayerEventRecorder: SEPlayerDelegate {
     struct Discontinuity {
@@ -149,6 +178,6 @@ final class PlayerEventRecorder: SEPlayerDelegate {
 }
 
 extension CMTime {
-    /// Milliseconds as ExoPlayer reports positions: the microseconds, truncated (`Util.usToMs`).
+    /// Milliseconds as positions are reported: the microseconds, truncated.
     var ms: Int64 { convertScale(1000, method: .roundTowardZero).value }
 }

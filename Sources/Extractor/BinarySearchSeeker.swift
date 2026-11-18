@@ -66,8 +66,7 @@ public class BinarySearchSeeker {
     /// reloaded at the new seek position.
     private static let maxSkipBytes = 256 * 1024
 
-    /// Exo's time positions are `long timeUs`, so its degenerate-range guards read `+ 1`.
-    /// This is that one unit, expressed once.
+    /// The smallest step between time positions, which keeps a search range from collapsing.
     static let timePositionEpsilon = CMTime(value: 1, timescale: 90_000)
 
     public let seekMap: BinarySearchSeekMap

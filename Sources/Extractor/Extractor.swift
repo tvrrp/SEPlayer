@@ -9,7 +9,7 @@ import CoreMedia
 
 public protocol Extractor: AnyObject {
     func initialize(output: any ExtractorOutput, _ isolation: isolated any Actor) async throws
-    func shiff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool
+    func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool
     func getSniffFailureDetails(_ isolation: isolated any Actor) -> [any SniffFailure]
     func read(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> ExtractorReadResult
     func seek(to position: Int, time: CMTime, _ isolation: isolated any Actor) throws

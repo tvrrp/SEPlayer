@@ -1,693 +1,323 @@
-////
-////  AVFAudioRenderer.swift
-////  SEPlayer
-////
-////  Created by Damir Yackupov on 05.01.2026.
-////
-//
-//import AVFoundation
-//import Decoder
-//import SEPlayerCommon
-//
-////final class AVFAudioRenderer: BaseSERenderer {
-////    private let renderSynchronizer: AVSampleBufferRenderSynchronizer
-////    private let audioRenderer: AVSampleBufferAudioRenderer
-////
-////    private let flagsOnlyBuffer: DecoderInputBuffer
-////    private var inputFormat: Format?
-////    private var firstStreamSampleRead: Bool = false
-////
-////    private var decoder: AudioConverterDecoder?
-////    private var inputBuffer: ACDecoderInputBuffer?
-////    private var outputBuffer: ACDecoderOutputBuffer?
-////
-////    private var decoderReinitializationState: DecoderReinitializationState
-////    private var decoderReceivedBuffers: Bool = false
-////
-////    private var currentPositionUs: Int64 = .zero
-////    private var allowPositionDiscontinuity: Bool = false
-////    private var inputStreamEnded: Bool = false
-////    private var outputStreamEnded: Bool = false
-////    private var outputStreamOffsetUs: Int64 = .zero
-////    private var pendingOutputStreamOffsetsUs: [Int64]
-////    private var pendingOutputStreamOffsetCount: Int = 0
-//////    private var hasPendingReportedSkippedSilence: Bool = false
-////    private var isStarted: Bool = false
-////    private var largestQueuedPresentationTimeUs: Int64
-////    private var lastBufferInStreamPresentationTimeUs: Int64
-////    private var nextBufferToWritePresentationTimeUs: Int64
-////
-////    private var diffTest: Int64 = .zero
-////    private var didResetPosition: Bool = false
-////    private var waitingForEndOfStream: Bool = false
-////    private var streamEnded: Bool = false
-////    private var timeObserver: Any?
-////    private var playbackParameters: PlaybackParameters = .default
-////    private var requestMediaDataInfo: (Queue, () -> Void)?
-////    private var currentRendererError: SEPlaybackError?
-////
-////    init(
-////        queue: Queue,
-////        renderSynchronizer: AVSampleBufferRenderSynchronizer,
-////        clock: SEClock
-////    ) {
-////        self.renderSynchronizer = renderSynchronizer
-////        audioRenderer = AVSampleBufferAudioRenderer()
-////
-////        flagsOnlyBuffer = .noDataBuffer()
-////        decoderReinitializationState = .none
-////        pendingOutputStreamOffsetsUs = Array(repeating: 0, count: 10)
-////        largestQueuedPresentationTimeUs = .timeUnset
-////        lastBufferInStreamPresentationTimeUs = .timeUnset
-////        nextBufferToWritePresentationTimeUs = .timeUnset
-////
-////        super.init(queue: queue, trackType: .audio, clock: clock)
-////
-////        setOutputStreamOffsetUs(.timeUnset)
-////
-////        renderSynchronizer.delaysRateChangeUntilHasSufficientMediaData = false
-////        renderSynchronizer.addRenderer(audioRenderer)
-////
-////        NotificationCenter.default.addObserver(self,
-////                                               selector: #selector(onRendererError(notification:)),
-////                                               name: .AVSampleBufferAudioRendererWasFlushedAutomatically,
-////                                               object: audioRenderer)
-////        NotificationCenter.default.addObserver(self,
-////                                               selector: #selector(onRendererError(notification:)),
-////                                               name: .AVSampleBufferAudioRendererOutputConfigurationDidChange,
-////                                               object: audioRenderer)
-////    }
-////
-////    deinit {
-////        renderSynchronizer.removeRenderer(audioRenderer, at: .zero)
-////    }
-////
-////    override func getTimebase() -> CMTimebase? {
-////        renderSynchronizer.timebase
-////    }
-////
-////    override func getMediaClock() -> MediaClock? { self }
-////
-////    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-////        guard format.sampleMimeType.trackType == .audio else {
-////            return .create(formatSupport: .unsupportedType)
-////        }
-////
-//////        let formatSupport: RendererCapabilities.Support.FormatSupport
-//////        if isFormatSupportedFromAVFAsset(format) {
-//////            formatSupport = .handled
-//////        } else {
-//////            formatSupport = try AudioConverterDecoder.supportsFormat(format)
-//////        }
-////        let formatSupport = try AudioConverterDecoder.supportsFormat(format)
-////
-////        return RendererCapabilities.Support(
-////            formatSupport: formatSupport,
-////            adaptiveSupport: .notSupported,
-////            hardwareAccelerationSupport: .notSupported,
-////            decoderSupport: .primary,
-////            tunnelingSupport: .supported,
-////        )
-////    }
-////
-////    override func render(position: Int64, elapsedRealtime: Int64) throws {
-////        if let currentRendererError {
-////            self.currentRendererError = nil
-////            throw currentRendererError
-////        }
-////
-////        if outputStreamEnded {
-////            try playEndOfStream()
-////            nextBufferToWritePresentationTimeUs = lastBufferInStreamPresentationTimeUs
-////            return
-////        }
-////
-////        if inputFormat == nil {
-////            flagsOnlyBuffer.clear()
-////            let result = try readSource(to: flagsOnlyBuffer, readFlags: .requireFormat)
-////
-////            if case let .didReadFormat(format) = result {
-////                try onInputFormatChanged(format)
-////            } else if result == .didReadBuffer {
-////                assert(flagsOnlyBuffer.flags.contains(.endOfStream))
-////                inputStreamEnded = true
-////
-////                do {
-////                    try processEndOfStream()
-////                } catch {
-////                    throw error
-////                }
-////            } else {
-////                return
-////            }
-////        }
-////
-////        try maybeInitDecoder()
-////
-////        guard decoder != nil else { return }
-////
-////        do {
-////            while try drainOutputBuffer() {}
-////            while try feedInputBuffer() {}
-////        } catch {
-////            throw error
-////        }
-////    }
-////
-////    private func drainOutputBuffer() throws -> Bool {
-////        guard let decoder else { return false }
-////
-////        if outputBuffer == nil {
-////            outputBuffer = try decoder.dequeueOutputBuffer()
-////
-////            guard let outputBuffer else { return false }
-////            if outputBuffer.skippedOutputBufferCount > 0 {
-////                // TODO: decoder counters
-////            }
-////
-////            if outputBuffer.sampleFlags.contains(.firstSample) {
-////                processFirstSampleOfStream()
-////            }
-////        }
-////
-////        guard let outputBuffer else { return false }
-////
-////        if outputBuffer.sampleFlags.contains(.endOfStream) {
-////            if decoderReinitializationState == .waitEndOfStream {
-////                releaseDecoder()
-////                try maybeInitDecoder()
-////            } else {
-////                outputBuffer.release()
-////                self.outputBuffer = nil
-////                try processEndOfStream()
-////            }
-////            return false
-////        }
-////
-////        nextBufferToWritePresentationTimeUs = .timeUnset
-////        guard let sampleBuffer = outputBuffer.sampleBuffer else { return false }
-////        if audioRenderer.isReadyForMoreMediaData {
-////            if didResetPosition {
-////                renderSynchronizer.setRate(
-////                    renderSynchronizer.rate,
-////                    time: .from(microseconds: outputBuffer.timeUs)
-////                )
-////                didResetPosition = false
-////            }
-////
-////            audioRenderer.enqueue(sampleBuffer)
-////            // TODO: decoderCounters.renderedOutputBufferCount
-////            outputBuffer.release()
-////            self.outputBuffer = nil
-////            return true
-////        } else {
-////            nextBufferToWritePresentationTimeUs = outputBuffer.timeUs
-////
-////            if let (queue, block) = requestMediaDataInfo {
-////                try handleMessage(.requestMediaDataWhenReady(queue: queue, block: block))
-////            }
-////        }
-////
-////        return false
-////    }
-////
-////    private func processFirstSampleOfStream() {
-////        if pendingOutputStreamOffsetCount != 0 {
-////            setOutputStreamOffsetUs(pendingOutputStreamOffsetsUs[0])
-////            pendingOutputStreamOffsetCount -= 1
-////            pendingOutputStreamOffsetsUs.replaceSubrange(
-////                0..<pendingOutputStreamOffsetCount,
-////                with: pendingOutputStreamOffsetsUs[1..<(1 + pendingOutputStreamOffsetCount)]
-////            )
-////        }
-////    }
-////
-////    private func setOutputStreamOffsetUs(_ outputStreamOffsetUs: Int64) {
-////        self.outputStreamOffsetUs = outputStreamOffsetUs
-////    }
-////
-////    private func feedInputBuffer() throws -> Bool {
-////        guard let decoder else { return false }
-////
-////        if decoderReinitializationState == .waitEndOfStream || inputStreamEnded {
-////            return false
-////        }
-////
-////        if inputBuffer == nil {
-////            inputBuffer = try decoder.dequeueInputBuffer()
-////        }
-////
-////        guard let inputBuffer else { return false }
-////
-////        if decoderReinitializationState == .signalEndOfStream {
-////            inputBuffer.flags.insert(.endOfStream)
-////            try decoder.queueInputBuffer(inputBuffer)
-////            self.inputBuffer = nil
-////            decoderReinitializationState = .waitEndOfStream
-////            return false
-////        }
-////
-////        switch try readSource(to: inputBuffer) {
-////        case .nothingRead:
-////            if didReadStreamToEnd() {
-////                lastBufferInStreamPresentationTimeUs = largestQueuedPresentationTimeUs
-////            }
-////
-////            return false
-////        case let .didReadFormat(format):
-////            try onInputFormatChanged(format)
-////            return true
-////        case .didReadBuffer:
-////            if inputBuffer.flags.contains(.endOfStream) {
-////                inputStreamEnded = true
-////                if lastBufferInStreamPresentationTimeUs != .timeUnset {
-////                    diffTest = lastBufferInStreamPresentationTimeUs - largestQueuedPresentationTimeUs
-////                }
-////                lastBufferInStreamPresentationTimeUs = largestQueuedPresentationTimeUs
-////                try decoder.queueInputBuffer(inputBuffer)
-////                self.inputBuffer = nil
-////                return false
-////            }
-////
-////            if !firstStreamSampleRead {
-////                firstStreamSampleRead = true
-////                inputBuffer.flags.insert(.firstSample)
-////            }
-////
-////            largestQueuedPresentationTimeUs = inputBuffer.timeUs
-////            if didReadStreamToEnd() || inputBuffer.flags.contains(.lastSample) {
-////                lastBufferInStreamPresentationTimeUs = largestQueuedPresentationTimeUs
-////            }
-////
-////            inputBuffer.format = inputFormat
-////            try decoder.queueInputBuffer(inputBuffer)
-////            decoderReceivedBuffers = true
-////            // TODO: decoderCounters.queuedInputBufferCount += 1
-////            self.inputBuffer = nil
-////            return true
-////        }
-////    }
-////
-////    private func processEndOfStream() throws {
-////        outputStreamEnded = true
-////        try playEndOfStream()
-////        nextBufferToWritePresentationTimeUs = lastBufferInStreamPresentationTimeUs
-////    }
-////
-////    private func flushDecoder() throws {
-////        if decoderReinitializationState == .none {
-////            releaseDecoder()
-////            try maybeInitDecoder()
-////        } else {
-////            inputBuffer = nil
-////            outputBuffer?.release()
-////            outputBuffer = nil
-////            decoder?.flush()
-////            decoder?.setOutputStartTimeUs(getLastResetPosition())
-////        }
-////    }
-////
-////    override func isEnded() -> Bool {
-////        outputStreamEnded && streamEnded
-////    }
-////
-////    override func isReady() -> Bool {
-////        audioRenderer.hasSufficientMediaDataForReliablePlaybackStart
-////    }
-////
-////    override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
-////        // TODO: decoderCounters = Dec..
-////    }
-////
-////    override func onPositionReset(position: Int64, joining: Bool) throws {
-////        audioRenderer.flush()
-////        didResetPosition = true
-////        streamEnded = false
-////        currentPositionUs = position
-////        nextBufferToWritePresentationTimeUs = .timeUnset
-////        allowPositionDiscontinuity = true
-////        inputStreamEnded = false
-////        outputStreamEnded = false
-////        if decoder != nil {
-////            try flushDecoder()
-////        }
-////    }
-////
-////    override func onStarted() throws {
-////        renderSynchronizer.rate = playbackParameters.playbackRate
-////        isStarted = true
-////    }
-////
-////    override func onStopped() {
-////        updateCurrentPosition()
-////        renderSynchronizer.rate = .zero
-////        isStarted = false
-////    }
-////
-////    override func onDisabled() {
-////        inputFormat = nil
-////        setOutputStreamOffsetUs(.timeUnset)
-////        nextBufferToWritePresentationTimeUs = .timeUnset
-////        releaseDecoder()
-////        audioRenderer.flush()
-////        streamEnded = false
-////        if let timeObserver {
-////            renderSynchronizer.removeTimeObserver(timeObserver)
-////            self.timeObserver = nil
-////        }
-////    }
-////
-////    override func onStreamChanged(formats: [Format], startPosition: Int64, offset: Int64, mediaPeriodId: MediaPeriodId) throws {
-////        try super.onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-////        firstStreamSampleRead = false
-////        if outputStreamOffsetUs == .timeUnset {
-////            setOutputStreamOffsetUs(offset)
-////        } else {
-////            if pendingOutputStreamOffsetCount == pendingOutputStreamOffsetsUs.count {
-////                // TODO: log
-////            } else {
-////                pendingOutputStreamOffsetCount += 1
-////            }
-////
-////            pendingOutputStreamOffsetsUs[pendingOutputStreamOffsetCount - 1] = offset
-////        }
-////    }
-////
-////    override func handleMessage(_ message: RendererMessage) throws {
-////        switch message {
-////        case let .setAudioVolume(volume):
-////            audioRenderer.volume = volume
-////        case let .setAudioIsMuted(isMuted):
-////            audioRenderer.isMuted = isMuted
-////        case let .requestMediaDataWhenReady(queue, block):
-////            requestMediaDataInfo = (queue, block)
-////            audioRenderer.requestMediaDataWhenReady(on: queue.queue) { [unowned self] in
-////                audioRenderer.stopRequestingMediaData()
-////                block()
-////            }
-////        case .stopRequestingMediaData:
-////            audioRenderer.stopRequestingMediaData()
-////            requestMediaDataInfo = nil
-////        default:
-////            try super.handleMessage(message)
-////        }
-////    }
-////
-////    private func maybeInitDecoder() throws {
-////        guard decoder == nil, let inputFormat else { return }
-////
-////        decoder = try createDecoder(format: inputFormat)
-////        decoder?.setOutputStartTimeUs(getLastResetPosition())
-////        // TODO: decoder counters
-////    }
-////
-////    private func releaseDecoder() {
-////        inputBuffer = nil
-////        outputBuffer = nil
-////        decoderReinitializationState = .none
-////        decoderReceivedBuffers = false
-////        largestQueuedPresentationTimeUs = .timeUnset
-////        lastBufferInStreamPresentationTimeUs = .timeUnset
-////
-////        decoder?.release()
-////        decoder = nil
-////    }
-////
-////    private func onInputFormatChanged(_ newFormat: Format) throws {
-////        let oldFormat = inputFormat
-////        inputFormat = newFormat
-////
-////        if decoder == nil {
-////            try maybeInitDecoder()
-////            return
-////        }
-////
-////        if !canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) {
-////            if decoderReceivedBuffers {
-////                decoderReinitializationState = .signalEndOfStream
-////            } else {
-////                releaseDecoder()
-////                try maybeInitDecoder()
-////            }
-////        }
-////    }
-////
-////    private func createDecoder(format: Format) throws -> AudioConverterDecoder {
-////        try AudioConverterDecoder(format: format)
-////    }
-////
-////    private func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool {
-////        guard let oldFormat,
-////              let oldFormatDescription = try? oldFormat.buildFormatDescription(),
-////              let newFormatDescription = try? newFormat.buildFormatDescription() else {
-////            return false
-////        }
-////
-////        return oldFormatDescription.equalTo(newFormatDescription)
-////    }
-////
-////    private func updateCurrentPosition() {
-////        let newCurrentPositionUs = renderSynchronizer.currentTime().microseconds
-////        if newCurrentPositionUs != .timeUnset {
-////            currentPositionUs = allowPositionDiscontinuity ? newCurrentPositionUs : max(currentPositionUs, newCurrentPositionUs)
-////            allowPositionDiscontinuity = false
-////        }
-////    }
-////
-////    private func playEndOfStream() throws {
-////        guard !waitingForEndOfStream, !streamEnded else { return }
-////        waitingForEndOfStream = true
-////
-////        timeObserver = renderSynchronizer.addBoundaryTimeObserver(
-////            forTimes: [NSValue(time: CMTime.from(microseconds: lastBufferInStreamPresentationTimeUs))],
-////            queue: queue.queue
-////        ) { [weak self] in
-////            guard let self else { return }
-////
-////            waitingForEndOfStream = false
-////            streamEnded = true
-////
-////            if let timeObserver {
-////                renderSynchronizer.removeTimeObserver(timeObserver)
-////                self.timeObserver = nil
-////            }
-////        }
-////    }
-////
-////    @objc
-////    private func onRendererError(notification: NSNotification) {
-////        currentRendererError = SEPlaybackError(
-////            type: .renderer(
-////                .init(
-////                    rendererName: "AVFAudioRenderer",
-////                    rendererIndex: 0,
-////                    rendererFormat: inputFormat,
-////                    rendererFormatSupport: .handled
-////                )
-////            ),
-////            mediaPeriodId: .init(),
-////            isRecoverable: true
-////        )
-////    }
-////}
-////
-////extension AVFAudioRenderer: MediaClock {
-////    func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
-////        self.playbackParameters = playbackParameters
-////
-////        if renderSynchronizer.rate != 0 {
-////            renderSynchronizer.rate = playbackParameters.playbackRate
-////        }
-////    }
-////
-////    func getPlaybackParameters() -> PlaybackParameters {
-////        playbackParameters
-////    }
-////
-////    func getPositionUs() -> Int64 {
-////        if getState() == .started {
-////            updateCurrentPosition()
-////        }
-////
-////        return currentPositionUs
-////    }
-////}
-//
-//final class AVFAudioRenderer: AVFBaseRenderer<AudioConverterDecoder> {
-//    private let renderSynchronizer: AVSampleBufferRenderSynchronizer
-//    private let audioRenderer: AVSampleBufferAudioRenderer
-//
-//    private var currentPositionUs: Int64 = .zero
-//    private var allowPositionDiscontinuity: Bool = false
-//    private var playbackParameters: PlaybackParameters = .default
-//    private var lastSampleTimingInfos: [CMSampleTimingInfo] = [.invalid]
-//
-//    init(
-//        queue: Queue,
-//        renderSynchronizer: AVSampleBufferRenderSynchronizer,
-//        clock: SEClock
-//    ) throws {
-//        self.renderSynchronizer = renderSynchronizer
-//        audioRenderer = AVSampleBufferAudioRenderer()
-//        super.init(queue: queue, trackType: .audio, clock: clock)
-//
-//        renderSynchronizer.addRenderer(audioRenderer)
-//        renderSynchronizer.delaysRateChangeUntilHasSufficientMediaData = false
-//        lowWaterMark = .cmTime(.init(seconds: 0.5, preferredTimescale: 48000))
-//        highWaterMark = .cmTime(.init(seconds: 2, preferredTimescale: 48000))
-//    }
-//
-////    override func handleMessage(_ message: RendererMessage) throws {
-////        super.handleMessage(message)
-////    }
-//
-//    override func getTimebase() -> CMTimebase? {
-//        renderSynchronizer.timebase
-//    }
-//
-//    override func getMediaClock() -> MediaClock? {
-//        self
-//    }
-//
-//    override func onStarted() throws {
-//        renderSynchronizer.rate = playbackParameters.playbackRate
-////        isStarted = true
-//    }
-//
-//    override func onStopped() {
-//        updateCurrentPosition()
-//        renderSynchronizer.rate = .zero
-////        isStarted = false
-//    }
-//
-//    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-//        guard format.sampleMimeType.trackType == .audio else {
-//            return .create(formatSupport: .unsupportedType)
-//        }
-//
-//        let formatSupport: RendererCapabilities.Support.FormatSupport
-//        if isFormatSupportedFromAVFAsset(format) {
-//            formatSupport = .handled
-//        } else {
-//            formatSupport = try AudioConverterDecoder.supportsFormat(format)
-//        }
-//
-//        if formatSupport == .handled {
-//            let sampleRate = CMTimeScale(format.sampleRate ?? 48000)
-//            lowWaterMark = .cmTime(.init(seconds: 0.5, preferredTimescale: sampleRate))
-//            highWaterMark = .cmTime(.init(seconds: 2, preferredTimescale: sampleRate))
-//        }
-//
-//        return RendererCapabilities.Support(
-//            formatSupport: formatSupport,
-//            adaptiveSupport: .notSupported,
-//            hardwareAccelerationSupport: .notSupported,
-//            decoderSupport: .primary,
-//            tunnelingSupport: .supported,
-//        )
-//    }
-//
-//    override func createDecoder(format: Format) throws -> AudioConverterDecoder {
-//        try AudioConverterDecoder(format: format)
-//    }
-//
-//    override func onPositionReset(position: CMTime, joining: Bool) throws {
-//        try super.onPositionReset(position: position, joining: joining)
-//        audioRenderer.flush()
-//
-//        renderSynchronizer.setRate(renderSynchronizer.rate, time: position)
-//    }
-//
-//    override func renderOutputBuffer(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
-//        lastSampleTimingInfos = try sampleBuffer.sampleTimingInfos()
-//        audioRenderer.enqueue(sampleBuffer)
-//        return true
-//    }
-//
-//    override func renderOutputBuffer(_ buffer: ACDecoderOutputBuffer) throws -> Bool {
-////        guard audioRenderer.isReadyForMoreMediaData else {
-////            return false
-////        }
-//
-//        if let sampleBuffer = buffer.sampleBuffer {
-//            lastSampleTimingInfos = try sampleBuffer.sampleTimingInfos()
-////            print("ENQUEUE SAMPLE BUFFER, time = \(buffer.timeUs)")
-//            audioRenderer.enqueue(sampleBuffer)
-//            buffer.release()
-//        }
-//
-//        return true
-//    }
-//
-//    override func isReadyForMoreMediaData() -> Bool {
-//        audioRenderer.isReadyForMoreMediaData
-//    }
-//
-//    override func requestOutputMediaDataWhenReady(_ callback: @escaping () -> Void) {
-//        audioRenderer.requestMediaDataWhenReady(on: queue.queue, using: callback)
-//    }
-//
-//    override func stopRequestingOutputMediaData() {
-//        audioRenderer.stopRequestingMediaData()
-//    }
-//
-//    override func isReady() -> Bool {
-////        guard inputFormat != nil else { return false }
-//        let result = audioRenderer.hasSufficientMediaDataForReliablePlaybackStart
-////        print("AUDIO RENDERER IS READY = \(result)")
-//        return result
-//    }
-//
-//    override func onOutputStreamEnded() throws {
-//        guard let lastTimingInfo = lastSampleTimingInfos.last,
-//              lastTimingInfo.decodeTimeStamp.isValid,
-//              lastTimingInfo.duration.isValid else {
-//            return
-//        }
-//
-//        renderSynchronizer.addBoundaryTimeObserver(
-//            forTimes: [NSValue(time: lastTimingInfo.decodeTimeStamp + lastTimingInfo.presentationTimeStamp)],
-//            queue: queue.queue
-//        ) { [weak self] in
-//            guard let self else { return }
-//            
-////            waitingForEndOfStream = false
-////            streamEnded = true
-//            
-////            if let timeObserver {
-////                renderSynchronizer.removeTimeObserver(timeObserver)
-////                self.timeObserver = nil
-////            }
-//        }
-//    }
-//
-//    private func updateCurrentPosition() {
-//        let newCurrentPositionUs = renderSynchronizer.currentTime().microseconds
-//        if newCurrentPositionUs != .timeUnset {
-//            currentPositionUs = allowPositionDiscontinuity ? newCurrentPositionUs : max(currentPositionUs, newCurrentPositionUs)
-//            allowPositionDiscontinuity = false
-//        }
-//    }
-//}
-//
-//extension AVFAudioRenderer: MediaClock {
-//    func setPlaybackParameters(new playbackParameters: PlaybackParameters) {
-//        self.playbackParameters = playbackParameters
-//
-//        if renderSynchronizer.rate != 0 {
-//            renderSynchronizer.rate = playbackParameters.playbackRate
-//        }
-//    }
-//
-//    func getPlaybackParameters() -> PlaybackParameters {
-//        playbackParameters
-//    }
-//
-//    func getPosition() -> CMTime {
-//        if getState() == .started {
-//            updateCurrentPosition()
-//        }
-//
-//        return .from(microseconds: currentPositionUs)
-//    }
-//}
+import AVFoundation
+import SEPlayerCommon
+
+final class AVFAudioRenderer: AVFBaseRenderer {
+    private let renderSynchronizer: any PlaybackSynchronizer
+    private let outputFactory: () -> any AudioSampleBufferOutput
+    private var audioOutput: any AudioSampleBufferOutput
+    private let decodeBufferQueue: TypedCMBufferQueue<CMSampleBuffer>
+    private var outputGeneration: UInt64 = 0
+    private var effectiveRateObserver: NSObjectProtocol?
+    private weak var eventListener: AudioRendererEventListener?
+    /// Whether the renderer was started and the clock hasn't moved yet.
+    private var isAwaitingPlaybackStart = false
+    /// Sample rate and channel count of the last sample enqueued.
+    private var enqueuedAudioFormat: (sampleRate: Float64, channels: UInt32)?
+    /// The first sample of a new format, kept until just before it plays; see ``holdsBackNewFormat(_:)``.
+    private var heldSample: CMSampleBuffer?
+    private let heldSampleTimer: DispatchSourceTimer
+    private var volume: Float = 1
+    private var isMuted = false
+
+    init(
+        queue: any Queue,
+        clock: SEClock,
+        renderSynchronizer: any PlaybackSynchronizer,
+        eventListener: AudioRendererEventListener? = nil,
+        outputFactory: @escaping () -> any AudioSampleBufferOutput = { AVFAudioSampleBufferOutput() }
+    ) throws {
+        self.eventListener = eventListener
+        self.renderSynchronizer = renderSynchronizer
+        self.outputFactory = outputFactory
+        audioOutput = outputFactory()
+        decodeBufferQueue = try .init()
+        heldSampleTimer = DispatchSource.makeTimerSource(queue: queue.queue)
+        super.init(queue: queue, trackType: .audio, clock: clock)
+
+        heldSampleTimer.setEventHandler { [weak self] in self?.enqueueHeldSample() }
+        heldSampleTimer.activate()
+        try renderSynchronizer.timebase.addTimer(heldSampleTimer)
+
+        // The synchronizer may hold its clock after the rate is set; the clock's own rate tells when it moves.
+        effectiveRateObserver = NotificationCenter.default.addObserver(
+            forName: CMTimebase.effectiveRateChanged,
+            object: renderSynchronizer.timebase,
+            queue: nil
+        ) { [weak self, queue] _ in
+            queue.justDispatch { [weak self] in self?.effectiveRateDidChange() }
+        }
+    }
+
+    deinit {
+        effectiveRateObserver.map(NotificationCenter.default.removeObserver)
+        try? renderSynchronizer.timebase.removeTimer(heldSampleTimer)
+        heldSampleTimer.cancel()
+    }
+
+    override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
+        try super.onEnabled(joining: joining, mayRenderStartOfStream: mayRenderStartOfStream)
+        observeOutput()
+        audioOutput.attach(to: renderSynchronizer)
+    }
+
+    override func onDisabled() {
+        super.onDisabled()
+        audioOutput.flush()
+        replaceOutput()
+        try? decodeBufferQueue.reset()
+        forgetAudioFormat()
+    }
+
+    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+        .create(formatSupport: format.sampleMimeType?.isAudio == true ? .handled : .unsupportedType)
+    }
+
+    /// The player's clock starts, stops and moves the synchronizer; the audio only plays in it.
+    override func getRenderSynchronizer() -> (any PlaybackSynchronizer)? { renderSynchronizer }
+
+    override func onStarted() throws {
+        try super.onStarted()
+        isAwaitingPlaybackStart = true
+        // The clock may move at once: then no change is left to notify.
+        effectiveRateDidChange()
+    }
+
+    override func onStopped() {
+        super.onStopped()
+        isAwaitingPlaybackStart = false
+    }
+
+    /// Leaves the synchronizer's time alone: enabled ahead for the next item, the renderer must not move the time of
+    /// the item still playing.
+    override func onPositionReset(position: CMTime, joining: Bool) throws {
+        try super.onPositionReset(position: position, joining: joining)
+        try decodeBufferQueue.reset()
+        audioOutput.flush()
+        forgetAudioFormat()
+    }
+
+    override func handleMessage(_ message: RendererMessage) throws {
+        switch message {
+        case let .setAudioVolume(volume):
+            self.volume = volume
+            audioOutput.setVolume(volume, isMuted: isMuted)
+        case let .setAudioIsMuted(isMuted):
+            self.isMuted = isMuted
+            audioOutput.setVolume(volume, isMuted: isMuted)
+        default:
+            break
+        }
+        try super.handleMessage(message)
+    }
+
+    override func recoverOutput(at position: CMTime, reason: RendererRecoveryReason) throws -> Bool {
+        assert(queue.isCurrent())
+        // A failed audio renderer stays failed: a new one takes its place.
+        if reason == .mediaServicesWereReset || reason == .outputFailed {
+            SELogger.info(.recovery, "\(name) rebuilds its output after \(reason)")
+            suspendMediaData()
+            forgetAudioFormat()
+            replaceOutput()
+            observeOutput()
+            audioOutput.attach(to: renderSynchronizer)
+            return false // The player coordinates re-preroll after hardware reconstruction.
+        }
+        guard reason == .automaticFlush else { return false }
+        suspendMediaData()
+        let currentTime = renderSynchronizer.currentTime()
+        let readAhead = enqueuedDuration(aheadOf: currentTime)
+        SELogger.verbose(
+            .audio,
+            "Audio refill time=\(currentTime.seconds) rate=\(renderSynchronizer.rate) "
+                + "airPlay=\(audioOutput.isAirPlayActive) readAhead=\(readAhead.seconds)"
+        )
+        // Local replay cannot recover a synchronizer that stopped independently of
+        // the player's renderer state. Let the player stop, re-preroll and restart it.
+        if getState() == .started, renderSynchronizer.rate == 0 { return false }
+        // Buffered AirPlay prerolls a second or more of output before it plays, and while the clock
+        // runs that audio is already late. Re-preroll all tracks with the clock stopped instead.
+        if audioOutput.isAirPlayActive { return false }
+        guard currentTime.isNumeric, try rewindSourceForRecovery(to: currentTime) else {
+            return false
+        }
+        // AVSampleBufferAudioRendererWasFlushedAutomatically recommends a serialized flush to
+        // remove samples that survived concurrent enqueueing. A coordinated seek
+        // flushes in onPositionReset instead, so it must not flush here as well.
+        audioOutput.flush()
+        forgetAudioFormat()
+        try resetOutputPipeline()
+        try decodeBufferQueue.reset()
+        beginOutputRecovery()
+        resumeMediaData()
+        // Deliberately do not set the synchronizer's time or rate.
+        return true
+    }
+
+    override func onInputFormatChanged(_ format: Format) throws {}
+
+    override func inputFormatDidChange(_ format: Format?) {
+        eventListener?.onAudioInputFormatChanged(format)
+    }
+
+    override func getDecodeBufferQueue() throws -> TypedCMBufferQueue<CMSampleBuffer>? {
+        outputMode == .decode ? decodeBufferQueue : nil
+    }
+
+    override func feedInputBuffer(readStream: (ReadFlags) throws -> SampleStreamReadResult) throws -> Bool {
+        throw RendererRecoveryError.unsupportedAudioDecoding
+    }
+
+    /// Joins the packets that follow `buffer` and are already in the stream: see ``AudioPacketBatch``.
+    override func outputBuffer(startingWith buffer: CMSampleBuffer) throws -> CMSampleBuffer {
+        guard var batch = AudioPacketBatch(buffer) else { return buffer }
+        while let next = try readFollowingBuffer(if: batch.canAppend) {
+            batch.append(next)
+        }
+        return try batch.makeSampleBuffer()
+    }
+
+    override func feedOutputBuffer(_ buffer: CMSampleBuffer) throws -> Bool {
+        guard !holdsBackNewFormat(buffer) else { return false }
+        try audioOutput.enqueue(buffer)
+        return audioOutput.isReadyForMoreMediaData
+    }
+
+    override func requestOutputMediaDataWhenReady(_ callback: @Sendable @escaping () -> Void) {
+        audioOutput.requestMediaDataWhenReady(on: queue.queue, using: callback)
+    }
+
+    override func stopRequestingOutputMediaData() { audioOutput.stopRequestingMediaData() }
+
+    // MARK: - Output
+
+    private func effectiveRateDidChange() {
+        guard isAwaitingPlaybackStart, getState() == .started, renderSynchronizer.timebase.effectiveRate > 0 else {
+            return
+        }
+        isAwaitingPlaybackStart = false
+        delegate?.rendererDidStartPlayback(self)
+    }
+
+    private func observeOutput() {
+        outputGeneration &+= 1
+        let generation = outputGeneration
+        audioOutput.observeEvents { [weak self] event in
+            guard let self else { return }
+            // The context is locked: notifications may arrive on any thread. The entire
+            // flush/seek/enqueue transaction executes on the same queue as the pump.
+            let context = getRecoveryContext()
+            queue.justDispatch { [weak self] in
+                guard let self, generation == outputGeneration,
+                      context == getRecoveryContext(), getState() != .disabled else {
+                    return
+                }
+                SELogger.info(.audio, "\(name) output event: \(event)")
+                switch event {
+                case let .recovery(reason, error): requestRecovery(reason, error: error)
+                case let .flushedAutomatically(time):
+                    // A player seek restarts from the first flushed sample with the clock stopped, so all
+                    // flushed audio is still heard: always on AirPlay, and locally when the samples
+                    // can't be replayed. A local refill keeps the clock and ignores it.
+                    requestRecovery(.automaticFlush, position: time)
+                case let .failure(error): reportFailure(error)
+                }
+            }
+        }
+    }
+
+    /// Puts a new output in place of the current one, which may still be detaching: it isn't attached again.
+    private func replaceOutput() {
+        outputGeneration &+= 1
+        audioOutput.stopObserving()
+        audioOutput.detach(from: renderSynchronizer)
+        audioOutput = outputFactory()
+        audioOutput.setVolume(volume, isMuted: isMuted)
+    }
+
+    // MARK: - Format changes
+
+    /// Keeps the first sample of a new sample rate or channel count until just before it plays.
+    ///
+    /// The output plays a new format on a new audio queue, started for the time of its first sample. While the audio
+    /// is stretched in time, at a rate other than 1, that queue's timeline already runs from when it is started, and
+    /// the output then places its audio that much ahead of the clock, for as long as it plays. Enqueued long before
+    /// its time, as the output reads ahead, the new format would play ahead by about as long. Enqueued a moment
+    /// before, it is on time.
+    ///
+    /// - Returns: Whether `buffer` is kept; it is enqueued by ``enqueueHeldSample()``.
+    private func holdsBackNewFormat(_ buffer: CMSampleBuffer) -> Bool {
+        guard buffer.numSamples > 0,
+              let description = buffer.formatDescription?.audioStreamBasicDescription else {
+            return false
+        }
+
+        let format = (sampleRate: description.mSampleRate, channels: description.mChannelsPerFrame)
+        let previous = enqueuedAudioFormat
+        enqueuedAudioFormat = format
+
+        guard let previous, previous.sampleRate != format.sampleRate || previous.channels != format.channels else {
+            return false
+        }
+
+        let time = buffer.outputPresentationTimeStamp
+        let enqueueTime = time - CMTime(
+            seconds: Self.newFormatLead * Double(max(renderSynchronizer.rate, 1)),
+            preferredTimescale: 1_000_000
+        )
+
+        guard renderSynchronizer.currentTime() < enqueueTime else {
+            return false
+        }
+
+        SELogger.debug(
+            .audio,
+            "audio: format \(previous.sampleRate) Hz × \(previous.channels) → "
+                + "\(format.sampleRate) Hz × \(format.channels) at \(time.seconds), kept until \(enqueueTime.seconds)"
+        )
+        heldSample = buffer
+        suspendMediaData()
+        try? renderSynchronizer.timebase.setTimerNextFireTime(heldSampleTimer, fireTime: enqueueTime)
+        // The timer can be lost when the clock changes its source: the host time it is due backs it up.
+        let rate = Double(renderSynchronizer.rate)
+        if rate > 0 {
+            let delay = (enqueueTime - renderSynchronizer.currentTime()).seconds / rate
+            queue.after(max(delay, 0) + Self.heldSampleTimerSlack) { [weak self] in
+                guard let self, heldSample === buffer, renderSynchronizer.currentTime() >= enqueueTime else {
+                    return
+                }
+                enqueueHeldSample()
+            }
+        }
+        return true
+    }
+
+    private func enqueueHeldSample() {
+        guard let heldSample else { return }
+        self.heldSample = nil
+        try? renderSynchronizer.timebase.setTimerNextFireTime(heldSampleTimer, fireTime: .invalid)
+        guard getState() != .disabled else { return }
+        SELogger.debug(.audio, "audio: new format enqueued at \(renderSynchronizer.currentTime().seconds)")
+        do {
+            try audioOutput.enqueue(heldSample)
+        } catch {
+            reportFailure(error)
+            return
+        }
+        resumeMediaData()
+    }
+
+    /// A flush or a seek drops a kept sample: the samples come again from the source.
+    private func forgetAudioFormat() {
+        heldSample = nil
+        enqueuedAudioFormat = nil
+        try? renderSynchronizer.timebase.setTimerNextFireTime(heldSampleTimer, fireTime: .invalid)
+    }
+}
+
+private extension AVFAudioRenderer {
+    /// How long before its time the first sample of a new format is enqueued: enough for the output to set up the
+    /// new format and start it on time.
+    static let newFormatLead: CFTimeInterval = 0.06
+    /// How long after the kept sample is due the host-time backup of its timer fires.
+    static let heldSampleTimerSlack: CFTimeInterval = 0.01
+}

@@ -69,6 +69,14 @@ public protocol SETrackSelection: TrackSelection {
     func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool
     func isTrackExcluded(index: Int, now: CMTime) -> Bool
     func getLatestBitrateEstimate() -> Int64?
+    /// The bitrate of the selected format from its chunks loaded so far, for a format that doesn't tell its own, as the
+    /// variant of a media playlist without a multivariant playlist. `nil` until one of its chunks loaded.
+    var measuredBitrate: Int? { get }
+    /// Counts a chunk that loaded towards ``measuredBitrate``.
+    func chunkLoaded(_ chunk: MediaChunk)
+    /// Whether a transfer of `bits` loads quickly at the bandwidth the selection plans with, as the frame of a
+    /// scrubbing seek should. `nil` when nothing was measured yet.
+    func loadsQuickly(bits: Double) -> Bool?
 
     func isEquals(to other: SETrackSelection) -> Bool
 }
@@ -77,10 +85,13 @@ extension SETrackSelection {
     func onDiscontinuity() {}
     func onRebuffer() {}
     func playWhenReadyChanged(_ playWhenReady: Bool) {}
+    func loadsQuickly(bits: Double) -> Bool? { nil }
 
     func shouldCancelChunkLoad(playbackPosition: CMTime, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool {
         false
     }
 
     func getLatestBitrateEstimate() -> Int64? { nil }
+    var measuredBitrate: Int? { nil }
+    func chunkLoaded(_ chunk: MediaChunk) {}
 }

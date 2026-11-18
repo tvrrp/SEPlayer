@@ -103,49 +103,93 @@ final class MediaPeriodHolder {
         !isPrepared ? .zero : mediaPeriod.getNextLoadPosition()
     }
 
-    /// Calls `body` once every stream has at least `duration` buffered ahead, once per install.
-    /// While the decoder catches up after a seek, the renderers take samples in bursts and the
-    /// buffer crosses `duration` again and again; the player needs waking only the first time.
-    func changeDurationForPlaybackTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+    /// Calls `body` once every stream of `streamIndices` holds media up to `position`, once per install. What the
+    /// streams hold ahead of their reads would do for the renderers, but they read ahead: while they take the samples
+    /// as they come, it stays short of what the player waits for.
+    func changeBufferedPositionForPlaybackTriggerTokens(
+        _ position: CMTime?,
+        streamIndices: Set<Int>? = nil,
+        body: ((MediaPeriodHolder) -> Void)? = nil
+    ) {
+        // Streams can hold media past the position from before a seek, and fire at once; once they reset, the
+        // trigger fires again when they get there.
+        if let installed = durationForPlaybackTriggers, installed.didFire, installed.duration == position, !installed.allHold {
+            durationForPlaybackTriggers?.didFire = false
+        }
         durationForPlaybackTriggers = updateTriggers(
             durationForPlaybackTriggers,
-            duration: duration,
-            condition: { .whenDurationBecomesGreaterThanOrEqualTo($0) },
+            duration: position,
+            streamIndices: streamIndices,
+            condition: { .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo($0) },
             fire: { [weak self] in
-                guard let self, let triggers = durationForPlaybackTriggers, !triggers.didFire, triggers.allHold else { return }
+                guard let self, let triggers = durationForPlaybackTriggers, !triggers.didFire, triggers.allHold else {
+                    return
+                }
                 durationForPlaybackTriggers?.didFire = true
                 body?(self)
             }
         )
     }
 
-    /// Calls `body` when any stream drops below `duration` buffered ahead.
-    func changeDurationForStartLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+    /// Calls `body` when any stream of `streamIndices` drops below `duration` buffered ahead.
+    func changeDurationForStartLoadingTriggerTokens(
+        _ duration: CMTime?,
+        streamIndices: Set<Int>? = nil,
+        body: ((MediaPeriodHolder) -> Void)? = nil
+    ) {
         durationForStartLoadingTriggers = updateTriggers(
             durationForStartLoadingTriggers,
             duration: duration,
+            streamIndices: streamIndices,
             condition: { .whenDurationBecomesLessThan($0) },
             fire: { [weak self] in
-                guard let self, durationForStartLoadingTriggers != nil else { return }
+                guard let self, durationForStartLoadingTriggers != nil else {
+                    return
+                }
                 body?(self)
             }
         )
     }
 
-    /// Calls `body` once every stream has at least `duration` buffered ahead.
-    func changeDurationToStopLoadingTriggerTokens(_ duration: CMTime?, body: ((MediaPeriodHolder) -> Void)? = nil) {
+    /// Calls `body` once every stream of `streamIndices` has at least `duration` buffered ahead.
+    func changeDurationToStopLoadingTriggerTokens(
+        _ duration: CMTime?,
+        streamIndices: Set<Int>? = nil,
+        body: ((MediaPeriodHolder) -> Void)? = nil
+    ) {
         durationToStopLoadingTriggers = updateTriggers(
             durationToStopLoadingTriggers,
             duration: duration,
+            streamIndices: streamIndices,
             condition: { .whenDurationBecomesGreaterThanOrEqualTo($0) },
             fire: { [weak self] in
-                guard let self, durationToStopLoadingTriggers?.allHold == true else { return }
+                guard let self, durationToStopLoadingTriggers?.allHold == true else {
+                    return
+                }
                 body?(self)
             }
         )
     }
 
-    /// Installs a trigger for `condition(duration)` on every sample stream; `nil` removes them.
+    /// The least any stream of `streamIndices` has queued ahead, or `nil` without such streams.
+    func queuedAheadDuration(streamIndices: Set<Int>? = nil) -> CMTime? {
+        triggerStreams(streamIndices).map(\.bufferedAheadDuration).filter(\.isNumeric).min()
+    }
+
+    /// The streams with media, of `streamIndices`, or all of them when `streamIndices` names none of those.
+    private func triggerStreams(_ streamIndices: Set<Int>?) -> [SampleStream] {
+        let streams = sampleStreams.indices.compactMap { index -> (index: Int, stream: SampleStream)? in
+            guard let stream = sampleStreams[index], !(stream is EmptySampleStream) else {
+                return nil
+            }
+            return (index, stream)
+        }
+        let selected = streams.filter { streamIndices?.contains($0.index) ?? true }
+        return (selected.isEmpty ? streams : selected).map(\.stream)
+    }
+
+    /// Installs a trigger for `condition(duration)` on the sample streams of `streamIndices`, or all of them; `nil`
+    /// removes them. Streams without media never buffer anything, so they are left out.
     ///
     /// Triggers already installed for the same duration on the same streams are kept: a fresh
     /// install fires at once when the condition already holds, so reinstalling on every update
@@ -153,10 +197,11 @@ final class MediaPeriodHolder {
     private func updateTriggers(
         _ installed: DurationTriggers?,
         duration: CMTime?,
+        streamIndices: Set<Int>? = nil,
         condition: (CMTime) -> TriggerCondition,
         fire: @escaping () -> Void
     ) -> DurationTriggers? {
-        let streams = sampleStreams.compactMap { $0 }
+        let streams = triggerStreams(streamIndices)
         if let installed, installed.duration == duration, installed.isInstalled(on: streams) {
             return installed
         }
@@ -190,9 +235,11 @@ final class MediaPeriodHolder {
             // TODO: check requestedStartPosition = max(.zero, CMTime(value: info.duration.value - 1, timescale: info.duration.timescale))
             requestedStartPosition = max(.zero, info.duration)
         }
-        let newStartPosition = try applyTrackSelection(trackSelectorResult: selectorResult,
-                                                       position: requestedStartPosition,
-                                                       forceRecreateStreams: false)
+        let newStartPosition = try applyTrackSelection(
+            trackSelectorResult: selectorResult,
+            position: requestedStartPosition,
+            forceRecreateStreams: false
+        )
         renderPositionOffset = renderPositionOffset + info.startPosition - newStartPosition
         info = info.copyWithStartPosition(newStartPosition)
     }
@@ -240,8 +287,13 @@ final class MediaPeriodHolder {
         streamResetFlags: inout [Bool]
     ) throws -> CMTime {
         for index in 0..<newTrackSelectorResult.selections.count {
+            // Per renderer: the streams of the renderers whose selection didn't change keep playing. Where the media
+            // period allows, so do the streams of a new selection of the same group: their buffer is replaced
+            // instead, and the renderer keeps showing what it has.
             mayRetainStreamFlags[index] = !forceRecreateStreams
-                && trackSelectorResults == newTrackSelectorResult
+                && (newTrackSelectorResult.isEquivalent(to: trackSelectorResults, at: index)
+                    || (mediaPeriod.keepsStreamsForSelectionsInSameGroup
+                        && Self.selectsSameGroup(newTrackSelectorResult, trackSelectorResults, at: index)))
         }
 
         disassociateNoSampleRenderersWithEmptySampleStream(sampleStreams: &sampleStreams)
@@ -269,6 +321,46 @@ final class MediaPeriodHolder {
         }
 
         return position
+    }
+
+    /// Takes `newTrackSelectorResult` without touching what is buffered: the streams stay, and only what loads from
+    /// now on follows the new selections.
+    ///
+    /// - Returns: `false` if the new selections can't be taken that way, as when a renderer changes track group;
+    ///   nothing changed then.
+    func updateTrackSelectionKeepingBuffer(_ newTrackSelectorResult: TrackSelectorResult) -> Bool {
+        assert(queue.isCurrent())
+        let selections = newTrackSelectorResult.selections
+        guard selections.count == trackSelectorResults.selections.count else {
+            return false
+        }
+        for index in selections.indices {
+            let isSame = newTrackSelectorResult.isEquivalent(to: trackSelectorResults, at: index)
+            guard isSame || Self.selectsSameGroup(newTrackSelectorResult, trackSelectorResults, at: index) else {
+                return false
+            }
+        }
+
+        // Renderers without a selection may read a placeholder stream: it isn't the media period's.
+        let streams = sampleStreams.indices.map { selections[$0] == nil ? nil : sampleStreams[$0] }
+        guard mediaPeriod.updateSelectionsKeepingBuffer(selections, streams: streams) else {
+            return false
+        }
+
+        disableTrackSelectionsInResult()
+        trackSelectorResults = newTrackSelectorResult
+        enableTrackSelectionsInResult()
+        return true
+    }
+
+    /// Whether both results select from the same track group for the renderer, with the same configuration.
+    private static func selectsSameGroup(_ lhs: TrackSelectorResult, _ rhs: TrackSelectorResult, at index: Int) -> Bool {
+        guard index < lhs.selections.count, index < rhs.selections.count,
+              lhs.rendererConfigurations[index] == rhs.rendererConfigurations[index],
+              let lhsSelection = lhs.selections[index], let rhsSelection = rhs.selections[index] else {
+            return false
+        }
+        return lhsSelection.trackGroup == rhsSelection.trackGroup
     }
 
     func release() {
@@ -394,6 +486,11 @@ private extension TriggerCondition {
             return true
         case (.whenMaxPresentationTimeStampChanges, .whenMaxPresentationTimeStampChanges):
             return true
+        case (
+            let .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(lhs),
+            let .whenMaxPresentationTimeStampBecomesGreaterThanOrEqualTo(rhs)
+        ):
+            return lhs == rhs
         case (.whenDataBecomesReady, .whenDataBecomesReady):
             return true
         case (.whenEndOfDataReached, .whenEndOfDataReached):

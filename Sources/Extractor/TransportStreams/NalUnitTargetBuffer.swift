@@ -20,14 +20,14 @@ final class NalUnitTargetBuffer {
 
     init(targetType: NalUnitUtil.H264NalUnitType, initialCapacity: Int = 128, memoryPool: CMMemoryPool) throws {
         self.targetType = targetType
-        self.allocator = CMMemoryPoolGetAllocator(memoryPool)
+        self.allocator = memoryPool.allocator
         nalBuffer = try CMBlockBuffer(
             length: 3 + initialCapacity,
             allocator: allocator,
             flags: .assureMemoryNow
         )
         // Initialize data with a start code in the first three bytes.
-        try nalBuffer.withUnsafeMutableBytes(atOffset: 0) { destination in
+        try nalBuffer.withUnsafeMutableBlockBytes { destination in
             destination[0] = 0
             destination[1] = 0
             destination[2] = 1
@@ -55,8 +55,7 @@ final class NalUnitTargetBuffer {
         guard isFilling, source.count > 0 else { return }
         try ensureCapacity(nalLength + source.count)
         let copied = try source.withContiguousStorageIfAvailable {
-            try nalBuffer[nalLength..<(nalLength + $0.count)]
-                .replaceDataBytes(with: UnsafeRawBufferPointer($0))
+            try nalBuffer.replaceDataBytes(with: UnsafeRawBufferPointer($0), atOffset: nalLength)
             return $0.count
         }
 
@@ -76,7 +75,7 @@ final class NalUnitTargetBuffer {
         guard required > nalBuffer.dataLength else { return }
         let amountToGrow = required - nalBuffer.dataLength
 
-        try nalBuffer.append(
+        try nalBuffer.appendMemoryBlock(
             length: amountToGrow,
             allocator: allocator,
             flags: .assureMemoryNow

@@ -24,8 +24,10 @@ public final class PlayerExecutor: SerialExecutor {
     nonisolated public let queue: Queue
     public init(queue: Queue) { self.queue = queue }
 
+    /// Always runs `job` later: `Queue.async` runs a block at once on its own queue, and a job run while it is being
+    /// enqueued breaks the runtime, which may still be suspending its task.
     public func enqueue(_ job: UnownedJob) {
-        queue.async { job.runSynchronously(on: self.asUnownedSerialExecutor()) }
+        queue.queue.async { job.runSynchronously(on: self.asUnownedSerialExecutor()) }
     }
 
     public func asUnownedSerialExecutor() -> UnownedSerialExecutor {

@@ -8,22 +8,23 @@
 import CoreMedia
 import SEPlayerCommon
 
+/// The sample table of an MP4 track, built from its `stbl` box.
 public struct TrackSampleTable {
+    // A long movie has hundreds of thousands of samples, so each field is stored compactly: times as values of one
+    // timescale rather than `CMTime`s, sizes in 32 bits, and decode times sharing the presentation times when they
+    // are the same, as for audio.
+
+
     public let track: Track
     public let sampleCount: Int
     public let offsets: [Int]
-    public let sizes: [Int]
+    public let sizes: SampleSizes
     public let maximumSize: Int
 
-    // CMTime-based timing (native timescale preserved).
-    public let pts: [CMTime]
-    public let dts: [CMTime]
-    public let durations: [CMTime]
+    public let pts: SampleTimes
+    public let dts: SampleTimes
+    public let durations: SampleTimes
     public let duration: CMTime
-
-    // Backward-compatible microsecond timing (derived from CMTime).
-//    public let timestampsUs: [Int64]
-//    public let durationUs: Int64
 
     public let flags: [SampleFlags]
     public let syncSampleIndices: [Int]
@@ -52,14 +53,15 @@ public struct TrackSampleTable {
 
         self.track = track
         self.offsets = offsets
-        self.sizes = sizes
+        self.sizes = try SampleSizes(sizes)
         self.maximumSize = maximumSize
-        self.pts = pts
-        self.dts = dts
-        self.durations = durations
+        let timescale = SampleTimes.commonTimescale(of: [pts, dts, durations], preferring: track.timescale)
+        let presentationTimes = SampleTimes(pts, timescale: timescale)
+        self.pts = presentationTimes
+        // Without composition offsets, decode times are the presentation times: they share their storage.
+        self.dts = dts == pts ? presentationTimes : SampleTimes(dts, timescale: timescale)
+        self.durations = SampleTimes(durations, timescale: timescale)
         self.duration = duration
-//        self.timestampsUs = pts.map { $0.microseconds }
-//        self.durationUs = duration.microseconds
         self.syncSampleIndices = syncSampleIndices
         self.hasOnlySyncSamples = hasOnlySyncSamples
         self.sampleCount = sampleCount
@@ -177,83 +179,59 @@ public struct TrackSampleTable {
             decodeTimeStamp: dts[index]
         )
     }
+}
 
-//    func earlierOrEqualSyncSample(for timeUs: Int64) -> Int? {
-//        if hasOnlySyncSamples {
-//            return Util.binarySearch(
-//                array: timestampsUs,
-//                value: timeUs,
-//                inclusive: true,
-//                stayInBounds: false
-//            )
-//        }
-//
-//        var low = 0
-//        var high = syncSampleIndices.count - 1
-//        var index: Int?
-//
-//        while low <= high {
-//            let mid = low + ((high - low) / 2)
-//            let currentTimestamp = timestampsUs[syncSampleIndices[mid]]
-//
-//            if currentTimestamp <= timeUs {
-//                index = mid
-//                low = mid + 1
-//            } else {
-//                high = mid - 1
-//            }
-//        }
-//
-//        guard var index else { return nil }
-//
-//        let targetTimestamp = timestampsUs[syncSampleIndices[index]]
-//        // Only scan backwards if the found sample is an EXACT match for the search time.
-//        if targetTimestamp == timeUs {
-//            while index > 0, timestampsUs[syncSampleIndices[index - 1]] == targetTimestamp {
-//                index -= 1
-//            }
-//        }
-//
-//        return syncSampleIndices[index]
-//    }
-//
-//    public func laterOrEqualSyncSample(for timeUs: Int64) -> Int? {
-//        if hasOnlySyncSamples {
-//            return Util.binarySearchCeil(
-//                array: timestampsUs,
-//                value: timeUs,
-//                inclusive: true,
-//                stayInBounds: false
-//            )
-//        }
-//
-//        var low = 0
-//        var high = syncSampleIndices.count - 1
-//        var index: Int?
-//
-//        while low <= high {
-//            let mid = low + ((high - low) / 2)
-//            let currentTimestamp = timestampsUs[syncSampleIndices[mid]]
-//
-//            if currentTimestamp >= timeUs {
-//                index = mid
-//                high = mid - 1
-//            } else {
-//                low = mid + 1
-//            }
-//        }
-//
-//        guard var index else { return nil }
-//
-//        let targetTimestamp = timestampsUs[syncSampleIndices[index]]
-//        // Only scan backwards if the found sample is an EXACT match for the search time.
-//        if targetTimestamp == timeUs {
-//            while index < syncSampleIndices.count - 1,
-//                  timestampsUs[syncSampleIndices[index + 1]] == targetTimestamp {
-//                index += 1
-//            }
-//        }
-//
-//        return syncSampleIndices[index]
-//    }
+/// Times of samples as values of one timescale: 8 bytes each, rather than a `CMTime`'s 24.
+public struct SampleTimes: RandomAccessCollection, Equatable, Sendable {
+    public let values: [Int64]
+    public let timescale: CMTimeScale
+
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { values.count }
+
+    public subscript(position: Int) -> CMTime {
+        CMTime(value: values[position], timescale: timescale)
+    }
+
+    /// - Parameter timescale: The timescale of the values; times of another one are converted, rounded.
+    init(_ times: [CMTime], timescale: CMTimeScale) {
+        self.timescale = timescale
+        values = times.map { time in
+            time.timescale == timescale ? time.value : CMTimeConvertScale(time, timescale: timescale, method: .roundHalfAwayFromZero).value
+        }
+    }
+
+    /// The timescale that keeps the times exact: `preferred` when they all have it, as the times of a track have its
+    /// own, otherwise the finest of theirs.
+    static func commonTimescale(of times: [[CMTime]], preferring preferred: CMTimeScale) -> CMTimeScale {
+        var finest = preferred
+        var isUniform = true
+        for list in times {
+            for time in list where time.timescale != preferred {
+                isUniform = false
+                finest = Swift.max(finest, time.timescale)
+            }
+        }
+        return isUniform ? preferred : finest
+    }
+}
+
+/// Sizes of samples in 32 bits, read as `Int`.
+public struct SampleSizes: RandomAccessCollection, Sendable {
+    public let values: [UInt32]
+
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { values.count }
+
+    public subscript(position: Int) -> Int {
+        Int(values[position])
+    }
+
+    init(_ sizes: [Int]) throws {
+        values = try sizes.map { size in
+            let value = UInt32(exactly: size)
+            try checkArgument(value != nil)
+            return value ?? 0
+        }
+    }
 }

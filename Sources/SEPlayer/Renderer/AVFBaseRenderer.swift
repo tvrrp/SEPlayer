@@ -1,1088 +1,789 @@
-////
-////  AVFDecoder.swift
-////  SEPlayer
-////
-////  Created by tvrrp on 15.03.2026.
-////
 //
-////import AVFoundation
-////import Decoder
-////
-////public protocol AVFDecoder: Decoder where InputBuffer: DecoderInputBuffer, OutputBuffer: SimpleDecoderOutputBuffer {
-////    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
-////}
-////
-////class AVFBaseRenderer<D: AVFDecoder>: BaseSERenderer {
-////    var lowWaterMark: WaterMarkSource = .sampleCount(3)
-////    var hightWaterMark: WaterMarkSource = .sampleCount(5)
-////    var currentRendererError: Error?
-////
-////    private(set) var decoder: D?
-////    private(set) var outputStreamEnded = false
-////    private(set) var inputFormat: Format?
-////
-////    private let flagsOnlyBuffer: DecoderInputBuffer
-////    private var inputBuffer: D.InputBuffer?
-////    private var outputBuffer: D.OutputBuffer?
-////    private var decoderReinitializationState: DecoderReinitializationState
-////    private var decoderReceivedBuffers = false
-////    private var inputStreamEnded = false
-////    private var firstStreamSampleRead = false
-////
-////    private var workingOnDecodeLoop = false
-////    private var workingInFeedDataLoop = false
-////    private var workingInOutputDataLoop = false
-////    private var decoderLowWaterMarkToken: CMBufferQueue.TriggerToken?
-////    private var decoderHighWaterMarkToken: CMBufferQueue.TriggerToken?
-////    private var decoderOutputBufferAvailable: CMBufferQueue.TriggerToken?
-////    private var sampleQueueAvailabilityToken: QueueTriggerToken?
-////
-////    override init(queue: Queue, trackType: TrackType, clock: SEClock) {
-////        flagsOnlyBuffer = DecoderInputBuffer(bufferReplacementMode: .disabled)
-////        decoderReinitializationState = .none
-////        super.init(queue: queue, trackType: trackType, clock: clock)
-////    }
-////
-////    override func willChangeStream() throws {
-////        try super.willChangeStream()
-////        if let sampleStream = getStream(), let sampleQueueAvailabilityToken {
-////            sampleStream.removeTrigger(sampleQueueAvailabilityToken)
-////            self.sampleQueueAvailabilityToken = nil
-////        }
-////    }
-////
-////    override func onStreamChanged(formats: [Format], startPosition: Int64, offset: Int64, mediaPeriodId: MediaPeriodId) throws {
-////        try super.onStreamChanged(formats: formats, startPosition: startPosition, offset: offset, mediaPeriodId: mediaPeriodId)
-////
-////        firstStreamSampleRead = false
-////        feedInputBuffer2()
-////        requestOutputMediaDataWhenReady {
-////            customDebug("requestOutputMediaDataWhenReady onStreamChanged")
-////            self.drainOutputBuffer2()
-////        }
-////    }
-////
-////    override func onPositionReset(position: Int64, joining: Bool) throws {
-////        inputStreamEnded = false
-////        outputStreamEnded = false
-////        firstStreamSampleRead = false
-////        if decoder != nil { try flushDecoder() }
-////        customDebug("ON POSITION RESETTTT")
-////        feedInputBuffer2()
-////        requestOutputMediaDataWhenReady {
-////            customDebug("requestOutputMediaDataWhenReady from POS RESET")
-////            self.drainOutputBuffer2()
-////        }
-////    }
-////
-////    override func onDisabled() {
-////        inputFormat = nil
-////        if let stream = getStream(), let sampleQueueAvailabilityToken {
-////            stream.removeTrigger(sampleQueueAvailabilityToken)
-////        }
-////        stopRequestingOutputMediaData()
-////        try? removeDecoderTriggers()
-////        releaseDecoder()
-////    }
-////
-////    override func isEnded() -> Bool { outputStreamEnded }
-////
-////    func createRendererError(error: Error) -> SEPlaybackError {
-////        return SEPlaybackError(
-////            type: .renderer(.init(
-////                rendererName: name,
-////                rendererIndex: 0,
-////                rendererFormat: inputFormat,
-////                rendererFormatSupport: nil
-////            )),
-////            mediaPeriodId: .init(), // TODO: mediaPeriodId
-////            isRecoverable: false
-////        )
-////    }
-////
-////    func createDecoder(format: Format) throws -> D { fatalError("abstract") }
-////    func renderOutputBuffer(_ buffer: D.OutputBuffer) throws -> Bool { fatalError("abstract") }
-////    func onOutputStreamEnded() throws {}
-////    func isReadyForMoreMediaData() -> Bool { false }
-////    func requestOutputMediaDataWhenReady(_ callback: @escaping () -> Void) { fatalError("abstract") }
-////    func stopRequestingOutputMediaData() {}
-////    func onFirstOutputSample() {}
-////
-////    final func maybeInitDecoder() throws {
-////        guard decoder == nil, let inputFormat else { return }
-////        decoder = try createDecoder(format: inputFormat)
-////        decoder?.setOutputStartTimeUs(getLastResetPosition())
-////        customDebug("MAYBE INIT DECODER")
-////        try waitForDecoderOutputBuffer()
-////    }
-////
-////    final func releaseDecoder() {
-////        inputBuffer = nil
-////        outputBuffer?.release(); outputBuffer = nil
-////        decoderReinitializationState = .none
-////        decoderReceivedBuffers = false
-////        if let decoderLowWaterMarkToken {
-////            try? decoder?.removeTrigger(decoderLowWaterMarkToken)
-////        }
-////        if let decoderHighWaterMarkToken {
-////            try? decoder?.removeTrigger(decoderHighWaterMarkToken)
-////        }
-////        if let decoderOutputBufferAvailable {
-////            try? decoder?.removeTrigger(decoderOutputBufferAvailable)
-////        }
-////        decoder?.onInputBufferAvailable = nil
-////        decoderLowWaterMarkToken = nil
-////        decoderHighWaterMarkToken = nil
-////        decoderOutputBufferAvailable = nil
-////        decoder?.release()
-////        decoder = nil
-////    }
-////
-////    final func flushDecoder() throws {
-////        if decoderReinitializationState != .none {
-////            releaseDecoder()
-////            try maybeInitDecoder()
-////        } else {
-////            inputBuffer = nil
-////            outputBuffer?.release(); outputBuffer = nil
-////            decoder?.flush()
-////            decoder?.setOutputStartTimeUs(getLastResetPosition())
-////            decoderReceivedBuffers = false
-////        }
-////    }
-////
-////    final func onInputFormatChanged(_ newFormat: Format) throws {
-////        let oldFormat = inputFormat
-////        inputFormat = newFormat
-////        if decoder == nil {
-////            try maybeInitDecoder()
-////            try installDecoderTriggers()
-////            return
-////        }
-////
-////        if !(decoder?.canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) ?? false) {
-////            if decoderReceivedBuffers {
-////                decoderReinitializationState = .signalEndOfStream
-////            } else {
-////                releaseDecoder()
-////                try maybeInitDecoder()
-////                try installDecoderTriggers()
-////            }
-////        }
-////    }
-////
-////    final func isFormatSupportedFromAVFAsset(_ format: Format) -> Bool {
-////        guard let codecs = format.codecs else {
-////            return false
-////        }
-////
-////        if let containerMimeType = format.containerMimeType {
-////            let extendedMIMEType = "\(containerMimeType.rawValue); codecs=\"\(codecs)\""
-////            if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
-////                return true
-////            }
-////        }
-////
-////        if let sampleMimeType = format.sampleMimeType {
-////            let extendedMIMEType = "\(sampleMimeType.rawValue); codecs=\"\(codecs)\""
-////            if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
-////                return true
-////            }
-////        }
-////
-////        let extendedMIMEType = "video/mp4; codecs=\"\(codecs)\""
-////        if AVURLAsset.isPlayableExtendedMIMEType(extendedMIMEType) {
-////            return true
-////        }
-////
-////        return false
-////    }
-////
-////    private func feedInputBuffer2() {
-////        do {
-////            if let currentRendererError {
-////                self.currentRendererError = nil
-////                throw currentRendererError
-////            }
-////
-////            guard !outputStreamEnded else { return }
-////            guard getState() != .disabled, !workingInFeedDataLoop else { return }
-////            workingInFeedDataLoop = true
-////            defer { workingInFeedDataLoop = false }
-////
-////            if inputFormat == nil {
-////                flagsOnlyBuffer.clear()
-////                let result = try readSource(to: flagsOnlyBuffer, readFlags: .requireFormat)
-////
-////                if case let .didReadFormat(format) = result {
-////                    try onInputFormatChanged(format)
-////                } else if case .didReadBuffer = result {
-////                    assert(flagsOnlyBuffer.flags.contains(.endOfStream))
-////                    inputStreamEnded = true
-////                    outputStreamEnded = true
-////                    return
-////                } else {
-////                    return
-////                }
-////            }
-////
-////            try maybeInitDecoder()
-////
-////            guard let decoder, let decoderHighWaterMarkToken,
-////                  decoderReinitializationState != .waitEndOfStream,
-////                  !inputStreamEnded else { return }
-////
-////            var counter = 0
-////            customDebug(""); customDebug("--------------")
-////            customDebug("FEED INPUT BUFFER LOOP")
-////            while decoder.testTrigger(decoderHighWaterMarkToken) == false {
-////                if inputBuffer == nil {
-////                    inputBuffer = try decoder.dequeueInputBuffer()
-////                }
-////                guard let inputBuffer else {
-////                    if let decoderLowWaterMarkToken,
-////                       decoder.testTrigger(decoderLowWaterMarkToken) == false {
-////                        return
-////                    }
-////                    customDebug("FINISH FEEDD INPUT BUFFER NO BUFFER, enqueued = \(counter)")
-////                    customDebug("--------------"); customDebug("")
-////                    decoder.onInputBufferAvailable = { [unowned self] in
-////                        customDebug("DECODER ON INPUT BUFFER AVAILABLE")
-////                        queue.async {
-////                            decoder.onInputBufferAvailable = nil
-////                            feedInputBuffer2()
-////                        }
-////                    }
-////                    return
-////                }
-////
-////                if decoderReinitializationState == .signalEndOfStream {
-////                    inputBuffer.flags.insert(.endOfStream)
-////                    try decoder.queueInputBuffer(inputBuffer)
-////                    self.inputBuffer = nil
-////                    decoderReinitializationState = .waitEndOfStream
-////                    return
-////                }
-////
-////                switch try readSource(to: inputBuffer) {
-////                case .nothingRead:
-////                    if let decoderLowWaterMarkToken,
-////                       decoder.testTrigger(decoderLowWaterMarkToken) == false {
-////                        return
-////                    }
-////                    if sampleQueueAvailabilityToken == nil {
-////                        if let sampleStream = getStream() {
-////                            customDebug("INSTALL SAMPLE QUEUE TRIGGER")
-////                            sampleQueueAvailabilityToken = sampleStream.installTrigger(
-////                                condition: .whenDataBecomesReady
-////                            ) { [unowned self] token in
-////                                queue.justDispatch {
-//////                                    customDebug("SAMPLE QUEUEU NEW SAMPLE!!!!")
-////                                    sampleStream.removeTrigger(token)
-////                                    sampleQueueAvailabilityToken = nil
-////                                    feedInputBuffer2()
-////                                }
-////                            }
-////                        } else {
-////                            customDebug("DID NOT INSTALL SAMPLE QUEUE TRIGGER, NO SAMPLE STREAM")
-////                        }
-////                    } else {
-////                        customDebug("DID NOT INSTALL SAMPLE QUEUE TRIGGER, ALREADY INSTALLED")
-////                    }
-////
-////                    customDebug("FINISH FEEDD INPUT BUFFER NO DATA, enqueued = \(counter)")
-////                    customDebug("--------------"); customDebug("")
-////                    return
-////                case let .didReadFormat(format):
-////                    try onInputFormatChanged(format)
-////                    break
-////                case .didReadBuffer:
-//////                    customDebug("didReadBuffer, timeUs = \(inputBuffer.timeUs), last = \(getLastResetPosition())")
-////                    if inputBuffer.flags.contains(.endOfStream) {
-////                        inputStreamEnded = true
-////                        try decoder.queueInputBuffer(inputBuffer)
-////                        self.inputBuffer = nil
-////                        delegate?.rendererDidFinishReading(self)
-////                        try removeDecoderTriggers()
-////                        return
-////                    }
-////
-////                    if !firstStreamSampleRead {
-////                        firstStreamSampleRead = true
-////                        inputBuffer.flags.insert(.firstSample)
-////                    }
-////
-////                    inputBuffer.format = inputFormat
-////                    try decoder.queueInputBuffer(inputBuffer)
-////                    counter += 1
-////                    decoderReceivedBuffers = true
-////                    self.inputBuffer = nil
-////                }
-////            }
-////
-////            customDebug("FINISH FEEDD INPUT BUFFER enqueued = \(counter)")
-////            customDebug("--------------"); customDebug("")
-////        } catch {
-////            delegate?.onRendererError(self, error: createRendererError(error: error))
-////        }
-////    }
-////
-////    private func drainOutputBuffer2() {
-////        do {
-////            if let currentRendererError {
-////                self.currentRendererError = nil
-////                throw currentRendererError
-////            }
-////
-////            guard !workingInOutputDataLoop else { return }
-////            workingInOutputDataLoop = true
-////            defer { workingInOutputDataLoop = false }
-////            stopRequestingOutputMediaData()
-////
-////            customDebug("📹📹📹📹📹"); customDebug("--------------")
-////            customDebug("DRAIN RENDER LOOP")
-////            var counter = 0
-////            while isReadyForMoreMediaData() {
-////                if outputBuffer == nil {
-////                    outputBuffer = try decoder?.dequeueOutputBuffer()
-////                }
-////
-////                guard let outputBuffer else {
-////                    customDebug("DRAIN NO BUFFER, did enqueue = \(counter)")
-////                    try waitForDecoderOutputBuffer()
-////                    break
-////                }
-////
-////                if outputBuffer.sampleFlags.contains(.firstSample) {
-////                    onFirstOutputSample()
-////                }
-////
-////                if outputBuffer.sampleFlags.contains(.endOfStream) {
-////                    if decoderReinitializationState == .waitEndOfStream {
-////                        releaseDecoder()
-////                        try maybeInitDecoder()
-////                    } else {
-////                        outputBuffer.release()
-////                        self.outputBuffer = nil
-////                        outputStreamEnded = true
-////                        try onOutputStreamEnded()
-////                    }
-////
-////                    break
-////                }
-////
-////                let consumed = try renderOutputBuffer(outputBuffer)
-////                if consumed {
-////                    counter += 1
-//////                    customDebug("😊 did render frame = \(outputBuffer.timeUs)")
-////                    self.outputBuffer = nil
-////                } else {
-////                    customDebug("DRAIN RENDER LOOP ENDED, RENDERER IS FULL, consume = \(counter)")
-//////                    customDebug("😊 did NOTTTT render frame = \(outputBuffer.timeUs)")
-////
-////                    break
-////                }
-////            }
-////
-////            if !isReadyForMoreMediaData() {
-////                requestOutputMediaDataWhenReady {
-////                    customDebug("requestOutputMediaDataWhenReady DRAIN BUFFER")
-////                    self.drainOutputBuffer2()
-////                }
-////            }
-////
-////            if isReady() {
-////                customDebug("DRAIN RENDER LOOP ENDED, RENDERER IS READY, consume = \(counter)")
-////                customDebug("--------------"); customDebug("📹📹📹📹")
-////                delegate?.rendererReportsReady(self)
-////            } else {
-////                customDebug("DRAIN RENDER LOOP ENDED, RENDERER IS NOTTTT!!!!! READY, consume = \(counter)")
-////                customDebug("--------------"); customDebug("📹📹📹📹")
-////                delegate?.rendererNeedsMoreData(self)
-////            }
-////        } catch {
-////            delegate?.onRendererError(self, error: createRendererError(error: error))
-////        }
-////    }
-////
-////    private func waitForDecoderOutputBuffer() throws {
-////        guard decoderOutputBufferAvailable == nil else { return }
-////        stopRequestingOutputMediaData()
-////        customDebug("WAIT FOR DECODER OUPUT BUFFER, decoder is nil = \(decoder == nil)")
-////        decoderOutputBufferAvailable = try decoder?.installTrigger(condition: .whenDataBecomesReady) { [unowned self] token in
-////            queue.justDispatch {
-////                do {
-////                    customDebug("DECODER OUTPUT BUFFER AVAILABLE")
-////                    try decoder?.removeTrigger(token)
-////                    decoderOutputBufferAvailable = nil
-////                    drainOutputBuffer2()
-////                } catch {
-////                    currentRendererError = error
-////                }
-////            }
-////        }
-////    }
-////
-////    private func removeDecoderTriggers() throws {
-////        guard let decoder,
-////              let decoderLowWaterMarkToken,
-////              let decoderHighWaterMarkToken else {
-////            return
-////        }
-////
-////        self.decoderLowWaterMarkToken = nil
-////        self.decoderHighWaterMarkToken = nil
-////        try decoder.removeTrigger(decoderLowWaterMarkToken)
-////        try decoder.removeTrigger(decoderHighWaterMarkToken)
-////    }
-////
-////    private func installDecoderTriggers() throws {
-////        guard let decoder,
-////              decoderLowWaterMarkToken == nil,
-////              decoderHighWaterMarkToken == nil else {
-////            return
-////        }
-////
-////        let condition: (CMBufferQueue.TriggerToken) -> Void = { [unowned self] _ in
-////            customDebug("DECODER LOW WATER MARK")
-////            queue.justDispatch { feedInputBuffer2() }
-////        }
-////
-////        decoderLowWaterMarkToken = switch lowWaterMark {
-////        case let .sampleCount(count):
-////            try decoder.installTrigger(condition: .whenBufferCountBecomesLessThan(count), condition)
-////        case let .cmTime(cmTime):
-////            try decoder.installTrigger(condition: .whenDurationBecomesLessThanOrEqualTo(cmTime), condition)
-////        }
-////
-////        decoderHighWaterMarkToken = switch hightWaterMark {
-////        case let .sampleCount(count):
-////            try decoder.installTrigger(condition: .whenBufferCountBecomesGreaterThan(count))
-////        case let .cmTime(cmTime):
-////            try decoder.installTrigger(condition: .whenDurationBecomesGreaterThanOrEqualTo(cmTime))
-////        }
-////    }
-////}
-////
-////extension AVFBaseRenderer {
-////    enum WaterMarkSource {
-////        case sampleCount(Int)
-////        case cmTime(CMTime)
-////    }
-////}
-//
-//import AVFoundation
-//import Decoder
-//
-//// MARK: - Protocol
-//
-//public protocol AVFDecoder: Decoder where InputBuffer: DecoderInputBuffer, OutputBuffer: SimpleDecoderOutputBuffer {
-//    func canReuseDecoder(oldFormat: Format?, newFormat: Format) -> Bool
-//}
-//
-//// MARK: - AVFBaseRenderer
-//
-//class AVFBaseRenderer<D: AVFDecoder>: BaseSERenderer {
-//
-//    // MARK: - Configuration
-//
-//    var lowWaterMark: WaterMark = .sampleCount(2)
-//    var highWaterMark: WaterMark = .sampleCount(10)
-//    var debugEnabled = false
-//
-//    // MARK: - Public read-only state
-//
-//    private(set) var decoder: D?
-//    private(set) var outputStreamEnded = false
-//    private(set) var inputFormat: Format?
-//
-//    // MARK: - Decoder I/O buffers
-//
-//    private let flagsOnlyBuffer: DecoderInputBuffer
-//    private var inputBuffer: D.InputBuffer?
-//    private var outputBuffer: D.OutputBuffer?
-//
-//    // MARK: - Stream state
-//
-//    private var inputStreamEnded = false
-//    private var firstStreamSampleRead = false
-//    private var decoderReceivedBuffers = false
-//    private var decoderReinitState: DecoderReinitState = .none
-//
-//    // MARK: - Re-entrancy guards
-//
-//    private var isFeedingInput = false
-//    private var isDrainingOutput = false
-//
-//    // MARK: - Trigger tokens
-//
-//    private var lowWaterMarkToken: CMBufferQueue.TriggerToken?
-//    private var highWaterMarkToken: CMBufferQueue.TriggerToken?
-//    private var outputAvailableToken: CMBufferQueue.TriggerToken?
-//    private var sampleQueueToken: QueueTriggerToken?
-//
-//    // MARK: - Error forwarding
-//
-//    /// Errors captured in trigger callbacks, re-thrown on the next loop entry.
-//    private var deferredError: Error?
-//
-//    // MARK: - Init
-//
-//    override init(queue: Queue, trackType: TrackType, clock: SEClock) {
-//        flagsOnlyBuffer = DecoderInputBuffer(bufferReplacementMode: .disabled)
-//        super.init(queue: queue, trackType: trackType, clock: clock)
-//    }
-//
-//    // MARK: - Subclass contract
-//
-//    func createDecoder(format: Format) throws -> D {
-//        fatalError("Subclasses must override createDecoder(format:)")
-//    }
-//
-//    /// Return `true` if the buffer was consumed (enqueued for presentation).
-//    func renderOutputBuffer(_ buffer: D.OutputBuffer) throws -> Bool {
-//        fatalError("Subclasses must override renderOutputBuffer(_:)")
-//    }
-//
-//    func renderOutputBuffer(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
-//        fatalError("Subclasses must override renderOutputBuffer(_:)")
-//    }
-//
-//    func onOutputStreamEnded() throws {}
-//    func isReadyForMoreMediaData() -> Bool { false }
-//
-//    func requestOutputMediaDataWhenReady(_ callback: @escaping () -> Void) {
-//        fatalError("Subclasses must override requestOutputMediaDataWhenReady(_:)")
-//    }
-//
-//    func stopRequestingOutputMediaData() {}
-//    func onSampleQueuedToDecoder(timingInfo: CMSampleTimingInfo, flags: SampleFlags) {}
-//    func rendererIsReady() -> Bool { false }
-//
-//    // MARK: - BaseSERenderer overrides
-//
-//    override func willChangeStream() throws {
-//        try super.willChangeStream()
-//        removeSampleQueueTrigger()
-//    }
-//
-//    override func onStreamChanged(
-//        formats: [Format],
-//        startPosition: CMTime,
-//        offset: CMTime,
-//        mediaPeriodId: MediaPeriodId
-//    ) throws {
-//        try super.onStreamChanged(
-//            formats: formats,
-//            startPosition: startPosition,
-//            offset: offset,
-//            mediaPeriodId: mediaPeriodId
-//        )
-//        firstStreamSampleRead = false
-//        installSampleQueueTrigger()
-//        scheduleFeedAndDrain()
-//    }
-//
-//    override func onPositionReset(position: CMTime, joining: Bool) throws {
-//        inputStreamEnded = false
-//        outputStreamEnded = false
-//        firstStreamSampleRead = false
-//        if decoder != nil { try flushDecoder() }
-//        scheduleFeedAndDrain()
-//    }
-//
-//    override func onDisabled() {
-//        inputFormat = nil
-//        removeSampleQueueTrigger()
-//        stopRequestingOutputMediaData()
-//        releaseDecoder()
-//    }
-//
-//    override func isEnded() -> Bool { outputStreamEnded }
-//
-//    // MARK: - Error factory
-//
-//    func createRendererError(error: Error) -> SEPlaybackError {
-//        SEPlaybackError(
-//            type: .renderer(.init(
-//                rendererName: name,
-//                rendererIndex: 0,
-//                rendererFormat: inputFormat,
-//                rendererFormatSupport: nil
-//            )),
-//            mediaPeriodId: .init(), // TODO: carry actual mediaPeriodId
-//            isRecoverable: false
-//        )
-//    }
-//
-//    // MARK: - Format support query
-//
-//    final func isFormatSupportedFromAVFAsset(_ format: Format) -> Bool {
-//        guard let codecs = format.codecs else { return false }
-//
-//        let mimeTypes = [
-//            format.containerMimeType?.rawValue,
-//            format.sampleMimeType?.rawValue,
-//            "video/mp4"   // fallback probe
-//        ].compactMap { $0 }
-//
-//        return mimeTypes.contains { mime in
-//            AVURLAsset.isPlayableExtendedMIMEType("\(mime); codecs=\"\(codecs)\"")
-//        }
-//    }
-//}
-//
-//// MARK: - Decoder lifecycle
-//
-//extension AVFBaseRenderer {
-//
-//    final func maybeInitDecoder() throws {
-//        guard decoder == nil, let inputFormat else { return }
-//        let newDecoder = try createDecoder(format: inputFormat)
-//        newDecoder.setOutputStartTime(getLastResetPosition())
-//        decoder = newDecoder
-//        try installDecoderTriggers()
-//        try installOutputAvailableTrigger()
-//        try installInputBufferAvailableCallback(decoder: newDecoder)
-//    }
-//
-//    final func releaseDecoder() {
-//        inputBuffer = nil
-//
-//        outputBuffer?.release()
-//        outputBuffer = nil
-//
-//        decoderReinitState = .none
-//        decoderReceivedBuffers = false
-//
-//        removeAllDecoderTriggers()
-//
-//        decoder?.release()
-//        decoder = nil
-//    }
-//
-//    final func flushDecoder() throws {
-//        if decoderReinitState != .none {
-//            // Full teardown + rebuild when a reinit was in progress.
-//            releaseDecoder()
-//            try maybeInitDecoder()
-//        } else {
-//            inputBuffer = nil
-//            outputBuffer?.release()
-//            outputBuffer = nil
-//            decoder?.flush()
-//            decoder?.setOutputStartTime(getLastResetPosition())
-//            decoderReceivedBuffers = false
-//        }
-//    }
-//
-//    final func onInputFormatChanged(_ newFormat: Format) throws {
-//        let oldFormat = inputFormat
-//        inputFormat = newFormat
-//
-//        guard let decoder else {
-//            try maybeInitDecoder()
-//            return
-//        }
-//
-//        if decoder.canReuseDecoder(oldFormat: oldFormat, newFormat: newFormat) {
-//            return // reuse as-is
-//        }
-//
-//        if decoderReceivedBuffers {
-//            // Can't tear down mid-stream; signal EOS to flush the decoder first.
-//            decoderReinitState = .signalEndOfStream
-//        } else {
-//            releaseDecoder()
-//            try maybeInitDecoder()
-//        }
-//    }
-//}
-//
-//// MARK: - Scheduling helpers
-//
-//private extension AVFBaseRenderer {
-//
-//    /// Single entry point that kicks both the feed and drain loops.
-//    func scheduleFeedAndDrain() {
-//        feedInputBuffer()
-//        customDebug("")
-//        customDebug("📹 scheduleFeedAndDrain requestOutputMediaDataWhenReady")
-//        requestOutputMediaDataWhenReady { [weak self] in
-//            self?.customDebug("📹 requestOutputMediaDataWhenReady scheduleFeedAndDrain")
-//            self?.feedInputBuffer()
-//        }
-//        customDebug("")
-//    }
-//}
-//
-//// MARK: - Feed (input) loop
-//
-//private extension AVFBaseRenderer {
-//    func feedInputBuffer() {
-//        do {
-//            try rethrowDeferred()
-//            guard canEnterFeedLoop() else { return }
-//            isFeedingInput = true
-//
-//            try ensureInputFormat()
-//            try maybeInitDecoder()
-//
-//            guard let decoder, let highWaterMarkToken,
-//                  decoderReinitState != .waitEndOfStream,
-//                  !inputStreamEnded else { return }
-//
-//            try enterFeedLoop()
-//        } catch {
-//            delegate?.onRendererError(self, error: createRendererError(error: error))
-//        }
-//    }
-//
-//    func enterFeedLoop() throws {
-//        guard let decoder, let highWaterMarkToken else {
-//            isFeedingInput = false
-//            return
-//        }
-//
-//        while decoder.testTrigger(highWaterMarkToken) == false {
-//            guard try feedOneSample(decoder: decoder) else { break }
-//        }
-//        isFeedingInput = false
-//    }
-//
-//    func canEnterFeedLoop() -> Bool {
-//        !outputStreamEnded && getState() != .disabled && !isFeedingInput
-//    }
-//
-//    /// Reads the first format from the source when `inputFormat` is still nil.
-//    func ensureInputFormat() throws {
-//        guard inputFormat == nil else { return }
-////        flagsOnlyBuffer.clear()
-//        let result = try readSource2(readFlags: .requireFormat)
-//
-//        switch result {
-//        case let .didReadFormat(format):
-//            try onInputFormatChanged(format)
-//        case let .didReadBuffer(flagsOnlyBuffer):
-//            assert(flagsOnlyBuffer.flags.contains(.endOfStream))
-//            inputStreamEnded = true
-//            outputStreamEnded = true
-//        default:
-//            break
-//        }
-//    }
-//
-//    /// Attempt to dequeue one input buffer, fill it from the source, and enqueue it.
-//    func feedOneSample(decoder: D) throws -> Bool {
-//        // 1. Acquire an input buffer if we don't already have one.
-//        if inputBuffer == nil {
-//            inputBuffer = try decoder.dequeueInputBuffer()
-//        }
-//        guard let buffer = inputBuffer else {
-//            return false
-//        }
-//
-//        // 2. Handle pending decoder reinit (signal EOS to the old decoder).
-//        if decoderReinitState == .signalEndOfStream {
-//            buffer.flags.insert(.endOfStream)
-//            try decoder.queueInputBuffer(buffer)
-//            inputBuffer = nil
-//            decoderReinitState = .waitEndOfStream
-//            return false
-//        }
-//
-//        // 3. Read from the sample source.
-//        switch try readSource2() {
-//        case .nothingRead:
-////            installSampleQueueTrigger()
-//            return false
-//
-//        case let .didReadFormat(format):
-//            try onInputFormatChanged(format)
-//            return true
-//        case let .didReadBuffer(sampleBuffer):
-////            print("🫟 did read buffer, pts = \(sampleBuffer.presentationTimeStamp.seconds)")
-//            try buffer.setBuffer(sampleBuffer)
-//            if buffer.flags.contains(.endOfStream) {
-//                inputStreamEnded = true
-//                try decoder.queueInputBuffer(buffer)
-//                inputBuffer = nil
-//                delegate?.rendererDidFinishReading(self)
-//                try removeWaterMarkTriggers()
-//                return false
-//            }
-//
-////            if !firstStreamSampleRead {
-////                firstStreamSampleRead = true
-////                buffer.flags.insert(.firstSample)
-////            }
-////
-////            buffer.format = inputFormat
-////            try decoder.queueInputBuffer(buffer)
-//            try renderOutputBuffer(sampleBuffer)
-//            onSampleQueuedToDecoder(timingInfo: buffer.time, flags: buffer.flags)
-//            decoderReceivedBuffers = true
-////            inputBuffer = nil
-//
-//            return isReadyForMoreMediaData()
-//        }
-//    }
-//
-//    func installInputBufferAvailableCallback(decoder: D) {
-//        decoder.onInputBufferAvailable = { [weak self] in
-//            self?.checkForInputWaterMarkLevel()
-//        }
-//    }
-//}
-//
-//// MARK: - Drain (output) loop
-//
-//private extension AVFBaseRenderer {
-//    func drainOutputBuffer() {
-//        do {
-//            try rethrowDeferred()
-//            guard !isDrainingOutput else { return }
-//            isDrainingOutput = true
-//            defer {
-//                isDrainingOutput = false
-//                reportReadinessToDelegate()
-//            }
-//
-//            var counter = 0
-//            customDebug()
-//            customDebug("------------- time = \(getClock().milliseconds)")
-//            customDebug("📹📹📹📹📹📹")
-////            while isReadyForMoreMediaData() {
-////                if outputBuffer == nil {
-////                    outputBuffer = try decoder?.dequeueOutputBuffer()
-////                }
-////                guard let buffer = outputBuffer else {
-////                    try installOutputAvailableTrigger()
-////                    customDebug("📹📹📹📹📹📹")
-////                    customDebug("No available buffer, counter = \(counter)")
-////                    customDebug("-------------")
-////                    customDebug()
-////                    return
-////                }
-////
-////                if try handleSpecialOutputFlags(buffer) { break }
-////
-////                let consumed = try renderOutputBuffer(buffer)
-////                if consumed {
-////                    counter += 1
-////                    outputBuffer = nil
-////                } else {
-////                    break // back-pressure from the downstream renderer
-////                }
-////            }
-//            while true {
-//                if isReadyForMoreMediaData() {
-//                    if outputBuffer == nil {
-//                        outputBuffer = try decoder?.dequeueOutputBuffer()
-//                    }
-//                    guard let buffer = outputBuffer else {
-//                        try installOutputAvailableTrigger()
-//                        stopRequestingOutputMediaData()
-//                        customDebug("📹📹📹📹📹📹")
-//                        customDebug("No available buffer, isReadyForMore? = \(isReadyForMoreMediaData()), isReady = \(rendererIsReady()), counter = \(counter)")
-//                        customDebug("-------------")
-//                        customDebug()
-//                        return
-//                    }
-//
-//                    if try handleSpecialOutputFlags(buffer) {
-//                        stopRequestingOutputMediaData()
-//                        break
-//                    }
-//
-//                    let consumed = try renderOutputBuffer(buffer)
-//                    if consumed {
-//                        counter += 1
-//                        outputBuffer = nil
-//                    } else {
-//                        break // back-pressure from the downstream renderer
-//                    }
-//                } else {
-//                    customDebug("STOPPED BEING READY FOR MORE MEDIA DATA, isReady = \(rendererIsReady()), counter = \(counter)")
-//                    break
-//                }
-//            }
-//
-//            customDebug("📹📹📹📹📹📹 counter = \(counter), isReady = \(rendererIsReady())")
-//            customDebug("-------------")
-//            customDebug()
-////            scheduleNextDrain(counter)
-//        } catch {
-//            delegate?.onRendererError(self, error: createRendererError(error: error))
-//        }
-//    }
-//
-//    /// Returns `true` if the buffer was a special (first/EOS) buffer that terminates the loop.
-//    func handleSpecialOutputFlags(_ buffer: D.OutputBuffer) throws -> Bool {
-//        guard buffer.sampleFlags.contains(.endOfStream) else { return false }
-//
-//        if decoderReinitState == .waitEndOfStream {
-//            // Old decoder drained — rebuild for the new format.
-//            releaseDecoder()
-//            try maybeInitDecoder()
-//        } else {
-//            buffer.release()
-//            outputBuffer = nil
-//            outputStreamEnded = true
-//            try onOutputStreamEnded()
-//        }
-//        return true
-//    }
-//
-//    func scheduleNextDrain(_ counter: Int) {
-////        guard !isReadyForMoreMediaData() else { return }
-//        customDebug("📹 2 scheduleNextDrain requestOutputMediaDataWhenReady")
-//        requestOutputMediaDataWhenReady { [weak self] in
-////            self?.customDebug("📹 requestOutputMediaDataWhenReady scheduleNextDrain 2")
-////            self?.stopRequestingOutputMediaData()
-//            self?.feedInputBuffer()
-////            self?.feedInputBuffer()
-//        }
-//        
-//    }
-//
-//    func reportReadinessToDelegate() {
-//        if isReady() {
-//            delegate?.rendererReportsReady(self)
-//        } else {
-//            delegate?.rendererNeedsMoreData(self)
-//        }
-//    }
-//}
-//
-//// MARK: - Trigger management
-//
-//private extension AVFBaseRenderer {
-//    func installDecoderTriggers() throws {
-//        guard let decoder,
-//              lowWaterMarkToken == nil,
-//              highWaterMarkToken == nil else { return }
-//
-//        let onLowWater: (CMBufferQueue.TriggerToken) -> Void = { [weak self] _ in
-//            guard let self else { return }
-//            queue.justDispatch { self.feedInputBuffer() }
-//        }
-//
-//        lowWaterMarkToken = switch lowWaterMark {
-//        case let .sampleCount(n):
-//            try decoder.installTrigger(condition: .whenBufferCountBecomesLessThan(n), onLowWater)
-//        case let .cmTime(t):
-//            try decoder.installTrigger(condition: .whenDurationBecomesLessThanOrEqualTo(t), onLowWater)
-//        }
-//
-//        highWaterMarkToken = switch highWaterMark {
-//        case let .sampleCount(n):
-//            try decoder.installTrigger(condition: .whenBufferCountBecomesGreaterThan(n))
-//        case let .cmTime(t):
-//            try decoder.installTrigger(condition: .whenDurationBecomesGreaterThanOrEqualTo(t))
-//        }
-//    }
-//
-//    func installOutputAvailableTrigger() throws {
-//        guard outputAvailableToken == nil, let decoder else { return }
-//        stopRequestingOutputMediaData()
-//
-//        outputAvailableToken = try decoder.installTrigger(
-//            condition: .whenDataBecomesReady
-//        ) { [weak self] token in
-//            guard let self else { return }
-//            queue.justDispatchWithQoS(qos: .userInteractive) {
-//                self.customDebug(); self.customDebug(); self.customDebug()
-//                self.customDebug("📹📹📹 NEW DECODER OUTPUT BUFFER IS AVAILABLE 📹📹📹")
-//                self.customDebug(); self.customDebug(); self.customDebug()
-//                do {
-//                    try self.decoder?.removeTrigger(token)
-//                    self.outputAvailableToken = nil
-//                    self.scheduleNextDrain(0)
-//                } catch {
-//                    self.deferredError = error
-//                }
-//            }
-//        }
-//    }
-//
-//    func installSampleQueueTrigger() {
-//        guard sampleQueueToken == nil, let stream = getStream2() else { return }
-//
-//        sampleQueueToken = stream.installTrigger(
-//            condition: .whenDataBecomesReady
-//        ) { [weak self] token in
-//            self?.checkForInputWaterMarkLevel()
-//        }
-//    }
-//
-//    private func checkForInputWaterMarkLevel() {
-//        queue.justDispatchWithQoS(qos: .utility) {
-//            if let decoder = self.decoder, let lowWaterMarkToken = self.lowWaterMarkToken,
-//                decoder.testTrigger(lowWaterMarkToken) {
-//                self.feedInputBuffer()
-//            }
-//        }
-//    }
-//
-//    func removeSampleQueueTrigger() {
-//        guard let token = sampleQueueToken, let stream = getStream2() else { return }
-//        stream.removeTrigger(token)
-//        sampleQueueToken = nil
-//    }
-//
-//    func removeWaterMarkTriggers() throws {
-//        // Capture and nil before calling removeTrigger to avoid
-//        // re-entrancy issues if removal itself triggers a callback.
-//        let low = lowWaterMarkToken
-//        let high = highWaterMarkToken
-//        lowWaterMarkToken = nil
-//        highWaterMarkToken = nil
-//
-//        if let low  { try decoder?.removeTrigger(low) }
-//        if let high { try decoder?.removeTrigger(high) }
-//    }
-//
-//    func removeAllDecoderTriggers() {
-//        // Best-effort removal — decoder may already be nil.
-//        let tokens: [CMBufferQueue.TriggerToken?] = [
-//            lowWaterMarkToken, highWaterMarkToken, outputAvailableToken
-//        ]
-//        lowWaterMarkToken = nil
-//        highWaterMarkToken = nil
-//        outputAvailableToken = nil
-//        decoder?.onInputBufferAvailable = nil
-//
-//        for token in tokens.compactMap({ $0 }) {
-//            try? decoder?.removeTrigger(token)
-//        }
-//    }
-//
-//    func customDebug(_ items: Any...) {
-//        if debugEnabled {
-//            print(items)
-//        }
-//    }
-//}
-//
-//private extension AVFBaseRenderer {
-//    func rethrowDeferred() throws {
-//        if let error = deferredError {
-//            deferredError = nil
-//            throw error
-//        }
-//    }
-//}
-//
-//extension AVFBaseRenderer {
-//    enum WaterMark {
-//        case sampleCount(Int)
-//        case cmTime(CMTime)
-//    }
-//
-//    private enum DecoderReinitState {
-//        case none
-//        case signalEndOfStream
-//        case waitEndOfStream
-//    }
-//}
+//  AVFBaseRenderer.swift
+//  SEPlayer
+//
+//  Created by Damir Yackupov on 19.07.2026.
+//
+
+import AVFoundation
+import SEPlayerCommon
+
+class AVFBaseRenderer: BaseSERenderer {
+    enum OutputMode {
+        case passthrough
+        case decode
+    }
+
+    var outputMode: OutputMode = .passthrough {
+        didSet { onOutputModeChanged() }
+    }
+
+    /// Whether the output failed in the background, and is looked at again once the app is in the foreground.
+    /// Meanwhile the renderer counts as ready, so the other tracks play on, and drops what its stream holds behind the
+    /// clock, which the output couldn't show anyway.
+    private(set) final var isOutputDirty = false
+
+    override var isRecoveringWhileTimelineAdvances: Bool { recoveringOutput }
+
+    /// Whether failures of the output in the background wait for the foreground: the system takes video decoders
+    /// away there, and gives them back on return.
+    var defersRecoveryInBackground: Bool { false }
+    /// How much enqueued ahead of the clock is enough to start, before the output stops asking for more; `nil` to wait
+    /// until it does.
+    var minimumPreroll: CMTime? { nil }
+
+    private let stallTimer: TimebaseTimer
+    private let rendererFinishedTimer: TimebaseTimer
+
+    private var outputAvailableToken: CMBufferQueueTriggerToken?
+    private var sampleQueueToken: QueueTriggerToken?
+    /// Whether the output has had enough since the last reset: it stopped asking for media data, or the stream
+    /// ended. It's the renderer's readiness, and only the pipeline changes it: the output filling, or running dry.
+    private var prerollReached = false
+    private var lastEnqueuedSample: CMTimeRange = .invalid
+    private var controlTimebase: CMTimebase?
+
+    private var currentError: SEPlaybackError?
+    private var pumpGeneration: UInt64 = 0
+    private var pumpSuspended = false
+    private var recoveringOutput = false
+    private var recoveryTimer: DispatchSourceTimer?
+    private var recoveryAttempt: UInt64 = 0
+    /// Bumped each time the output gets dirty, so a foreground check meant for an earlier time does nothing.
+    private var dirtyGeneration: UInt64 = 0
+    private var dirtySkipTimer: DispatchSourceTimer?
+
+    /// What one pump has enqueued so far, for the log.
+    private var batchSampleCount = 0
+    private var batchDuration: CMTime = .zero
+    private var batchRange: CMTimeRange = .invalid
+
+    private var pendingOutputMode: OutputMode?
+    /// What was read after the samples of the last buffer enqueued, and didn't join them: the next pump starts with it.
+    private var carriedRead: SampleStreamReadResult?
+    private var rendererAtEndOfStream = false
+    private var isRenderingEnded = false
+
+    override init(queue: any Queue, trackType: TrackType, clock: any SEClock) {
+        stallTimer = TimebaseTimer(queue: queue.queue)
+        rendererFinishedTimer = TimebaseTimer(queue: queue.queue)
+
+        super.init(queue: queue, trackType: trackType, clock: clock)
+
+        stallTimer.setEventHandler { [weak self] in
+            guard let self, !pumpSuspended, getState() != .disabled else {
+                return
+            }
+            outputDidRunDry()
+        }
+
+        rendererFinishedTimer.setEventHandler { [weak self] in
+            guard let self, !pumpSuspended, getState() != .disabled else {
+                return
+            }
+            guard rendererAtEndOfStream, lastEnqueuedSample.isValid,
+                  let controlTimebase, lastEnqueuedSample.end <= controlTimebase.time else {
+                return
+            }
+
+            SELogger.info(logTopic, "\(name) finished rendering at \(controlTimebase.time.seconds)")
+            isRenderingEnded = true
+            delegate?.rendererDidFinishRendering(self)
+        }
+    }
+
+    deinit {
+        recoveryTimer?.cancel()
+    }
+
+    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+        guard let codecs = format.codecs.map(Codecs.withParameterSetsOutOfBand) else {
+            return .create(formatSupport: .unsupportedType)
+        }
+
+        let mimeTypes = [
+            format.containerMimeType?.rawValue,
+            format.sampleMimeType?.rawValue,
+            "video/mp4"   // fallback probe
+        ].compactMap { $0 }
+
+        let result = mimeTypes.contains { mime in
+            AVURLAsset.isPlayableExtendedMIMEType("\(mime); codecs=\"\(codecs)\"")
+        }
+
+        return if result {
+            .create(
+                formatSupport: .handled,
+                adaptiveSupport: .seamless,
+                hardwareAccelerationSupport: .supported,
+                decoderSupport: .primary
+            )
+        } else {
+            .create(formatSupport: .unsupportedSubtype)
+        }
+    }
+
+    override func handleMessage(_ message: RendererMessage) throws {
+        if case let .setTimeSource(source) = message, source?.timebase !== controlTimebase {
+            controlTimebase = source?.timebase
+            try stallTimer.setTimebase(controlTimebase)
+            try rendererFinishedTimer.setTimebase(controlTimebase)
+            // Timers set on the old timebase are gone with it.
+            if getState() == .started { try armPlaybackTimers() }
+        }
+
+        try super.handleMessage(message)
+    }
+
+    override func isEnded() -> Bool { isRenderingEnded }
+
+    override func isReady() -> Bool {
+        prerollReached || isRenderingEnded || isOutputDirty
+    }
+
+    override func willChangeStream(oldStream: (any SampleStream)?, newStream: inout any SampleStream) throws {
+        pumpGeneration &+= 1
+        carriedRead = nil
+        stopRequestingOutputMediaData()
+        cancelOutputRecovery()
+        if let outputAvailableToken {
+            try? getDecodeBufferQueue()?.removeTrigger(outputAvailableToken)
+            self.outputAvailableToken = nil
+        }
+        if let oldStream, let sampleQueueToken {
+            self.sampleQueueToken = nil
+            oldStream.removeTrigger(sampleQueueToken)
+        }
+    }
+
+    override func onStreamChanged(
+        formats: [Format],
+        startPosition: CMTime,
+        offset: CMTime,
+        mediaPeriodId: MediaPeriodId
+    ) throws {
+        pumpSuspended = false
+        isRenderingEnded = false
+        rendererAtEndOfStream = false
+
+        try installInputQueueTrigger()
+        if outputMode == .decode {
+            try installOutputQueueTriggers()
+        }
+    }
+
+    override func setStreamFinal() {
+        super.setStreamFinal()
+
+        if !rendererAtEndOfStream {
+            readInputStream()
+        }
+    }
+
+    override func onPositionReset(position: CMTime, joining: Bool) throws {
+        try super.onPositionReset(position: position, joining: joining)
+        cancelOutputRecovery()
+        try resetOutputPipeline()
+        resumeMediaData()
+    }
+
+    /// Invalidates callbacks already dispatched before a flush, seek, or stream replacement.
+    final func suspendMediaData() {
+        logBatchFinished("suspended")
+        pumpGeneration &+= 1
+        pumpSuspended = true
+        stopRequestingOutputMediaData()
+        if let sampleQueueToken {
+            getStream()?.removeTrigger(sampleQueueToken)
+            self.sampleQueueToken = nil
+        }
+        if let outputAvailableToken {
+            try? getDecodeBufferQueue()?.removeTrigger(outputAvailableToken)
+            self.outputAvailableToken = nil
+        }
+        stallTimer.cancel()
+        rendererFinishedTimer.cancel()
+    }
+
+    final func resetOutputPipeline() throws {
+        SELogger.debug(logTopic, "\(name) flushes its output")
+        clearDirtyOutput()
+        suspendMediaData()
+        currentError = nil
+        prerollReached = false
+        isRenderingEnded = false
+        rendererAtEndOfStream = false
+        lastEnqueuedSample = .invalid
+        carriedRead = nil
+    }
+
+    final func resumeMediaData() {
+        pumpSuspended = false
+        schedulePump()
+        // Suspending removed the trigger of the decoded frames: without it nothing would read them again.
+        if outputMode == .decode {
+            try? installOutputQueueTriggers()
+        }
+    }
+
+    final func requestRecovery(_ reason: RendererRecoveryReason, error: Error? = nil, position: CMTime = .invalid) {
+        guard getState() != .disabled else { return }
+        // In the background a flush could fail again at once, and nothing needs the output there. It is looked at
+        // again in the foreground.
+        if defersRecoveryInBackground, reason == .decoderRequiresFlush || reason == .outputFailed,
+           ApplicationActivity.shared.isInBackground {
+            markOutputDirty(reason: reason, error: error, position: position)
+            return
+        }
+        clearDirtyOutput()
+        let context = getRecoveryContext()
+        SELogger.info(
+            .recovery,
+            "\(name) recovery=\(reason) generation=\(context.generation) "
+                + "period=\(String(describing: context.mediaPeriodId)) readPosition=\(getReadingPosition().seconds) "
+                + "position=\(position.seconds) error=\(String(describing: error))"
+        )
+        suspendMediaData()
+        if reason == .automaticFlush {
+            beginOutputRecovery()
+        } else {
+            cancelOutputRecovery()
+        }
+        let request = RendererRecoveryRequest(
+            reason: reason,
+            context: context,
+            underlyingError: error,
+            position: position
+        )
+        delegate?.rendererNeedsRecovery(self, request: request)
+    }
+
+    /// Leaves a failure in the background for the foreground.
+    private func markOutputDirty(reason: RendererRecoveryReason, error: Error?, position: CMTime) {
+        cancelOutputRecovery()
+        guard !isOutputDirty else { return }
+        SELogger.info(
+            .recovery,
+            "\(name) output failed in the background (\(reason)): checked again in the foreground"
+        )
+        isOutputDirty = true
+        dirtyGeneration &+= 1
+        let timer = DispatchSource.makeTimerSource(queue: queue.queue)
+        timer.setEventHandler { [weak self] in self?.skipStreamToClock() }
+        timer.schedule(deadline: .now() + Self.dirtySkipInterval, repeating: Self.dirtySkipInterval)
+        dirtySkipTimer = timer
+        timer.activate()
+        // The player may wait on this renderer: it counts as ready now.
+        delegate?.rendererFinishedPreroll(self)
+
+        let generation = dirtyGeneration
+        ApplicationActivity.shared.whenInForeground { [weak self] in
+            guard let self else { return }
+            queue.justDispatch { [weak self] in
+                guard let self, isOutputDirty, dirtyGeneration == generation, getState() != .disabled else {
+                    return
+                }
+                clearDirtyOutput()
+                guard outputNeedsRecovery() else {
+                    SELogger.info(.recovery, "\(name) output works again in the foreground")
+                    schedulePump()
+                    return
+                }
+                SELogger.info(.recovery, "\(name) recovers its output in the foreground")
+                requestRecovery(reason, error: error, position: position)
+            }
+        }
+    }
+
+    private func clearDirtyOutput() {
+        isOutputDirty = false
+        dirtySkipTimer?.cancel()
+        dirtySkipTimer = nil
+    }
+
+    /// Drops the samples behind the clock, so the stream doesn't hold on to them, nor the player stop loading for
+    /// the other tracks.
+    private func skipStreamToClock() {
+        guard isOutputDirty, getState() != .disabled, let stream = getStream(),
+              let time = controlTimebase?.time, time.isNumeric else {
+            return
+        }
+        let skipped = (try? stream.skipData(position: time - getStreamOffset())) ?? 0
+        if skipped > 0 {
+            SELogger.verbose(.recovery, "\(name) skipped \(skipped) samples to \(time.seconds) with a dirty output")
+        }
+    }
+
+    final func beginOutputRecovery() {
+        guard !recoveringOutput else { return }
+        recoveringOutput = true
+        recoveryAttempt &+= 1
+        let attempt = recoveryAttempt
+        let timer = DispatchSource.makeTimerSource(queue: queue.queue)
+        timer.setEventHandler { [weak self] in
+            guard let self, recoveringOutput, recoveryAttempt == attempt else {
+                return
+            }
+            requestRecovery(.recoveryTimedOut, error: RendererRecoveryError.timedOut)
+        }
+        timer.schedule(deadline: .now() + Self.outputRecoveryTimeout)
+        recoveryTimer = timer
+        timer.activate()
+    }
+
+    final func cancelOutputRecovery() {
+        recoveryAttempt &+= 1
+        recoveringOutput = false
+        recoveryTimer?.cancel()
+        recoveryTimer = nil
+    }
+
+    private func schedulePump(output: Bool = false) {
+        let generation = pumpGeneration
+        queue.justDispatch { [weak self] in
+            guard let self, generation == pumpGeneration, !pumpSuspended,
+                  getState() != .disabled else {
+                return
+            }
+            if output { feedOutputStream() } else { readInputStream() }
+        }
+    }
+
+    final func enqueuedDuration(aheadOf time: CMTime) -> CMTime {
+        guard time.isNumeric, lastEnqueuedSample.start.isNumeric else {
+            return .zero
+        }
+        let end = lastEnqueuedSample.end.isNumeric ? lastEnqueuedSample.end : lastEnqueuedSample.start
+        return max(.zero, end - time)
+    }
+
+    override func onStarted() throws {
+        try super.onStarted()
+        try armPlaybackTimers()
+    }
+
+    private func armPlaybackTimers() throws {
+        guard !pumpSuspended, let controlTimebase, lastEnqueuedSample.end.isNumeric else {
+            return
+        }
+        // stop() disarms these timers, including when buffering stops playback.
+        // Re-arm them on resume even if no new sample has arrived in the meantime.
+        if rendererAtEndOfStream {
+            if lastEnqueuedSample.end <= controlTimebase.time {
+                isRenderingEnded = true
+                delegate?.rendererDidFinishRendering(self)
+            } else {
+                try rendererFinishedTimer.setFireTime(lastEnqueuedSample.end)
+            }
+        } else {
+            if lastEnqueuedSample.end <= controlTimebase.time {
+                outputDidRunDry()
+            } else {
+                try stallTimer.setFireTime(lastEnqueuedSample.end)
+            }
+        }
+    }
+
+    override func onStopped() {
+        stallTimer.cancel()
+        rendererFinishedTimer.cancel()
+    }
+
+    override func onDisabled() {
+        clearDirtyOutput()
+        cancelOutputRecovery()
+        suspendMediaData()
+        carriedRead = nil
+        currentError = nil
+        inputFormatDidChange(nil)
+    }
+
+    final func changeOutputMode(to outputMode: OutputMode) {
+        guard self.outputMode != outputMode else { return }
+        if getState() == .disabled {
+            self.outputMode = outputMode
+        } else {
+            pendingOutputMode = outputMode
+        }
+    }
+
+    func onOutputModeChanged() {}
+
+    /// The buffer to enqueue for `buffer`, just read. An output that takes several samples in one buffer joins those
+    /// that follow it here, read with ``readFollowingBuffer(if:)``.
+    func outputBuffer(startingWith buffer: CMSampleBuffer) throws -> CMSampleBuffer { buffer }
+
+    /// Reads the buffer that follows the last one read, if `joins` takes it. Anything else read, such as a buffer of
+    /// another format or the end of the stream, is what the next pump starts with.
+    final func readFollowingBuffer(if joins: (CMSampleBuffer) -> Bool) throws -> CMSampleBuffer? {
+        assert(carriedRead == nil)
+        let result = try readSource()
+        switch result {
+        case .nothingRead:
+            return nil
+        case let .didReadBuffer(buffer) where joins(buffer):
+            return buffer
+        case .didReadBuffer, .didReadFormat:
+            carriedRead = result
+            return nil
+        }
+    }
+
+    private func takeCarriedRead() -> SampleStreamReadResult? {
+        defer { carriedRead = nil }
+        return carriedRead
+    }
+
+    // MARK: - For subclasses
+
+    /// Whether the output still needs recovering once the app is in the foreground, after a failure in the background.
+    func outputNeedsRecovery() -> Bool { true }
+
+    func feedInputBuffer(readStream: (ReadFlags) throws -> SampleStreamReadResult) throws -> Bool {
+        fatalError("To override")
+    }
+
+    func getDecodeBufferQueue() throws -> TypedCMBufferQueue<CMSampleBuffer>? { fatalError("To override") }
+    func feedOutputBuffer(_ buffer: CMSampleBuffer) throws -> Bool { fatalError("To override") }
+    func onInputFormatChanged(_ format: Format) throws { fatalError("To override") }
+    /// Called with each format the renderer reads, and `nil` once it is disabled: what it renders from now on.
+    func inputFormatDidChange(_ format: Format?) {}
+    func requestOutputMediaDataWhenReady(_ callback: @Sendable @escaping () -> Void) { fatalError("To override") }
+    func stopRequestingOutputMediaData() { fatalError("To override") }
+
+    func createPlaybackError(_ error: Error) -> SEPlaybackError {
+        .createForRenderer(
+            error,
+            rendererName: name,
+            rendererIndex: -1,
+            trackType: trackType,
+            format: getStreamFormats().first,
+            mediaPeriodId: getRecoveryContext().mediaPeriodId ?? .init()
+        )
+    }
+
+    /// Ends playback with `error` if the media can't be decoded; recovers the output from anything else.
+    final func reportFailure(_ error: Error) {
+        guard getState() != .disabled, currentError == nil else { return }
+        guard RendererFailure(error) == .decoding else {
+            SELogger.warning(.recovery, "\(name) output failed, recovering: \(error as NSError)")
+            requestRecovery(.outputFailed, error: error)
+            return
+        }
+        SELogger.error(logTopic, "\(name) failed to decode: \(error as NSError)")
+        cancelOutputRecovery()
+        suspendMediaData()
+        let playbackError = createPlaybackError(error)
+        currentError = playbackError
+        delegate?.onRendererError(self, error: playbackError)
+    }
+
+    /// The clock reached the end of what was enqueued, before the end of the stream: the output played out
+    /// everything and has to fill up again.
+    private func outputDidRunDry() {
+        guard !pumpSuspended, !isOutputDirty, getState() != .disabled, prerollReached, !rendererAtEndOfStream else {
+            return
+        }
+        SELogger.info(logTopic, "\(name) ran dry after \(lastEnqueuedSample.end.seconds), \(logTimes)")
+        prerollReached = false
+        delegate?.rendererPipelineStalled(self)
+    }
+
+    final func readInputStream() {
+        assert(queue.isCurrent())
+        guard currentError == nil, !pumpSuspended, getState() != .disabled else {
+            return
+        }
+
+        if let sampleQueueToken {
+            getStream()?.removeTrigger(sampleQueueToken)
+            self.sampleQueueToken = nil
+        }
+
+        do {
+            while try pumpReadStream() {}
+        } catch {
+            reportFailure(error)
+        }
+    }
+
+    private func pumpReadStream() throws -> Bool {
+        // The output mode changes at a keyframe: decoding starts with it, and passing through waits until the
+        // decoded frames before it are out.
+        if let pendingOutputMode,
+           case let .didReadBuffer(buffer) = try carriedRead ?? readSource(readFlags: .peek),
+           buffer.flags.contains(.keyframe) {
+            switch pendingOutputMode {
+            case .decode:
+                outputMode = pendingOutputMode
+                self.pendingOutputMode = nil
+                schedulePump(output: true)
+                try stallTimer.setFireTime(.invalid)
+                return true
+            case .passthrough:
+                return false
+            }
+        }
+
+        if outputMode == .decode {
+            return try feedInputBuffer { flags in
+                let result = try readSource(readFlags: flags)
+                if case .nothingRead = result {
+                    try installInputQueueTrigger()
+                }
+
+                return result
+            }
+        }
+
+        switch try takeCarriedRead() ?? readSource() {
+        case .nothingRead:
+            logBatchFinished("input empty")
+            try installInputQueueTrigger()
+
+            if lastEnqueuedSample.isValid {
+                try stallTimer.setFireTime(lastEnqueuedSample.end)
+            }
+            return false
+        case let .didReadFormat(format):
+            SELogger.info(logTopic, "\(name) input format: \(format)")
+            try onInputFormatChanged(format)
+            inputFormatDidChange(format)
+            return true
+        case let .didReadBuffer(buffer):
+            try stallTimer.setFireTime(.invalid)
+
+            // End of stream stops reading every time, not only the first. Fed on as a sample, it
+            // comes straight back from the queue and loops forever on the shared player queue.
+            if buffer.flags.contains(.endOfStream) {
+                logBatchFinished("end of stream")
+                guard !rendererAtEndOfStream else { return false }
+                rendererAtEndOfStream = true
+
+                // Rendering ends when the last sample has played out. A timebase timer set behind the
+                // current time never fires, and after a seek to the end nothing may have been
+                // enqueued at all, so then it has ended already.
+                let end = lastEnqueuedSample.isValid ? lastEnqueuedSample.end : .invalid
+                SELogger.debug(logTopic, "\(name) read the end of the stream, last sample ends at \(end.seconds)")
+                if let controlTimebase, end.isValid, end > controlTimebase.time {
+                    try rendererFinishedTimer.setFireTime(end)
+                } else {
+                    isRenderingEnded = true
+                    delegate?.rendererDidFinishRendering(self)
+                }
+                // All there is was enqueued: the output has enough.
+                markPrerollReached()
+                return false
+            }
+
+            // Frames that end before the seek position are decoded but not shown. The frame covering
+            // the position stays visible, or there would be nothing to show at that time. Marked on
+            // the buffer itself: `singleSampleBuffers()` returns copies.
+            if trackType == .video, buffer.duration.isNumeric,
+               buffer.outputPresentationTimeStamp + buffer.duration <= getLastResetPosition() {
+                for index in 0..<buffer.numSamples {
+                    buffer.perSampleAttachments[index][.doNotDisplay] = true
+                }
+            }
+
+            let enqueued = try outputBuffer(startingWith: buffer)
+            let isReadyForMoreMediaData = try feedOutputBuffer(enqueued)
+            lastEnqueuedSample = .init(start: enqueued.outputPresentationTimeStamp, duration: enqueued.duration)
+
+            recordEnqueued(enqueued)
+            markPrerollReachedIfEnoughEnqueued()
+
+            if !isReadyForMoreMediaData {
+                logBatchFinished("output full")
+                let generation = pumpGeneration
+                requestOutputMediaDataWhenReady { [weak self] in
+                    guard let self, generation == pumpGeneration, !pumpSuspended else {
+                        return
+                    }
+                    logMediaDataRequested()
+                    stopRequestingOutputMediaData()
+                    readInputStream()
+                }
+
+                markPrerollReached()
+            }
+
+            return isReadyForMoreMediaData
+        }
+    }
+
+    private func feedOutputStream() {
+        assert(queue.isCurrent())
+        guard currentError == nil, !pumpSuspended, getState() != .disabled else {
+            return
+        }
+
+        do {
+            stopRequestingOutputMediaData()
+            if let token = outputAvailableToken {
+                try getDecodeBufferQueue()?.removeTrigger(token)
+                outputAvailableToken = nil
+            }
+
+            while try pumpOutputStream() {}
+        } catch {
+            reportFailure(error)
+        }
+    }
+
+    private func pumpOutputStream() throws -> Bool {
+        guard let decodeBufferQueue = try getDecodeBufferQueue() else {
+            return false
+        }
+
+        guard let buffer = decodeBufferQueue.dequeue() else {
+            if let pendingOutputMode, pendingOutputMode == .passthrough {
+                outputMode = pendingOutputMode
+                self.pendingOutputMode = nil
+                schedulePump()
+                try stallTimer.setFireTime(.invalid)
+                return false
+            }
+
+            logBatchFinished("input empty")
+            try installOutputQueueTriggers()
+
+            if lastEnqueuedSample.isValid {
+                try stallTimer.setFireTime(lastEnqueuedSample.end)
+            }
+            return false
+        }
+
+        try stallTimer.setFireTime(.invalid)
+        let isReadyForMoreMediaData = try feedOutputBuffer(buffer)
+        lastEnqueuedSample = .init(start: buffer.outputPresentationTimeStamp, duration: buffer.duration)
+        recordEnqueued(buffer)
+        markPrerollReachedIfEnoughEnqueued()
+
+        if !isReadyForMoreMediaData {
+            logBatchFinished("output full")
+            let generation = pumpGeneration
+            requestOutputMediaDataWhenReady { [weak self] in
+                guard let self, generation == pumpGeneration, !pumpSuspended else {
+                    return
+                }
+                logMediaDataRequested()
+                stopRequestingOutputMediaData()
+                feedOutputStream()
+            }
+
+            markPrerollReached()
+        }
+
+        return isReadyForMoreMediaData
+    }
+
+    /// Marks the preroll reached once ``minimumPreroll`` is enqueued ahead of the clock, while the output goes on asking.
+    private func markPrerollReachedIfEnoughEnqueued() {
+        guard !prerollReached, let minimumPreroll else { return }
+        let time = controlTimebase?.time ?? getLastResetPosition()
+        if enqueuedDuration(aheadOf: time) >= minimumPreroll {
+            markPrerollReached()
+        }
+    }
+
+    /// The output stopped asking for media data: it has enough to start. Tells the player once; it has no timer,
+    /// so without this it would not look again.
+    private func markPrerollReached() {
+        cancelOutputRecovery()
+        guard !prerollReached else { return }
+        SELogger.debug(logTopic, "\(name) preroll reached, enqueued to \(lastEnqueuedSample.end.seconds), \(logTimes)")
+        prerollReached = true
+        delegate?.rendererFinishedPreroll(self)
+    }
+
+    // MARK: - Pump log
+
+    /// Whether the topic of the renderer logs each batch: video enqueues frame by frame, so only at its most verbose.
+    private var logsPump: Bool { SELogger.isEnabled(logTopic, .verbose) }
+
+    private var logTimes: String {
+        // The renderer's own timebase is the synchronizer's for audio; the control timebase is the player's.
+        return String(
+            format: "host=%.3f renderer=%.3f player=%.3f",
+            CACurrentMediaTime(),
+            getTimebase()?.time.seconds ?? .nan,
+            controlTimebase?.time.seconds ?? .nan
+        )
+    }
+
+    private func logMediaDataRequested() {
+        guard logsPump else { return }
+        SELogger.verbose(logTopic, "\(name) pump: requestMediaDataWhenReady fired \(logTimes)")
+    }
+
+    private func recordEnqueued(_ buffer: CMSampleBuffer) {
+        guard logsPump else { return }
+        batchSampleCount += buffer.numSamples
+        if buffer.duration.isNumeric { batchDuration = batchDuration + buffer.duration }
+        let range = CMTimeRange(start: buffer.outputPresentationTimeStamp, duration: buffer.duration)
+        batchRange = batchRange.isValid ? batchRange.union(range) : range
+    }
+
+    /// Logs what the pump enqueued since the last time it stopped, if anything.
+    private func logBatchFinished(_ reason: String) {
+        guard logsPump, batchSampleCount > 0 else { return }
+        SELogger.verbose(logTopic, String(
+            format: "%@ pump: finished (%@) %@ enqueued=%d samples duration=%.3f range=%.3f..%.3f",
+            name, reason, logTimes, batchSampleCount, batchDuration.seconds,
+            batchRange.start.seconds, batchRange.end.seconds
+        ))
+        batchSampleCount = 0
+        batchDuration = .zero
+        batchRange = .invalid
+    }
+
+    private func installInputQueueTrigger() throws {
+        // After the end of the stream there is nothing to wait for: marking the stream final or
+        // replacing it wakes the renderer.
+        guard sampleQueueToken == nil, !didReadStreamToEnd(), let stream = getStream() else {
+            return
+        }
+
+        let generation = pumpGeneration
+        sampleQueueToken = stream.installTrigger(
+            condition: .whenDataBecomesReady
+        ) { [weak self] token in
+            guard let self else { return }
+
+            queue.justDispatch { [weak self] in
+                guard let self, generation == pumpGeneration else { return }
+                schedulePump()
+            }
+        }
+    }
+
+    private func installOutputQueueTriggers() throws {
+        guard outputAvailableToken == nil, let decodeBufferQueue = try getDecodeBufferQueue() else {
+            return
+        }
+
+        let generation = pumpGeneration
+        outputAvailableToken = try decodeBufferQueue.installTrigger(
+            condition: .whenDataBecomesReady
+        ) { [weak self] token in
+            guard let self else { return }
+
+            queue.justDispatch { [weak self] in
+                guard let self, generation == pumpGeneration else { return }
+                schedulePump(output: true)
+            }
+        }
+        // The trigger fires when frames become ready: frames already there wouldn't fire it.
+        if !decodeBufferQueue.isEmpty {
+            schedulePump(output: true)
+        }
+    }
+}
+
+private extension AVFBaseRenderer {
+    /// How long an output may take to fill again after an automatic flush before the recovery counts as failed.
+    static let outputRecoveryTimeout: TimeInterval = 5
+    /// How often a renderer with a dirty output drops the samples behind the clock.
+    static let dirtySkipInterval: TimeInterval = 1
+}

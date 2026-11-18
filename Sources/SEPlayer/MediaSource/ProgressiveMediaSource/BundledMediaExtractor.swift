@@ -27,7 +27,7 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
         url: URL,
         response: HTTPURLResponse?,
         position: Int,
-        lenght: Int?,
+        length: Int?,
         output: ExtractorOutput,
         _ isolation: isolated any Actor
     ) async throws {
@@ -36,7 +36,7 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
             queue: syncActor.executor.queue,
             dataReader: dataReader,
             position: position,
-            lenght: lenght
+            length: length
         )
         self.extractorInput = extractorInput
         guard extractor == nil else {
@@ -56,13 +56,14 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
 //                        queue: syncActor.executor.queue,
 //                        dataReader: dataReader,
 //                        position: position,
-//                        lenght: lenght
+//                        length: length
 //                    )
 //                }
 
                 defer { extractorInput.resetPeekPosition(isolation) }
                 do {
-                    if try await extractor.shiff(input: extractorInput, isolation) {
+                    if try await extractor.sniff(input: extractorInput, isolation) {
+                        SELogger.info(.sniffing, "\(url.lastPathComponent) is read by \(type(of: extractor))")
                         self.extractor = extractor
 //                        postAction()
                         break
@@ -75,6 +76,7 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
             }
 
             if extractor == nil {
+                SELogger.error(.sniffing, "No extractor reads \(url.lastPathComponent): \(sniffFailures)")
                 throw UnrecognizedInputFormatError(
                     message: "None of the available extractors could read the stream.",
                     url: url,
@@ -110,7 +112,7 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
     func read(_ isolation: isolated any Actor) async throws -> ExtractorReadResult {
         syncActor.assertIsolated()
         guard let extractor, let extractorInput else {
-            throw ErrorBuilder.illegalState
+            throw ErrorBuilder.illegalState()
         }
 
         return try await extractor.read(input: extractorInput, isolation)

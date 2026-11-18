@@ -13,7 +13,10 @@ public enum RendererMessage {
     case stopRequestingMediaData
     case setVideoOutput(_ output: any VideoOutput)
     case removeVideoOutput(_ output: any VideoOutput)
-    case setControlTimebase(_ timebase: CMTimebase?)
+    /// What the renderer plays to; `nil` detaches it.
+    case setTimeSource(_ source: RendererTimeSource?)
     case setAudioVolume(_ volume: Float)
     case setAudioIsMuted(_ isMuted: Bool)
+    /// Scoped to recovery; ordinary disable/release still removes the displayed image.
+    case setPreservesDisplayedImageOnDisable(Bool)
 }

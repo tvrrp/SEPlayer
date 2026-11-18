@@ -69,6 +69,7 @@ public enum MimeTypes: String, Sendable {
     case audioWAV = "audio/wav"
     case audioMIDI = "audio/midi"
     case audioIAMF = "audio/iamf"
+    case audioAPAC = "audio/apac"
     case audioUnknown = "audio/x-unknown"
 
     // MARK: - Text

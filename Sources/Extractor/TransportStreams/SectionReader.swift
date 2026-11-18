@@ -27,14 +27,12 @@ final class SectionReader: TsPayload.Reader {
     func initialize(
         session: TimestampAdjuster.Session,
         extractorOutput: any ExtractorOutput,
-        idGenerator: TsPayload.TrackIdGenerator,
-        _ isolation: isolated any Actor
-    ) async throws {
-        try await reader.initialize(
+        idGenerator: TsPayload.TrackIdGenerator
+    ) throws {
+        try reader.initialize(
             session: session,
             extractorOutput: extractorOutput,
-            idGenerator: idGenerator,
-            isolation
+            idGenerator: idGenerator
         )
         waitingForPayloadStart = true
     }
@@ -45,17 +43,18 @@ final class SectionReader: TsPayload.Reader {
 
     func consume(
         data: inout SEPlayerCommon.BlockBufferReader,
-        flags: TsPayload.PacketIndicators,
-        _ isolation: isolated any Actor
-    ) async throws {
+        flags: TsPayload.PacketIndicators
+    ) throws {
         let payloadUnitStartIndicator = flags.contains(.payloadUnitStart)
         var payloadStartPosition: Int?
         if payloadUnitStartIndicator {
-            let payloadStartOffset = try! Int(data.readInt(as: UInt8.self))
+            let payloadStartOffset = try Int(data.readInt(as: UInt8.self))
             payloadStartPosition = data.readerIndex + payloadStartOffset
         }
 
         if waitingForPayloadStart, let payloadStartPosition {
+            // A pointer past the end of the packet: the section isn't here.
+            guard payloadStartPosition <= data.capacity else { return }
             waitingForPayloadStart = false
             data.moveReaderIndex(to: payloadStartPosition)
             bytesRead = 0
@@ -65,70 +64,67 @@ final class SectionReader: TsPayload.Reader {
             if bytesRead < .sectionHeaderLength {
                 // See ISO/IEC 13818-1, section 2.4.4.3 for detailed information on the format of the header.
                 if bytesRead == 0 {
-                    let tableId: UInt8 = try! data.readInt()
+                    let tableId: UInt8 = try data.readInt()
                     data.moveReaderIndex(to: data.readerIndex - 1)
                     if tableId == 0xFF { // forbidden value
                         // No more sections in this ts packet.
                         waitingForPayloadStart = true
                         return
                     }
+                    // A new section: none of the last one's bytes.
+                    sectionData = try BlockBufferReader()
                 }
 
                 let headerBytesToRead = min(data.readableBytes, .sectionHeaderLength - bytesRead)
-                try! sectionData.extend(with: data.readSlice(length: headerBytesToRead))
+                try sectionData.extend(with: data.readSlice(length: headerBytesToRead))
                 bytesRead += headerBytesToRead
 
                 if bytesRead == .sectionHeaderLength {
                     sectionData.moveReaderIndex(to: 0)
-                    sectionData = try! sectionData.readSlice(length: .sectionHeaderLength)
-//                    sectionData = try! sectionData.getSliceIgnoringReaderOffset(at: 0, length: .sectionHeaderLength)
+                    sectionData = try sectionData.readSlice(length: .sectionHeaderLength)
                     sectionData.moveReaderIndex(forwardBy: 1) // Skip table id (8).
 
-                    let secondHeaderByte: UInt8 = try! sectionData.readInt()
-                    let thirdHeaderByte: UInt8 = try! sectionData.readInt()
+                    let secondHeaderByte: UInt8 = try sectionData.readInt()
+                    let thirdHeaderByte: UInt8 = try sectionData.readInt()
                     sectionSyntaxIndicator = (secondHeaderByte & 0x80) != 0
-                    totalSectionLength = Int((((secondHeaderByte & 0x0F) << 8) | thirdHeaderByte)) + .sectionHeaderLength
+                    // section_length (12)
+                    let sectionLength = Int(secondHeaderByte & 0x0F) << 8 | Int(thirdHeaderByte)
+                    totalSectionLength = sectionLength + .sectionHeaderLength
                 }
             } else {
                 // Reading the body.
                 let bodyBytesToRead = min(data.readableBytes, totalSectionLength - bytesRead)
                 // sectionData has been sized large enough for totalSectionLength when reading the header.
-                try! sectionData.extend(with: data.readSlice(length: bodyBytesToRead))
+                try sectionData.extend(with: data.readSlice(length: bodyBytesToRead))
                 bytesRead += bodyBytesToRead
                 if bytesRead == totalSectionLength {
                     if sectionSyntaxIndicator {
                         // This section has common syntax as defined in ISO/IEC 13818-1, section 2.4.4.11.
                         let slice = sectionData.bytesView[0..<totalSectionLength]
-                        if CrcUtil.computeCrc32(slice, mode: .mpeg2) != 0 {
+                        if totalSectionLength < .crcLength || CrcUtil.computeCrc32(slice, mode: .mpeg2) != 0 {
                             // The CRC is invalid so discard the section.
                             waitingForPayloadStart = true
                             return
                         }
-//                        sectionData = try! sectionData.getSlice(
-//                            at: 0,
-//                            length: totalSectionLength - 4 // Exclude the CRC_32 field.
-//                        )
-                        sectionData = try! sectionData.getSliceIgnoringReaderOffset(
+                        sectionData = try sectionData.getSliceIgnoringReaderOffset(
                             at: 0,
-                            length: totalSectionLength - 4 // Exclude the CRC_32 field.
+                            length: totalSectionLength - .crcLength // Exclude the CRC_32 field.
                         )
                     } else {
                         // This is a private section with private defined syntax.
-//                        sectionData = try! sectionData.getSlice(at: 0, length: totalSectionLength)
-                        sectionData = try! sectionData.getSliceIgnoringReaderOffset(at: 0, length: totalSectionLength)
+                        sectionData = try sectionData.getSliceIgnoringReaderOffset(at: 0, length: totalSectionLength)
                     }
 
-                    try! await reader.consume(sectionData: &sectionData, isolation)
+                    try reader.consume(sectionData: &sectionData)
+                    // The next section of the packet, if any, starts here.
+                    bytesRead = 0
                 }
             }
         }
     }
-
-
 }
 
 private extension Int {
     static let sectionHeaderLength = 3
-    static let defaultSectionBufferLength = 32
-    static let maxSectionLength = 4098
+    static let crcLength = 4
 }

@@ -10,7 +10,7 @@ import DataSource
 import Extractor
 import SEPlayerCommon
 
-final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Listener {
+final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.Listener {
     protocol Listener: AnyObject {
         func onSeekMap(source: MediaSource, seekMap: SeekMap)
     }
@@ -23,6 +23,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Lis
     private let dataSourceFactory: DataSourceFactory
     private let extractorsFactory: ExtractorsFactory
     private let continueLoadingCheckIntervalBytes: Int
+    private let loadErrorHandlingPolicy: LoadErrorHandlingPolicy
 
     private var timelineIsPlaceholder: Bool
     private var timelineDuration: CMTime
@@ -37,7 +38,8 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Lis
         mediaItem: MediaItem,
         dataSourceFactory: DataSourceFactory,
         extractorsFactory: ExtractorsFactory,
-        continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes
+        continueLoadingCheckIntervalBytes: Int = .continueLoadingCheckIntervalBytes,
+        loadErrorHandlingPolicy: LoadErrorHandlingPolicy = DefaultLoadErrorHandlingPolicy()
     ) {
         self.queue = queue
         self.loaderQueue = loaderQueue
@@ -45,6 +47,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Lis
         self.dataSourceFactory = dataSourceFactory
         self.extractorsFactory = extractorsFactory
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
+        self.loadErrorHandlingPolicy = loadErrorHandlingPolicy
         self.timelineIsPlaceholder = true
         self.timelineDuration = .invalid
         super.init(queue: queue)
@@ -71,33 +74,30 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Lis
         allocator: Allocator,
         startPosition: CMTime
     ) throws -> MediaPeriod {
-        print("👹 CREATE PERIOD , self = \(ObjectIdentifier(self)), id = \(id), startPosition = \(startPosition.seconds)")
-        // TODO: return
-//        if let mediaTransferListener {
-//            dataSource.addTransferListener(mediaTransferListener)
-//        }
-
+        SELogger.debug(.progressive, "Creating a period \(id) at \(startPosition.seconds)")
         guard let localConfiguration = mediaItem.localConfiguration else {
-            throw ErrorBuilder.illegalState
+            throw ErrorBuilder.illegalState()
         }
 
-        return ProgressiveMediaPeriod2(
+        return ProgressiveMediaPeriod(
             url: localConfiguration.url,
             queue: queue,
             loadQueue: loaderQueue,
             dataSourceFactory: dataSourceFactory,
+            transferListener: mediaTransferListener,
             progressiveMediaExtractor: BundledMediaExtractor(
                 syncActor: loaderQueue.playerActor(),
                 extractorsFactory: extractorsFactory
             ),
             listener: self,
             allocator: allocator,
-            continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes
+            continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes,
+            loadErrorHandlingPolicy: loadErrorHandlingPolicy
         )
     }
 
     override func release(mediaPeriod: MediaPeriod) {
-        (mediaPeriod as! ProgressiveMediaPeriod2).release()
+        (mediaPeriod as! ProgressiveMediaPeriod).release()
     }
 
     func sourceInfoRefreshed(duration: CMTime, seekMap: SeekMap, isLive: Bool) {
@@ -119,7 +119,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod2.Lis
         do {
             try notifySourceInfoRefreshed()
         } catch {
-            fatalError() // TODO: maybe throw error
+            SELogger.error(.progressive, "Timeline refresh failed: \(error)")
         }
         listener?.onSeekMap(source: self, seekMap: seekMap)
     }

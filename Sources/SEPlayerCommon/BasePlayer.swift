@@ -8,7 +8,12 @@
 import CoreMedia
 
 public protocol BasePlayer: Player {
+    /// Scratch for the windows the members below look up.
     var window: Window { get set }
+
+    /// Runs `body` with no change to the player meanwhile, so that it reads one state and acts on it. The player may
+    /// be used from `body`.
+    func withConsistentState<R>(_ body: () throws -> R) rethrows -> R
 
     func seek(
         to mediaItemIndex: Int?,
@@ -20,8 +25,16 @@ public protocol BasePlayer: Player {
 }
 
 public extension BasePlayer {
+    func withConsistentState<R>(_ body: () throws -> R) rethrows -> R {
+        try body()
+    }
+
+    var snapshot: PlayerSnapshot {
+        withConsistentState { PlayerSnapshot(reading: self) }
+    }
+
     var isPlaying: Bool {
-        playbackState == .ready && playWhenReady
+        withConsistentState { playbackState == .ready && playWhenReady }
     }
 
     var hasPreviousMediaItem: Bool {
@@ -33,26 +46,35 @@ public extension BasePlayer {
     }
 
     var nextMediaItemIndex: Int? {
-        timeline.isEmpty ? nil : timeline.nextWindowIndex(
-            windowIndex: currentMediaItemIndex,
-            repeatMode: repeatModeForNavigation,
-            shuffleModeEnabled: shuffleModeEnabled
-        )
+        withConsistentState {
+            let timeline = timeline
+            return timeline.isEmpty ? nil : timeline.nextWindowIndex(
+                windowIndex: currentMediaItemIndex,
+                repeatMode: repeatModeForNavigation,
+                shuffleModeEnabled: shuffleModeEnabled
+            )
+        }
     }
 
     var previousMediaItemIndex: Int? {
-        timeline.isEmpty ? nil : timeline.previousWindowIndex(
-            windowIndex: currentMediaItemIndex,
-            repeatMode: repeatModeForNavigation,
-            shuffleModeEnabled: shuffleModeEnabled
-        )
+        withConsistentState {
+            let timeline = timeline
+            return timeline.isEmpty ? nil : timeline.previousWindowIndex(
+                windowIndex: currentMediaItemIndex,
+                repeatMode: repeatModeForNavigation,
+                shuffleModeEnabled: shuffleModeEnabled
+            )
+        }
     }
 
     var currentMediaItem: MediaItem? {
-        timeline.isEmpty ? nil : timeline.getWindow(
-            windowIndex: currentMediaItemIndex,
-            window: window
-        ).mediaItem
+        withConsistentState {
+            let timeline = timeline
+            return timeline.isEmpty ? nil : timeline.getWindow(
+                windowIndex: currentMediaItemIndex,
+                window: window
+            ).mediaItem
+        }
     }
 
     var numberOfMediaItemsInPlaylist: Int {
@@ -60,32 +82,32 @@ public extension BasePlayer {
     }
 
     var bufferedPercentage: Int {
-        let duration = duration
-        if !bufferedPosition.isValid || !duration.isValid {
-            return .zero
-        } else {
-//            return Int(duration == .zero ? 100 : max(0, min(((position * 100) / duration), 100)))
-            // TODO: fix
+        let (duration, bufferedPosition) = withConsistentState { (duration, bufferedPosition) }
+        guard bufferedPosition.isNumeric, duration.isNumeric else {
             return .zero
         }
+        guard duration > .zero else { return 100 }
+        return Int(min(max(bufferedPosition.seconds / duration.seconds * 100, 0), 100))
     }
 
     var isCurrentMediaItemDynamic: Bool {
-        !timeline.isEmpty && timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).isDynamic
+        withConsistentState {
+            let timeline = timeline
+            return !timeline.isEmpty && timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).isDynamic
+        }
     }
 
     var isCurrentMediaItemSeekable: Bool {
-        !timeline.isEmpty && timeline.getWindow(windowIndex: currentPeriodIndex ?? .zero, window: window).isSeekable
+        withConsistentState {
+            let timeline = timeline
+            return !timeline.isEmpty && timeline.getWindow(windowIndex: currentPeriodIndex ?? .zero, window: window).isSeekable
+        }
     }
 
     var contentDuration: CMTime {
-        if timeline.isEmpty {
-            return .invalid
-        } else {
-            return timeline.getWindow(
-                windowIndex: currentMediaItemIndex,
-                window: window
-            ).duration
+        withConsistentState {
+            let timeline = timeline
+            return timeline.isEmpty ? .invalid : timeline.getWindow(windowIndex: currentMediaItemIndex, window: window).duration
         }
     }
 }
@@ -157,13 +179,13 @@ public extension BasePlayer {
     }
 
     func mediaItem(at index: Int) -> MediaItem {
-        timeline.getWindow(windowIndex: index, window: window).mediaItem
+        withConsistentState { timeline.getWindow(windowIndex: index, window: window).mediaItem }
     }
 }
 
 public extension BasePlayer {
     func seekToDefaultPosition(completion: ((Bool) -> Void)?) {
-        seekToDefaultPositionInternal(mediaItemIndex: currentMediaItemIndex, completion: completion)
+        withConsistentState { seekToDefaultPositionInternal(mediaItemIndex: currentMediaItemIndex, completion: completion) }
     }
 
     func seekToDefaultPosition(of mediaItemIndex: Int, completion: ((Bool) -> Void)?) {
@@ -190,44 +212,45 @@ public extension BasePlayer {
     }
 
     func seekToPreviousMediaItem(completion: ((Bool) -> Void)?) {
-        seekToPreviousMediaItemInternal(completion: completion)
+        withConsistentState { seekToPreviousMediaItemInternal(completion: completion) }
     }
 
     func seekToPrevious(completion: ((Bool) -> Void)?) {
-        let timeline = timeline
-        if timeline.isEmpty {
-            ignoreSeek(completion: completion)
-            return
-        }
+        withConsistentState {
+            if timeline.isEmpty {
+                ignoreSeek(completion: completion)
+                return
+            }
 
-        let hasPreviousMediaItem = hasPreviousMediaItem
-        if hasPreviousMediaItem, currentPosition <= maxSeekToPreviousPosition {
-            seekToPreviousMediaItemInternal(completion: completion)
-        } else {
-            seekToCurrentItem(position: .zero, seekParameters: .exact, completion: completion)
+            if hasPreviousMediaItem, currentPosition <= maxSeekToPreviousPosition {
+                seekToPreviousMediaItemInternal(completion: completion)
+            } else {
+                seekToCurrentItem(position: .zero, seekParameters: .exact, completion: completion)
+            }
         }
     }
 
     func seekToNextMediaItem(completion: ((Bool) -> Void)?) {
-        seekToNextMediaItemInternal(completion: completion)
+        withConsistentState { seekToNextMediaItemInternal(completion: completion) }
     }
 
     func seekToNext(completion: ((Bool) -> Void)?) {
-        let timeline = timeline
-        if timeline.isEmpty {
-            ignoreSeek(completion: completion)
-            return
-        }
+        withConsistentState {
+            if timeline.isEmpty {
+                ignoreSeek(completion: completion)
+                return
+            }
 
-        if hasNextMediaItem {
-            seekToNextMediaItemInternal(completion: completion)
-        } else {
-            ignoreSeek(completion: completion)
+            if hasNextMediaItem {
+                seekToNextMediaItemInternal(completion: completion)
+            } else {
+                ignoreSeek(completion: completion)
+            }
         }
     }
 
     func seek(to position: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
-        seekToCurrentItem(position: position, seekParameters: seekParameters, completion: completion)
+        withConsistentState { seekToCurrentItem(position: position, seekParameters: seekParameters, completion: completion) }
     }
 
     func seek(to position: CMTime, of mediaItemIndex: Int, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
@@ -267,13 +290,15 @@ private extension BasePlayer {
     }
 
     func seekTo(offset: CMTime, seekParameters: SeekParameters, completion: ((Bool) -> Void)?) {
-        var position = currentPosition + offset
-        let duration = duration
-        if duration.isValid {
-            position = min(position, duration)
+        withConsistentState {
+            var position = currentPosition + offset
+            let duration = duration
+            if duration.isValid {
+                position = min(position, duration)
+            }
+            position = max(position, .zero)
+            seekToCurrentItem(position: position, seekParameters: seekParameters, completion: completion)
         }
-        position = max(position, .zero)
-        seekToCurrentItem(position: position, seekParameters: seekParameters, completion: completion)
     }
 
     func seekToDefaultPositionInternal(

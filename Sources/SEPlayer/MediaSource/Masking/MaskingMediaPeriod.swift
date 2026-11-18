@@ -32,6 +32,8 @@ final class MaskingMediaPeriod: MediaPeriod {
     private let allocator: Allocator
     private weak var mediaSource: MediaSource?
     private var mediaPeriod: MediaPeriod?
+    /// Passed on to the period once it is created.
+    private var isScrubbing = false
 
     private var notifiedPrepareError = false
     private var callback: (any MediaPeriodCallback)?
@@ -67,7 +69,21 @@ final class MaskingMediaPeriod: MediaPeriod {
             mediaPeriod.prepare(callback: self, on: preparePosition)
         }
 
-        lock.withLock { self.mediaPeriod = mediaPeriod }
+        let isScrubbing = lock.withLock {
+            self.mediaPeriod = mediaPeriod
+            return self.isScrubbing
+        }
+        if isScrubbing {
+            mediaPeriod.setScrubbing(true)
+        }
+    }
+
+    func setScrubbing(_ isScrubbing: Bool) {
+        let mediaPeriod = lock.withLock {
+            self.isScrubbing = isScrubbing
+            return self.mediaPeriod
+        }
+        mediaPeriod?.setScrubbing(isScrubbing)
     }
 
     func releasePeriod() {
@@ -133,6 +149,14 @@ final class MaskingMediaPeriod: MediaPeriod {
         ) ?? .invalid
     }
 
+    var keepsStreamsForSelectionsInSameGroup: Bool {
+        lock.withLock { mediaPeriod }?.keepsStreamsForSelectionsInSameGroup ?? false
+    }
+
+    func updateSelectionsKeepingBuffer(_ selections: [SETrackSelection?], streams: [SampleStream?]) -> Bool {
+        lock.withLock { mediaPeriod }?.updateSelectionsKeepingBuffer(selections, streams: streams) ?? false
+    }
+
     func discardBuffer(position: CMTime, toKeyframe: Bool) throws {
         let mediaPeriod = lock.withLock { mediaPeriod }
         try mediaPeriod?.discardBuffer(
@@ -154,6 +178,14 @@ final class MaskingMediaPeriod: MediaPeriod {
     func seek(position: CMTime) throws -> CMTime {
         let mediaPeriod = lock.withLock { mediaPeriod }
         return try mediaPeriod?.seek(position: position) ?? .zero
+    }
+
+    func seekForRecovery(position: CMTime) throws -> CMTime {
+        let mediaPeriod = lock.withLock { mediaPeriod }
+        guard let mediaPeriod else {
+            throw RendererRecoveryError.positionUnavailable
+        }
+        return try mediaPeriod.seekForRecovery(position: position)
     }
 
     func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime {
@@ -199,6 +231,6 @@ extension MaskingMediaPeriod: MediaPeriodCallback {
 
 private extension MaskingMediaPeriod {
     func preparePositionWithOverrideLocked(preparePosition: CMTime) -> CMTime {
-        !preparePositionOverride.isValid ? preparePositionOverride : preparePosition
+        preparePositionOverride.isValid ? preparePositionOverride : preparePosition
     }
 }
