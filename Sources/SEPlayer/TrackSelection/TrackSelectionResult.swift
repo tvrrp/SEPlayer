@@ -33,7 +33,7 @@ extension TrackSelectorResult: Equatable {
         guard lhs.selections.count == rhs.selections.count else { return false }
 
         for index in 0..<lhs.selections.count {
-            if !isEquivalent(lhs: lhs, rhs: rhs, index: index) {
+            if !lhs.isEquivalent(to: rhs, at: index) {
                 return false
             }
         }
@@ -41,14 +41,22 @@ extension TrackSelectorResult: Equatable {
         return true
     }
 
-    private static func isEquivalent(lhs: TrackSelectorResult, rhs: TrackSelectorResult, index: Int) -> Bool {
-        guard let lhsRendererConfiguration = lhs.rendererConfigurations[index],
-              let rhsRendererConfiguration = rhs.rendererConfigurations[index],
-              let lhsSelections = lhs.selections[index],
-              let rhsSelections = rhs.selections[index] else {
+    /// Whether the renderer at `index` is configured the same in both, disabled renderers included.
+    func isEquivalent(to other: TrackSelectorResult?, at index: Int) -> Bool {
+        guard let other, index < selections.count, index < other.selections.count else {
+            return false
+        }
+        guard rendererConfigurations[index] == other.rendererConfigurations[index] else {
             return false
         }
 
-        return lhsRendererConfiguration == rhsRendererConfiguration && lhsSelections.isEquals(to: rhsSelections)
+        switch (selections[index], other.selections[index]) {
+        case (nil, nil):
+            return true
+        case let (lhsSelection?, rhsSelection?):
+            return lhsSelection.isEquals(to: rhsSelection)
+        default:
+            return false
+        }
     }
 }

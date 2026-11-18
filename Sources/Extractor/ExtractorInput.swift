@@ -5,70 +5,54 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
-public enum ExtractorInputReadResult {
-    case bytesRead(ByteBuffer, Int)
-    case endOfInput
-}
-
 public protocol ExtractorInput: DataReader {
+    /// Reads up to `length` bytes from the input.
+    ///
+    /// - Returns: The bytes read, which may be fewer than `length`, or an empty buffer if the end of the input has been
+    ///   reached.
     @discardableResult
-    func read(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult
-
-    @discardableResult
-    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool
-
-    @discardableResult
-    func read(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult
+    func read(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer
 
     @discardableResult
-    func readFully(allocation: Allocation, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool
+    func readFully(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) async throws -> (buffer: CMBlockBuffer, isEndOfInput: Bool)
 
     @discardableResult
-    func skip(length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult
+    func skip(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) throws -> Bool
 
-    @discardableResult
-    func skipFully(length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool
+    func peek(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer
 
-    @discardableResult
-    func peek(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws -> DataReaderReadResult
+    func peekFully(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) async throws -> (buffer: CMBlockBuffer, isEndOfInput: Bool)
 
-    @discardableResult
-    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool
+    func advancePeekPosition(length: Int, allowEndOfInput: Bool, _ isolation: isolated any Actor) throws
 
-    @discardableResult
-    func advancePeekPosition(length: Int, allowEndOfInput: Bool, isolation: isolated any Actor) async throws -> Bool
+    func advancePeekPosition(length: Int, _ isolation: isolated any Actor) throws
 
-    func resetPeekPosition(isolation: isolated any Actor)
+    func resetPeekPosition(_ isolation: isolated any Actor)
 
-    func getPeekPosition(isolation: isolated any Actor) -> Int
+    func getPeekPosition(_ isolation: isolated any Actor) -> Int
 
-    func getPosition(isolation: isolated any Actor) -> Int
+    func getPosition(_ isolation: isolated any Actor) -> Int
 
-    func getLength(isolation: isolated any Actor) -> Int?
+    func getLength(_ isolation: isolated any Actor) -> Int?
 
-    func set<E: Error>(retryPosition: Int, using error: E, isolation: isolated any Actor) throws
+    func set<E: Error>(retryPosition: Int, using error: E, _ isolation: isolated any Actor) throws(E)
 }
 
-extension ExtractorInput {
-    func readFully(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws {
-        try await readFully(to: &buffer, offset: offset, length: length, allowEndOfInput: false, isolation: isolation)
+public extension ExtractorInput {
+    @discardableResult
+    func readFully(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer {
+        let (blockBuffer, _) = try await readFully(length: length, allowEndOfInput: false, isolation)
+        return blockBuffer
     }
 
-    func readFully(allocation: Allocation, offset: Int, length: Int, isolation: isolated any Actor) async throws {
-        try await readFully(allocation: allocation, offset: offset, length: length, allowEndOfInput: false, isolation: isolation)
+    func skip(length: Int, _ isolation: isolated any Actor) throws {
+        try skip(length: length, allowEndOfInput: false, isolation)
     }
 
-    func skipFully(length: Int, isolation: isolated any Actor) async throws {
-        try await skipFully(length: length, allowEndOfInput: false, isolation: isolation)
-    }
-
-    func peekFully(to buffer: inout ByteBuffer, offset: Int, length: Int, isolation: isolated any Actor) async throws {
-        try await peekFully(to: &buffer, offset: offset, length: length, allowEndOfInput: false, isolation: isolation)
-    }
-
-    func advancePeekPosition(length: Int, isolation: isolated any Actor) async throws {
-        try await advancePeekPosition(length: length, allowEndOfInput: false, isolation: isolation)
+    func peekFully(length: Int, _ isolation: isolated any Actor) async throws -> CMBlockBuffer {
+        try await peekFully(length: length, allowEndOfInput: false, isolation).buffer
     }
 }

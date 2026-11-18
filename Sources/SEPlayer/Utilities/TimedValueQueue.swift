@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.04.2025.
 //
 
-import Darwin
+import Foundation
 import SEPlayerCommon
 
 final class TimedValueQueue<Element> {

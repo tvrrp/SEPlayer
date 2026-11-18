@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 07.01.2025.
 //
 
+import CoreMedia
 import DataSource
 import Foundation.NSUUID
 import SEPlayerCommon
@@ -169,7 +170,7 @@ final class MediaSourceList {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64
+        startPosition: CMTime
     ) throws -> MediaPeriod {
         let mediaSourceHolderId = mediaSourceHolderId(for: id.periodId)
         let childMediaPeriodId = id.copy(with: childPeriodId(from: id.periodId))
@@ -199,6 +200,13 @@ final class MediaSourceList {
                 disableUnusedMediaSources()
             }
             releaseChildSource(from: holder)
+        }
+    }
+
+    /// Throws the error of a source that failed to tell what it plays.
+    func maybeThrowSourceInfoRefreshError() throws {
+        for childSource in childSources.values {
+            try childSource.source.maybeThrowSourceInfoRefreshError()
         }
     }
 

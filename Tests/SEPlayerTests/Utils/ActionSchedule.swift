@@ -25,7 +25,7 @@ final class ActionSchedule {
     func start(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         callback: Callback?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
@@ -104,6 +104,11 @@ final class ActionSchedule {
         }
 
         @discardableResult
+        func addMediaSources(_ mediaSources: MediaSource...) -> Builder {
+            apply(AddMediaItems(tag: tag, mediaSources: mediaSources))
+        }
+
+        @discardableResult
         func waitForPendingPlayerCommands() -> Builder {
             apply(WaitForPendingPlayerCommands(tag: tag))
         }
@@ -130,8 +135,8 @@ final class ActionSchedule {
                 checkForInitialState: { $0 == state },
                 validateEvent: {
                     print("🧚 event = \($0)")
-                    if case let .didChangePlaybackState(state) = $0 {
-                        return state == state
+                    if case let .didChangePlaybackState(newState) = $0 {
+                        return newState == state
                     }
                     return false
                 }
@@ -176,14 +181,14 @@ final class ActionSchedule {
 }
 
 final class ActionNode {
-    private let action: Action
+    let action: Action
     private let delayMs: UInt64
     private let repeatIntervalMs: UInt64?
 
     private var next: ActionNode?
     private var player: SEPlayer?
     private var trackSelector: DefaultTrackSelector?
-    private var view: SEPlayerView?
+    private var view: SEPlayerLayer?
 
     init(action: Action, delayMs: UInt64, repeatIntervalMs: UInt64? = nil) {
         self.action = action
@@ -198,7 +203,7 @@ final class ActionNode {
     func schedule(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
         self.player = player
@@ -209,7 +214,7 @@ final class ActionNode {
             try await self.run(isolation: isolation)
             await Task.yield()
         } else {
-            if #available(iOS 16, *) {
+            if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                 try await Task.sleep(for: .milliseconds(delayMs))
             } else {
                 try await Task.sleep(for: .milliseconds(Int(delayMs)), leeway: .zero)
@@ -220,6 +225,9 @@ final class ActionNode {
     }
 
     func run(isolation: isolated (any Actor)? = #isolation) async throws {
+        // The player here answers on the queue the actions run on, so what an action causes can be
+        // reported before the next action listens. Waiting actions start listening now.
+        await next?.action.prepareToRun(player: try #require(player))
         try await action.doActionAndScheduleNext(
             player: try #require(player),
             trackSelector: try #require(trackSelector),
@@ -229,7 +237,7 @@ final class ActionNode {
         )
 
         if let repeatIntervalMs {
-            if #available(iOS 16, *) {
+            if #available(macOS 13.0, iOS 16.0, watchOS 9.0, tvOS 16.0, *) {
                 try await Task.sleep(for: .milliseconds(repeatIntervalMs))
             } else {
                 try await Task.sleep(for: .milliseconds(Int(repeatIntervalMs)), leeway: .zero)
@@ -252,7 +260,7 @@ final class RootAction: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {}
 }
@@ -265,14 +273,14 @@ final class CallbackAction: Action {
     override func doActionImpl(
         player: any SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {}
 
     override func doActionAndScheduleNextImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {

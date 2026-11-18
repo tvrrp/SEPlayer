@@ -6,6 +6,8 @@
 //
 
 public extension Optional {
+    @inlinable
+    @discardableResult
     func checkNotNil(_ error: Error) throws -> Wrapped {
         guard let self else {
             throw error
@@ -13,6 +15,8 @@ public extension Optional {
         return self
     }
 
+    @inlinable
+    @discardableResult
     func checkNotNil(
         _ file: String = #fileID,
         _ line: Int = #line,
@@ -24,6 +28,7 @@ public extension Optional {
         return self
     }
 
+    @inlinable
     mutating func withTransform<T>(_ transform: (inout Wrapped) throws -> T) rethrows -> T? {
         if var value = self {
             let result = try transform(&value)

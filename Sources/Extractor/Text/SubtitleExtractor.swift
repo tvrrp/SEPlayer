@@ -5,22 +5,24 @@
 //  Created by tvrrp on 24.02.2026.
 //
 
-import Foundation
+import CoreMedia
 import SEPlayerCommon
 
-public class SubtitleExtractor: Extractor {
+public final class SubtitleExtractor: Extractor {
     private let queue: Queue
     private let subtitleParser: SubtitleParser
-    private let encoder: JSONEncoder
+    private let encoder: CueEncoder
     private let format: Format?
     private var samples: [Sample]
 
-    private var subtitleData: ByteBuffer
-    private var trackOutput: TrackOutput!
+    private var subtitleData: BlockBufferReader?
+    private var extractorOutput: ExtractorOutput?
+    private var trackOutput: TrackOutput?
+    private var seekMap: SubtitleSeekMap?
     private var bytesRead: Int
     private var state: State
-    private var timestamps: [Int64]
-    private var seekTimeUs: Int64
+    private var timestamps: [CMTime]
+    private var seekTime: CMTime
 
     public init(
         queue: Queue,
@@ -29,63 +31,61 @@ public class SubtitleExtractor: Extractor {
     ) {
         self.queue = queue
         self.subtitleParser = subtitleParser
-        self.format = format?
-            .buildUpon()
-            .setSampleMimeType(.applicationSEPlayerCues)
-            .setCodecs(format?.sampleMimeType?.rawValue)
-            // TODO: .setCueReplacementBehavior
-            .build()
+        self.format = format?.cuesFormat(cueReplacementBehavior: subtitleParser.getCueReplacementBehavior()).build()
 
-        encoder = JSONEncoder()
+        encoder = CueEncoder()
         samples = []
-        subtitleData = ByteBuffer()
         bytesRead = .zero
         state = .created
         timestamps = []
-        seekTimeUs = .timeUnset
+        seekTime = .invalid
     }
 
-    public func shiff(input: ExtractorInput, isolation: isolated Actor) async throws -> Bool {
+    public func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
+        // TODO: Implement sniffing. For now it's safe to return true, as this extractor is meant to be the only one
+        // an ExtractorsFactory returns.
         return true
     }
 
-    public func initialize(output: any ExtractorOutput, isolation: isolated any Actor) throws {
+    public func initialize(output: any ExtractorOutput, _ isolation: isolated any Actor) async throws {
+        assert(queue.isCurrent())
         try checkState(state == .created)
 
-        trackOutput = try output.track(for: .zero, trackType: .text)
+        extractorOutput = output
+        let trackOutput = try output.track(for: .zero, trackType: .text)
+        self.trackOutput = trackOutput
         if let format {
-            try trackOutput.setFormat(format, isolation: isolation)
+            try trackOutput.setFormat(format)
             output.endTracks()
-            // TODO: output.seekMap(seekMap: <#T##any SeekMap#>)
+            let seekMap = SubtitleSeekMap(duration: .invalid)
+            self.seekMap = seekMap
+            output.seekMap(seekMap: seekMap)
         }
         state = .initialized
     }
 
-    public func read(input: any ExtractorInput, isolation: isolated any Actor) async throws -> ExtractorReadResult {
+    public func read(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> ExtractorReadResult {
+        assert(queue.isCurrent())
         try checkState(state != .created && state != .released)
 
         if state == .initialized {
-            let length = input.getLength(isolation: isolation) ?? .defaultBufferSize
-            if length > subtitleData.capacity {
-                subtitleData.reserveCapacity(length)
-            }
-
+            subtitleData = try BlockBufferReader()
             bytesRead = 0
             state = .extracting
         }
 
         if state == .extracting {
-            let inputFinished = try await readFromInput(input, isolation: isolation)
+            let inputFinished = try await readFromInput(input, isolation)
             if inputFinished {
-                try await parseAndWriteToOutput(isolation: isolation)
+                try await parseAndWriteToOutput(isolation)
                 state = .finished
             }
         }
 
         if state == .seeking {
-            let inputFinished = try await skipInput(input, isolation: isolation)
+            let inputFinished = try skipInput(input, isolation)
             if inputFinished {
-                try writeToOutput(isolation: isolation)
+                try await writeToOutput(isolation)
                 state = .finished
             }
         }
@@ -97,9 +97,9 @@ public class SubtitleExtractor: Extractor {
         return .continueRead
     }
 
-    public func seek(to position: Int, timeUs: Int64, isolation: isolated any Actor) throws {
+    public func seek(to position: Int, time: CMTime, _ isolation: isolated any Actor) throws {
         try checkState(state != .created && state != .released)
-        seekTimeUs = timeUs
+        seekTime = time
 
         if state == .extracting {
             state = .initialized
@@ -110,102 +110,111 @@ public class SubtitleExtractor: Extractor {
         }
     }
 
-    public func release(isolation: isolated any Actor) {
+    public func release(_ isolation: isolated any Actor) {
         guard state != .released else { return }
 
         subtitleParser.reset()
         state = .released
     }
 
-    private func skipInput(_ input: ExtractorInput, isolation: isolated any Actor) async throws -> Bool {
-        if case .endOfInput = try await input.skip(
-            length: input.getLength(isolation: isolation) ?? .defaultBufferSize,
-            isolation: isolation
-        ) {
-            return true
-        }
-
-        return false
+    private func skipInput(_ input: any ExtractorInput, _ isolation: isolated any Actor) throws -> Bool {
+        let length = input.getLength(isolation).map { $0 - input.getPosition(isolation) } ?? .defaultBufferSize
+        return try input.skip(length: length, allowEndOfInput: true, isolation)
     }
 
-    private func readFromInput(_ input: ExtractorInput, isolation: isolated any Actor) async throws -> Bool {
-        if subtitleData.capacity == bytesRead {
-            subtitleData.reserveCapacity(subtitleData.capacity + .defaultBufferSize)
+    private func readFromInput(_ input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
+        let subtitleData = try subtitleData.checkNotNil()
+        let inputLength = input.getLength(isolation)
+        let length = inputLength.map { $0 - bytesRead } ?? .defaultBufferSize
+        guard length > 0 else { return true }
+
+        let (blockBuffer, isEndOfInput) = try await input.readFully(length: length, allowEndOfInput: true, isolation)
+        if !blockBuffer.isEmpty {
+            try subtitleData.extend(with: blockBuffer)
+            bytesRead += blockBuffer.dataLength
         }
 
-        let result = try await input.read(
-            to: &subtitleData,
-            offset: bytesRead,
-            length: subtitleData.capacity - bytesRead,
-            isolation: isolation
-        )
-
-        if case let .success(amount) = result {
-            bytesRead += amount
-        }
-
-        let inputLength = input.getLength(isolation: isolation)
-        return (inputLength != nil && inputLength == bytesRead) || DataReaderReadResult.endOfInput == result
+        return (inputLength != nil && inputLength == bytesRead) || isEndOfInput
     }
 
-    private func parseAndWriteToOutput(isolation: isolated any Actor) async throws {
-        let outputOptions = seekTimeUs != .timeUnset
-            ? SubtitleParserOutputOptions.cuesAfterThenRemainingCuesBefore(startTimeUs: seekTimeUs)
+    private func parseAndWriteToOutput(_ isolation: isolated any Actor) async throws {
+        let outputOptions = seekTime.isValid
+            ? SubtitleParserOutputOptions.cuesAfterThenRemainingCuesBefore(startTime: seekTime)
             : SubtitleParserOutputOptions.allCues()
 
-        try subtitleParser.parse(
-            data: &subtitleData,
-            offset: 0,
-            lenght: bytesRead,
-            outputOptions: outputOptions,
-            output: { cuesWithTiming in
-                let sample = try Sample(
-                    timeUs: cuesWithTiming.startTimeUs,
-                    cues: ByteBuffer(data: encoder.encode(cuesWithTiming))
-                )
+        var maxEndTime = CMTime.invalid
+        // Written once parsing is done: the track output runs in its own isolation.
+        var samplesToWrite: [Sample] = []
+        if let subtitleData, bytesRead > 0 {
+            try subtitleParser.parse(
+                data: subtitleData.getSlice(at: 0, length: bytesRead),
+                outputOptions: outputOptions,
+                output: { cuesWithTiming in
+                    let sample = Sample(
+                        time: cuesWithTiming.startTime,
+                        duration: cuesWithTiming.duration,
+                        cues: try encoder.encode(cues: cuesWithTiming.cues, duration: cuesWithTiming.duration)
+                    )
 
-                samples.append(sample)
-                if seekTimeUs == .timeUnset || cuesWithTiming.endTimeUs >= seekTimeUs {
-                    try writeToOutput(sample: sample, isolation: isolation)
+                    samples.append(sample)
+                    if cuesWithTiming.endTime.isValid {
+                        maxEndTime = maxEndTime.isValid ? max(maxEndTime, cuesWithTiming.endTime) : cuesWithTiming.endTime
+                    }
+                    if !seekTime.isValid || cuesWithTiming.endTime >= seekTime {
+                        samplesToWrite.append(sample)
+                    }
                 }
-            }
-        )
+            )
+        }
+
+        SELogger.debug(.subtitles, "Parsed \(samples.count) cues, \(samplesToWrite.count) written\(maxEndTime.isValid ? ", to \(maxEndTime.seconds)s" : "")")
+        for sample in samplesToWrite {
+            try await writeToOutput(sample: sample, isolation)
+        }
 
         samples.sort()
-        timestamps = samples.map { $0.timeUs }
-        subtitleData.clear()
+        timestamps = samples.map { $0.time }
+        // Duration is exact after parsing all subtitle cues.
+        if maxEndTime.isValid {
+            let trackOutput = try trackOutput.checkNotNil()
+            trackOutput.setDuration(maxEndTime)
+            if let seekMap {
+                seekMap.duration = maxEndTime
+                extractorOutput?.seekMap(seekMap: seekMap)
+            }
+        }
+        subtitleData = nil
     }
 
-    private func writeToOutput(isolation: isolated any Actor) throws {
-        let index = if seekTimeUs == .timeUnset {
-            Int.zero
+    private func writeToOutput(_ isolation: isolated any Actor) async throws {
+        let index = if seekTime.isValid {
+            Util.binarySearch(array: timestamps, value: seekTime, inclusive: true, stayInBounds: true)
         } else {
-            Util.binarySearch(array: timestamps, value: seekTimeUs, inclusive: true, stayInBounds: true)
+            Int.zero
         }
 
-        try samples[index..<samples.count].forEach {
-            try writeToOutput(sample: $0, isolation: isolation)
+        guard index < samples.count else { return }
+        for sample in samples[index..<samples.count] {
+            try await writeToOutput(sample: sample, isolation)
         }
     }
 
-    private func writeToOutput(sample: Sample, isolation: isolated any Actor) throws {
-        try trackOutput.sampleData(
-            data: sample.cues,
-            length: sample.cues.readableBytes,
-            isolation: isolation
-        )
-
+    private func writeToOutput(sample: Sample, _ isolation: isolated any Actor) async throws {
+        let trackOutput = try trackOutput.checkNotNil()
+        try trackOutput.sampleData(data: sample.cues)
         try trackOutput.sampleMetadata(
-            time: sample.timeUs,
+            time: CMSampleTimingInfo(
+                duration: sample.duration,
+                presentationTimeStamp: sample.time,
+                decodeTimeStamp: .invalid
+            ),
             flags: .keyframe,
-            size: 0,
-            offset: 0,
-            isolation: isolation
+            range: 0..<sample.cues.dataLength
         )
     }
 
     private func checkState(_ check: @autoclosure () -> Bool) throws {
-        if check() { throw ErrorBuilder(errorDescription: "Wrong state") } // TODO: real error
+        if !check() { throw ErrorBuilder(errorDescription: "Wrong state") } // TODO: real error
     }
 }
 
@@ -220,16 +229,30 @@ private extension SubtitleExtractor {
     }
 
     struct Sample: Comparable {
-        let timeUs: Int64
-        let cues: ByteBuffer
+        let time: CMTime
+        let duration: CMTime
+        let cues: CMBlockBuffer
 
-        static func < (lhs: SubtitleExtractor.Sample, rhs: SubtitleExtractor.Sample) -> Bool {
-            lhs.timeUs < rhs.timeUs
+        static func < (lhs: Sample, rhs: Sample) -> Bool {
+            lhs.time < rhs.time
         }
 
-        static func == (lhs: SubtitleExtractor.Sample, rhs: SubtitleExtractor.Sample) -> Bool {
-            lhs.timeUs == rhs.timeUs
+        static func == (lhs: Sample, rhs: Sample) -> Bool {
+            lhs.time == rhs.time
         }
+    }
+
+    /// Seeks to the start of the input: the extractor reads all of it, and outputs the cues from the seek time.
+    final class SubtitleSeekMap: SeekMap {
+        var duration: CMTime
+
+        init(duration: CMTime) {
+            self.duration = duration
+        }
+
+        func isSeekable() -> Bool { true }
+        func getDuration() -> CMTime { duration }
+        func getSeekPoints(for time: CMTime) -> SeekPoints { SeekPoints(first: .start) }
     }
 }
 

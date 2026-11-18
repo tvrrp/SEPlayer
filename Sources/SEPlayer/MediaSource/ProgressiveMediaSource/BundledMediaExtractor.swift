@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSURLSession
 import Extractor
 import SEPlayerCommon
@@ -24,41 +25,58 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
     func prepare(
         dataReader: DataReader,
         url: URL,
-        response: URLResponse?,
-        range: NSRange,
+        response: HTTPURLResponse?,
+        position: Int,
+        length: Int?,
         output: ExtractorOutput,
-        isolation: isolated any Actor
+        _ isolation: isolated any Actor
     ) async throws {
         syncActor.assertIsolated()
-        let extractorInput = DefaltExtractorInput(dataReader: dataReader, syncActor: syncActor, range: range)
+        let extractorInput = DefaultExtractorInput(
+            queue: syncActor.executor.queue,
+            dataReader: dataReader,
+            position: position,
+            length: length
+        )
         self.extractorInput = extractorInput
-        guard extractor == nil else { return }
-        let httpHeaders = (response as? HTTPURLResponse)?.allHeaderFields ?? [:]
-        let extractors = extractorsFactory.createExtractors(url: url, httpHeaders: httpHeaders)
+        guard extractor == nil else {
+            return
+        }
+
+        let httpHeaders = response?.allHeaderFields ?? [:]
+        let extractors = try extractorsFactory.createExtractors(url: url, httpHeaders: httpHeaders)
 
         var sniffFailures = [SniffFailure]()
         if extractors.count == 1 {
             extractor = extractors[0]
         } else {
             for extractor in extractors {
-                func postAction() { extractorInput.resetPeekPosition(isolation: isolation) }
+//                func postAction() {
+//                    extractorInput = DefaultExtractorInput(
+//                        queue: syncActor.executor.queue,
+//                        dataReader: dataReader,
+//                        position: position,
+//                        length: length
+//                    )
+//                }
 
+                defer { extractorInput.resetPeekPosition(isolation) }
                 do {
-                    if try await extractor.shiff(input: extractorInput, isolation: isolation) {
+                    if try await extractor.sniff(input: extractorInput, isolation) {
+                        SELogger.info(.sniffing, "\(url.lastPathComponent) is read by \(type(of: extractor))")
                         self.extractor = extractor
-                        postAction()
+//                        postAction()
                         break
                     } else {
-                        sniffFailures.append(contentsOf: extractor.getSniffFailureDetails(isolation: isolation))
+                        sniffFailures.append(contentsOf: extractor.getSniffFailureDetails(isolation))
                     }
                 } catch is EndOfFileError {
                     // Do nothing
                 }
-
-                postAction()
             }
 
             if extractor == nil {
+                SELogger.error(.sniffing, "No extractor reads \(url.lastPathComponent): \(sniffFailures)")
                 throw UnrecognizedInputFormatError(
                     message: "None of the available extractors could read the stream.",
                     url: url,
@@ -67,35 +85,36 @@ final class BundledMediaExtractor: ProgressiveMediaExtractor {
             }
         }
 
-        try extractor?.initialize(output: output, isolation: isolation)
+        self.extractorInput = extractorInput
+        try await extractor?.initialize(output: output, isolation)
     }
 
     func release() {
         Task {
             await syncActor.run { _ in
-                await extractor?.release(isolation: syncActor)
+                await extractor?.release(syncActor)
                 extractor = nil
                 extractorInput = nil
             }
         }
     }
 
-    func getCurrentInputPosition(isolation: isolated any Actor) -> Int? {
+    func getCurrentInputPosition(_ isolation: isolated any Actor) -> Int? {
         syncActor.assertIsolated()
-        return extractorInput?.getPosition(isolation: isolation)
+        return extractorInput?.getPosition(isolation)
     }
 
-    func seek(position: Int, time: Int64, isolation: isolated any Actor) throws {
+    func seek(position: Int, time: CMTime, _ isolation: isolated any Actor) throws {
         syncActor.assertIsolated()
-        try extractor?.seek(to: position, timeUs: time, isolation: isolation)
+        try extractor?.seek(to: position, time: time, isolation)
     }
 
-    func read(isolation: isolated any Actor) async throws -> ExtractorReadResult {
+    func read(_ isolation: isolated any Actor) async throws -> ExtractorReadResult {
         syncActor.assertIsolated()
         guard let extractor, let extractorInput else {
-            throw ErrorBuilder.illegalState
+            throw ErrorBuilder.illegalState()
         }
 
-        return try await extractor.read(input: extractorInput, isolation: isolation)
+        return try await extractor.read(input: extractorInput, isolation)
     }
 }

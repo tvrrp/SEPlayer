@@ -5,11 +5,16 @@
 //  Created by Damir Yackupov on 16.12.2025.
 //
 
-import CoreMedia
+import AVFoundation
 import SEPlayerCommon
 
-public class ForwardingRenderer: SERenderer {
-    public var trackType: TrackType { renderer.trackType }
+open class ForwardingRenderer: SERenderer {
+    open var trackType: TrackType { renderer.trackType }
+
+    open var delegate: SERendererDelegate? {
+        get { renderer.delegate }
+        set { renderer.delegate = newValue }
+    }
 
     private let renderer: SERenderer
 
@@ -17,35 +22,46 @@ public class ForwardingRenderer: SERenderer {
         self.renderer = renderer
     }
 
-    public func getCapabilities() -> RendererCapabilitiesResolver {
+    open func getCapabilities() -> RendererCapabilitiesResolver {
         renderer.getCapabilities()
     }
 
-    public func handleMessage(_ message: RendererMessage) throws {
+    open func handleMessage(_ message: RendererMessage) throws {
         try renderer.handleMessage(message)
     }
 
-    public func getMediaClock() -> MediaClock? {
+    open func getMediaClock() -> MediaClock? {
         renderer.getMediaClock()
     }
 
-    public func getTimebase() -> CMTimebase? {
+    open func getTimebase() -> CMTimebase? {
         renderer.getTimebase()
     }
 
-    public func getState() -> SERendererState {
+    open func getRenderSynchronizer() -> (any PlaybackSynchronizer)? {
+        renderer.getRenderSynchronizer()
+    }
+
+    open func getState() -> SERendererState {
         renderer.getState()
+    }
+
+    open func getRecoveryContext() -> RendererRecoveryContext { renderer.getRecoveryContext() }
+    open var isRecoveringWhileTimelineAdvances: Bool { renderer.isRecoveringWhileTimelineAdvances }
+    open func recoverOutput(at position: CMTime, reason: RendererRecoveryReason) throws -> Bool {
+        try renderer.recoverOutput(at: position, reason: reason)
     }
 
     public func enable(
         formats: [Format],
-        stream: SampleStream,
-        position: Int64,
+        stream: any SampleStream,
+        position: CMTime,
         joining: Bool,
         mayRenderStartOfStream: Bool,
-        startPosition: Int64,
-        offset: Int64,
-        mediaPeriodId: MediaPeriodId
+        startPosition: CMTime,
+        offset: CMTime,
+        mediaPeriodId: MediaPeriodId,
+        delegate: any SERendererDelegate
     ) throws {
         try renderer.enable(
             formats: formats,
@@ -55,19 +71,20 @@ public class ForwardingRenderer: SERenderer {
             mayRenderStartOfStream: mayRenderStartOfStream,
             startPosition: startPosition,
             offset: offset,
-            mediaPeriodId: mediaPeriodId
+            mediaPeriodId: mediaPeriodId,
+            delegate: delegate
         )
     }
 
-    public func start() throws {
+    open func start() throws {
         try renderer.start()
     }
 
-    public func replaceStream(
+    open func replaceStream(
         formats: [Format],
         stream: SampleStream,
-        startPosition: Int64,
-        offset: Int64,
+        startPosition: CMTime,
+        offset: CMTime,
         mediaPeriodId: MediaPeriodId
     ) throws {
         try renderer.replaceStream(
@@ -79,71 +96,75 @@ public class ForwardingRenderer: SERenderer {
         )
     }
 
-    public func getStream() -> SampleStream? {
+    open func getStream() -> SampleStream? {
         renderer.getStream()
     }
 
-    public func didReadStreamToEnd() -> Bool {
+    open func didReadStreamToEnd() -> Bool {
         renderer.didReadStreamToEnd()
     }
 
-    public func getReadingPosition() -> Int64 {
+    open func getReadingPosition() -> CMTime {
         renderer.getReadingPosition()
     }
 
-    public func setStreamFinal() {
+    open func setStreamFinal() {
         renderer.setStreamFinal()
     }
 
-    public func isCurrentStreamFinal() -> Bool {
+    open func isCurrentStreamFinal() -> Bool {
         renderer.isCurrentStreamFinal()
     }
 
-    public func resetPosition(new position: Int64) throws {
+    open func resetPosition(new position: CMTime) throws {
         try renderer.resetPosition(new: position)
     }
 
-    public func setPlaybackSpeed(current: Float, target: Float) throws {
+    open func setPlaybackSpeed(current: Float, target: Float) throws {
         try renderer.setPlaybackSpeed(current: current, target: target)
     }
 
-    public func enableRenderStartOfStream() {
+    open func enableRenderStartOfStream() {
         renderer.enableRenderStartOfStream()
     }
 
-    public func getTimeline() -> Timeline {
+    open func getTimeline() -> Timeline {
         renderer.getTimeline()
     }
 
-    public func setTimeline(_ timeline: Timeline) {
+    open func setTimeline(_ timeline: Timeline) {
         renderer.setTimeline(timeline)
     }
 
-    public func render(position: Int64, elapsedRealtime: Int64) throws {
+    open func render(position: CMTime, elapsedRealtime: CMTime) throws {
         try renderer.render(position: position, elapsedRealtime: elapsedRealtime)
     }
 
-    public func isReady() -> Bool {
+    open func isReady() -> Bool {
         renderer.isReady()
     }
 
-    public func isEnded() -> Bool {
+    open func isEnded() -> Bool {
         renderer.isEnded()
     }
 
-    public func stop() {
+    open func hasPresentedOutput() -> Bool {
+        renderer.hasPresentedOutput()
+    }
+
+    open func stop() {
         renderer.stop()
     }
 
-    public func disable() {
+    open func disable() {
         renderer.disable()
     }
 
-    public func reset() {
+    open func reset() {
         renderer.reset()
     }
 
-    public func release() {
+    open func release() {
         renderer.release()
     }
 }

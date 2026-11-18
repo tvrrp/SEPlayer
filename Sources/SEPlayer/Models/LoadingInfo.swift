@@ -5,14 +5,16 @@
 //  Created by Damir Yackupov on 06.05.2025.
 //
 
-public struct LoadingInfo: Hashable {
-    let playbackPosition: Int64
-    let playbackSpeed: Float
-    let lastRebufferRealtime: Int64
+import CoreMedia
 
-    func rebufferedSince(realtime: Int64) -> Bool {
-        return lastRebufferRealtime != .timeUnset
-            && realtime != .timeUnset
+public struct LoadingInfo: Hashable {
+    let playbackPosition: CMTime
+    let playbackSpeed: Float
+    let lastRebufferRealtime: CMTime
+
+    func rebufferedSince(realtime: CMTime) -> Bool {
+        return lastRebufferRealtime.isValid
+            && realtime.isValid
             && lastRebufferRealtime >= realtime
     }
 }

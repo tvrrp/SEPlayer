@@ -5,7 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-import CoreMedia.CMTime
+import CoreMedia
 import SEPlayerCommon
 
 extension BoxParser {
@@ -27,30 +27,28 @@ extension BoxParser {
 
         var sampleCount = sampleSizeBox.sampleCount
         if sampleCount == 0 {
-            return try TrackSampleTable(
-                track: track,
-                offsets: [],
-                sizes: [],
-                maximumSize: 0,
-                timestampsUs: [],
-                flags: [],
-                syncSampleIndices: [],
-                hasOnlySyncSamples: false,
-                durationUs: 0,
-                sampleCount: 0
-            )
+            return try .empty(track: track)
         }
 
-        if track.type == .video, track.mediaDurationUs > 0 {
-            let frameRate = Float(sampleCount) / ((Float(track.mediaDurationUs) / 1000000))
+        /// Create a CMTime in track timescale from raw time-units.
+        func trackTime(_ value: CMTimeValue) -> CMTime {
+            CMTime(value: value, timescale: track.timescale)
+        }
+        /// Create a CMTime in movie timescale from raw time-units.
+        func movieTime(_ value: CMTimeValue) -> CMTime {
+            CMTime(value: value, timescale: track.movieTimescale)
+        }
+
+        if track.type == .video, track.mediaDuration.isValid, track.mediaDurationUs > 0 {
+            let frameRate = Float(sampleCount) / (Float(track.mediaDurationUs) / 1_000_000)
             track.format = track.format.buildUpon().setFrameRate(frameRate).build()
         }
 
         // Entries are byte offsets of chunks.
         var chunkOffsetsType: any FixedWidthInteger.Type = UInt32.self
         let chunkOffsetsAtom: LeafBox
-        if let stblBox = stblBox.getLeafBoxOfType(type: .stco) {
-            chunkOffsetsAtom = stblBox
+        if let stcoBox = stblBox.getLeafBoxOfType(type: .stco) {
+            chunkOffsetsAtom = stcoBox
         } else {
             chunkOffsetsType = UInt64.self
             chunkOffsetsAtom = try stblBox.getLeafBoxOfType(type: .co64)
@@ -59,9 +57,11 @@ extension BoxParser {
 
         let chunkOffsets = chunkOffsetsAtom.data
         // Entries are (chunk number, number of samples per chunk, sample description index).
-        let stsc = try stblBox.getLeafBoxOfType(type: .stsc).checkNotNil(BoxParserErrors.missingBox(type: .stsc)).data
+        let stsc = try stblBox.getLeafBoxOfType(type: .stsc)
+            .checkNotNil(BoxParserErrors.missingBox(type: .stsc)).data
         // Entries are (number of samples, timestamp delta between those samples).
-        var stts = try stblBox.getLeafBoxOfType(type: .stts).checkNotNil(BoxParserErrors.missingBox(type: .stts)).data
+        var stts = try stblBox.getLeafBoxOfType(type: .stts)
+            .checkNotNil(BoxParserErrors.missingBox(type: .stts)).data
         // Entries are the indices of samples that are synchronization samples.
         var stss = stblBox.getLeafBoxOfType(type: .stss)?.data
         // Entries are (number of samples, timestamp offset).
@@ -114,39 +114,58 @@ extension BoxParser {
         var offsets = [Int]()
         var sizes = [Int]()
         var maximumSize = 0
-        var timestamps = [Int64]()
+        var ptsValues = [CMTime]()
+        var dtsValues = [CMTime]()
+        var sampleDurations = [CMTime]()
         var samplesFlags = [SampleFlags]()
         var syncSampleIndicesList = [Int]()
         let hasOnlySyncSamples = stss == nil
-        var timestampTimeUnits: Int64 = 0
-        var duration: Int64 = 0
+        var dtsAccumulator: Int64 = 0       // running DTS in track timescale units
+        var totalDuration = CMTime.zero     // total duration in track timescale
         var totalSize = 0
 
         if rechunkFixedSizeSamples, let fixedSampleSize {
-            var chunkOffsetsBytes = Array(repeating: 0, count: chunkIterator.numberOfSamples)
-            var chunkSampleCounts = Array(repeating: 0, count: chunkIterator.numberOfSamples)
+            var chunkOffsetsBytes = Array(repeating: 0, count: chunkIterator.length)
+            var chunkSampleCounts = Array(repeating: 0, count: chunkIterator.length)
             while try chunkIterator.moveNext() {
                 chunkOffsetsBytes[chunkIterator.index] = chunkIterator.offset
                 chunkSampleCounts[chunkIterator.index] = chunkIterator.numberOfSamples
             }
-            let rechunkedResults = FixedSampleSizeRechunker.rechunk(
+            let r = FixedSampleSizeRechunker.rechunk(
                 fixedSampleSize: fixedSampleSize,
                 chunkOffsets: chunkOffsetsBytes,
                 chunkSampleCounts: chunkSampleCounts,
                 timestampDeltaInTimeUnits: timestampDeltaInTimeUnits
             )
-            offsets = omitTrackSampleTable ? [] : rechunkedResults.offsets
-            sizes = omitTrackSampleTable ? [] : rechunkedResults.sizes
-            timestamps = omitTrackSampleTable ? [] : rechunkedResults.timestamps
-            samplesFlags = omitTrackSampleTable ? [] : rechunkedResults.flags
-            maximumSize = rechunkedResults.maximumSize
-            duration = rechunkedResults.duration
-            totalSize = rechunkedResults.totalSize
-            sampleCount = rechunkedResults.offsets.count
+            sampleCount = r.offsets.count
+            offsets = omitTrackSampleTable ? [] : r.offsets
+            sizes = omitTrackSampleTable ? [] : r.sizes
+            samplesFlags = omitTrackSampleTable ? [] : r.flags
+            maximumSize = r.maximumSize
+            totalSize = r.totalSize
+            totalDuration = trackTime(r.duration)
+
+            if !omitTrackSampleTable {
+                let uniformDelta = trackTime(timestampDeltaInTimeUnits)
+                // No ctts for rechunked fixed-size audio ⇒ DTS == PTS, uniform delta.
+                ptsValues = r.timestamps.map { trackTime($0) }
+                dtsValues = ptsValues
+                sampleDurations = Array(repeating: uniformDelta, count: sampleCount)
+                // Last sample: remaining duration.
+                if sampleCount > 0 {
+                    sampleDurations[sampleCount - 1] = totalDuration - dtsValues[sampleCount - 1]
+                }
+            } else {
+                ptsValues = []
+                dtsValues = []
+                sampleDurations = []
+            }
         } else {
             offsets = omitTrackSampleTable ? [] : Array(repeating: 0, count: sampleCount)
             sizes = omitTrackSampleTable ? [] : Array(repeating: 0, count: sampleCount)
-            timestamps = omitTrackSampleTable ? [] : Array(repeating: 0, count: sampleCount)
+            ptsValues = omitTrackSampleTable ? [] : Array(repeating: .zero, count: sampleCount)
+            dtsValues = omitTrackSampleTable ? [] : Array(repeating: .zero, count: sampleCount)
+            sampleDurations = omitTrackSampleTable ? [] : Array(repeating: .zero, count: sampleCount)
             samplesFlags = omitTrackSampleTable ? [] : Array(repeating: [], count: sampleCount)
             var offset = 0
             var remainingSamplesInChunk = 0
@@ -167,7 +186,9 @@ extension BoxParser {
                     if !omitTrackSampleTable {
                         offsets = Array(offsets[0..<sampleCount])
                         sizes = Array(sizes[0..<sampleCount])
-                        timestamps = Array(timestamps[0..<sampleCount])
+                        ptsValues = Array(ptsValues[0..<sampleCount])
+                        dtsValues = Array(dtsValues[0..<sampleCount])
+                        sampleDurations = Array(sampleDurations[0..<sampleCount])
                         samplesFlags = Array(samplesFlags[0..<sampleCount])
                     }
                     break
@@ -197,7 +218,12 @@ extension BoxParser {
                 if !omitTrackSampleTable {
                     offsets[index] = offset
                     sizes[index] = currentSampleSize
-                    timestamps[index] = timestampTimeUnits + timestampOffset
+                    // DTS is the raw accumulation from stts deltas.
+                    dtsValues[index] = trackTime(dtsAccumulator)
+                    // PTS = DTS + composition offset from ctts.
+                    ptsValues[index] = trackTime(dtsAccumulator + timestampOffset)
+                    // Per-sample duration = current stts delta (refined below for last sample).
+                    sampleDurations[index] = trackTime(timestampDeltaInTimeUnits)
                     // All samples are synchronization samples if the stss is not present.
                     samplesFlags[index] = stss == nil ? .keyframe : []
                     if index == nextSynchronizationSampleIndex {
@@ -216,7 +242,7 @@ extension BoxParser {
                 }
 
                 // Add on the duration of this sample.
-                timestampTimeUnits += timestampDeltaInTimeUnits
+                dtsAccumulator += timestampDeltaInTimeUnits
                 remainingSamplesAtTimestampDelta -= 1
                 if remainingSamplesAtTimestampDelta == 0 && remainingTimestampDeltaChanges > 0 {
                     remainingSamplesAtTimestampDelta = try stts.readInt(as: UInt32.self)
@@ -234,7 +260,12 @@ extension BoxParser {
                 remainingSamplesInChunk -= 1
             }
 
-            duration = timestampTimeUnits + timestampOffset
+            totalDuration = trackTime(dtsAccumulator + timestampOffset)
+
+            // Refine last sample duration: total_dts_accumulation - last_dts.
+            if !omitTrackSampleTable, sampleCount > 0 {
+                sampleDurations[sampleCount - 1] = trackTime(dtsAccumulator) - dtsValues[sampleCount - 1]
+            }
 
             // If the stbl's child boxes are not consistent the container is malformed, but the stream may
             // still be playable.
@@ -261,7 +292,7 @@ extension BoxParser {
             }
         }
 
-        if track.mediaDurationUs > 0 {
+        if track.mediaDuration.isValid, track.mediaDurationUs > 0 {
             let averageBitrate = Util.scaleLargeValue(
                 Int64(totalSize * 8),
                 multiplier: .microsecondsPerSecond,
@@ -274,62 +305,66 @@ extension BoxParser {
             }
         }
 
-        var durationUs = Util.scaleLargeTimestamp(
-            duration,
-            multiplier: Int64.microsecondsPerSecond,
-            divisor: track.timescale
-        )
-
         guard let editListDurations = track.editListDurations,
               let editListMediaTimes = track.editListMediaTimes else {
-            if !omitTrackSampleTable {
-                Util.scaleLargeTimestampsInPlace(&timestamps, multiplier: .microsecondsPerSecond, divisor: track.timescale)
-            }
             return try TrackSampleTable(
                 track: track,
                 offsets: offsets,
                 sizes: sizes,
                 maximumSize: maximumSize,
-                timestampsUs: timestamps,
+                pts: ptsValues,
+                dts: dtsValues,
+                durations: sampleDurations,
+                duration: totalDuration,
                 flags: samplesFlags,
                 syncSampleIndices: syncSampleIndicesList,
                 hasOnlySyncSamples: hasOnlySyncSamples,
-                durationUs: durationUs,
                 sampleCount: sampleCount
             )
         }
 
-        if omitTrackSampleTable {
-            let editedDurationUs: Int64
-            if editListDurations.count == 1 && editListDurations[0] == 0 {
-                let editStartTime = editListDurations[0]
-                editedDurationUs = Util.scaleLargeTimestamp(
-                    duration - editStartTime,
-                    multiplier: .microsecondsPerSecond,
-                    divisor: track.timescale
-                )
+        // Convert each edit list entry into a CMTimeMapping.
+        // source: time range in the track (media) timescale.
+        // target: time range in the movie (presentation) timescale.
+        // Dwell edits (mediaTime == -1) produce an empty mapping with an invalid source.
+        var targetStart = CMTime.zero
+        var editMappings = [CMTimeMapping]()
+        editMappings.reserveCapacity(editListDurations.count)
+        for (mediaTimeRaw, durationRaw) in zip(editListMediaTimes, editListDurations) {
+            let targetDuration = movieTime(durationRaw)
+            let targetRange = CMTimeRange(start: targetStart, duration: targetDuration)
+            targetStart = targetStart + targetDuration
+            if mediaTimeRaw == -1 {
+                editMappings.append(CMTimeMappingMakeEmpty(target: targetRange))
             } else {
-                let pts = editListDurations.indices
-                    .filter { editListMediaTimes[$0] != -1 }
-                    .reduce(Int64.zero) { $0 + editListDurations[$1] }
+                let sourceDuration = CMTimeConvertScale(targetDuration, timescale: track.timescale, method: .default)
+                let sourceRange = CMTimeRange(start: trackTime(mediaTimeRaw), duration: sourceDuration)
+                editMappings.append(CMTimeMappingMake(source: sourceRange, target: targetRange))
+            }
+        }
 
-                editedDurationUs = Util.scaleLargeTimestamp(
-                    pts,
-                    multiplier: .microsecondsPerSecond,
-                    divisor: track.movieTimescale
-                )
+        if omitTrackSampleTable {
+            let editedDuration: CMTime
+            if editMappings.count == 1 && editListDurations[0] == 0 {
+                editedDuration = totalDuration - trackTime(editListMediaTimes[0])
+            } else {
+                editedDuration = editMappings
+                    .filter { $0.source.isValid }
+                    .reduce(CMTime.zero) { $0 + $1.target.duration }
             }
 
             return try TrackSampleTable(
                 track: track,
-                offsets: offsets,
-                sizes: sizes,
+                offsets: [],
+                sizes: [],
                 maximumSize: maximumSize,
-                timestampsUs: timestamps,
-                flags: samplesFlags,
-                syncSampleIndices: syncSampleIndicesList,
+                pts: [],
+                dts: [],
+                durations: [],
+                duration: editedDuration,
+                flags: [],
+                syncSampleIndices: [],
                 hasOnlySyncSamples: hasOnlySyncSamples,
-                durationUs: editedDurationUs,
                 sampleCount: sampleCount
             )
         }
@@ -341,40 +376,30 @@ extension BoxParser {
         // handles simple discarding/delaying of samples. The extractor may place further restrictions
         // on what edited streams are playable.
 
-        if editListDurations.count == 1, track.type == .audio, timestamps.count >= 2 {
-            let editStartTime = editListMediaTimes[0]
-            let editEndTime = editStartTime + Util.scaleLargeTimestamp(editListDurations[0],
-                                                                       multiplier: track.timescale,
-                                                                       divisor: track.movieTimescale)
+        if editMappings.count == 1, track.type == .audio, ptsValues.count >= 2,
+           editMappings[0].source.isValid
+        {
+            let mapping = editMappings[0]
 
-            if canApplyEditWithGaplessInfo(timestamps: timestamps,
-                                           duration: duration,
-                                           editStartTime: editStartTime,
-                                           editEndTime: editEndTime) {
-                let paddingTimeUnits = duration - editEndTime
-                let encoderDelay = Util.scaleLargeTimestamp(
-                    editStartTime - timestamps[0],
-                    multiplier: Int64(track.format.sampleRate),
-                    divisor: track.timescale
-                )
+            if canApplyEditWithGaplessInfo(
+                pts: ptsValues,
+                duration: totalDuration,
+                editStartTime: mapping.source.start,
+                editEndTime: mapping.source.end
+            ) {
+                let paddingDuration = totalDuration - mapping.source.end
+                let sampleRateTimescale = CMTimeScale(track.format.sampleRate)
 
-                let encoderPadding = Util.scaleLargeTimestamp(
-                    paddingTimeUnits,
-                    multiplier: Int64(track.format.sampleRate),
-                    divisor: track.timescale
-                )
+                let encoderDelay = (mapping.source.start - ptsValues[0])
+                    .convertScale(sampleRateTimescale, method: .default).value
+                let encoderPadding = paddingDuration
+                    .convertScale(sampleRateTimescale, method: .default).value
 
                 if (encoderDelay != 0 || encoderPadding != 0),
                    encoderDelay <= .max, encoderPadding <= .max {
                     gaplessInfoHolder = .init(
                         encoderDelay: Int(encoderDelay),
-                        encoderPadding: Int(encoderDelay)
-                    )
-                    Util.scaleLargeTimestampsInPlace(&timestamps, multiplier: .microsecondsPerSecond, divisor: track.timescale)
-                    let editedDurationUs = Util.scaleLargeTimestamp(
-                        editListDurations[0],
-                        multiplier: .microsecondsPerSecond,
-                        divisor: track.movieTimescale
+                        encoderPadding: Int(encoderPadding)
                     )
 
                     return try TrackSampleTable(
@@ -382,45 +407,42 @@ extension BoxParser {
                         offsets: offsets,
                         sizes: sizes,
                         maximumSize: maximumSize,
-                        timestampsUs: timestamps,
+                        pts: ptsValues,
+                        dts: dtsValues,
+                        durations: sampleDurations,
+                        duration: mapping.target.duration,
                         flags: samplesFlags,
                         syncSampleIndices: syncSampleIndicesList,
                         hasOnlySyncSamples: hasOnlySyncSamples,
-                        durationUs: editedDurationUs,
                         sampleCount: sampleCount
                     )
                 }
             }
         }
 
-        if editListDurations.count == 1, editListDurations[0] == 0 {
+        if editMappings.count == 1, editListDurations[0] == 0 {
             // The current version of the spec leaves handling of an edit with zero segment_duration in
             // unfragmented files open to interpretation. We handle this as a special case and include all
             // samples in the edit.
-            let editStartTime = editListMediaTimes[0]
-            timestamps = timestamps.map {
-                Util.scaleLargeTimestamp(
-                    $0 - editStartTime,
-                    multiplier: Int64.microsecondsPerSecond,
-                    divisor: track.timescale
-                )
-            }
-            durationUs = Util.scaleLargeTimestamp(
-                duration - editStartTime,
-                multiplier: .microsecondsPerSecond,
-                divisor: track.movieTimescale
-            )
+            let editStartTime = trackTime(editListMediaTimes[0])
+            let editedDuration = totalDuration - editStartTime
+
+            let editedPts = ptsValues.map { $0 - editStartTime }
+            let editedDts = dtsValues.map { $0 - editStartTime }
+            // Per-sample durations are unaffected by a uniform shift.
 
             return try TrackSampleTable(
                 track: track,
                 offsets: offsets,
                 sizes: sizes,
                 maximumSize: maximumSize,
-                timestampsUs: timestamps,
+                pts: editedPts,
+                dts: editedDts,
+                durations: sampleDurations,
+                duration: editedDuration,
                 flags: samplesFlags,
                 syncSampleIndices: syncSampleIndicesList,
                 hasOnlySyncSamples: hasOnlySyncSamples,
-                durationUs: durationUs,
                 sampleCount: sampleCount
             )
         }
@@ -431,22 +453,21 @@ extension BoxParser {
         // there is no partial audio in this case.
         let omitZeroDurationClippedSample = track.type == .audio
 
+        // All PTS share trackTimescale, so raw .value comparison is valid for binary search.
+        let ptsRawValues = ptsValues.map { $0.value }
+
         // Count the number of samples after applying edits.
         var editedSampleCount = 0
         var nextSampleIndex = 0
         var copyMetadata = false
-        var startIndices = Array(repeating: 0, count: editListDurations.count)
-        var endIndices = Array(repeating: 0, count: editListDurations.count)
+        var startIndices = Array(repeating: 0, count: editMappings.count)
+        var endIndices = Array(repeating: 0, count: editMappings.count)
 
-        for (index, (editMediaTime, editListDuration)) in zip(editListMediaTimes, editListDurations).enumerated() {
-            guard editMediaTime != -1 else { continue }
+        for (index, mapping) in editMappings.enumerated() {
+            guard mapping.source.isValid else { continue }
 
-            let editDuration = Util.scaleLargeTimestamp(
-                editListDuration,
-                multiplier: track.timescale,
-                divisor: track.movieTimescale
-            )
-            let editEndTime = editMediaTime + editDuration
+            let editMediaTimeRaw = mapping.source.start.value
+            let editEndTimeRaw = mapping.source.end.value
 
             // The timestamps array is in the order read from the media, which might not be strictly
             // sorted. However, all sync frames are guaranteed to be in order. The logic below
@@ -456,8 +477,8 @@ extension BoxParser {
             // It then walks backward to ensure the index points to a sync frame, since
             // decoding must start from a keyframe.
             startIndices[index] = Util.binarySearch(
-                array: timestamps,
-                value: editMediaTime,
+                array: ptsRawValues,
+                value: editMediaTimeRaw,
                 inclusive: true,
                 stayInBounds: true
             )
@@ -465,8 +486,8 @@ extension BoxParser {
             // The endIndices calculation finds the true end of the edit by searching past the
             // naive end point for any out-of-order frames that belong in the clip.
             let firstSampleAfterEdit = Util.binarySearchCeil(
-                array: timestamps,
-                value: editEndTime,
+                array: ptsRawValues,
+                value: editEndTimeRaw,
                 inclusive: omitZeroDurationClippedSample,
                 stayInBounds: false
             )
@@ -476,15 +497,12 @@ extension BoxParser {
             // guarantees no more valid frames will be found.
             var samplesSeenAfterEnd = 0
             var maxValidIndexInWindow = firstSampleAfterEdit - 1
-            for j in firstSampleAfterEdit..<timestamps.count {
-                if timestamps[j] < editEndTime {
-                    // This is an out-of-order frame that belongs in the edit. Update our max index.
+            for j in firstSampleAfterEdit..<ptsRawValues.count {
+                if ptsRawValues[j] < editEndTimeRaw {
                     maxValidIndexInWindow = j
                 } else {
-                    // This frame is outside the edit. Increment our counter of seen "post-roll" frames.
                     samplesSeenAfterEnd += 1
                     if samplesSeenAfterEnd > track.format.maxNumReorderSamples {
-                        // We've exhausted our search budget. We can be sure no more valid frames will appear.
                         break
                     }
                 }
@@ -516,47 +534,62 @@ extension BoxParser {
         var editedOffsets = copyMetadata ? Array(repeating: 0, count: editedSampleCount) : offsets
         var editedSizes = copyMetadata ? Array(repeating: 0, count: editedSampleCount) : sizes
         var editedMaximumSize = copyMetadata ? 0 : maximumSize
-        var editedFlags = copyMetadata ? Array(repeating: [], count: editedSampleCount) : samplesFlags
-        var editedSyncSampleIndicesList = copyMetadata ? [] : syncSampleIndicesList
-        var editedTimestamps = copyMetadata ? Array(repeating: 0, count: editedSampleCount) : timestamps
-        var pts = Int64.zero
+        var editedFlags = copyMetadata
+            ? Array(repeating: SampleFlags(), count: editedSampleCount) : samplesFlags
+        var editedSyncSampleIndicesList = copyMetadata ? [Int]() : syncSampleIndicesList
+        var editedPts = copyMetadata
+            ? Array(repeating: CMTime.zero, count: editedSampleCount) : ptsValues
+        var editedDts = copyMetadata
+            ? Array(repeating: CMTime.zero, count: editedSampleCount) : dtsValues
+        var editedDurations = copyMetadata
+            ? Array(repeating: CMTime.zero, count: editedSampleCount) : sampleDurations
+
         var sampleIndex = 0
         var hasPrerollSamples = false
 
-        for (index, editMediaTime) in editListMediaTimes.enumerated() {
+        for (index, mapping) in editMappings.enumerated() {
+            guard mapping.source.isValid else { continue }
+
             let startIndex = startIndices[index]
             let endIndex = endIndices[index]
+
             if copyMetadata {
                 let count = endIndex - startIndex
-                editedOffsets.replaceSubrange(sampleIndex ..< sampleIndex + count,
-                                              with: offsets[startIndex ..< endIndex])
-                editedSizes.replaceSubrange(sampleIndex ..< sampleIndex + count,
-                                            with: sizes[startIndex ..< endIndex])
-                editedFlags.replaceSubrange(sampleIndex ..< sampleIndex + count,
-                                            with: samplesFlags[startIndex ..< endIndex])
+                editedOffsets.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: offsets[startIndex..<endIndex]
+                )
+                editedSizes.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: sizes[startIndex..<endIndex]
+                )
+                editedFlags.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: samplesFlags[startIndex..<endIndex]
+                )
+                editedDurations.replaceSubrange(
+                    sampleIndex..<sampleIndex + count, with: sampleDurations[startIndex..<endIndex]
+                )
             }
 
             for j in startIndex..<endIndex {
-                let ptsUs = Util.scaleLargeTimestamp(pts, multiplier: .microsecondsPerSecond, divisor: track.movieTimescale)
-                let timeInSegmentUs = Util.scaleLargeTimestamp(
-                    timestamps[j] - editMediaTime,
-                    multiplier: .microsecondsPerSecond,
-                    divisor: track.timescale
+                editedPts[sampleIndex] = CMTimeMapTimeFromRangeToRange(
+                    ptsValues[j], fromRange: mapping.source, toRange: mapping.target
                 )
-                if timeInSegmentUs < 0 { hasPrerollSamples = true }
-                editedTimestamps[sampleIndex] = ptsUs + timeInSegmentUs
+                editedDts[sampleIndex] = CMTimeMapTimeFromRangeToRange(
+                    dtsValues[j], fromRange: mapping.source, toRange: mapping.target
+                )
+
+                if ptsValues[j] < mapping.source.start { hasPrerollSamples = true }
+
                 if copyMetadata, editedSizes[sampleIndex] > editedMaximumSize {
                     editedMaximumSize = sizes[j]
                 }
-                if copyMetadata, !hasOnlySyncSamples, editedFlags.contains(.keyframe) {
-                    editedSyncSampleIndicesList.append(sampleCount)
+                if copyMetadata, !hasOnlySyncSamples, editedFlags[sampleIndex].contains(.keyframe) {
+                    editedSyncSampleIndicesList.append(sampleIndex)
                 }
                 sampleIndex += 1
             }
-            pts += editListDurations[index]
         }
 
-        let editedDurationUs = Util.scaleLargeTimestamp(pts, multiplier: .microsecondsPerSecond, divisor: track.movieTimescale)
+        let editedDuration = targetStart
         if hasPrerollSamples {
             let newFormat = track.format.buildUpon().setHasPrerollSamples(true).build()
             track.format = newFormat
@@ -567,31 +600,35 @@ extension BoxParser {
             offsets: editedOffsets,
             sizes: editedSizes,
             maximumSize: editedMaximumSize,
-            timestampsUs: editedTimestamps,
+            pts: editedPts,
+            dts: editedDts,
+            durations: editedDurations,
+            duration: editedDuration,
             flags: editedFlags,
             syncSampleIndices: editedSyncSampleIndicesList,
             hasOnlySyncSamples: hasOnlySyncSamples,
-            durationUs: editedDurationUs,
             sampleCount: editedOffsets.count
         )
     }
 
     private func canApplyEditWithGaplessInfo(
-        timestamps: [Int64],
-        duration: Int64,
-        editStartTime: Int64,
-        editEndTime: Int64
+        pts: [CMTime],
+        duration: CMTime,
+        editStartTime: CMTime,
+        editEndTime: CMTime
     ) -> Bool {
-        let lastIndex = timestamps.count - 1
+        let lastIndex = pts.count - 1
         let latestDelayIndex = max(0, min(.maxGaplessTrimSizeSamples, lastIndex))
-        let earliestPaddingIndex = max(0, min(timestamps.count - .maxGaplessTrimSizeSamples, lastIndex))
+        let earliestPaddingIndex = max(0, min(pts.count - .maxGaplessTrimSizeSamples, lastIndex))
 
-        return timestamps[0] <= editEndTime
-            && editStartTime < timestamps[latestDelayIndex]
-            && timestamps[earliestPaddingIndex] < editEndTime
+        return pts[0] <= editEndTime
+            && editStartTime < pts[latestDelayIndex]
+            && pts[earliestPaddingIndex] < editEndTime
             && editEndTime <= duration
     }
 }
+
+// MARK: - SampleSizeBox
 
 private extension BoxParser {
     private protocol SampleSizeBox {
@@ -603,7 +640,7 @@ private extension BoxParser {
     struct StszSampleSizeBox: SampleSizeBox {
         let fixedSampleSize: Int?
         let sampleCount: Int
-        private var data: ByteBuffer
+        private var data: BlockBufferReader
 
         init(stszAtom: LeafBox) throws {
             data = stszAtom.data
@@ -626,7 +663,7 @@ private extension BoxParser {
         let fixedSampleSize: Int?
         let sampleCount: Int
         private let fieldSize: Int
-        private var data: ByteBuffer
+        private var data: BlockBufferReader
 
         private var sampleIndex = 0
         private var currentByte = 0
@@ -659,6 +696,8 @@ private extension BoxParser {
     }
 }
 
+// MARK: - ChunkIterator
+
 private extension BoxParser {
     struct ChunkIterator {
         let length: Int
@@ -666,14 +705,14 @@ private extension BoxParser {
         var offset = 0
         var numberOfSamples = 0
 
-        private var stsc: ByteBuffer
-        private var chunkOffsets: ByteBuffer
+        private var stsc: BlockBufferReader
+        private var chunkOffsets: BlockBufferReader
         private let chunkOffsetsType: any FixedWidthInteger.Type
 
         private var remainingSamplesPerChunkChanges: Int
         private var nextSamplesPerChunkChangeIndex: Int? = 0
 
-        init(stsc: ByteBuffer, chunkOffsets: ByteBuffer, chunkOffsetsType: any FixedWidthInteger.Type) throws {
+        init(stsc: BlockBufferReader, chunkOffsets: BlockBufferReader, chunkOffsetsType: any FixedWidthInteger.Type) throws {
             self.stsc = stsc
             self.chunkOffsets = chunkOffsets
             self.chunkOffsetsType = chunkOffsetsType

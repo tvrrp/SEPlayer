@@ -5,24 +5,26 @@
 //  Created by Damir Yackupov on 14.11.2025.
 //
 
+import CoreMedia
+
 public struct AdPlaybackState: Hashable, Sendable {
     public static let none = AdPlaybackState(
-        contentDurationUs: .timeUnset
+        contentDuration: .invalid
     )
 
-    private(set) public var contentDurationUs: Int64
+    private(set) public var contentDuration: CMTime
 
-    init(adGroupTimesUs: [Int64]) {
-        contentDurationUs = .timeUnset
+    init(adGroupTimes: [CMTime]) {
+        contentDuration = .invalid
     }
 
-    init(contentDurationUs: Int64) {
-        self.contentDurationUs = contentDurationUs
+    init(contentDuration: CMTime) {
+        self.contentDuration = contentDuration
     }
 
-    func withContentDurationUs(_ contentDurationUs: Int64) -> Self {
+    func withContentDuration(_ contentDuration: CMTime) -> Self {
         var copy = self
-        copy.contentDurationUs = contentDurationUs
+        copy.contentDuration = contentDuration
         return self
     }
 }

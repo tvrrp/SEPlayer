@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 05.11.2025.
 //
 
+import CoreMedia
 import Testing
 @testable import SEPlayer
 
@@ -13,6 +14,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         .setSampleMimeType(.videoH264)
         .setAverageBitrate(800_000)
         .setSize(width: 1280, height: 720)
+        .setInitializationData(FakeInitializationData())
         .build()
 
     static let audioFormat = Format.Builder()
@@ -21,6 +23,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         .setAverageBitrate(100_000)
         .setChannelCount(2)
         .setSampleRate(44100)
+        .setInitializationData(FakeInitializationData())
         .build()
 
     final class Builder {
@@ -30,7 +33,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         private var mediaSources: [MediaSource]
         private var supportedFormats: [Format]
         private var actionSchedule: ActionSchedule?
-        private var view: SEPlayerView?
+        private var view: SEPlayerLayer?
         private weak var playerDelegate: SEPlayerDelegate?
         private var expectedPlayerEndedCount: Int?
         private var pauseAtEndOfMediaItems = false
@@ -107,7 +110,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         }
 
         @discardableResult
-        func setVideoView(_ view: SEPlayerView) -> Builder {
+        func setVideoView(_ view: SEPlayerLayer) -> Builder {
             self.view = view
             return self
         }
@@ -130,7 +133,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
                     timeline = FakeTimeline()
                 }
                 guard let timeline else {
-                    throw ErrorBuilder.illegalState
+                    throw ErrorBuilder.illegalState()
                 }
                 try mediaSources.append(FakeMediaSource(
                     queue: queue,
@@ -161,7 +164,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
     private let skipSettingMediaSources: Bool
     private let initialMediaItemIndex: Int?
     private let initialPositionMs: Int64
-    private let view: SEPlayerView?
+    private let view: SEPlayerLayer?
     private let actionSchedule: ActionSchedule?
     private weak var playerDelegate: SEPlayerDelegate?
     private let endedCountDownLatch: CountDownLatch
@@ -186,7 +189,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         skipSettingMediaSources: Bool,
         initialMediaItemIndex: Int?,
         initialPositionMs: Int64,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         actionSchedule: ActionSchedule?,
         playerDelegate: SEPlayerDelegate?,
         expectedPlayerEndedCount: Int,
@@ -234,22 +237,23 @@ final class SEPlayerTestRunner: @unchecked Sendable {
                 player.play()
 
                 if let actionSchedule {
-                    if #available(iOS 26, *) {
-                        Task.immediate {
-                            try await actionSchedule.start(
-                                player: player,
-                                trackSelector: DefaultTrackSelector(),
-                                view: self.view,
-                                callback: self,
-                                isolation: isolation
-                            )
-                        }
+                    let start = {
+                        try await actionSchedule.start(
+                            player: player,
+                            trackSelector: DefaultTrackSelector(),
+                            view: self.view,
+                            callback: self,
+                            isolation: isolation
+                        )
+                    }
+                    if #available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, *) {
+                        Task.immediate { try await start() }
                     } else {
-                        fatalError()
+                        Task { try await start() }
                     }
                 }
                 if let initialMediaItemIndex {
-                    player.seek(to: initialPositionMs, of: initialMediaItemIndex)
+                    player.seek(to: CMTime(value: initialPositionMs, timescale: 1000), of: initialMediaItemIndex)
                 }
                 if !skipSettingMediaSources {
                     player.set(mediaSources: mediaSources, resetPosition: false)
@@ -286,7 +290,14 @@ final class SEPlayerTestRunner: @unchecked Sendable {
     @discardableResult
     func blockUntilActionScheduleFinished(timeoutMs: UInt64, isolation: isolated any Actor = #isolation) async throws -> Self {
         isolation.assertIsolated()
-        try await actionScheduleFinishedCountDownLatch.awaitResult(timeoutMs: timeoutMs)
+        do {
+            try await actionScheduleFinishedCountDownLatch.awaitResult(timeoutMs: timeoutMs)
+        } catch {
+            // A player left playing would go on running on the shared queue during the next tests.
+            actionSchedule?.stop()
+            player?.release()
+            throw error
+        }
         return self
     }
 

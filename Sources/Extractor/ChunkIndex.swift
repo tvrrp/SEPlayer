@@ -5,51 +5,74 @@
 //  Created by Damir Yackupov on 27.06.2025.
 //
 
-final class ChunkIndex {
+import CoreMedia
+
+struct ChunkIndex {
     public let count: Int
 
     public let sizes: [Int]
     public let offsets: [Int]
-    public let durationsUs: [Int64]
-    public let timesUs: [Int64]
-    private let durationUs: Int64
+    public let durations: [CMTime]
+    public let times: [CMTime]
+    private let duration: CMTime
 
-    init(sizes: [Int], offsets: [Int], durationsUs: [Int64], timesUs: [Int64]) {
+    init(
+        sizes: [Int],
+        offsets: [Int],
+        durations: [CMTime],
+        times: [CMTime]
+    ) {
         self.sizes = sizes
         self.offsets = offsets
-        self.durationsUs = durationsUs
-        self.timesUs = timesUs
+        self.durations = durations
+        self.times = times
 
         self.count = sizes.count
-        durationUs = if count > 0 {
-            durationsUs[count - 1] + timesUs[count - 1]
+        duration = if count > 0 {
+            durations[count - 1] + times[count - 1]
         } else {
             .zero
         }
     }
 
-    func index(for timeUs: Int64) -> Int {
-        timesUs.firstIndex(of: timeUs) ?? .zero
+    /// The last chunk starting at or before `time`, or the first chunk if `time` is earlier.
+    func index(for time: CMTime) -> Int {
+        var low = 0
+        var high = count - 1
+        var result = 0
+
+        while low <= high {
+            let middle = (low + high) / 2
+            if times[middle] <= time {
+                result = middle
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+
+        return result
     }
 }
 
 extension ChunkIndex: SeekMap {
     func isSeekable() -> Bool { true }
 
-    func getDurationUs() -> Int64 { durationUs }
+    func getDuration() -> CMTime { duration }
 
-    func getSeekPoints(for timeUs: Int64) -> SeekPoints {
-        let chunkIndex = index(for: timeUs)
+    func getSeekPoints(for time: CMTime) -> SeekPoints {
+        guard count > 0 else { return SeekPoints(first: .start) }
+        let chunkIndex = index(for: time)
         let seekPoint = SeekPoints.SeekPoint(
-            timeUs: timesUs[chunkIndex],
+            time: times[chunkIndex],
             position: offsets[chunkIndex]
         )
 
-        if seekPoint.timeUs >= timeUs || chunkIndex == count - 1 {
+        if seekPoint.time >= time || chunkIndex == count - 1 {
             return SeekPoints(first: seekPoint)
         } else {
             let nextSeekPoint = SeekPoints.SeekPoint(
-                timeUs: timesUs[chunkIndex + 1],
+                time: times[chunkIndex + 1],
                 position: offsets[chunkIndex + 1]
             )
 
@@ -64,8 +87,8 @@ extension ChunkIndex: CustomStringConvertible {
             + "count=\(count)"
             + ", sizes=\(sizes)"
             + ", offsets=\(offsets)"
-            + ", timeUs=\(timesUs)"
-            + ", durationsUs=\(durationUs)"
+            + ", timeUs=\(times)"
+            + ", durationsUs=\(duration)"
             + ")";
     }
 }

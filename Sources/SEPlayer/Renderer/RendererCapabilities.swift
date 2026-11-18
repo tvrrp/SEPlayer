@@ -15,13 +15,7 @@ public enum RendererCapabilities {
         let decoderSupport: DecoderSupport
         let tunnelingSupport: TunnelingSupport
 
-        public enum FormatSupport: Comparable {
-            case unsupportedType
-            case unsupportedSubtype
-            case unsupportedDrm
-            case exceedCapabilities
-            case handled
-        }
+        public typealias FormatSupport = SEPlayerCommon.FormatSupport
 
         public struct AdaptiveSupport: OptionSet {
             public let rawValue: Int

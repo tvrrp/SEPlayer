@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 27.06.2025.
 //
 
+import CoreMedia
+
 final class TrackFragment {
     var header: DefaultSampleValues?
     var atomPosition: Int
@@ -15,9 +17,11 @@ final class TrackFragment {
     var trunDataPosition: [Int]
     var trunLength: [Int]
     var sampleSizeTable: [Int]
-    var samplePresentationTimesUs: [Int64]
+    var sampleDecodeTimes: [CMTime]
+    var samplePresentationTimes: [CMTime]
+    var sampleDurations: [CMTime]
     var sampleIsSyncFrameTable: [Bool]
-    var nextFragmentDecodeTime: Int
+    var nextFragmentDecodeTime: CMTimeValue
     var nextFragmentDecodeTimeIncludesMoov: Bool
 
     init(
@@ -30,9 +34,11 @@ final class TrackFragment {
         trunDataPosition: [Int] = [],
         trunLength: [Int] = [],
         sampleSizeTable: [Int] = [],
-        samplePresentationTimesUs: [Int64] = [],
+        sampleDecodeTimes: [CMTime] = [],
+        samplePresentationTimes: [CMTime] = [],
+        sampleDurations: [CMTime] = [],
         sampleIsSyncFrameTable: [Bool] = [],
-        nextFragmentDecodeTime: Int = 0,
+        nextFragmentDecodeTime: CMTimeValue = 0,
         nextFragmentDecodeTimeIncludesMoov: Bool = false
     ) {
         self.header = header
@@ -44,7 +50,9 @@ final class TrackFragment {
         self.trunDataPosition = trunDataPosition
         self.trunLength = trunLength
         self.sampleSizeTable = sampleSizeTable
-        self.samplePresentationTimesUs = samplePresentationTimesUs
+        self.sampleDecodeTimes = sampleDecodeTimes
+        self.samplePresentationTimes = samplePresentationTimes
+        self.sampleDurations = sampleDurations
         self.sampleIsSyncFrameTable = sampleIsSyncFrameTable
         self.nextFragmentDecodeTime = nextFragmentDecodeTime
         self.nextFragmentDecodeTimeIncludesMoov = nextFragmentDecodeTimeIncludesMoov
@@ -67,8 +75,19 @@ final class TrackFragment {
         if sampleSizeTable.count < sampleCount {
             let tableSize = (sampleCount * 125) / 100
             sampleSizeTable = Array(repeating: 0, count: tableSize)
-            samplePresentationTimesUs = Array(repeating: 0, count: tableSize)
+            sampleDecodeTimes = Array(repeating: .zero, count: tableSize)
+            samplePresentationTimes = Array(repeating: .zero, count: tableSize)
+            sampleDurations = Array(repeating: .zero, count: tableSize)
             sampleIsSyncFrameTable = Array(repeating: false, count: tableSize)
         }
+    }
+
+    @inline(__always)
+    func timingInfo(at index: Int) -> CMSampleTimingInfo {
+        CMSampleTimingInfo(
+            duration: sampleDurations[index],
+            presentationTimeStamp: samplePresentationTimes[index],
+            decodeTimeStamp: sampleDecodeTimes[index]
+        )
     }
 }

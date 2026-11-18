@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 100;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -41,14 +41,12 @@
 /* Begin PBXFrameworksBuildPhase section */
 		8D4BB8A22D2C064F001B5876 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 				8D4BB8C02D2C0748001B5876 /* SEPlayer in Frameworks */,
 				8D28AA172DC8786400A67F38 /* SEPlayer in Frameworks */,
 				8D66695D2DAC1B8B00F14F16 /* SEPlayer in Frameworks */,
 				8D307C3C2D2C0ACD0065A7DD /* SEPlayer in Frameworks */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -82,8 +80,6 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				8D4BB8A72D2C064F001B5876 /* DemoApp */,
 			);
@@ -106,7 +102,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1610;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					8D4BB8A42D2C064F001B5876 = {
 						CreatedOnToolsVersion = 16.1;
@@ -138,25 +134,21 @@
 /* Begin PBXResourcesBuildPhase section */
 		8D4BB8A32D2C064F001B5876 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		8D4BB8A12D2C064F001B5876 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		8D4BB89F2D2C05DB001B5876 /* Debug */ = {
+		8D4BB89F2D2C05DB001B5876 /* Debug configuration for PBXProject "DemoApp" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
@@ -193,7 +185,7 @@
 			};
 			name = Debug;
 		};
-		8D4BB8A02D2C05DB001B5876 /* Release */ = {
+		8D4BB8A02D2C05DB001B5876 /* Release configuration for PBXProject "DemoApp" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
@@ -228,7 +220,7 @@
 			};
 			name = Release;
 		};
-		8D4BB8B72D2C0650001B5876 /* Debug */ = {
+		8D4BB8B72D2C0650001B5876 /* Debug configuration for PBXNativeTarget "DemoApp" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -305,6 +297,9 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.SEPlayer.DemoApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -313,7 +308,7 @@
 			};
 			name = Debug;
 		};
-		8D4BB8B82D2C0650001B5876 /* Release */ = {
+		8D4BB8B82D2C0650001B5876 /* Release configuration for PBXNativeTarget "DemoApp" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -383,6 +378,9 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.SEPlayer.DemoApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -397,19 +395,17 @@
 		8D4BB89E2D2C05DB001B5876 /* Build configuration list for PBXProject "DemoApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				8D4BB89F2D2C05DB001B5876 /* Debug */,
-				8D4BB8A02D2C05DB001B5876 /* Release */,
+				8D4BB89F2D2C05DB001B5876 /* Debug configuration for PBXProject "DemoApp" */,
+				8D4BB8A02D2C05DB001B5876 /* Release configuration for PBXProject "DemoApp" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		8D4BB8BA2D2C0650001B5876 /* Build configuration list for PBXNativeTarget "DemoApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				8D4BB8B72D2C0650001B5876 /* Debug */,
-				8D4BB8B82D2C0650001B5876 /* Release */,
+				8D4BB8B72D2C0650001B5876 /* Debug configuration for PBXNativeTarget "DemoApp" */,
+				8D4BB8B82D2C0650001B5876 /* Release configuration for PBXNativeTarget "DemoApp" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
@@ -418,6 +414,11 @@
 		8D28AA152DC8786400A67F38 /* XCLocalSwiftPackageReference "../../SEPlayer" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../SEPlayer;
+			traits = (
+				ExtractorFMP4,
+				ExtractorMP4,
+				ExtractorTS,
+			);
 		};
 /* End XCLocalSwiftPackageReference section */
 

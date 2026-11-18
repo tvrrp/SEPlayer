@@ -5,6 +5,8 @@
 //  Created by Damir Yackupov on 26.12.2025.
 //
 
+//import Atomics
+import CoreMedia
 import SEPlayerCommon
 
 public final class PlayerMessage {
@@ -21,12 +23,18 @@ public final class PlayerMessage {
     public private(set) var payload: Any?
     public private(set) var queue: Queue
     public private(set) var mediaItemIndex: Int
-    public private(set) var positionMs = Int64.zero
-    public private(set) var deleteAfterDelivery = false
+    public private(set) var position: CMTime
+    public private(set) var deleteAfterDelivery: Bool
     private var isSent = false
-    @UnfairLocked private var isDelivered = false
-    @UnfairLocked private var isProcessed = false
-    @UnfairLocked public private(set) var isCanceled = false
+//    private let _isDelivered: UnsafeAtomic<Bool> = .create(false)
+//    private let _isProcessed: UnsafeAtomic<Bool> = .create(false)
+//    private let _isCanceled: UnsafeAtomic<Bool> = .create(false)
+    @UnfairLocked private var _isDelivered = false
+    @UnfairLocked private var _isProcessed = false
+    @UnfairLocked private var _isCanceled = false
+
+//    public var isCanceled: Bool { _isCanceled.load(ordering: .sequentiallyConsistent) }
+    public var isCanceled: Bool { _isCanceled }
 
     @UnfairLocked private var continuations = [CheckedContinuation<Void, Never>]()
 
@@ -44,7 +52,7 @@ public final class PlayerMessage {
         self.queue = defaultQueue
         self.clock = clock
         self.mediaItemIndex = defaultMediaItemIndex
-        self.positionMs = .timeUnset
+        self.position = .invalid
         self.deleteAfterDelivery = true
     }
 
@@ -70,21 +78,21 @@ public final class PlayerMessage {
     }
 
     @discardableResult
-    public func setPositionMs(_ positionMs: Int64) -> PlayerMessage {
+    public func setPosition(_ position: CMTime) -> PlayerMessage {
         assert(!isSent)
-        self.positionMs = positionMs
+        self.position = position
         return self
     }
 
     @discardableResult
-    public func setPositionMs(_ positionMs: Int64, mediaItemIndex: Int) -> PlayerMessage {
+    public func setPosition(_ position: CMTime, mediaItemIndex: Int) -> PlayerMessage {
         assert(!isSent)
-        assert(positionMs != .timeUnset)
+        assert(position.isValid)
         if mediaItemIndex < 0 || (!timeline.isEmpty && mediaItemIndex >= timeline.windowCount()) {
             assertionFailure()
         }
         self.mediaItemIndex = mediaItemIndex
-        self.positionMs = positionMs
+        self.position = position
         return self
     }
 
@@ -98,7 +106,7 @@ public final class PlayerMessage {
     @discardableResult
     public func send() -> PlayerMessage {
         assert(!isSent)
-        if positionMs == .timeUnset {
+        if position.isValid == false {
             assert(deleteAfterDelivery)
         }
         isSent = true
@@ -109,14 +117,19 @@ public final class PlayerMessage {
     @discardableResult
     public func cancel() -> PlayerMessage {
         assert(isSent)
-        isCanceled = true
+//        _isCanceled.store(true, ordering: .sequentiallyConsistent)
+        _isCanceled = true
         markAsProcessed(isDelivered: false)
         return self
     }
 
     public func markAsProcessed(isDelivered: Bool) {
-        self.isDelivered = self.isDelivered || isDelivered
-        isProcessed = true
+        if isDelivered {
+//            _isDelivered.store(true, ordering: .sequentiallyConsistent)
+            _isDelivered = true
+        }
+        _isProcessed = true
+//        _isProcessed.store(true, ordering: .sequentiallyConsistent)
         continuations.forEach { $0.resume() }
         continuations.removeAll(keepingCapacity: true)
     }
@@ -127,6 +140,7 @@ public final class PlayerMessage {
             self.continuations.append(continuation)
         }
 
-        return isDelivered
+        return _isDelivered
+//        return _isDelivered.load(ordering: .sequentiallyConsistent)
     }
 }

@@ -5,17 +5,20 @@
 //  Created by Damir Yackupov on 06.11.2025.
 //
 
+import CoreMedia
 import Foundation
 import Testing
 @testable import SEPlayer
 
 final class FakeMediaPeriod: MediaPeriod {
-    func maybeThrowPrepareError() throws {
-        // TODO: 
-    }
-    
+    func maybeThrowPrepareError() throws {}
+
     var trackGroups: TrackGroupArray
     let isLoading: Bool = false
+    /// Whether streams take new selections of their group, as HLS variants do.
+    var allowsSelectionUpdatesKeepingBuffer = false
+    private(set) var selectionUpdatesKeepingBuffer = 0
+    private(set) var createdStreamCount = 0
 
     private let queue: Queue
     private let sampleStreams: NSHashTable<FakeSampleStream>
@@ -88,7 +91,7 @@ final class FakeMediaPeriod: MediaPeriod {
         sampleStreams.removeAllObjects()
     }
 
-    func prepare(callback: any MediaPeriodCallback, on time: Int64) {
+    func prepare(callback: any MediaPeriodCallback, on time: CMTime) {
         assert(queue.isCurrent())
         prepareCallback = callback
         if !deferOnPrepared {
@@ -101,8 +104,8 @@ final class FakeMediaPeriod: MediaPeriod {
         mayRetainStreamFlags: [Bool],
         streams: inout [SampleStream?],
         streamResetFlags: inout [Bool],
-        positionUs: Int64
-    ) -> Int64 {
+        position: CMTime
+    ) throws -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
         for i in 0..<selections.count {
             if streams[i] != nil && (selections[i] == nil || !mayRetainStreamFlags[i]) {
@@ -111,15 +114,20 @@ final class FakeMediaPeriod: MediaPeriod {
                 streams[i] = nil
             }
 
+            if streams[i] != nil, selections[i] != nil, allowsSelectionUpdatesKeepingBuffer {
+                // A kept stream starts over with the media of its new selection.
+                streamResetFlags[i] = true
+            }
+
             if streams[i] == nil, let selection = selections[i] {
+                createdStreamCount += 1
                 // TODO: assert(selection.count
                 // TODO: other assertions
                 let sampleStreamItems = trackDataFactory.create(
                     format: selection.selectedFormat,
                     mediaPeriodId: MediaPeriodId() // TODO: real mediaPeriodId
                 )
-                let sampleStream = createSampleStream(
-                    allocator: allocator,
+                let sampleStream = try createSampleStream(
                     initialFormat: selection.selectedFormat,
                     fakeSampleStreamItems: sampleStreamItems
                 )
@@ -129,40 +137,49 @@ final class FakeMediaPeriod: MediaPeriod {
             }
         }
 
-        return seek(to: positionUs)
+        return try seek(position: position)
     }
 
-    func discardBuffer(to position: Int64, toKeyframe: Bool) {
+    var keepsStreamsForSelectionsInSameGroup: Bool { allowsSelectionUpdatesKeepingBuffer }
+
+    func updateSelectionsKeepingBuffer(_ selections: [SETrackSelection?], streams: [SampleStream?]) -> Bool {
         assert(queue.isCurrent())
-        sampleStreams.allObjects.forEach { $0.discardTo(positionUs: position, toKeyframe: toKeyframe) }
+        guard allowsSelectionUpdatesKeepingBuffer else { return false }
+        selectionUpdatesKeepingBuffer += 1
+        return true
     }
 
-    func reevaluateBuffer(positionUs: Int64) {}
+    func discardBuffer(position: CMTime, toKeyframe: Bool) throws {
+        assert(queue.isCurrent())
+        try sampleStreams.allObjects.forEach { try $0.discardTo(positionUs: position.microseconds, toKeyframe: toKeyframe) }
+    }
 
-    func readDiscontinuity() -> Int64 {
+    func reevaluateBuffer(position: CMTime) {}
+
+    func readDiscontinuity() -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
         let discontinuityPositionUs = self.discontinuityPositionUs
         self.discontinuityPositionUs = .timeUnset
-        return discontinuityPositionUs
+        return .time(us: discontinuityPositionUs)
     }
 
-    func getBufferedPositionUs() -> Int64 {
+    func getBufferedPosition() -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
         guard !isLoadingFinished() else {
-            return .endOfSource
+            return .positiveInfinity
         }
 
-        var minBufferedPositionUs = Int64.max
+        var minBufferedPosition = CMTime.positiveInfinity
         for sampleStream in sampleStreams.allObjects {
-            minBufferedPositionUs = min(minBufferedPositionUs, sampleStream.getLargestQueuedTimestampUs())
+            minBufferedPosition = min(minBufferedPosition, sampleStream.getLargestQueuedTimestamp())
         }
 
-        return minBufferedPositionUs == .min ? lastSeekPositionUs : minBufferedPositionUs
+        return minBufferedPosition == .negativeInfinity ? .time(us: lastSeekPositionUs) : minBufferedPosition
     }
 
-    func seek(to position: Int64) -> Int64 {
+    func seek(position: CMTime) throws -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
-        let seekPositionUs = position + seekOffsetUs
+        let seekPositionUs = position.microseconds + seekOffsetUs
         lastSeekPositionUs = seekPositionUs
         var seekedInsideStreams = true
         for sampleStream in sampleStreams.allObjects {
@@ -170,14 +187,19 @@ final class FakeMediaPeriod: MediaPeriod {
         }
         if !seekedInsideStreams {
             for sampleStream in sampleStreams.allObjects {
-                sampleStream.reset()
+                try sampleStream.reset()
             }
         }
-        return seekPositionUs
+        return .time(us: seekPositionUs)
     }
 
-    func getAdjustedSeekPositionUs(positionUs: Int64, seekParameters: SeekParameters) -> Int64 {
+    func seekForRecovery(position: CMTime) throws -> CMTime {
+        try seek(position: position)
+    }
+
+    func getAdjustedSeekPosition(position: CMTime, seekParameters: SeekParameters) -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
+        let positionUs = position.microseconds
         let adjustedPositionUs: Int64
         if let syncSampleTimestampsUs {
             let firstSyncTimestampIndex = Util.binarySearch(
@@ -195,44 +217,47 @@ final class FakeMediaPeriod: MediaPeriod {
             }
 
             adjustedPositionUs = seekParameters.resolveSyncPosition(
-                positionUs: positionUs,
-                firstSyncUs: firstSyncUs,
-                secondSyncUs: secondSyncUs
-            )
+                position: .time(us: positionUs),
+                firstSync: .time(us: firstSyncUs),
+                secondSync: .time(us: secondSyncUs)
+            ).microseconds
         } else {
             adjustedPositionUs = positionUs
         }
 
-        return adjustedPositionUs + seekOffsetUs
+        return .time(us: adjustedPositionUs + seekOffsetUs)
     }
 
-    func getNextLoadPositionUs() -> Int64 {
+    func getNextLoadPosition() -> CMTime {
         assert(queue.isCurrent()); assert(prepared)
-        return getBufferedPositionUs()
+        return getBufferedPosition()
     }
 
-    @TestableSyncPlayerActor
     func continueLoading(with loadingInfo: LoadingInfo) -> Bool {
         assert(queue.isCurrent())
         var progressMade = false
-        for sampleStream in sampleStreams.allObjects {
-            try! sampleStream.writeData(
-                startPositionUs: loadingInfo.playbackPosition,
-                isolation: TestableSyncPlayerActor.shared
-            )
-            progressMade = true
+        queue.playerActor().assumeIsolated { isolation in
+            for sampleStream in sampleStreams.allObjects {
+                // From where the period starts or was sought to: a period that loads ahead of playback starts after
+                // the playback position.
+                try! sampleStream.writeData(
+                    startPositionUs: lastSeekPositionUs,
+                    isolation: isolation
+                )
+                progressMade = true
+            }
         }
         return progressMade
     }
 
+    func stopLoading() {}
+
     func createSampleStream(
-        allocator: Allocator,
         initialFormat: Format,
         fakeSampleStreamItems: [FakeSampleStream.FakeSampleStreamItem]
-    ) -> FakeSampleStream {
-        FakeSampleStream(
+    ) throws -> FakeSampleStream {
+        try FakeSampleStream(
             queue: queue,
-            allocator: allocator,
             initialFormat: initialFormat,
             fakeSampleStreamItems: fakeSampleStreamItems
         )
@@ -283,8 +308,4 @@ extension FakeMediaPeriod {
             samples
         }
     }
-}
-
-private extension DataSpec {
-    static let fakeDataSpec = DataSpec.spec(from: URL(string: "http://fake.test")!)
 }

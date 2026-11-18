@@ -7,11 +7,23 @@
 
 import AVFoundation
 import SEPlayerCommon
+#if canImport(MediaAccessibility)
+import MediaAccessibility
+#endif
 
 public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesListener {
     private let trackSelectionFactory: SETrackSelectionFactory
     private let lock: UnfairLock
     private var parameters: Parameters
+    /// What the codec and dynamic range rules of ``VariantFilters`` depend on, or `nil` to not apply them.
+    var variantFilterEnvironment: (() -> VariantFilters.Environment)? = { .current() } {
+        didSet { lock.withLock { cachedVariantFilterEnvironment = nil } }
+    }
+    /// The environment as of its last change. Asking for it is a call to the media server, too slow for every
+    /// selection: it is asked once, ahead of the first one, and again after the system says it changed.
+    private var cachedVariantFilterEnvironment: VariantFilters.Environment? // Guarded by lock.
+    /// The size the video output shows the picture at, in pixels, or `nil` before it says.
+    private var videoOutputSize: CGSize? // Guarded by lock.
 
     public convenience init(parameters: TrackSelectionParameters = .defaultParameters) {
         self.init(
@@ -35,19 +47,42 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         super.init()
 
         let center = NotificationCenter.default
-        center.addObserver(self,
-                           selector: #selector(audioCapabilitiesDidChange),
-                           name: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification,
-                           object: nil)
-        if #available(iOS 17.2, *) {
-            center.addObserver(self,
-                               selector: #selector(audioCapabilitiesDidChange),
-                               name: AVAudioSession.renderingModeChangeNotification,
-                               object: nil)
-            center.addObserver(self,
-                               selector: #selector(audioCapabilitiesDidChange),
-                               name: AVAudioSession.renderingCapabilitiesChangeNotification,
-                               object: nil)
+        center.addObserver(
+            self,
+            selector: #selector(audioCapabilitiesDidChange),
+            name: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification,
+            object: nil
+        )
+        // The variants that can be played depend on these.
+        center.addObserver(
+            self,
+            selector: #selector(variantFilterEnvironmentDidChange),
+            name: Notification.Name.NSProcessInfoPowerStateDidChange,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(variantFilterEnvironmentDidChange),
+            name: AVPlayer.eligibleForHDRPlaybackDidChangeNotification,
+            object: nil
+        )
+        if #available(iOS 17.2, tvOS 17.2, *) {
+            center.addObserver(
+                self,
+                selector: #selector(audioCapabilitiesDidChange),
+                name: AVAudioSession.renderingModeChangeNotification,
+                object: nil
+            )
+            center.addObserver(
+                self,
+                selector: #selector(audioCapabilitiesDidChange),
+                name: AVAudioSession.renderingCapabilitiesChangeNotification,
+                object: nil
+            )
+        }
+        // Ready before the first selection, which would otherwise wait for the media server.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            _ = self?.currentVariantFilterEnvironment()
         }
     }
 
@@ -55,8 +90,32 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         invalidate()
     }
 
+    @objc private func variantFilterEnvironmentDidChange() {
+        lock.withLock { cachedVariantFilterEnvironment = nil }
+        invalidate()
+    }
+
+    /// The environment of the variant rules, asked for once and kept until it changes.
+    private func currentVariantFilterEnvironment() -> VariantFilters.Environment? {
+        guard let provider = variantFilterEnvironment else { return nil }
+        if let cached = lock.withLock({ cachedVariantFilterEnvironment }) { return cached }
+        let environment = provider()
+        lock.withLock { cachedVariantFilterEnvironment = environment }
+        return environment
+    }
+
     public override func release() {
         super.release()
+    }
+
+    public override func setVideoOutputSize(_ size: CGSize?) {
+        let (changed, isUsed) = lock.withLock {
+            defer { videoOutputSize = size }
+            return (videoOutputSize != size, parameters.isViewportSizeLimitedByVideoOutputSize)
+        }
+        if changed, isUsed {
+            invalidate()
+        }
     }
 
     public override func getParameters() -> Parameters {
@@ -64,12 +123,17 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
     }
 
     public override func setParameters(_ parameters: TrackSelectionParameters) {
+        setParameters(parameters, application: .deferred)
+    }
+
+    public override func setParameters(_ parameters: TrackSelectionParameters, application: TrackSelectionApplication) {
         if let parameters = parameters as? Parameters {
-            setParametersInternal(parameters)
+            setParametersInternal(parameters, application: application)
+            return
         }
 
         let mergedParameters = Parameters.Builder(params: getParameters()).set(parameters).build()
-        setParametersInternal(mergedParameters)
+        setParametersInternal(mergedParameters, application: application)
     }
 
     public func setParameters(_ parametersBuilder: Parameters.Builder) {
@@ -80,16 +144,16 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         getParameters().buildUpon()
     }
 
-    private func setParametersInternal(_ parameters: Parameters) {
+    private func setParametersInternal(_ parameters: Parameters, application: TrackSelectionApplication = .deferred) {
         let parametersChanged = lock.withLock {
-            let parametersChanged = self.parameters.isEqual(to: parameters)
+            let parametersChanged = !self.parameters.isEqual(to: parameters)
             self.parameters = parameters
             return parametersChanged
         }
 
         if parametersChanged {
             // TODO: warn about audio
-            invalidate()
+            invalidate(application: application)
         }
     }
 
@@ -217,6 +281,15 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         return definitions
     }
 
+    /// The size video shows at, as the parameters say: the video output's, which is exact, or the one set.
+    private func viewport(for params: Parameters) -> (size: CGSize, orientationMayChange: Bool) {
+        if params.isViewportSizeLimitedByVideoOutputSize, let size = lock.withLock({ videoOutputSize }) {
+            return (size, false)
+        }
+        // TODO: the physical display size, with isViewportSizeLimitedByPhysicalDisplaySize
+        return (params.viewportSize, params.viewportOrientationMayChange)
+    }
+
     private func selectVideoTrack(
         mappedTrackInfo: MappingTrackSelector.MappedTrackInfo,
         rendererFormatSupports: [[[RendererCapabilities.Support]]],
@@ -224,20 +297,27 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         params: Parameters,
         selectedAudioLanguage: String?
     ) throws -> (SETrackSelectionDefinition, Int)? {
-        let viewportSizeFromDisplay: CGSize? = nil // TODO:
+        let (viewport, viewportOrientationMayChange) = viewport(for: params)
+        let environment = currentVariantFilterEnvironment()
         return try selectTrackForType(
             .video,
             mappedTrackInfo: mappedTrackInfo,
             formatSupport: rendererFormatSupports,
             createTrackInfo: { rendererIndex, group, support in
-                VideoTrackInfo.createForTrackGroup(
+                // The codec and dynamic range rules leave out some variants before any is picked.
+                let allowedTracks = environment.map {
+                    Set(VariantFilters.allowedIndices(of: group.map { $0 }, environment: $0))
+                }
+                return VideoTrackInfo.createForTrackGroup(
                     rendererIndex: rendererIndex,
                     trackGroup: group,
                     params: params,
                     formatSupport: support,
                     selectedAudioLanguage: selectedAudioLanguage,
                     mixedMimeTypeAdaptationSupport: mixedMimeTypeSupports[rendererIndex],
-                    viewportSizeFromDisplay: viewportSizeFromDisplay
+                    viewport: viewport,
+                    viewportOrientationMayChange: viewportOrientationMayChange,
+                    allowedTracks: allowedTracks
                 )
             },
             comparator: VideoTrackInfo.compareSelections
@@ -287,7 +367,40 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         params: Parameters,
         selectedAudioLanguage: String?
     ) throws -> (SETrackSelectionDefinition, Int)? {
+        let preferredCaptioningLanguage = params.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager
+            ? Self.getPreferredLanguageFromCaptioningSettings()
+            : nil
+
+        return try selectTrackForType(
+            .text,
+            mappedTrackInfo: mappedTrackInfo,
+            formatSupport: rendererFormatSupports,
+            createTrackInfo: { rendererIndex, group, support in
+                TextTrackInfo.createForTrackGroup(
+                    rendererIndex: rendererIndex,
+                    trackGroup: group,
+                    params: params,
+                    formatSupport: support,
+                    selectedAudioLanguage: selectedAudioLanguage,
+                    preferredCaptioningLanguage: preferredCaptioningLanguage
+                )
+            },
+            comparator: TextTrackInfo.compareSelections
+        )
+    }
+
+    /// The language of the subtitles the user asked to always show in Settings › Accessibility › Subtitles & Captioning,
+    /// or `nil` if they didn't.
+    private static func getPreferredLanguageFromCaptioningSettings() -> String? {
+        #if canImport(MediaAccessibility)
+        guard MACaptionAppearanceGetDisplayType(.user) == .alwaysOn else {
+            return nil
+        }
+        let selectedLanguages = MACaptionAppearanceCopySelectedLanguages(.user).takeRetainedValue() as? [String] ?? []
+        return Util.normalizeLanguageCode(selectedLanguages.first ?? Locale.preferredLanguages.first)
+        #else
         return nil
+        #endif
     }
 
     private func selectOtherTrack(
@@ -316,7 +429,9 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
     ) throws -> (SETrackSelectionDefinition, Int)? {
         var possibleSelections = [[T]]()
         for rendererIndex in 0..<mappedTrackInfo.rendererCount {
-            guard type == mappedTrackInfo.rendererTrackTypes[rendererIndex] else { continue }
+            guard type == mappedTrackInfo.rendererTrackTypes[rendererIndex] else {
+                continue
+            }
             let groups = mappedTrackInfo.rendererTrackGroups[rendererIndex]
 
             for (groupIndex, group) in groups.enumerated() {
@@ -451,11 +566,11 @@ public extension DefaultTrackSelector {
         }
 
         func getSelectionEligibility() -> SelectionEligibility {
-            fatalError()
+            fatalError("To override")
         }
 
         func isCompatibleForAdaptationWith(_ otherTrack: TrackInfo) -> Bool {
-            fatalError()
+            fatalError("To override")
         }
 
         static func getRoleFlagMatchScore(trackRoleFlags: RoleFlags, preferredRoleFlags: RoleFlags) -> Int {
@@ -515,7 +630,7 @@ public extension DefaultTrackSelector {
         }
 
         static func normalizeUndeterminedLanguageToNil(_ language: String?) -> String? {
-            if language?.isEmpty == true, language == "und" {
+            if language?.isEmpty != false || language == "und" {
                 return nil
             } else {
                 return language
@@ -568,7 +683,8 @@ public extension DefaultTrackSelector {
             formatSupport: RendererCapabilities.Support,
             selectedAudioLanguage: String?,
             mixedMimeTypeAdaptationSupport: RendererCapabilities.Support.AdaptiveSupport,
-            isSuitableForViewport: Bool
+            isSuitableForViewport: Bool,
+            isAllowedByVariantFilters: Bool = true
         ) {
             let format = trackGroup[trackIndex]
             // TODO: a lot of stuff
@@ -576,22 +692,23 @@ public extension DefaultTrackSelector {
             let requiredAdaptiveSupport: RendererCapabilities.Support.AdaptiveSupport = if parameters.allowVideoNonSeamlessAdaptiveness {
                 [.seamless, .notSeamless]
             } else {
-                [.notSupported]
+                [.seamless]
             }
 
             allowMixedMimeTypes = parameters.allowVideoMixedMimeTypeAdaptiveness
                  && !mixedMimeTypeAdaptationSupport.intersection(requiredAdaptiveSupport).isEmpty
 
-            isWithinMaxConstraints = true
+            // Unknown values are within the limits.
+            isWithinMaxConstraints = isSuitableForViewport
+                && (format.width <= 0 || CGFloat(format.width) <= parameters.maxVideoSize.width)
+                && (format.height <= 0 || CGFloat(format.height) <= parameters.maxVideoSize.height)
+                && (format.frameRate <= 0 || format.frameRate <= Float(parameters.maxVideoFrameRate))
+                && (format.bitrate <= 0 || format.bitrate <= parameters.maxVideoBitrate)
             isWithinMinConstraints = true
             isWithinRendererCapabilities = formatSupport.isFormatSupported(allowExceedsCapabilities: false)
             hasReasonableFrameRate = true // TODO:
             bitrate = format.bitrate
-            pixelCount = 0
-//            TODO: isWithinMaxConstraints = isSuitableForViewport
-//                && (format.width == Format.noValue || CGFloat(format.width) <= parameters.maxVideoSize.width)
-//                && (format.height == Format.noValue || CGFloat(format.height) <= parameters.maxVideoSize.height)
-//                && (format.frameRate == Format.noValue || format.frameRate <= parameters.maxVideoFrameRate)
+            pixelCount = format.width > 0 && format.height > 0 ? format.width * format.height : Format.noValue
 
             var bestLanguageIndex = Int.max
             var bestLanguageScore = 0
@@ -639,7 +756,7 @@ public extension DefaultTrackSelector {
             usesPrimaryDecoder = formatSupport.decoderSupport == .primary
             usesHardwareAcceleration = formatSupport.hardwareAccelerationSupport == .supported
             codecPreferenceScore = format.sampleMimeType.videoCodecPreferenceScore
-            selectionEligibility = VideoTrackInfo.evaluateSelectionEligibility(
+            selectionEligibility = !isAllowedByVariantFilters ? .none : VideoTrackInfo.evaluateSelectionEligibility(
                 format: format,
                 params: parameters,
                 isWithinMinConstraints: isWithinMinConstraints,
@@ -658,10 +775,15 @@ public extension DefaultTrackSelector {
             formatSupport: [RendererCapabilities.Support],
             selectedAudioLanguage: String?,
             mixedMimeTypeAdaptationSupport: RendererCapabilities.Support.AdaptiveSupport,
-            viewportSizeFromDisplay: CGSize?
+            viewport: CGSize,
+            viewportOrientationMayChange: Bool,
+            allowedTracks: Set<Int>? = nil
         ) -> [VideoTrackInfo] {
-            let _ = viewportSizeFromDisplay ?? params.viewportSize
-            // TODO: deside smth with viewport size
+            let suitableTracks = tracksSuitableForViewport(
+                in: trackGroup,
+                viewport: viewport,
+                orientationMayChange: viewportOrientationMayChange
+            )
 
             return trackGroup.enumerated().map { index, format in
                 VideoTrackInfo(
@@ -672,8 +794,72 @@ public extension DefaultTrackSelector {
                     formatSupport: formatSupport[index],
                     selectedAudioLanguage: selectedAudioLanguage,
                     mixedMimeTypeAdaptationSupport: mixedMimeTypeAdaptationSupport,
-                    isSuitableForViewport: false
+                    isSuitableForViewport: suitableTracks?.contains(index) ?? true,
+                    isAllowedByVariantFilters: allowedTracks?.contains(index) ?? true
                 )
+            }
+        }
+
+        /// How much larger than the size it shows at, in each dimension, a track may be and still be worth loading.
+        /// Scaled down by up to this much, a picture still looks sharper than one scaled up to fill the viewport.
+        private static let viewportSizeMargin = 1.35
+
+        /// The tracks of `group` worth loading for `viewport`: those less than ``viewportSizeMargin`` times the size
+        /// they show at in both dimensions, and those of unknown size. If every sized track is larger, the smallest
+        /// ones. `nil` if the viewport is unbounded.
+        static func tracksSuitableForViewport(
+            in group: TrackGroup,
+            viewport: CGSize,
+            orientationMayChange: Bool
+        ) -> Set<Int>? {
+            guard viewport.width < .greatestFiniteMagnitude, viewport.height < .greatestFiniteMagnitude,
+                  viewport.width > 0, viewport.height > 0 else {
+                return nil
+            }
+            var suitable = Set<Int>()
+            var hasSuitableSizedTrack = false
+            var smallest: (pixels: Int, indices: [Int])?
+            for (index, format) in group.enumerated() {
+                guard format.width > 0, format.height > 0 else {
+                    suitable.insert(index)
+                    continue
+                }
+                let shown = maxVideoSizeInViewport(
+                    video: CGSize(width: format.width, height: format.height),
+                    viewport: viewport,
+                    orientationMayChange: orientationMayChange
+                )
+                if Double(format.width) < shown.width * viewportSizeMargin,
+                   Double(format.height) < shown.height * viewportSizeMargin {
+                    suitable.insert(index)
+                    hasSuitableSizedTrack = true
+                }
+                let pixels = format.width * format.height
+                if pixels < smallest?.pixels ?? .max {
+                    smallest = (pixels, [index])
+                } else if pixels == smallest?.pixels {
+                    smallest?.indices.append(index)
+                }
+            }
+            if !hasSuitableSizedTrack, let smallest {
+                suitable.formUnion(smallest.indices)
+            }
+            return suitable
+        }
+
+        /// The size a video of `video` shows at, fitted in `viewport`: turned with it, when it would be larger so and the
+        /// orientation may change.
+        private static func maxVideoSizeInViewport(video: CGSize, viewport: CGSize, orientationMayChange: Bool) -> CGSize {
+            var viewport = viewport
+            if orientationMayChange, (video.width > video.height) != (viewport.width > viewport.height) {
+                viewport = CGSize(width: viewport.height, height: viewport.width)
+            }
+            if video.width * viewport.height >= video.height * viewport.width {
+                // Bars above and below.
+                return CGSize(width: viewport.width, height: (viewport.width * video.height / video.width).rounded(.up))
+            } else {
+                // Bars on the sides.
+                return CGSize(width: (viewport.height * video.width / video.height).rounded(.up), height: viewport.height)
             }
         }
 
@@ -716,7 +902,8 @@ public extension DefaultTrackSelector {
                     && format.bitrate != Format.noValue
                     && !params.forceHighestSupportedBitrate
                     && !params.forceLowestBitrate
-                    && rendererSupport.adaptiveSupport.contains(requiredAdaptiveSupport)
+                    // Any of the required kinds of adaptation will do.
+                    && !rendererSupport.adaptiveSupport.intersection(requiredAdaptiveSupport).isEmpty
                 ? .adaptive
                 : .fixed
         }
@@ -800,6 +987,158 @@ public extension DefaultTrackSelector {
         }
     }
 
+    final class TextTrackInfo: TrackInfo {
+        private let selectionEligibility: SelectionEligibility
+        private let isWithinRendererCapabilities: Bool
+        private let isDefault: Bool
+        private let isForced: Bool
+        private let preferredLanguageIndex: Int
+        private let preferredLanguageScore: Int
+        private let preferredRoleFlagsScore: Int
+        private let preferredLabelMatchIndex: Int
+        private let selectedAudioLanguageScore: Int
+        private let hasCaptionRoleFlags: Bool
+
+        init(
+            rendererIndex: Int,
+            trackGroup: TrackGroup,
+            trackIndex: Int,
+            parameters: Parameters,
+            formatSupport: RendererCapabilities.Support,
+            selectedAudioLanguage: String?,
+            preferredCaptioningLanguage: String?
+        ) {
+            let format = trackGroup[trackIndex]
+            isWithinRendererCapabilities = formatSupport.isFormatSupported(allowExceedsCapabilities: false)
+
+            let maskedSelectionFlags = format.selectionFlags.subtracting(parameters.ignoredTextSelectionFlags)
+            isDefault = maskedSelectionFlags.contains(.default)
+            isForced = maskedSelectionFlags.contains(.forced)
+
+            // Compare against empty (unset) language if no preference is given to allow the selection of a text track
+            // with undetermined language.
+            let preferredLanguages = if let preferredCaptioningLanguage {
+                [preferredCaptioningLanguage]
+            } else if parameters.preferredTextLanguages.isEmpty {
+                [""]
+            } else {
+                parameters.preferredTextLanguages
+            }
+            var bestLanguageIndex = Int.max
+            var bestLanguageScore = 0
+            for (index, language) in preferredLanguages.enumerated() {
+                let score = TrackInfo.getFormatLanguageScore(
+                    format: format,
+                    language: language,
+                    allowUndeterminedFormatLanguage: parameters.selectUndeterminedTextLanguage
+                )
+                if score > 0 {
+                    bestLanguageIndex = index
+                    bestLanguageScore = score
+                    break
+                }
+            }
+            preferredLanguageIndex = bestLanguageIndex
+            preferredLanguageScore = bestLanguageScore
+
+            let preferredRoleFlags: RoleFlags = preferredCaptioningLanguage != nil
+                ? [.caption, .describesMusicAndSound]
+                : parameters.preferredTextRoleFlags
+            preferredRoleFlagsScore = TrackInfo.getRoleFlagMatchScore(
+                trackRoleFlags: format.roleFlags,
+                preferredRoleFlags: preferredRoleFlags
+            )
+            hasCaptionRoleFlags = !format.roleFlags.intersection([.caption, .describesMusicAndSound]).isEmpty
+            preferredLabelMatchIndex = TrackInfo.getBestLabelMatchIndex(
+                format: format,
+                preferredLabels: parameters.preferredTextLabels
+            )
+
+            let selectedAudioLanguageUndetermined = TrackInfo.normalizeUndeterminedLanguageToNil(selectedAudioLanguage) == nil
+            selectedAudioLanguageScore = TrackInfo.getFormatLanguageScore(
+                format: format,
+                language: selectedAudioLanguage,
+                allowUndeterminedFormatLanguage: selectedAudioLanguageUndetermined
+            )
+
+            let isWithinConstraints = preferredLanguageScore > 0
+                || (parameters.preferredTextLanguages.isEmpty && preferredRoleFlagsScore > 0)
+                || (parameters.preferredTextLanguages.isEmpty && preferredLabelMatchIndex != Int.max)
+                || isDefault
+                || (isForced && selectedAudioLanguageScore > 0)
+                || parameters.selectTextByDefault
+            selectionEligibility = formatSupport.isFormatSupported(
+                allowExceedsCapabilities: parameters.exceedRendererCapabilitiesIfNecessary
+            ) && isWithinConstraints ? .fixed : .none
+
+            super.init(rendererIndex: rendererIndex, trackGroup: trackGroup, trackIndex: trackIndex)
+        }
+
+        static func createForTrackGroup(
+            rendererIndex: Int,
+            trackGroup: TrackGroup,
+            params: Parameters,
+            formatSupport: [RendererCapabilities.Support],
+            selectedAudioLanguage: String?,
+            preferredCaptioningLanguage: String?
+        ) -> [TextTrackInfo] {
+            trackGroup.enumerated().map { index, _ in
+                TextTrackInfo(
+                    rendererIndex: rendererIndex,
+                    trackGroup: trackGroup,
+                    trackIndex: index,
+                    parameters: params,
+                    formatSupport: formatSupport[index],
+                    selectedAudioLanguage: selectedAudioLanguage,
+                    preferredCaptioningLanguage: preferredCaptioningLanguage
+                )
+            }
+        }
+
+        override func getSelectionEligibility() -> DefaultTrackSelector.SelectionEligibility {
+            selectionEligibility
+        }
+
+        override func isCompatibleForAdaptationWith(_ otherTrack: TrackInfo) -> Bool {
+            false
+        }
+
+        func compareTo(_ other: TextTrackInfo) -> CFComparisonResult {
+            func compareReversed(_ lhs: Int, _ rhs: Int) -> CFComparisonResult {
+                lhs == rhs ? .compareEqualTo : (lhs > rhs ? .compareLessThan : .compareGreaterThan)
+            }
+
+            var accumulated = AccumulatedComparison.start()
+                .compareFalseFirst(isWithinRendererCapabilities, other.isWithinRendererCapabilities)
+                // 1. Compare match with specific content preferences set by the parameters.
+                .compare(preferredLanguageIndex, other.preferredLanguageIndex, compareReversed)
+                .compare(preferredLanguageScore, other.preferredLanguageScore)
+                .compare(preferredRoleFlagsScore, other.preferredRoleFlagsScore)
+                .compare(preferredLabelMatchIndex, other.preferredLabelMatchIndex, compareReversed)
+                // 2. Compare match with implicit content preferences set by the media.
+                .compareFalseFirst(isDefault, other.isDefault)
+
+            // Prefer non-forced to forced if a preferred text language has been matched. Where both are provided the
+            // non-forced track will usually contain the forced subtitles as a subset. Otherwise, prefer a forced track.
+            accumulated = preferredLanguageScore == 0
+                ? accumulated.compareFalseFirst(isForced, other.isForced)
+                : accumulated.compareTrueFirst(isForced, other.isForced)
+
+            accumulated = accumulated.compare(selectedAudioLanguageScore, other.selectedAudioLanguageScore)
+            if preferredRoleFlagsScore == 0 {
+                accumulated = accumulated.compareTrueFirst(hasCaptionRoleFlags, other.hasCaptionRoleFlags)
+            }
+            return accumulated.result()
+        }
+
+        static func compareSelections(infos1: [TextTrackInfo], infos2: [TextTrackInfo]) -> CFComparisonResult {
+            guard let first1 = infos1.first, let first2 = infos2.first else {
+                return .compareEqualTo
+            }
+            return first1.compareTo(first2)
+        }
+    }
+
     final class AudioTrackInfo: TrackInfo, Comparable {
         private let selectionEligibility: SelectionEligibility
         private let isWithinConstraints: Bool
@@ -879,8 +1218,7 @@ public extension DefaultTrackSelector {
             )
 
             hasMainOrNoRoleFlag = format.roleFlags.isEmpty || format.roleFlags.contains(.main)
-//            TODO: isDefaultSelectionFlag = format.selectionFlags //.contains(.default)
-            isDefaultSelectionFlag = false
+            isDefaultSelectionFlag = format.selectionFlags.contains(.default)
 
             isObjectBasedAudio = format.sampleMimeType.isObjectBasedAudio
 
@@ -894,7 +1232,7 @@ public extension DefaultTrackSelector {
             && withinAudioChannelCountConstraints(format)
 
             // Locale language match (first match wins)
-            let localeLanguages = Locale.preferredLanguages
+            let localeLanguages = Locale.preferredLanguages.compactMap(Util.normalizeLanguageCode)
             var bestLocaleMatchIndex = Int.max
             var bestLocaleMatchScore = 0
             for (index, lang) in localeLanguages.enumerated() {
@@ -1053,11 +1391,6 @@ public extension DefaultTrackSelector {
             if !isWithinConstraints && !params.exceedAudioConstraintsIfNecessary {
                 return .none
             }
-            // TODO: think about that
-//            if params.audioOffloadPreferences.audioOffloadMode == .required
-//                && !rendererSupportsOffload(params: params, rendererSupport: rendererSupport, format: format) {
-//                return .none
-//            }
 
             let supportsAdaptive = !rendererSupport.adaptiveSupport.intersection(requiredAdaptiveSupport).isEmpty
 

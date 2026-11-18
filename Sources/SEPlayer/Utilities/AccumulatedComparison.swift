@@ -67,7 +67,9 @@ enum AccumulatedComparison {
         return classify((lhs == rhs) ? .compareEqualTo : (lhs ? .compareGreaterThan : .compareLessThan))
     }
 
-    func result() -> CFComparisonResult { .compareEqualTo }
+    func result() -> CFComparisonResult {
+        if case let .decided(result) = self { result } else { .compareEqualTo }
+    }
 
     private func classify(_ result: CFComparisonResult) -> AccumulatedComparison {
         switch result {

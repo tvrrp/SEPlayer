@@ -5,9 +5,121 @@
 //  Created by Damir Yackupov on 02.06.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 public enum NalUnitUtil {
+    /// The H.265 access unit delimiter.
+    private static let h265NalUnitTypeAud = 35
+
+    public static func parseSpsNalUnit<T: RandomAccessCollection<UInt8>>(
+        nalData: T,
+        nalOffset: Int,
+        nalLimit: Int
+    ) throws -> SpsData where T.Index == Int {
+        try SpsData(data: nalData, nalOffset: nalOffset + 1, nalLimit: nalLimit)
+    }
+
+    public static func parsePpsNalUnit<T: RandomAccessCollection<UInt8>>(
+        nalData: T,
+        nalOffset: Int,
+        nalLimit: Int
+    ) throws -> PpsData where T.Index == Int {
+        try PpsData(data: nalData, nalOffset: nalOffset + 1, nalLimit: nalLimit)
+    }
+
+    public static func clearPrefixFlags(_ prefixFlags: inout (Bool, Bool, Bool)) {
+        prefixFlags = (false, false, false)
+    }
+
+    /// - Parameter allocator: The allocator of the unescaped copy; `nil` for the default one.
+    public static func unescapeStream(
+        _ source: CMBlockBuffer,
+        length: Int,
+        allocator: CFAllocator? = nil
+    ) throws -> CMBlockBuffer {
+        let scratch = try source.makeContiguous(allocator: allocator, flags: .alwaysCopyData)
+
+        let unescapedLength = try scratch.withUnsafeMutableBlockBytes { destination -> Int in
+            let bytes = destination.baseAddress!.assumingMemoryBound(to: UInt8.self)
+            var write = 0
+            var read = 0
+            while read < length {
+                if read + 2 < length,
+                   bytes[read] == 0x00,
+                   bytes[read + 1] == 0x00,
+                   bytes[read + 2] == 0x03 {
+                    bytes[write] = 0x00
+                    bytes[write + 1] = 0x00
+                    write += 2
+                    read += 3
+                } else {
+                    bytes[write] = bytes[read]
+                    write += 1
+                    read += 1
+                }
+            }
+            return write
+        }
+
+        return try CMBlockBuffer(bufferReference: scratch, range: 0..<unescapedLength)
+    }
+
+    // TODO: just pass slice of RandomAccessCollection<UInt8> and ignore offset and limit
+    public static func findNalUnit<T: RandomAccessCollection<UInt8>>(
+        _ data: T,
+        offset: Int,
+        limit: Int,
+        prefixFlags: inout (Bool, Bool, Bool)
+    ) -> Int where T.Index == Int {
+        let length = limit - offset
+        if prefixFlags.0 {
+            clearPrefixFlags(&prefixFlags)
+            return offset - 3
+        } else if length > 1, prefixFlags.1, data[offset] == 1 {
+            clearPrefixFlags(&prefixFlags)
+            return offset - 2
+        } else if length > 2, prefixFlags.2, data[offset] == 0, data[offset + 1] == 1 {
+            clearPrefixFlags(&prefixFlags)
+            return offset - 1
+        }
+
+        // We're looking for the NAL unit start code prefix 0x000001. The value of i tracks the
+        // index of the third byte.
+        var i = offset + 2
+        while i < limit - 1 {
+            if data[i] & 0xFE != 0 {
+                // There isn't a NAL prefix here, or at the next two positions.
+                i += 3
+            } else if data[i - 2] == 0, data[i - 1] == 0, data[i] == 1 {
+                clearPrefixFlags(&prefixFlags)
+                return i - 2
+            } else {
+                // There isn't a NAL prefix here, but there might be at the next position.
+                i += 1
+            }
+        }
+
+        // True if the last three bytes in the data seen so far are {0,0,1}.
+        if length > 2 {
+            prefixFlags.0 = data[limit - 3] == 0 && data[limit - 2] == 0 && data[limit - 1] == 1
+        } else if length == 2 {
+            prefixFlags.0 = prefixFlags.2 && data[limit - 2] == 0 && data[limit - 1] == 1
+        } else {
+            prefixFlags.0 = prefixFlags.1 && data[limit - 1] == 1
+        }
+        // True if the last two bytes in the data seen so far are {0,0}.
+        if length > 1 {
+            prefixFlags.1 = data[limit - 2] == 0 && data[limit - 1] == 0
+        } else {
+            prefixFlags.1 = prefixFlags.2 && data[limit - 1] == 0
+        }
+        // True if the last byte in the data seen so far is {0}.
+        prefixFlags.2 = data[limit - 1] == 0
+
+        return limit
+    }
+
     public struct SpsData {
         public let profileIdc: Int
         public let constraintsFlagsAndReservedZero2Bits: Int
@@ -29,9 +141,16 @@ public enum NalUnitUtil {
         public let colorRange: ColorRange?
         public let colorTransfer: ColorTransfer?
         public let maxNumReorderFrames: Int
+        public let chromaFormatIdc: Int
+        /// The video usability information, if the parameter set has one.
+        let vui: VideoUsabilityInformation?
 
-        public init(data: ByteBufferView, nalOffset: Int, nalLimit: Int) throws {
-            var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset + 1, limit: nalLimit)
+        public init<T: RandomAccessCollection<UInt8>>(
+            data: T,
+            nalOffset: Int,
+            nalLimit: Int
+        ) throws where T.Index == Int {
+            var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset, limit: nalLimit)
             profileIdc = try data.readBits(8)
             let constraintsFlagsAndReservedZero2Bits = try data.readBits(8)
             levelIdc = try data.readBits(8)
@@ -134,46 +253,30 @@ public enum NalUnitUtil {
             var maxNumReorderFrames = profileIdcValues.contains(profileIdc)
                 && (constraintsFlagsAndReservedZero2Bits & 0x10 != 0) ? .zero : 16
 
+            var vui: VideoUsabilityInformation?
             if try data.readBit() { // vui_parameters_present_flag
                 // Section E.1.1: VUI parameters syntax
-                let aspectRatioInfoPresentFlag = try data.readBit()
-                if aspectRatioInfoPresentFlag {
-                    let aspectRatioIdc = try data.readBits(8)
-                    if aspectRatioIdc == .extendedSar {
-                        let sarWidth = try data.readBits(16)
-                        let sarHeight = try data.readBits(16)
-                        if sarWidth != sarHeight {
-                            pixelWidthHeightRatio = Float(sarWidth) / Float(sarHeight)
+                let parameters = try VideoUsabilityInformation(reading: &data, isH265: false)
+                vui = parameters
+                if let aspectRatio = parameters.aspectRatio {
+                    if aspectRatio.indicator == .extendedSar {
+                        if aspectRatio.sarWidth != aspectRatio.sarHeight, aspectRatio.sarHeight != 0 {
+                            pixelWidthHeightRatio = Float(aspectRatio.sarWidth) / Float(aspectRatio.sarHeight)
                         }
-                    } else if aspectRatioIdc < NalUnitUtil.aspectRatioIdcValues.count {
-                        pixelWidthHeightRatio = NalUnitUtil.aspectRatioIdcValues[aspectRatioIdc]
+                    } else if aspectRatio.indicator < NalUnitUtil.aspectRatioIdcValues.count {
+                        pixelWidthHeightRatio = NalUnitUtil.aspectRatioIdcValues[aspectRatio.indicator]
                     } else {
-                        print("Unexpected aspect_ratio_idc value: \(aspectRatioIdc)")
+                        SELogger.warning(.mp4, "Unexpected aspect_ratio_idc value \(aspectRatio.indicator)")
                     }
                 }
-
-                if try data.readBit() { // overscan_info_present_flag
-                    try data.skipBit() // overscan_appropriate_flag
+                if let fullRange = parameters.videoFullRange {
+                    colorRange = fullRange ? .full : .limited
+                }
+                if let colour = parameters.colourDescription {
+                    colorSpace = ColorSpace(isoColorPrimaries: colour.colourPrimaries)
+                    colorTransfer = ColorTransfer(isoTransferCharacteristics: colour.transferCharacteristics)
                 }
 
-                if try data.readBit() { // video_signal_type_present_flag
-                    try data.skipBits(3) // video_format
-                    colorRange = try data.readBit() ? .full : .limited
-
-                    if try data.readBit() { // colour_description_present_flag
-                        let colorPrimaries = try data.readBits(8) // colour_primaries
-                        let transferCharacteristics = try data.readBits(8) // transfer_characteristics
-                        try data.skipBits(8) // matrix_coeffs
-
-                        colorSpace = ColorSpace(isoColorPrimaries: colorPrimaries)
-                        colorTransfer = ColorTransfer(isoTransferCharacteristics: transferCharacteristics)
-                    }
-                }
-
-                if try data.readBit() { // chroma_loc_info_present_flag
-                    try data.readUnsignedExpGolombCodedInt() // chroma_sample_loc_type_top_field
-                    try data.readUnsignedExpGolombCodedInt() // chroma_sample_loc_type_bottom_field
-                }
                 if try data.readBit() { // timing_info_present_flag
                     try data.skipBits(65) // num_units_in_tick (32), time_scale (32), fixed_frame_rate_flag (1)
                 }
@@ -217,9 +320,11 @@ public enum NalUnitUtil {
             self.colorRange = colorRange
             self.colorTransfer = colorTransfer
             self.maxNumReorderFrames = maxNumReorderFrames
+            self.chromaFormatIdc = chromaFormatIdc
+            self.vui = vui
         }
 
-        private static func skipScalingList(bitArray: inout ParsableNalUnitBitArray, size: Int) throws {
+        private static func skipScalingList<T>(bitArray: inout ParsableNalUnitBitArray<T>, size: Int) throws {
             var lastScale = 8
             var nextScale = 8
 
@@ -233,7 +338,7 @@ public enum NalUnitUtil {
             }
         }
 
-        private static func skipHrdParameters(data: inout ParsableNalUnitBitArray) throws {
+        private static func skipHrdParameters<T>(data: inout ParsableNalUnitBitArray<T>) throws {
             let codedPictureBufferCount = try data.readUnsignedExpGolombCodedInt() + 1 // cpb_cnt_minus1
             try data.skipBits(8) // bit_rate_scale (4), cpb_size_scale (4)
             for _ in 0..<codedPictureBufferCount {
@@ -253,6 +358,24 @@ public enum NalUnitUtil {
         public let picParameterSetId: Int
         public let seqParameterSetId: Int
         public let bottomFieldPicOrderInFramePresentFlag: Bool
+
+        public init(picParameterSetId: Int, seqParameterSetId: Int, bottomFieldPicOrderInFramePresentFlag: Bool) {
+            self.picParameterSetId = picParameterSetId
+            self.seqParameterSetId = seqParameterSetId
+            self.bottomFieldPicOrderInFramePresentFlag = bottomFieldPicOrderInFramePresentFlag
+        }
+
+        public init<T: RandomAccessCollection<UInt8>>(
+            data: T,
+            nalOffset: Int,
+            nalLimit: Int
+        ) throws where T.Index == Int {
+            var data = try ParsableNalUnitBitArray(data: data, offset: nalOffset, limit: nalLimit)
+            picParameterSetId = try data.readUnsignedExpGolombCodedInt()
+            seqParameterSetId = try data.readUnsignedExpGolombCodedInt()
+            try data.skipBit() // entropy_coding_mode_flag
+            bottomFieldPicOrderInFramePresentFlag = try data.readBit()
+        }
     }
 
     public static func isH264NalUnitDependedOn(nalUnitHeaderFirstByte: UInt8) -> Bool {
@@ -294,15 +417,86 @@ public enum NalUnitUtil {
         return 0
     }
 
-    public static func isDependedOn(data: ByteBuffer, offset: Int, length: Int, format: Format) -> Bool {
-        if format.sampleMimeType == .videoH264 {
-            return isH264NalUnitDependedOn(nalUnitHeaderFirstByte: data.readableBytesView[offset])
+    public static func isDependedOn<T: RandomAccessCollection<UInt8>>(
+        data: T,
+        format: Format
+    ) -> Bool where T.Index == Int {
+        switch getNalStructureMimeType(format: format) {
+        case .videoH264:
+            guard let first = data.first else { return true }
+            return isH264NalUnitDependedOn(nalUnitHeaderFirstByte: first)
+        case .videoH265:
+            guard data.count >= 2 else { return true }
+            let start = data.startIndex
+            return isH265NalUnitDependedOn(
+                nalUnitHeaderFirstByte: data[start],
+                secondByte: data[start + 1],
+                format: format
+            )
+        default:
+            return true
         }
-        if format.sampleMimeType == .videoH265 {
-            return true // TODO: isH265NalUnitDependedOn
+    }
+
+    public static func isDependedOn(data: ByteBuffer, offset: Int, length: Int, format: Format) -> Bool {
+        let bytes = data.readableBytesView
+        let start = bytes.startIndex + offset
+        return isDependedOn(data: Array(bytes[start..<(start + length)]), format: format)
+    }
+
+    /// Whether a later frame may depend on the H.265 NAL unit with this header.
+    ///
+    /// A sub-layer non-reference picture of the highest temporal sub-layer isn't depended on, and neither is an access
+    /// unit delimiter. Everything else is treated as depended on.
+    public static func isH265NalUnitDependedOn(nalUnitHeaderFirstByte: UInt8, secondByte: UInt8, format: Format) -> Bool {
+        let nalUnitType = Int((nalUnitHeaderFirstByte >> 1) & 0x3F)
+        if nalUnitType == h265NalUnitTypeAud {
+            return false
         }
 
+        // TRAIL_N, TSA_N, STSA_N, RADL_N, RASL_N and the reserved RSV_VCL_N10/12/14: even types up to 14.
+        let isSubLayerNonReferencePicture = nalUnitType <= 14 && nalUnitType % 2 == 0
+        let temporalId = Int(secondByte & 0x07) - 1
+        if isSubLayerNonReferencePicture, format.maxSubLayers > 0, temporalId == format.maxSubLayers - 1 {
+            return false
+        }
         return true
+    }
+
+    /// Whether a later frame may depend on the sample: whether any of its NAL units is depended on.
+    ///
+    /// - Parameters:
+    ///   - sample: The sample, as NAL units each prefixed with its length.
+    ///   - nalUnitLengthFieldLength: The size of the length prefix, in bytes: 1, 2 or 4.
+    public static func isSampleDependedOn(
+        _ sample: BlockBufferReader,
+        nalUnitLengthFieldLength: Int,
+        format: Format
+    ) throws -> Bool {
+        let headerLength = numberOfBytesInNalUnitHeader(format: format)
+        guard headerLength > 0, [1, 2, 4].contains(nalUnitLengthFieldLength) else {
+            return true
+        }
+
+        var reader = sample
+        while reader.readableBytes >= nalUnitLengthFieldLength {
+            let nalUnitLength = switch nalUnitLengthFieldLength {
+            case 1: Int(try reader.readInt(as: UInt8.self))
+            case 2: Int(try reader.readInt(as: UInt16.self))
+            default: Int(try reader.readInt(as: UInt32.self))
+            }
+            guard nalUnitLength >= headerLength, nalUnitLength <= reader.readableBytes else {
+                // A malformed sample may be anything: it stays depended on.
+                return true
+            }
+
+            let header = try reader.readBytes(length: headerLength)
+            if isDependedOn(data: header, format: format) {
+                return true
+            }
+            reader.moveReaderIndex(forwardBy: nalUnitLength - headerLength)
+        }
+        return false
     }
 
     private static func getNalStructureMimeType(format: Format) -> MimeTypes? {
@@ -319,6 +513,18 @@ public enum NalUnitUtil {
 }
 
 public extension NalUnitUtil {
+    enum H264NalUnitType: Int {
+        case unspecified = 0
+        case nonIdr = 1
+        case partitionA = 2
+        case idr = 5
+        case sei = 6
+        case sps = 7
+        case pps = 8
+        case aud = 9
+        case prefix = 14
+    }
+
     static let nalStartCode: [UInt8] = [0, 0, 0, 1]
 }
 
@@ -342,12 +548,6 @@ private extension NalUnitUtil {
         3 / 2,
         2
     ]
-
-    enum H264NalUnitType: Int {
-        case nonIdr = 1
-        case aud = 9
-        case prefix = 14
-    }
 }
 
 private extension Int {

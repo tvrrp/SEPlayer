@@ -5,9 +5,11 @@
 //  Created by Damir Yackupov on 04.11.2025.
 //
 
+import CoreMedia
 import Foundation
 import Testing
 @testable import SEPlayer
+@testable import SEPlayerCommon
 
 @TestableSyncPlayerActor
 class MediaPeriodQueueTest {
@@ -19,11 +21,12 @@ class MediaPeriodQueueTest {
 
     private let adMediaItem = MediaItem.Builder().setUrl(URL(string: "example.com")!).build()
     private lazy var contentTimeline = SinglePeriodTimeline(
-        mediaItem: adMediaItem,
-        periodDurationUs: contentDurationUs,
-        windowDurationUs: contentDurationUs,
+        duration: .time(us: contentDurationUs),
         isSeekable: true,
-        isDynamic: false
+        isDynamic: false,
+        useLiveConfiguration: false,
+        manifest: nil,
+        mediaItem: adMediaItem
     )
 
     private let mediaPeriodQueue: MediaPeriodQueue
@@ -35,12 +38,10 @@ class MediaPeriodQueueTest {
     private let allocator: Allocator
     private let mediaSourceList: MediaSourceList
     private var fakeMediaSources: [FakeMediaSource]
-    private let mediaPeriodHolderFactoryInfos: NSMutableArray
-    private let mediaPeriodHolderFactoryRendererPositionOffsets: NSMutableArray
+    private var mediaPeriodHolderFactoryInfos: [MediaPeriodInfo] = []
+    private var mediaPeriodHolderFactoryRendererPositionOffsets: [CMTime] = []
 
     init() {
-        mediaPeriodHolderFactoryInfos = NSMutableArray()
-        mediaPeriodHolderFactoryRendererPositionOffsets = NSMutableArray()
         mediaSourceList = MediaSourceList(playerId: playerId)
         rendererCapabilities = []
         trackSelector = DefaultTrackSelector()
@@ -48,17 +49,17 @@ class MediaPeriodQueueTest {
         fakeMediaSources = []
 
         mediaPeriodQueue = MediaPeriodQueue(preloadConfiguration: .default)
-        mediaPeriodQueue.setMediaPeriodBuilder { [weak self] info, rendererPositionOffsetUs in
-            guard let self else { throw ErrorBuilder.illegalState }
+        mediaPeriodQueue.setMediaPeriodBuilder { [weak self] info, rendererPositionOffset in
+            guard let self else { throw ErrorBuilder.illegalState() }
             TestableSyncPlayerActor.shared.assertIsolated()
 
-            mediaPeriodHolderFactoryInfos.add(info)
-            mediaPeriodHolderFactoryRendererPositionOffsets.add(rendererPositionOffsetUs)
+            mediaPeriodHolderFactoryInfos.append(info)
+            mediaPeriodHolderFactoryRendererPositionOffsets.append(rendererPositionOffset)
 
             return try MediaPeriodHolder(
                 queue: playerSyncQueue,
                 rendererCapabilities: rendererCapabilities,
-                rendererPositionOffsetUs: rendererPositionOffsetUs,
+                rendererPositionOffset: rendererPositionOffset,
                 trackSelector: trackSelector,
                 allocator: allocator,
                 mediaSourceList: mediaSourceList,
@@ -68,7 +69,7 @@ class MediaPeriodQueueTest {
                     selections: [],
                     tracks: .empty
                 ),
-                targetPreloadBufferDurationUs: 5_000_000
+                targetPreloadBufferDuration: .time(us: 5_000_000)
             )
         }
     }
@@ -141,7 +142,7 @@ class MediaPeriodQueueTest {
         try setupTimelines([FakeTimeline(), FakeTimeline(), FakeTimeline()])
         let playbackInfo = try #require(playbackInfo)
         try mediaPeriodQueue.updatePreloadConfiguration(
-            new: PreloadConfiguration(targetPreloadDurationUs: 5_000_000),
+            new: PreloadConfiguration(targetPreloadDuration: .time(us: 5_000_000)),
             timeline: playbackInfo.timeline
         )
 
@@ -149,20 +150,20 @@ class MediaPeriodQueueTest {
         try enqueueNext()
 
         #expect(mediaPeriodHolderFactoryInfos.count == 1)
-        #expect((mediaPeriodHolderFactoryRendererPositionOffsets.firstObject as! Int64) == 1_000_000_000_000)
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 0))
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.windowSequenceNumber == 0)
+        #expect(mediaPeriodHolderFactoryRendererPositionOffsets.first?.microseconds == 1_000_000_000_000)
+        #expect(mediaPeriodHolderFactoryInfos[0].id.periodId == playbackInfo.timeline.id(for: 0))
+        #expect(mediaPeriodHolderFactoryInfos[0].id.windowSequenceNumber == 0)
 
         // Creates period of second window for preloading.
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
         #expect(mediaPeriodHolderFactoryInfos.count == 2)
         #expect({
-            let first = (mediaPeriodHolderFactoryRendererPositionOffsets[0] as! Int64)
-            let second = (mediaPeriodHolderFactoryRendererPositionOffsets[1] as! Int64)
+            let first = mediaPeriodHolderFactoryRendererPositionOffsets[0].microseconds
+            let second = mediaPeriodHolderFactoryRendererPositionOffsets[1].microseconds
             return first == 1_000_000_000_000 && second == 1_000_010_000_000
         }())
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 1))
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.windowSequenceNumber == 1)
+        #expect(mediaPeriodHolderFactoryInfos[1].id.periodId == playbackInfo.timeline.id(for: 1))
+        #expect(mediaPeriodHolderFactoryInfos[1].id.windowSequenceNumber == 1)
 
         // Enqueue period of second window from preload pool.
         try enqueueNext()
@@ -172,15 +173,15 @@ class MediaPeriodQueueTest {
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
         #expect(mediaPeriodHolderFactoryInfos.count == 3)
         #expect({
-            let first = (mediaPeriodHolderFactoryRendererPositionOffsets[0] as! Int64)
-            let second = (mediaPeriodHolderFactoryRendererPositionOffsets[1] as! Int64)
-            let third = (mediaPeriodHolderFactoryRendererPositionOffsets[2] as! Int64)
+            let first = mediaPeriodHolderFactoryRendererPositionOffsets[0].microseconds
+            let second = mediaPeriodHolderFactoryRendererPositionOffsets[1].microseconds
+            let third = mediaPeriodHolderFactoryRendererPositionOffsets[2].microseconds
             return first == 1_000_000_000_000 &&
             second == 1_000_010_000_000 &&
             third == 1_000_020_000_000
         }())
-        #expect((mediaPeriodHolderFactoryInfos[2] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 2))
-        #expect((mediaPeriodHolderFactoryInfos[2] as! MediaPeriodInfo).id.windowSequenceNumber == 2)
+        #expect(mediaPeriodHolderFactoryInfos[2].id.periodId == playbackInfo.timeline.id(for: 2))
+        #expect(mediaPeriodHolderFactoryInfos[2].id.windowSequenceNumber == 2)
 
         // Enqueue period of third window from preload pool.
         try enqueueNext()
@@ -226,9 +227,9 @@ class MediaPeriodQueueTest {
         try enqueueNext()
 
         #expect(mediaPeriodHolderFactoryInfos.count == 1)
-        #expect((mediaPeriodHolderFactoryRendererPositionOffsets.firstObject as! Int64) == 1_000_000_000_000)
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 0))
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.windowSequenceNumber == 0)
+        #expect(mediaPeriodHolderFactoryRendererPositionOffsets.first?.microseconds == 1_000_000_000_000)
+        #expect(mediaPeriodHolderFactoryInfos[0].id.periodId == playbackInfo.timeline.id(for: 0))
+        #expect(mediaPeriodHolderFactoryInfos[0].id.windowSequenceNumber == 0)
 
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
 
@@ -238,12 +239,12 @@ class MediaPeriodQueueTest {
 
         #expect(mediaPeriodHolderFactoryInfos.count == 2)
         #expect({
-            let first = (mediaPeriodHolderFactoryRendererPositionOffsets[0] as! Int64)
-            let second = (mediaPeriodHolderFactoryRendererPositionOffsets[1] as! Int64)
+            let first = mediaPeriodHolderFactoryRendererPositionOffsets[0].microseconds
+            let second = mediaPeriodHolderFactoryRendererPositionOffsets[1].microseconds
             return first == 1_000_000_000_000 && second == 1_000_010_000_000
         }())
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 1))
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.windowSequenceNumber == 1)
+        #expect(mediaPeriodHolderFactoryInfos[1].id.periodId == playbackInfo.timeline.id(for: 1))
+        #expect(mediaPeriodHolderFactoryInfos[1].id.windowSequenceNumber == 1)
         #expect(releasedMediaPeriods.isEmpty)
 
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
@@ -254,15 +255,15 @@ class MediaPeriodQueueTest {
 
         #expect(mediaPeriodHolderFactoryInfos.count == 3)
         #expect({
-            let first = (mediaPeriodHolderFactoryRendererPositionOffsets[0] as! Int64)
-            let second = (mediaPeriodHolderFactoryRendererPositionOffsets[1] as! Int64)
-            let third = (mediaPeriodHolderFactoryRendererPositionOffsets[2] as! Int64)
+            let first = mediaPeriodHolderFactoryRendererPositionOffsets[0].microseconds
+            let second = mediaPeriodHolderFactoryRendererPositionOffsets[1].microseconds
+            let third = mediaPeriodHolderFactoryRendererPositionOffsets[2].microseconds
             return first == 1_000_000_000_000 &&
                    second == 1_000_010_000_000 &&
                    third == 1_000_020_000_000
         }())
-        #expect((mediaPeriodHolderFactoryInfos[2] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 2))
-        #expect((mediaPeriodHolderFactoryInfos[2] as! MediaPeriodInfo).id.windowSequenceNumber == 2)
+        #expect(mediaPeriodHolderFactoryInfos[2].id.periodId == playbackInfo.timeline.id(for: 2))
+        #expect(mediaPeriodHolderFactoryInfos[2].id.windowSequenceNumber == 2)
         #expect(releasedMediaPeriods.isEmpty)
 
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
@@ -290,16 +291,16 @@ class MediaPeriodQueueTest {
         let playbackInfo = try #require(playbackInfo)
 
         try mediaPeriodQueue.updatePreloadConfiguration(
-            new: PreloadConfiguration(targetPreloadDurationUs: 5_000_000),
+            new: PreloadConfiguration(targetPreloadDuration: .time(us: 5_000_000)),
             timeline: playbackInfo.timeline
         )
 
         try enqueueNext()
 
         #expect(mediaPeriodHolderFactoryInfos.count == 1)
-        #expect((mediaPeriodHolderFactoryRendererPositionOffsets.firstObject as! Int64) == 1_000_000_000_000)
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 0))
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.windowSequenceNumber == 0)
+        #expect(mediaPeriodHolderFactoryRendererPositionOffsets.first?.microseconds == 1_000_000_000_000)
+        #expect(mediaPeriodHolderFactoryInfos[0].id.periodId == playbackInfo.timeline.id(for: 0))
+        #expect(mediaPeriodHolderFactoryInfos[0].id.windowSequenceNumber == 0)
 
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
 
@@ -312,12 +313,12 @@ class MediaPeriodQueueTest {
         #expect(mediaPeriodHolderFactoryInfos.count == 2)
         #expect({
             let offsets = mediaPeriodHolderFactoryRendererPositionOffsets
-            let first = offsets[0] as! Int64
-            let second = offsets[1] as! Int64
+            let first = offsets[0].microseconds
+            let second = offsets[1].microseconds
             return first == 1_000_000_000_000 && second == 1_000_010_000_000
         }())
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.periodId == playbackInfo.timeline.id(for: 1))
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.windowSequenceNumber == 1)
+        #expect(mediaPeriodHolderFactoryInfos[1].id.periodId == playbackInfo.timeline.id(for: 1))
+        #expect(mediaPeriodHolderFactoryInfos[1].id.windowSequenceNumber == 1)
 
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
 
@@ -335,31 +336,31 @@ class MediaPeriodQueueTest {
         let playbackInfo = try #require(playbackInfo)
 
         try mediaPeriodQueue.updatePreloadConfiguration(
-            new: PreloadConfiguration(targetPreloadDurationUs: 5_000_000),
+            new: PreloadConfiguration(targetPreloadDuration: .time(us: 5_000_000)),
             timeline: playbackInfo.timeline
         )
 
         try enqueueNext()
 
         #expect(mediaPeriodHolderFactoryInfos.count == 1)
-        #expect((mediaPeriodHolderFactoryRendererPositionOffsets.firstObject as! Int64) == 1_000_000_000_000)
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.periodId ==
+        #expect(mediaPeriodHolderFactoryRendererPositionOffsets.first?.microseconds == 1_000_000_000_000)
+        #expect(mediaPeriodHolderFactoryInfos[0].id.periodId ==
                 playbackInfo.timeline.id(for: 0))
-        #expect((mediaPeriodHolderFactoryInfos[0] as! MediaPeriodInfo).id.windowSequenceNumber == 0)
+        #expect(mediaPeriodHolderFactoryInfos[0].id.windowSequenceNumber == 0)
 
         try mediaPeriodQueue.invalidatePreloadPool(timeline: playbackInfo.timeline)
 
         #expect(mediaPeriodHolderFactoryInfos.count == 2)
         #expect({
             let offsets = mediaPeriodHolderFactoryRendererPositionOffsets
-            let first = offsets[0] as! Int64
-            let second = offsets[1] as! Int64
+            let first = offsets[0].microseconds
+            let second = offsets[1].microseconds
             return first == 1_000_000_000_000 &&
                    second == 1_000_005_000_000
         }())
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.periodId ==
+        #expect(mediaPeriodHolderFactoryInfos[1].id.periodId ==
                 playbackInfo.timeline.id(for: 2))
-        #expect((mediaPeriodHolderFactoryInfos[1] as! MediaPeriodInfo).id.windowSequenceNumber == 1)
+        #expect(mediaPeriodHolderFactoryInfos[1].id.windowSequenceNumber == 1)
     }
 
     @Test
@@ -410,7 +411,7 @@ class MediaPeriodQueueTest {
         let playbackInfo = try #require(playbackInfo)
 
         try mediaPeriodQueue.updatePreloadConfiguration(
-            new: PreloadConfiguration(targetPreloadDurationUs: 5_000_000),
+            new: PreloadConfiguration(targetPreloadDuration: .time(us: 5_000_000)),
             timeline: playbackInfo.timeline
         )
 
@@ -420,8 +421,8 @@ class MediaPeriodQueueTest {
         #expect({
             let offsets = mediaPeriodHolderFactoryRendererPositionOffsets
             guard offsets.count == 2 else { return false }
-            let first = offsets[0] as! Int64
-            let second = offsets[1] as! Int64
+            let first = offsets[0].microseconds
+            let second = offsets[1].microseconds
             return first == 1_000_000_000_000 &&
                    second == 1_000_010_000_000
         }())
@@ -440,27 +441,27 @@ class MediaPeriodQueueTest {
         try setupTimelines([FakeTimeline(), FakeTimeline()])
         try enqueueNext()
         #expect(mediaPeriodHolderFactoryRendererPositionOffsets.count == 1)
-        #expect((mediaPeriodHolderFactoryRendererPositionOffsets.firstObject as! Int64) == 1_000_000_000_000)
+        #expect(mediaPeriodHolderFactoryRendererPositionOffsets.first?.microseconds == 1_000_000_000_000)
 
         let playbackInfo = try #require(playbackInfo)
         try mediaPeriodQueue.updatePreloadConfiguration(
-            new: PreloadConfiguration(targetPreloadDurationUs: 5_000_000),
+            new: PreloadConfiguration(targetPreloadDuration: .time(us: 5_000_000)),
             timeline: playbackInfo.timeline
         )
 
         #expect({
             let offsets = mediaPeriodHolderFactoryRendererPositionOffsets
             guard offsets.count == 2 else { return false }
-            let first = offsets[0] as! Int64
-            let second = offsets[1] as! Int64
+            let first = offsets[0].microseconds
+            let second = offsets[1].microseconds
             return first == 1_000_000_000_000 &&
                    second == 1_000_010_000_000
         }())
     }
 
     private func setupAdTimeline(adGroupTimesUs: Int64...) throws {
-        addPlaybackState = AdPlaybackState(adGroupTimesUs: adGroupTimesUs)
-            .withContentDurationUs(contentDurationUs)
+        addPlaybackState = AdPlaybackState(adGroupTimes: adGroupTimesUs.map { .time(us: $0) })
+            .withContentDuration(.time(us: contentDurationUs))
         let adTimeline = SinglePeriodAdTimeline(contentTimeline: contentTimeline, adPlaybackState: addPlaybackState)
         try setupTimelines([adTimeline])
     }
@@ -500,10 +501,10 @@ class MediaPeriodQueueTest {
             periodId: mediaPeriodQueue.resolveMediaPeriodIdForAdsAfterPeriodPositionChange(
                 timeline: playlistTimeline,
                 periodId: firstPeriodId,
-                positionUs: 0
+                position: .zero
             ),
-            requestedContentPositionUs: .timeUnset,
-            discontinuityStartPositionUs: 0,
+            requestedContentPosition: .invalid,
+            discontinuityStartPosition: .zero,
             state: .ready,
             playbackError: nil,
             isLoading: false,
@@ -518,10 +519,10 @@ class MediaPeriodQueueTest {
             playWhenReadyChangeReason: .userRequest,
             playbackSuppressionReason: .none,
             playbackParameters: .default,
-            bufferedPositionUs: 0,
-            totalBufferedDurationUs: 0,
-            positionUs: 0,
-            positionUpdateTimeMs: 0
+            bufferedPosition: .zero,
+            totalBufferedDuration: .zero,
+            position: .zero,
+            positionUpdateTime: .zero
         )
     }
 
@@ -542,16 +543,16 @@ class MediaPeriodQueueTest {
 
     private func clear() {
         mediaPeriodQueue.clear()
-        playbackInfo = playbackInfo?.positionUs(
+        playbackInfo = playbackInfo?.setPosition(
             periodId: mediaPeriodQueue.resolveMediaPeriodIdForAdsAfterPeriodPositionChange(
                 timeline: mediaSourceList.createTimeline(),
                 periodId: firstPeriodId,
-                positionUs: 0
+                position: .zero
             ),
-            positionUs: 0,
-            requestedContentPositionUs: .timeUnset,
-            discontinuityStartPositionUs: 0,
-            totalBufferedDurationUs: 0,
+            position: .zero,
+            requestedContentPosition: .invalid,
+            discontinuityStartPosition: .zero,
+            totalBufferedDuration: .zero,
             trackGroups: .empty,
             trackSelectorResult: .init(
                 rendererConfigurations: [],
@@ -563,7 +564,7 @@ class MediaPeriodQueueTest {
 
     private func getNextMediaPeriodInfo() -> MediaPeriodInfo? {
         guard let playbackInfo else { return nil }
-        return mediaPeriodQueue.nextMediaPeriodInfo(rendererPositionUs: 0, playbackInfo: playbackInfo)
+        return mediaPeriodQueue.nextMediaPeriodInfo(rendererPosition: .zero, playbackInfo: playbackInfo)
     }
 
     private func assertGetNextMediaPeriodInfoReturnsContentMediaPeriod(
@@ -582,10 +583,10 @@ class MediaPeriodQueueTest {
         let mediaPeriodInfo = try #require(getNextMediaPeriodInfo())
         let checkedMediaPeriodInfo = MediaPeriodInfo(
             id: MediaPeriodId(periodId: periodId, windowSequenceNumber: 0),
-            startPositionUs: startPositionUs,
-            requestedContentPositionUs: requestedContentPositionUs,
-            endPositionUs: endPositionUs,
-            durationUs: durationUs,
+            startPosition: .time(us: startPositionUs),
+            requestedContentPosition: .time(us: requestedContentPositionUs),
+            endPosition: .time(us: endPositionUs),
+            duration: .time(us: durationUs),
             isLastInTimelinePeriod: isLastInPeriod,
             isLastInTimelineWindow: isLastInWindow,
             isFinal: isFinal

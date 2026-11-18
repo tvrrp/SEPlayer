@@ -8,9 +8,25 @@
 import Foundation
 
 public enum Util {
+    /// Returns a normalized IETF BCP 47 language tag for `language`.
+    ///
+    /// ISO 639-2 codes become ISO 639-1 ones where there is one ("eng" becomes "en"), legacy codes are replaced
+    /// ("iw" becomes "he"), and the tag is lowercased with "-" separators.
+    ///
+    /// - Parameter language: A case-insensitive language code supported by `Locale`.
+    /// - Returns: The all-lowercase normalized code, or `nil` if the input was `nil`, or `language` lowercased if it
+    ///   isn't a valid language tag.
+    public static func normalizeLanguageCode(_ language: String?) -> String? {
+        guard let language else { return nil }
+        let tag = language.replacingOccurrences(of: "_", with: "-")
+        guard !tag.isEmpty, tag != "und" else { return language.lowercased() }
+        return NSLocale.canonicalLanguageIdentifier(from: tag).lowercased()
+    }
+
     // TODO: make indexUset as nil
     @inline(__always)
-    public static func binarySearchCeil<T: Comparable>(array: [T], value: T, inclusive: Bool, stayInBounds: Bool) -> Int {
+    public static func binarySearchCeil<C: RandomAccessCollection>(array: C, value: C.Element, inclusive: Bool, stayInBounds: Bool) -> Int
+        where C.Element: Comparable, C.Index == Int {
         var index = array.binarySearch(value: value)
 
         if index < 0 {
@@ -29,7 +45,8 @@ public enum Util {
 
     // TODO: make indexUset as nil
     @inline(__always)
-    public static func binarySearch<T: Comparable>(array: [T], value: T, inclusive: Bool, stayInBounds: Bool) -> Int {
+    public static func binarySearch<C: RandomAccessCollection>(array: C, value: C.Element, inclusive: Bool, stayInBounds: Bool) -> Int
+        where C.Element: Comparable, C.Index == Int {
         var index = array.binarySearch(value: value)
 
         if index < 0 {
@@ -169,7 +186,7 @@ private extension Int64 {
     }
 }
 
-private extension Array where Element: Comparable {
+private extension RandomAccessCollection where Element: Comparable, Index == Int {
     @inline(__always)
     func binarySearch(value: Element) -> Int {
         var low = 0

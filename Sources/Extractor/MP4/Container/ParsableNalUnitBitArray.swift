@@ -7,14 +7,14 @@
 
 import SEPlayerCommon
 
-struct ParsableNalUnitBitArray {
-    private let data: ByteBufferView
+struct ParsableNalUnitBitArray<Buffer: RandomAccessCollection<UInt8>> where Buffer.Index == Int {
+    private let data: Buffer
 
     private var byteLimit: Int
     private var byteOffset: Int
     private var bitOffset: Int
 
-    init(data: ByteBufferView, offset: Int = 0, limit: Int? = nil) throws {
+    init(data: Buffer, offset: Int = 0, limit: Int? = nil) throws {
         let end = limit ?? data.count
         guard offset >= 0, end <= data.count, offset <= end else {
             throw Error.invalidOffset
@@ -23,7 +23,7 @@ struct ParsableNalUnitBitArray {
         self.byteOffset = offset
         self.byteLimit = end
         bitOffset = .zero
-        try! assertValidOffset()
+        try assertValidOffset()
     }
 
     mutating func skipBit() throws {
@@ -32,7 +32,7 @@ struct ParsableNalUnitBitArray {
             bitOffset = 0
             byteOffset += shouldSkipByte(byteOffset + 1) ? 2 : 1
         }
-        try! assertValidOffset()
+        try assertValidOffset()
     }
 
     mutating func skipBits(_ count: Int) throws {
@@ -52,12 +52,12 @@ struct ParsableNalUnitBitArray {
             }
             i += 1
         }
-        try! assertValidOffset()
+        try assertValidOffset()
     }
 
     mutating func byteAlign() throws {
         if bitOffset > 0 {
-            try! skipBits(8 - bitOffset)
+            try skipBits(8 - bitOffset)
         }
     }
 
@@ -86,7 +86,7 @@ struct ParsableNalUnitBitArray {
     mutating func readBit() throws -> Bool {
         let mask = UInt8(0x80) >> bitOffset
         let value = (data[byteOffset] & mask) != 0
-        try! skipBit()
+        try skipBit()
         return value
     }
 
@@ -108,7 +108,7 @@ struct ParsableNalUnitBitArray {
             bitOffset = 0
             byteOffset += shouldSkipByte(byteOffset + 1) ? 2 : 1
         }
-        try! assertValidOffset()
+        try assertValidOffset()
         return value
     }
 
@@ -117,7 +117,7 @@ struct ParsableNalUnitBitArray {
         let savedBit  = bitOffset
 
         var zeros = 0
-        while byteOffset < byteLimit, try! !readBit() { zeros += 1 }
+        while byteOffset < byteLimit, try !readBit() { zeros += 1 }
 
         let hitLimit = byteOffset == byteLimit
         byteOffset = savedByte
@@ -127,26 +127,26 @@ struct ParsableNalUnitBitArray {
 
     @discardableResult
     mutating func readUnsignedExpGolombCodedInt() throws -> Int {
-        try! readExpGolombCodeNum()
+        try readExpGolombCodeNum()
     }
 
     @discardableResult
     mutating func readSignedExpGolombCodedInt() throws -> Int {
-        let num = try! readExpGolombCodeNum()
+        let num = try readExpGolombCodeNum()
         return (num % 2 == 0 ? -1 : 1) * ((num + 1) / 2)
     }
 
     private mutating func readExpGolombCodeNum() throws -> Int {
         var zeros = 0
-        while try! !readBit() { zeros += 1 }
-        let suffix = zeros > 0 ? try! readBits(zeros) : 0
+        while try !readBit() { zeros += 1 }
+        let suffix = zeros > 0 ? try readBits(zeros) : 0
         return (1 << zeros) - 1 + suffix
     }
 
     private func shouldSkipByte(_ index: Int) -> Bool {
         index >= 2 &&
         index < byteLimit &&
-        data[index]     == 0x03 &&
+        data[index] == 0x03 &&
         data[index - 1] == 0x00 &&
         data[index - 2] == 0x00
     }
@@ -157,6 +157,7 @@ struct ParsableNalUnitBitArray {
         }
     }
 
+    // TODO: mark as io error
     enum Error: Swift.Error {
         case invalidOffset
         case notEnoughBits(Int)

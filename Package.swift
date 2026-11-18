@@ -1,11 +1,10 @@
 // swift-tools-version: 6.2
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
 let package = Package(
     name: "SEPlayer",
-    platforms: [ .iOS(.v15)],
+    platforms: [.iOS(.v15), .macOS(.v12), .macCatalyst(.v15), .tvOS(.v15), .visionOS(.v1)],
     products: [
         .library(name: "SEPlayerCommon", targets: ["SEPlayerCommon"]),
         .library(name: "DataSource", targets: ["DataSource"]),
@@ -13,7 +12,10 @@ let package = Package(
         .library(name: "Decoder", targets: ["Decoder"]),
         .library(name: "SEPlayer", targets: ["SEPlayer"]),
     ],
-    dependencies: [],
+    traits: createExtractorTraits(),
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-collections.git", .upToNextMajor(from: "1.6.0")),
+    ],
     targets: [
         .target(
             name: "SEPlayerCommon",
@@ -26,15 +28,20 @@ let package = Package(
             name: "DataSource",
             dependencies: [
                 "SEPlayerCommon",
+//                .product(name: "Atomics", package: "swift-atomics"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
+//                .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
+//                .enableUpcomingFeature("MemberImportVisibility"),
+//                .enableUpcomingFeature("ExistentialAny")
             ]
         ),
         .target(
             name: "Extractor",
             dependencies: [
                 "SEPlayerCommon",
+                .product(name: "OrderedCollections", package: "swift-collections")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
@@ -47,6 +54,7 @@ let package = Package(
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
+//                .enableUpcomingFeature("MemberImportVisibility"),
             ]
         ),
         .target(
@@ -59,7 +67,8 @@ let package = Package(
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
-                .enableExperimentalFeature("Lifetimes")
+                .enableExperimentalFeature("Lifetimes"),
+//                .enableUpcomingFeature("MemberImportVisibility"),
             ]
         ),
         .testTarget(
@@ -76,3 +85,20 @@ let package = Package(
         )
     ]
 )
+
+func createExtractorTraits() -> Set<Trait> {
+    let extractors = [
+        "ExtractorMP4",
+        "ExtractorFMP4",
+        "ExtractorTS",
+    ]
+
+    var traits: Set<Trait> = .init(
+        extractors.map {
+            Trait.trait(name: $0)
+        }
+    )
+    traits.insert(.default(enabledTraits: .init(extractors)))
+
+    return traits
+}

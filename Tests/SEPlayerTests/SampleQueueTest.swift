@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 03.11.2025.
 //
 
+import CoreMedia
 import Testing
 @testable import SEPlayer
 
@@ -15,11 +16,13 @@ class SampleQueueTest {
     private lazy var format2 = buildFormat(id: "2")
     private lazy var format1Copy = buildFormat(id: "1")
     private lazy var formatSpliced = buildFormat(id: "spliced")
-    private let formatSyncSampleOnly1 = Format.Builder().setId("sync1").setSampleMimeType(.audioRAW).build()
-    private let formatSyncSampleOnly2 = Format.Builder().setId("sync2").setSampleMimeType(.audioRAW).build()
+    private let formatSyncSampleOnly1 = Format.Builder().setId("sync1").setSampleMimeType(.audioRAW)
+        .setInitializationData(FakeInitializationData()).build()
+    private let formatSyncSampleOnly2 = Format.Builder().setId("sync2").setSampleMimeType(.audioRAW)
+        .setInitializationData(FakeInitializationData()).build()
 
     private lazy var dataCapacity = allocationSize * 10
-    private lazy var data = TestUtil.buildTestData(lenght: dataCapacity)
+    private lazy var data = TestUtil.buildTestData(length: dataCapacity)
 
     private lazy var sampleSizes: [Int] = [
         allocationSize - 1,
@@ -61,14 +64,47 @@ class SampleQueueTest {
     
     private let closeToCapacitySize = SampleQueue.sampleCapacityIncrement - 1
 
-    private let allocator: Allocator
     private var sampleQueue: SampleQueue
-    private let inputBuffer: DecoderInputBuffer
+    private let inputBuffer: TestInputBuffer
 
-    init() {
-        allocator = DefaultAllocator(trimOnReset: false, individualAllocationSize: allocationSize)
-        sampleQueue = SampleQueue(queue: playerSyncQueue, allocator: allocator)
-        inputBuffer = DecoderInputBuffer(bufferReplacementMode: .enabled)
+    init() throws {
+        sampleQueue = try SampleQueue(queue: playerSyncQueue)
+        inputBuffer = TestInputBuffer()
+    }
+
+    @Test
+    func failedRecoveryAndOrdinarySeeksPreserveAdvancedCursor() throws {
+        try writeTestData()
+        sampleQueue.skip(count: 3)
+        let original = sampleQueue.getReadIndex()
+        #expect(sampleQueue.seekWithinBuffer(to: CMTime(value: -1, timescale: 1)) == .unavailable)
+        #expect(sampleQueue.getReadIndex() == original)
+        #expect(!sampleQueue.seek(time: CMTime(value: 100, timescale: 1), allowTimeBeyondBuffer: false))
+        #expect(sampleQueue.getReadIndex() == original)
+        #expect(!sampleQueue.seek(to: -1))
+        #expect(sampleQueue.getReadIndex() == original)
+    }
+
+    @Test
+    func recoverySeekRestoresVideoDecodePointAndFormat() throws {
+        try writeTestData()
+        sampleQueue.skip(count: sampleTimestamps.count)
+        let result = sampleQueue.seekWithinBuffer(to: CMTime(value: 6500, timescale: 1_000_000))
+        #expect(result == .success(startPosition: CMTime(value: 4000, timescale: 1_000_000)))
+        try assertReadFormat(formatRequired: false, format: format2)
+        #expect(sampleQueue.getReadIndex() == dataSecondKeyframeIndex)
+    }
+
+    @Test
+    func recoverySeekIsRepeatableAndRetainsPacketBeforePlayhead() throws {
+        try writeSyncSamplesOnlyTestData()
+        sampleQueue.skip(count: sampleTimestamps.count)
+        for _ in 0..<2 {
+            let result = sampleQueue.seekWithinBuffer(to: CMTime(value: 6500, timescale: 1_000_000))
+            #expect(result == .success(startPosition: CMTime(value: 6000, timescale: 1_000_000)))
+            #expect(sampleQueue.getReadIndex() == 6)
+            sampleQueue.skip(count: 2)
+        }
     }
 
     @Test
@@ -105,14 +141,6 @@ class SampleQueueTest {
         }
         
         try assertReadNothing(formatRequired: false)
-    }
-    
-    @Test
-    func resetReleasesAllocations() throws {
-        try writeTestData()
-        assertAllocationCount(count: 10)
-        sampleQueue.reset()
-        assertAllocationCount(count: 0)
     }
     
     @Test
@@ -206,7 +234,6 @@ class SampleQueueTest {
     @Test
     func readSingleSamples() throws {
         try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
-        assertAllocationCount(count: 1)
         
         // Nothing to read without sample metadata
         try assertNoSamplesToRead(endFormat: nil)
@@ -224,11 +251,7 @@ class SampleQueueTest {
         try assertReadFormat(formatRequired: true, format: format1)
         // Otherwise should read the sample.
         try assertReadSample(timeUs: 1000, isKeyFrame: true, sampleData: data, offset: 0, length: allocationSize)
-        // Allocation should still be held.
-        assertAllocationCount(count: 1)
-        sampleQueue.discardToRead()
-        // The allocation should have been released.
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToRead()
         
         // Nothing to read.
         try assertNoSamplesToRead(endFormat: format1)
@@ -241,12 +264,7 @@ class SampleQueueTest {
         try assertReadFormat(formatRequired: true, format: format1)
         // Try reading the sample
         try assertReadSample(timeUs: 2000, isKeyFrame: false, sampleData: data, offset: 0, length: allocationSize - 1)
-        // Allocation should still be held.
-        assertAllocationCount(count: 1)
-        sampleQueue.discardToRead()
-        // The last byte written to the sample queue may belong to a sample whose metadata has yet to be
-        // written, so an allocation should still be held.
-        assertAllocationCount(count: 1)
+        try sampleQueue.discardToRead()
         
         // Write metadata for a third sample containing the remaining byte.
         sampleQueue.sampleMetadata(time: 3000, flags: [], size: 1, offset: 0)
@@ -255,10 +273,7 @@ class SampleQueueTest {
         try assertReadFormat(formatRequired: true, format: format1)
         // Try reading the sample
         try assertReadSample(timeUs: 3000, isKeyFrame: false, sampleData: data, offset: allocationSize - 1, length: 1)
-        // Allocation should still be held.
-        assertAllocationCount(count: 1)
-        sampleQueue.discardToRead()
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToRead()
     }
     
     @Test
@@ -267,39 +282,28 @@ class SampleQueueTest {
         sampleQueue.setFormat(format1)
         sampleQueue.sampleMetadata(time: 1000, flags: .keyframe, size: allocationSize, offset: 0)
         
-        assertAllocationCount(count: 1)
         // If formatRequired, should read the format rather than the sample.
         try assertReadFormat(formatRequired: true, format: format1)
         try assertReadLastSample(timeUs: 1000, isKeyFrame: true, sampleData: data, offset: 0, length: allocationSize)
         
-        // Allocation should still be held.
-        assertAllocationCount(count: 1)
-        sampleQueue.discardToRead()
-        // The allocation should have been released.
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToRead()
     }
     
     @Test
     func readMultiSamples() throws {
         try writeTestData()
         #expect(sampleQueue.getLargestQueuedTimestamp() == sampleTimestamps.last)
-        assertAllocationCount(count: 10)
         try assertReadTestData()
-        assertAllocationCount(count: 10)
-        sampleQueue.discardToEnd()
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToEnd()
     }
     
     @Test
     func readMultiSamplesTwice() throws {
         try writeTestData()
         try writeTestData()
-        assertAllocationCount(count: 20)
         try assertReadTestData(startFormat: format2)
         try assertReadTestData(startFormat: format2)
-        assertAllocationCount(count: 20)
-        sampleQueue.discardToEnd()
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToEnd()
     }
     
     @Test
@@ -308,10 +312,8 @@ class SampleQueueTest {
         try assertReadTestData()
         #expect(sampleQueue.getFirstIndex() == 0)
         #expect(sampleQueue.getReadIndex() == 8)
-        assertAllocationCount(count: 10)
 
         sampleQueue.seek(to: 0)
-        assertAllocationCount(count: 10)
         // Read again.
         #expect(sampleQueue.getFirstIndex() == 0)
         #expect(sampleQueue.getReadIndex() == 0)
@@ -335,13 +337,11 @@ class SampleQueueTest {
     func seekAfterDiscard() throws {
         try writeTestData()
         try assertReadTestData()
-        sampleQueue.discardToRead()
+        try sampleQueue.discardToRead()
         #expect(sampleQueue.getFirstIndex() == 8)
         #expect(sampleQueue.getReadIndex() == 8)
-        assertAllocationCount(count: 0)
         
         sampleQueue.seek(to: 0)
-        assertAllocationCount(count: 0)
         // Can't read again.
         #expect(sampleQueue.getFirstIndex() == 8)
         #expect(sampleQueue.getReadIndex() == 8)
@@ -352,9 +352,7 @@ class SampleQueueTest {
     func skipToEnd() throws {
         try writeTestData()
         sampleQueue.skip(count: sampleQueue.getSkipCount(time: .max, allowEndOfQueue: true))
-        assertAllocationCount(count: 10)
-        sampleQueue.discardToRead()
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToRead()
         // Despite skipping all samples, we should still read the last format, since this is the
         // expected format for a subsequent sample.
         try assertReadFormat(formatRequired: false, format: format2)
@@ -367,10 +365,7 @@ class SampleQueueTest {
         sampleQueue.setFormat(format1)
         try sampleQueue.sampleData(data: data, length: allocationSize, isolation: TestableSyncPlayerActor.shared)
         sampleQueue.skip(count: sampleQueue.getSkipCount(time: .max, allowEndOfQueue: true))
-        assertAllocationCount(count: 1)
-        sampleQueue.discardToRead()
-        // Skipping shouldn't discard data that may belong to a sample whose metadata has yet to be written.
-        assertAllocationCount(count: 1)
+        try sampleQueue.discardToRead()
         // We should be able to read the format.
         try assertReadFormat(formatRequired: false, format: format1)
         // Once the format has been read, there's nothing else to read.
@@ -380,9 +375,7 @@ class SampleQueueTest {
         // Once the metadata has been written, check the sample can be read as expected.
         try assertReadSample(timeUs: 0, isKeyFrame: true, sampleData: data, offset: 0, length: allocationSize)
         try assertNoSamplesToRead(endFormat: format1)
-        assertAllocationCount(count: 1)
-        sampleQueue.discardToEnd()
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardToEnd()
     }
 
     @Test
@@ -705,10 +698,9 @@ class SampleQueueTest {
         try writeTestData()
 
         // Should discard everything.
-        sampleQueue.discardToEnd()
+        try sampleQueue.discardToEnd()
         #expect(sampleQueue.getFirstIndex() == 8)
         #expect(sampleQueue.getReadIndex() == 8)
-        assertAllocationCount(count: 0)
 
         // We should still be able to read the upstream format.
         try assertReadFormat(formatRequired: false, format: format2)
@@ -726,7 +718,6 @@ class SampleQueueTest {
         try sampleQueue.discard(to: #require(sampleTimestamps.last), to: false, stopAtReadPosition: true)
         #expect(sampleQueue.getFirstIndex() == 0)
         #expect(sampleQueue.getReadIndex() == 0)
-        assertAllocationCount(count: 10)
 
         // Read the first sample.
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 1)
@@ -735,19 +726,16 @@ class SampleQueueTest {
         sampleQueue.discard(to: sampleTimestamps[1] - 1, to: false, stopAtReadPosition: true)
         #expect(sampleQueue.getFirstIndex() == 0)
         #expect(sampleQueue.getReadIndex() == 1)
-        assertAllocationCount(count: 10)
 
         // Should discard the read sample.
         sampleQueue.discard(to: sampleTimestamps[1], to: false, stopAtReadPosition: true)
         #expect(sampleQueue.getFirstIndex() == 1)
         #expect(sampleQueue.getReadIndex() == 1)
-        assertAllocationCount(count: 9)
 
         // Still shouldn't discard anything.
         try sampleQueue.discard(to: #require(sampleTimestamps.last), to: false, stopAtReadPosition: true)
         #expect(sampleQueue.getFirstIndex() == 1)
         #expect(sampleQueue.getReadIndex() == 1)
-        assertAllocationCount(count: 9)
 
         // Should be able to read the remaining samples.
         try assertReadTestData(startFormat: format1, firstSampleIndex: 1, sampleCount: 7)
@@ -758,13 +746,11 @@ class SampleQueueTest {
         try sampleQueue.discard(to: #require(sampleTimestamps.last) - 1, to: false, stopAtReadPosition: true)
         #expect(sampleQueue.getFirstIndex() == 6)
         #expect(sampleQueue.getReadIndex() == 8)
-        assertAllocationCount(count: 3)
 
         // Should discard up to the last sample.
         try sampleQueue.discard(to: #require(sampleTimestamps.last), to: false, stopAtReadPosition: true)
         #expect(sampleQueue.getFirstIndex() == 7)
         #expect(sampleQueue.getReadIndex() == 8)
-        assertAllocationCount(count: 1)
     }
 
     @Test
@@ -817,13 +803,11 @@ class SampleQueueTest {
         sampleQueue.discard(to: sampleTimestamps[1] - 1, to: false, stopAtReadPosition: false)
         #expect(sampleQueue.getFirstIndex() == 0)
         #expect(sampleQueue.getReadIndex() == 0)
-        assertAllocationCount(count: 10)
 
         // Should discard the first sample.
         sampleQueue.discard(to: sampleTimestamps[1], to: false, stopAtReadPosition: false)
         #expect(sampleQueue.getFirstIndex() == 1)
         #expect(sampleQueue.getReadIndex() == 1)
-        assertAllocationCount(count: 9)
 
         // Should be able to read the remaining samples.
         try assertReadTestData(startFormat: format1, firstSampleIndex: 1, sampleCount: 7)
@@ -833,23 +817,14 @@ class SampleQueueTest {
     func discardUpstreamFrom() throws {
         try writeTestData()
         sampleQueue.discardUpstreamFrom(time: 8000)
-        assertAllocationCount(count: 10)
         sampleQueue.discardUpstreamFrom(time: 7000)
-        assertAllocationCount(count: 9)
         sampleQueue.discardUpstreamFrom(time: 6000)
-        assertAllocationCount(count: 7)
         sampleQueue.discardUpstreamFrom(time: 5000)
-        assertAllocationCount(count: 5)
         sampleQueue.discardUpstreamFrom(time: 4000)
-        assertAllocationCount(count: 4)
         sampleQueue.discardUpstreamFrom(time: 3000)
-        assertAllocationCount(count: 3)
         sampleQueue.discardUpstreamFrom(time: 2000)
-        assertAllocationCount(count: 2)
         sampleQueue.discardUpstreamFrom(time: 1000)
-        assertAllocationCount(count: 1)
         sampleQueue.discardUpstreamFrom(time: 0)
-        assertAllocationCount(count: 0)
 
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
@@ -859,9 +834,7 @@ class SampleQueueTest {
     func discardUpstreamFromMulti() throws {
         try writeTestData()
         sampleQueue.discardUpstreamFrom(time: 4000)
-        assertAllocationCount(count: 4)
         sampleQueue.discardUpstreamFrom(time: 0)
-        assertAllocationCount(count: 0)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
     }
@@ -870,11 +843,8 @@ class SampleQueueTest {
     func discardUpstreamFromNonSampleTimestamps() throws {
         try writeTestData()
         sampleQueue.discardUpstreamFrom(time: 3500)
-        assertAllocationCount(count: 4)
         sampleQueue.discardUpstreamFrom(time: 500)
-        assertAllocationCount(count: 1)
         sampleQueue.discardUpstreamFrom(time: 0)
-        assertAllocationCount(count: 0)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
     }
@@ -883,7 +853,6 @@ class SampleQueueTest {
     func discardUpstreamFromBeforeRead() throws {
         try writeTestData()
         sampleQueue.discardUpstreamFrom(time: 4000)
-        assertAllocationCount(count: 4)
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 4)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
@@ -894,19 +863,12 @@ class SampleQueueTest {
         try writeTestData()
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 3)
         sampleQueue.discardUpstreamFrom(time: 8000)
-        assertAllocationCount(count: 10)
-        sampleQueue.discardToRead()
-        assertAllocationCount(count: 7)
+        try sampleQueue.discardToRead()
         sampleQueue.discardUpstreamFrom(time: 7000)
-        assertAllocationCount(count: 6)
         sampleQueue.discardUpstreamFrom(time: 6000)
-        assertAllocationCount(count: 4)
         sampleQueue.discardUpstreamFrom(time: 5000)
-        assertAllocationCount(count: 2)
         sampleQueue.discardUpstreamFrom(time: 4000)
-        assertAllocationCount(count: 1)
         sampleQueue.discardUpstreamFrom(time: 3000)
-        assertAllocationCount(count: 0)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
     }
@@ -951,24 +913,15 @@ class SampleQueueTest {
     @Test
     func discardUpstream() throws {
         try writeTestData()
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 8)
-        assertAllocationCount(count: 10)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 7)
-        assertAllocationCount(count: 9)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 6)
-        assertAllocationCount(count: 7)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 5)
-        assertAllocationCount(count: 5)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
-        assertAllocationCount(count: 4)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 3)
-        assertAllocationCount(count: 3)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 2)
-        assertAllocationCount(count: 2)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 1)
-        assertAllocationCount(count: 1)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 8)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 7)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 6)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 5)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 3)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 2)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 1)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
     }
@@ -976,10 +929,8 @@ class SampleQueueTest {
     @Test
     func discardUpstreamMulti() throws {
         try writeTestData()
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
-        assertAllocationCount(count: 4)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
     }
@@ -987,8 +938,7 @@ class SampleQueueTest {
     @Test
     func discardUpstreamBeforeRead() throws {
         try writeTestData()
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
-        assertAllocationCount(count: 4)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 4)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
@@ -998,20 +948,13 @@ class SampleQueueTest {
     func discardUpstreamAfterRead() throws {
         try writeTestData()
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 3)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 8)
-        assertAllocationCount(count: 10)
-        sampleQueue.discardToRead()
-        assertAllocationCount(count: 7)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 7)
-        assertAllocationCount(count: 6)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 6)
-        assertAllocationCount(count: 4)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 5)
-        assertAllocationCount(count: 2)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
-        assertAllocationCount(count: 1)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 3)
-        assertAllocationCount(count: 0)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 8)
+        try sampleQueue.discardToRead()
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 7)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 6)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 5)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 4)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 3)
         try assertReadFormat(formatRequired: false, format: format2)
         try assertNoSamplesToRead(endFormat: format2)
     }
@@ -1021,10 +964,10 @@ class SampleQueueTest {
         try writeTestData()
         let lastTimestamp = try #require(sampleTimestamps.last)
         #expect(sampleQueue.getLargestQueuedTimestamp() == lastTimestamp)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: sampleTimestamps.count - 1)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: sampleTimestamps.count - 1)
         // Discarding from upstream should reduce the largest timestamp.
         #expect(sampleQueue.getLargestQueuedTimestamp() == sampleTimestamps[sampleTimestamps.count - 2])
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
         // Discarding everything from upstream without reading should unset the largest timestamp.
         #expect(sampleQueue.getLargestQueuedTimestamp() == Int64.min)
     }
@@ -1041,14 +984,14 @@ class SampleQueueTest {
             sampleFlags: sampleFlags
         )
         #expect(sampleQueue.getLargestQueuedTimestamp() == 7000)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: sampleTimestamps.count - 2)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: sampleTimestamps.count - 2)
         // Discarding the last two samples should not change the largest timestamp, due to the decode
         // ordering of the timestamps.
         #expect(sampleQueue.getLargestQueuedTimestamp() == 7000)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: sampleTimestamps.count - 3)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: sampleTimestamps.count - 3)
         // Once a third sample is discarded, the largest timestamp should have changed.
         #expect(sampleQueue.getLargestQueuedTimestamp() == 4000)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 0)
         // Discarding everything from upstream without reading should unset the largest timestamp.
         #expect(sampleQueue.getLargestQueuedTimestamp() == Int64.min)
     }
@@ -1087,15 +1030,15 @@ class SampleQueueTest {
         // Discarding shouldn't change the read timestamp.
         try writeTestData()
         #expect(sampleQueue.getLargestReadTimestamp() == Int64.min)
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 5)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 5)
         #expect(sampleQueue.getLargestReadTimestamp() == Int64.min)
 
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 3)
         #expect(sampleQueue.getLargestReadTimestamp() == sampleTimestamps[2])
 
-        sampleQueue.discardUpstreamSamples(discardFromIndex: 3)
+        try sampleQueue.discardUpstreamSamples(discardFromIndex: 3)
         #expect(sampleQueue.getLargestReadTimestamp() == sampleTimestamps[2])
-        sampleQueue.discardToRead()
+        try sampleQueue.discardToRead()
         #expect(sampleQueue.getLargestReadTimestamp() == sampleTimestamps[2])
     }
 
@@ -1123,7 +1066,7 @@ class SampleQueueTest {
         // sample and then the end of stream.
         try assertReadFormat(
             formatRequired: false,
-            format: format2.buildUpon().setSubsampleOffsetUs(sampleOffsetUs).build()
+            format: format2.buildUpon().setSubsampleOffset(.time(us: sampleOffsetUs)).build()
         )
         try assertReadSample(
             timeUs: unadjustedTimestampUs + sampleOffsetUs,
@@ -1138,10 +1081,9 @@ class SampleQueueTest {
     @Test
     func adjustUpstreamFormat() throws {
         let label = "label"
-        sampleQueue = MockSampleQueue(
+        sampleQueue = try MockSampleQueue(
             label: .usual(label: label),
-            queue: playerSyncQueue,
-            allocator: allocator
+            queue: playerSyncQueue
         )
 
         sampleQueue.setFormat(format1)
@@ -1155,10 +1097,9 @@ class SampleQueueTest {
     @Test
     func invalidateUpstreamFormatAdjustment() throws {
         let label = AtomicReference<String>("label1")
-        sampleQueue = MockSampleQueue(
+        sampleQueue = try MockSampleQueue(
             label: .protected(protected: label),
-            queue: playerSyncQueue,
-            allocator: allocator
+            queue: playerSyncQueue
         )
 
         sampleQueue.setFormat(format1)
@@ -1246,7 +1187,7 @@ class SampleQueueTest {
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 4, sampleOffsetUs: sampleOffsetUs)
         try assertReadFormat(
             formatRequired: false,
-            format: formatSpliced.buildUpon().setSubsampleOffsetUs(sampleOffsetUs).build()
+            format: formatSpliced.buildUpon().setSubsampleOffset(.time(us: sampleOffsetUs)).build()
         )
         try assertReadSample(
             timeUs: spliceSampleTimeUs + sampleOffsetUs,
@@ -1316,7 +1257,7 @@ class SampleQueueTest {
         for _ in 0..<sampleCount {
             try writeSample(data: ByteBuffer(), timestampUs: 0, flags: .keyframe)
         }
-        sampleQueue.discardToEnd()
+        try sampleQueue.discardToEnd()
     }
 
     private func assertReadSyncSampleOnlyTestData(
@@ -1455,7 +1396,7 @@ class SampleQueueTest {
         length: Int
     ) throws {
         // Check that peek whilst omitting data yields the expected values.
-        let flagsOnlyBuffer = DecoderInputBuffer.noDataBuffer()
+        let flagsOnlyBuffer = TestInputBuffer()
         var result = try sampleQueue.read(
             buffer: flagsOnlyBuffer,
             readFlags: [.omitSampleData, .peek],
@@ -1490,7 +1431,7 @@ class SampleQueueTest {
         length: Int
     ) throws {
         // Check that peek whilst omitting data yields the expected values.
-        let flagsOnlyBuffer = DecoderInputBuffer.noDataBuffer()
+        let flagsOnlyBuffer = TestInputBuffer()
         var result = try sampleQueue.read(
             buffer: flagsOnlyBuffer,
             readFlags: [.omitSampleData, .peek],
@@ -1510,8 +1451,8 @@ class SampleQueueTest {
     }
 
     private func assertSampleBufferReadResult(
-        inputBuffer: DecoderInputBuffer,
-        result: SampleStreamReadResult,
+        inputBuffer: TestInputBuffer,
+        result: TestReadResult,
         timeUs: Int64,
         isKeyFrame: Bool,
         isLastSample: Bool
@@ -1523,7 +1464,7 @@ class SampleQueueTest {
     }
 
     private func assertSampleBufferReadResult(
-        result: SampleStreamReadResult,
+        result: TestReadResult,
         timeUs: Int64,
         isKeyFrame: Bool,
         isLastSample: Bool,
@@ -1539,10 +1480,6 @@ class SampleQueueTest {
         for (index, byte) in sampleData.readableBytesView[range].enumerated() {
             #expect(buffer[index] == byte)
         }
-    }
-
-    private func assertAllocationCount(count: Int) {
-        #expect(allocator.totalBytesAllocated == allocationSize * count)
     }
 
     private func assertInputBufferContainsNoSampleData() {
@@ -1565,12 +1502,13 @@ class SampleQueueTest {
         if format == nil || sampleOffsetUs == 0 {
             format
         } else {
-            format?.buildUpon().setSubsampleOffsetUs(sampleOffsetUs).build()
+            format?.buildUpon().setSubsampleOffset(.time(us: sampleOffsetUs)).build()
         }
     }
 
     private func buildFormat(id: String) -> Format {
-        Format.Builder().setId(id).setSubsampleOffsetUs(0).build()
+        Format.Builder().setId(id).setSubsampleOffset(.zero)
+            .setInitializationData(FakeInitializationData()).build()
     }
 
     nonisolated static func copyWithLabel(format: Format, label: String) -> Format {
@@ -1586,10 +1524,10 @@ private final class MockSampleQueue: SampleQueue {
 
     let label: LabelVariant
 
-    init(label: LabelVariant, queue: Queue, allocator: Allocator) {
+    init(label: LabelVariant, queue: Queue) throws {
         self.label = label
 
-        super.init(queue: queue, allocator: allocator)
+        try super.init(queue: queue)
     }
 
     override func getAdjustedUpstreamFormat(_ format: Format) -> Format {
@@ -1618,5 +1556,133 @@ private final class AtomicReference<Value> {
     init(_ value: Value) {
         self._value = value
         lock = UnfairLock()
+    }
+}
+
+// MARK: - The tests' view of the queue
+
+/// What a read hands out, without the sample buffer itself.
+enum TestReadResult: Equatable {
+    case nothingRead
+    case didReadFormat(Format)
+    case didReadBuffer
+}
+
+/// Receives what a read hands out: the time, the flags and, unless omitted, the data.
+final class TestInputBuffer {
+    private(set) var timeUs: Int64 = 0
+    private(set) var flags: SampleFlags = []
+    private var data: [UInt8]?
+
+    var size: Int { data?.count ?? 0 }
+
+    func clear() {
+        timeUs = 0
+        flags = []
+        data = nil
+    }
+
+    struct NoDataError: Error {}
+
+    func dequeue() throws -> [UInt8] {
+        guard let data else { throw NoDataError() }
+        return data
+    }
+
+    fileprivate func fill(from sampleBuffer: CMSampleBuffer) throws {
+        timeUs = sampleBuffer.presentationTimeStamp.isNumeric ? sampleBuffer.presentationTimeStamp.microseconds : 0
+        flags = sampleBuffer.flags
+        if let dataBuffer = sampleBuffer.dataBuffer {
+            var bytes = [UInt8](repeating: 0, count: dataBuffer.dataLength)
+            try bytes.withUnsafeMutableBytes { try dataBuffer.copyDataBytes(to: $0) }
+            data = bytes
+        }
+    }
+}
+
+/// The queue in the units of the tests: microseconds, with `Int64.min` and `Int64.max` for
+/// negative and positive infinity, and sample data written from the start of a byte buffer.
+extension SampleQueue {
+    private func onQueue<T>(_ body: (isolated PlayerActor) throws -> T) rethrows -> T {
+        try playerSyncQueue.playerActor().assumeIsolated(body)
+    }
+
+    private static func time(_ us: Int64) -> CMTime {
+        switch us {
+        case .max: .positiveInfinity
+        case .min: .negativeInfinity
+        default: .from(microseconds: us)
+        }
+    }
+
+    private static func us(_ time: CMTime) -> Int64 {
+        if time == .positiveInfinity { return .max }
+        if time == .negativeInfinity || !time.isNumeric { return .min }
+        return time.microseconds
+    }
+
+    func sampleData(data: ByteBuffer, length: Int, isolation: TestableSyncPlayerActor) throws {
+        let bytes = Array(data.readableBytesView.prefix(length))
+        // Writing nothing writes nothing; a block buffer can't be empty.
+        guard !bytes.isEmpty else { return }
+        let blockBuffer = try CMBlockBuffer(length: bytes.count, flags: .assureMemoryNow)
+        try bytes.withUnsafeBytes { try blockBuffer.replaceDataBytes(with: $0) }
+        onQueue { _ in sampleData(data: blockBuffer) }
+    }
+
+    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int) {
+        let time = Self.time(time)
+        try! onQueue { _ in
+            try sampleMetadata(
+                time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
+                flags: flags,
+                range: offset..<(offset + size)
+            )
+        }
+    }
+
+    func read(buffer: TestInputBuffer, readFlags: ReadFlags, loadingFinished: Bool) throws -> TestReadResult {
+        switch try read(readFlags: readFlags, loadingFinished: loadingFinished) {
+        case .nothingRead:
+            return .nothingRead
+        case let .didReadFormat(format):
+            return .didReadFormat(format)
+        case let .didReadBuffer(sampleBuffer):
+            try buffer.fill(from: sampleBuffer)
+            return .didReadBuffer
+        }
+    }
+
+    @discardableResult
+    func seek(to timeUs: Int64, allowTimeBeyondBuffer: Bool) -> Bool {
+        seek(time: Self.time(timeUs), allowTimeBeyondBuffer: allowTimeBeyondBuffer)
+    }
+
+    func getSkipCount(time: Int64, allowEndOfQueue: Bool) -> Int {
+        getSkipCount(time: Self.time(time), allowEndOfQueue: allowEndOfQueue)
+    }
+
+    func discard(to timeUs: Int64, to keyframe: Bool, stopAtReadPosition: Bool) {
+        try! discard(toTime: Self.time(timeUs), to: keyframe, stopAtReadPosition: stopAtReadPosition)
+    }
+
+    func discardUpstreamFrom(time: Int64) {
+        try! discardUpstreamFrom(time: Self.time(time))
+    }
+
+    func getLargestQueuedTimestamp() -> Int64 {
+        Self.us(getLargestQueuedTimestamp())
+    }
+
+    func getLargestReadTimestamp() -> Int64 {
+        Self.us(getLargestReadTimestamp())
+    }
+
+    func setStartTime(_ timeUs: Int64) {
+        setStartTime(Self.time(timeUs))
+    }
+
+    func setSampleOffsetTime(_ sampleOffsetUs: Int64) {
+        setSampleOffsetTime(Self.time(sampleOffsetUs))
     }
 }

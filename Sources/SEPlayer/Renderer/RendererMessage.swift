@@ -11,9 +11,12 @@ import SEPlayerCommon
 public enum RendererMessage {
     case requestMediaDataWhenReady(queue: Queue, block: () -> Void)
     case stopRequestingMediaData
-    case setVideoOutput(_ output: VideoSampleBufferRenderer)
-    case removeVideoOutput(_ output: VideoSampleBufferRenderer)
-    case setControlTimebase(_ timebase: CMTimebase?)
+    case setVideoOutput(_ output: any VideoOutput)
+    case removeVideoOutput(_ output: any VideoOutput)
+    /// What the renderer plays to; `nil` detaches it.
+    case setTimeSource(_ source: RendererTimeSource?)
     case setAudioVolume(_ volume: Float)
     case setAudioIsMuted(_ isMuted: Bool)
+    /// Scoped to recovery; ordinary disable/release still removes the displayed image.
+    case setPreservesDisplayedImageOnDisable(Bool)
 }

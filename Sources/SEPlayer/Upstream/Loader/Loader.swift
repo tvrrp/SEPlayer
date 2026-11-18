@@ -6,10 +6,11 @@
 //
 
 import Dispatch
+import Foundation
 import SEPlayerCommon
 
 public protocol Loadable {
-    func load(isolation: isolated any Actor) async throws
+    func load(_ isolation: isolated any Actor) async throws
 }
 
 public final class Loader {
@@ -31,26 +32,29 @@ public final class Loader {
         fatalError = nil
     }
 
+    /// Starts loading.
+    ///
+    /// - Returns: When the load started.
     @discardableResult
     public func startLoading<T: Loadable>(
         loadable: T,
         callback: any Callback<T>,
         defaultMinRetryCount: Int
-    ) -> Int64 {
+    ) -> DispatchTime {
         assert(currentTask == nil)
         fatalError = nil
-        let startTimeMs = DispatchTime.now()
+        let startTime = DispatchTime.now()
         let loadTask = LoadTask(
             workQueue: workQueue,
             loadQueue: loadQueue,
             loadable: loadable,
             loadCallback: callback,
             defaultMinRetryCount: defaultMinRetryCount,
-            startTimeMs: startTimeMs
+            startTime: startTime
         )
         loadTask.loadDelegate = self
-        loadTask.start(delayMillis: 0)
-        return startTimeMs.milliseconds
+        loadTask.start(delay: nil)
+        return startTime
     }
 
     public func isLoading() -> Bool {
@@ -81,48 +85,40 @@ public final class Loader {
 
 public extension Loader {
     struct LoadErrorAction {
-        let type: RetryAction
-        let retryDelayMillis: Int64
+        public let type: RetryAction
+        /// The delay before the retry, or `nil` for the default delay: a second more for each error in a row, up to
+        /// five seconds.
+        public let retryDelay: DispatchTimeInterval?
 
-        var isRetry: Bool { type == .retry || type == .retryResetErrorCount }
+        public var isRetry: Bool { type == .retry || type == .retryResetErrorCount }
 
-        static var retry: LoadErrorAction {
-            LoadErrorAction.createRetryAction(
-                resetErrorCount: false,
-                retryDelayMillis: .timeUnset
-            )
+        public static var retry: LoadErrorAction {
+            LoadErrorAction.createRetryAction(resetErrorCount: false, retryDelay: nil)
         }
 
-        static var retryResetErrorCount: LoadErrorAction {
-            LoadErrorAction.createRetryAction(
-                resetErrorCount: true,
-                retryDelayMillis: .timeUnset
-            )
+        public static var retryResetErrorCount: LoadErrorAction {
+            LoadErrorAction.createRetryAction(resetErrorCount: true, retryDelay: nil)
         }
 
-        static var dontRetry: LoadErrorAction {
-            LoadErrorAction(
-                type: .dontRetry,
-                retryDelayMillis: .timeUnset
-            )
+        /// The load stops, but its error doesn't stop playback: the callback falls back to something else.
+        public static var dontRetry: LoadErrorAction {
+            LoadErrorAction(type: .dontRetry, retryDelay: nil)
         }
 
-        static var dontRetryFatal: LoadErrorAction {
-            LoadErrorAction(
-                type: .dontRetryFatal,
-                retryDelayMillis: .timeUnset
-            )
+        /// The load stops, and ``Loader/maybeThrowError(minRetryCount:)`` throws its error from now on.
+        public static var dontRetryFatal: LoadErrorAction {
+            LoadErrorAction(type: .dontRetryFatal, retryDelay: nil)
         }
 
-        public init(type: RetryAction, retryDelayMillis: Int64) {
+        public init(type: RetryAction, retryDelay: DispatchTimeInterval?) {
             self.type = type
-            self.retryDelayMillis = retryDelayMillis
+            self.retryDelay = retryDelay
         }
 
-        public static func createRetryAction(resetErrorCount: Bool, retryDelayMillis: Int64) -> LoadErrorAction {
+        public static func createRetryAction(resetErrorCount: Bool, retryDelay: DispatchTimeInterval?) -> LoadErrorAction {
             LoadErrorAction(
                 type: resetErrorCount ? .retryResetErrorCount : .retry,
-                retryDelayMillis: retryDelayMillis
+                retryDelay: retryDelay
             )
         }
     }
@@ -139,27 +135,25 @@ public extension Loader {
     protocol Callback<T>: AnyObject where T: Loadable {
         associatedtype T
 
-        func onLoadStarted(loadable: T, onTime: Int64, loadDurationMs: Int64, retryCount: Int)
-        func onLoadCompleted(loadable: T, onTime: Int64, loadDurationMs: Int64)
-        func onLoadCancelled(loadable: T, onTime: Int64, loadDurationMs: Int64, released: Bool)
-        func onLoadError(loadable: T, onTime: Int64, loadDurationMs: Int64, error: Error, errorCount: Int) -> Loader.LoadErrorAction
+        /// Called when the load, or a retry of it, starts.
+        func onLoadStarted(loadable: T, onTime: DispatchTime, loadDuration: DispatchTimeInterval, retryCount: Int)
+        /// Called when the load completed.
+        func onLoadCompleted(loadable: T, onTime: DispatchTime, loadDuration: DispatchTimeInterval)
+        /// Called when the load was cancelled, or the loader released.
+        func onLoadCancelled(loadable: T, onTime: DispatchTime, loadDuration: DispatchTimeInterval, released: Bool)
+        /// Called when the load failed.
+        ///
+        /// - Parameter loadDuration: How long since the load first started, retries included.
+        /// - Returns: Whether and when the load retries.
+        func onLoadError(
+            loadable: T,
+            onTime: DispatchTime,
+            loadDuration: DispatchTimeInterval,
+            error: Error,
+            errorCount: Int
+        ) -> Loader.LoadErrorAction
     }
 
-    enum RetryType {
-        case retry
-        case retryAndResetErrorCount
-        case dontRetry
-        case dontRetryFatal
-    }
-
-    struct LoaderErrorAction {
-        let type: RetryType
-        let retryDelayMillis: Int64
-
-        var isRetry: Bool {
-            type == .retry || type == .retryAndResetErrorCount
-        }
-    }
 }
 
 extension Loader: LoadDelegate {
@@ -188,14 +182,16 @@ private protocol LoadDelegate: AnyObject {
     func loadFatalError(error: Error)
 }
 
-private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
+/// One load, and its retries. Started, cancelled and told how it went on the work queue; it loads on the load queue.
+private final class LoadTask<T: Loadable>: AnyLoadTask {
     weak var loadDelegate: LoadDelegate?
     let defaultMinRetryCount: Int
 
     private let lock: UnfairLock
+    private let workQueue: Queue
     private let syncActor: PlayerActor
     private let loadable: T
-    private let startTimeMs: DispatchTime
+    private let startTime: DispatchTime
     private weak var loadCallback: (any Loader.Callback<T>)?
 
     private var currentTask: Task<Void, Never>?
@@ -203,6 +199,8 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
     private var errorCount = Int.zero
     private var canceled = false
     private var released = false
+    /// The start of a retry, waiting for its delay. Used on the work queue.
+    private var pendingStart: DispatchWorkItem?
 
     init(
         workQueue: Queue,
@@ -210,16 +208,15 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         loadable: T,
         loadCallback: any Loader.Callback<T>,
         defaultMinRetryCount: Int,
-        startTimeMs: DispatchTime
+        startTime: DispatchTime
     ) {
+        self.workQueue = workQueue
         self.syncActor = loadQueue.playerActor()
         self.loadable = loadable
         self.loadCallback = loadCallback
         self.defaultMinRetryCount = defaultMinRetryCount
-        self.startTimeMs = startTimeMs
+        self.startTime = startTime
         lock = UnfairLock()
-
-        super.init(queue: workQueue, looper: Looper.myLooper(for: workQueue))
     }
 
     func maybeThrowError(minRetryCount: Int) throws {
@@ -228,23 +225,31 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         }
     }
 
-    func start(delayMillis: Int64) {
+    func start(delay: DispatchTimeInterval?) {
         loadDelegate?.didStartTask(self)
-        if delayMillis > 0 {
-            sendEmptyMessageDelayed(LoadMessageKind.start, delayMs: Int(delayMillis))
+        if let delay, delay.totalMilliseconds > 0 {
+            let start = DispatchWorkItem { [self] in
+                pendingStart = nil
+                guard lock.withLock({ !released }) else { return }
+                execute()
+            }
+            pendingStart = start
+            workQueue.queue.asyncAfter(deadline: .now() + delay, execute: start)
         } else {
             execute()
         }
     }
 
     func cancel(released: Bool) {
+        SELogger.debug(.loader, "Canceling \(T.self)\(released ? ", releasing the loader" : "")")
         lock.withLock { self.released = released }
         currentError = nil
-        if hasMessage(LoadMessageKind.start) {
+        if let pendingStart {
             canceled = true
-            removeMessages(LoadMessageKind.start)
+            pendingStart.cancel()
+            self.pendingStart = nil
             if !released {
-                sendEmptyMessage(LoadMessageKind.finish)
+                post(.finish)
             }
         } else {
             lock.withLock { canceled = true }
@@ -253,25 +258,25 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
 
         if released {
             loadDelegate?.loadFinished()
-            let nowMs = DispatchTime.now()
+            let now = DispatchTime.now()
             loadCallback?.onLoadCancelled(
                 loadable: loadable,
-                onTime: nowMs.milliseconds,
-                loadDurationMs: startTimeMs.advanced(by: .nanoseconds(Int(nowMs.uptimeNanoseconds))).milliseconds,
+                onTime: now,
+                loadDuration: startTime.distance(to: now),
                 released: true
             )
         }
     }
 
-    func run(isolation: isolated PlayerActor) async {
+    func run(_ isolation: isolated PlayerActor) async {
         do {
             if lock.withLock({ canceled == false }) {
-                try await loadable.load(isolation: isolation)
+                try await loadable.load(isolation)
             }
         } catch {
             if !Task.isCancelled {
                 if lock.withLock({ released == false }) {
-                    obtainMessage(what: LoadMessageKind.ioError(error)).sendToTarget()
+                    post(.ioError(error))
                 }
 
                 return
@@ -279,79 +284,82 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
         }
 
         if lock.withLock({ self.released == false }) {
-            sendEmptyMessage(LoadMessageKind.finish)
+            post(.finish)
         }
     }
 
-    override func handleMessage(_ msg: Message) {
-        guard lock.withLock({ !released }), let what = msg.what as? LoadMessageKind else { return }
+    /// Handles `event` on the work queue, after the work posted there before it.
+    private func post(_ event: LoadEvent) {
+        workQueue.justDispatch { [self] in handle(event) }
+    }
 
-        if what == .start {
-            execute(); return
-        }
+    private func handle(_ event: LoadEvent) {
+        guard lock.withLock({ !released }) else { return }
 
         loadDelegate?.loadFinished()
-        let nowMs = DispatchTime.now()
-        let durationMs = startTimeMs.advanced(by: .nanoseconds(Int(nowMs.uptimeNanoseconds))).milliseconds
+        let now = DispatchTime.now()
+        let duration = startTime.distance(to: now)
         if lock.withLock({ canceled }) {
             loadCallback?.onLoadCancelled(
                 loadable: loadable,
-                onTime: nowMs.milliseconds,
-                loadDurationMs: durationMs,
+                onTime: now,
+                loadDuration: duration,
                 released: false
             )
             return
         }
 
-        if what == .finish {
+        switch event {
+        case .finish:
+            SELogger.verbose(.loader, "\(T.self) finished in \(duration.totalMilliseconds)ms")
             loadCallback?.onLoadCompleted(
                 loadable: loadable,
-                onTime: nowMs.milliseconds,
-                loadDurationMs: durationMs
+                onTime: now,
+                loadDuration: duration
             )
-        } else if case let .ioError(error) = what {
+        case let .ioError(error):
             currentError = error
             errorCount += 1
+            // Nobody is left to hear a retry.
             let action = loadCallback?.onLoadError(
                 loadable: loadable,
-                onTime: nowMs.milliseconds,
-                loadDurationMs: durationMs,
+                onTime: now,
+                loadDuration: duration,
                 error: error,
                 errorCount: errorCount
-            )
+            ) ?? .dontRetry
 
-            if action?.type == .dontRetryFatal {
+            switch action.type {
+            case .dontRetryFatal:
+                SELogger.error(.loader, "\(T.self) failed for good after \(errorCount) errors: \(error)")
                 loadDelegate?.loadFatalError(error: error)
-            } else if action?.type != .dontRetry {
-                if action?.type == .retryResetErrorCount {
+            case .dontRetry:
+                SELogger.warning(.loader, "\(T.self) failed, not retrying: \(error)")
+            case .retry, .retryResetErrorCount:
+                if action.type == .retryResetErrorCount {
                     errorCount = 1
                 }
 
-                let retryDelayMs = if let retryDelayMillis = action?.retryDelayMillis,
-                                      retryDelayMillis != .timeUnset {
-                    retryDelayMillis
-                } else {
-                    Int64(min((errorCount - 1) * 1000, 5000))
-                }
-
-                start(delayMillis: retryDelayMs)
+                let delay = action.retryDelay ?? .milliseconds(min((errorCount - 1) * 1000, 5000))
+                SELogger.info(.loader, "Retrying \(T.self) in \(delay.totalMilliseconds)ms, error \(errorCount): \(error)")
+                start(delay: delay)
             }
         }
     }
 
     private func execute() {
-        let nowMs = DispatchTime.now()
-        let durationMs = startTimeMs.advanced(by: .nanoseconds(Int(nowMs.uptimeNanoseconds))).milliseconds
+        SELogger.verbose(.loader, "Starting \(T.self)\(errorCount > 0 ? ", retry \(errorCount)" : "")")
+        let now = DispatchTime.now()
         loadCallback?.onLoadStarted(
             loadable: loadable,
-            onTime: nowMs.milliseconds,
-            loadDurationMs: durationMs,
+            onTime: now,
+            loadDuration: startTime.distance(to: now),
             retryCount: errorCount
         )
         currentError = nil
 
         let currentTask = Task<Void, Never> {
-            await run(isolation: syncActor)
+            await run(syncActor)
         }
         self.currentTask = currentTask
 
@@ -360,28 +368,9 @@ private final class LoadTask<T: Loadable>: Handler, AnyLoadTask {
 }
 
 private extension LoadTask {
-    enum LoadMessageKind: MessageKind, Equatable {
-        case start
+    /// How the load went, told on the work queue.
+    enum LoadEvent {
         case finish
         case ioError(Error)
-
-        func isEqual(to other: any MessageKind) -> Bool {
-            guard let other = other as? LoadMessageKind else {
-                return false
-            }
-
-            return self == other
-        }
-
-        static func == (lhs: LoadMessageKind, rhs: LoadMessageKind) -> Bool {
-            switch (lhs, rhs) {
-            case (.start, .start),
-                 (.finish, .finish),
-                 (.ioError, .ioError):
-                return true
-            default:
-                return false
-            }
-        }
     }
 }

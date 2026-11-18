@@ -5,6 +5,7 @@
 //  Created by tvrrp on 19.02.2026.
 //
 
+import CoreMedia
 import Dispatch
 import SEPlayerCommon
 
@@ -17,12 +18,21 @@ class BaseTrackSelection: SETrackSelection, Hashable {
 
     var selectedFormat: Format { formats[selectedIndex] }
     var selectedIndexInTrackGroup: Int? { tracks[selectedIndex] }
-    var selectedIndex: Int { fatalError() }
-    var selectedReason: TrackSelectionReason { fatalError() }
-    var selectionData: Any? { fatalError() }
+    var selectedIndex: Int { fatalError("To override") }
+    var selectedReason: TrackSelectionReason { fatalError("To override") }
+    var selectionData: Any? { fatalError("To override") }
+
+    var measuredBitrate: Int? {
+        guard let loaded = loadedMedia[selectedIndex], loaded.seconds > 0 else {
+            return nil
+        }
+        return Int(loaded.bits / loaded.seconds)
+    }
 
     private(set) var playWhenReady: Bool
-    private var excludeUntilTimes: [Int64]
+    private var excludeUntilTimes: [CMTime]
+    /// The bits and seconds of the loaded chunks of formats without a bitrate, by index.
+    private var loadedMedia: [Int: (bits: Double, seconds: Double)] = [:]
 
     init(group: TrackGroup, tracks: [Int], type: TrackSelectionType = .unset) {
         precondition(!tracks.isEmpty)
@@ -37,7 +47,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
             tracks.append(group.indexOf(format: formats[index]))
         }
         self.tracks = tracks
-        excludeUntilTimes = Array(repeating: 0, count: length)
+        excludeUntilTimes = Array(repeating: .zero, count: length)
         playWhenReady = false
     }
 
@@ -60,42 +70,54 @@ class BaseTrackSelection: SETrackSelection, Hashable {
     func enable() {}
     func disable() {}
     func playbackSpeedDidChange(_ playbackSpeed: Float) {}
+    func loadsQuickly(bits: Double) -> Bool? { nil }
 
     func updateSelectedTrack(
-        playbackPositionUs: Int64,
-        bufferedDurationUs: Int64,
-        availableDurationUs: Int64,
+        playbackPosition: CMTime,
+        bufferedDuration: CMTime,
+        availableDuration: CMTime,
         queue: [MediaChunk],
         mediaChunkIterators: [MediaChunkIterator]
     ) {
-        fatalError()
+        fatalError("To override")
     }
 
-    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int {
+    func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int {
         queue.count
     }
 
-    func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool {
-        let nowMs = DispatchTime.now().milliseconds
-        var canExclude = isTrackExcluded(index: index, nowMs: nowMs)
-        for i in 0..<length {
-            canExclude = i != index && !isTrackExcluded(index: i, nowMs: nowMs)
-            if !canExclude { break }
-        }
+    func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool {
+        let now = CMClock.hostTimeClock.time
+        // An excluded track can stay excluded for longer; otherwise another track has to be left to play.
+        let canExclude = isTrackExcluded(index: index, now: now)
+            || (0..<length).contains { $0 != index && !isTrackExcluded(index: $0, now: now) }
 
         if !canExclude { return false }
 
-        let (value, overflow) = nowMs.addingReportingOverflow(exclusionDurationMs)
-        excludeUntilTimes[index] = max(
-            excludeUntilTimes[index],
-            overflow ? .max : value
-        )
+        let excludeUntil = now + exclusionDuration
+        if excludeUntil.isValid {
+            excludeUntilTimes[index] = max(excludeUntilTimes[index], excludeUntil)
+        } else {
+            excludeUntilTimes[index] = .positiveInfinity
+        }
 
         return true
     }
 
-    func isTrackExcluded(index: Int, nowMs: Int64) -> Bool {
-        excludeUntilTimes[index] > nowMs
+    func isTrackExcluded(index: Int, now: CMTime) -> Bool {
+        excludeUntilTimes[index] > now
+    }
+
+    func chunkLoaded(_ chunk: MediaChunk) {
+        guard let format = chunk.trackFormat, format.bitrate == Format.noValue, let index = indexOf(format: format),
+              chunk.endTime.isNumeric, chunk.startTime.isNumeric, chunk.endTime > chunk.startTime,
+              chunk.bytesLoaded > 0 else {
+            return
+        }
+        var loaded = loadedMedia[index] ?? (0, 0)
+        loaded.bits += Double(chunk.bytesLoaded * 8)
+        loaded.seconds += (chunk.endTime - chunk.startTime).seconds
+        loadedMedia[index] = loaded
     }
 
     func playWhenReadyChanged(_ playWhenReady: Bool) {

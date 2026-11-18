@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 20.05.2025.
 //
 
+import CoreMedia
 import SEPlayerCommon
 
 public class ForwardingTimeline: Timeline, @unchecked Sendable {
@@ -33,8 +34,8 @@ public class ForwardingTimeline: Timeline, @unchecked Sendable {
     }
 
     @discardableResult
-    public func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
-        timeline.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+    public func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
+        timeline.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjection: defaultPositionProjection)
     }
 
     public func periodCount() -> Int { timeline.periodCount() }

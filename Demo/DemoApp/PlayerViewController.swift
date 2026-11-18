@@ -9,13 +9,22 @@ import AVFAudio
 import UIKit
 import SEPlayer
 import MediaPlayer
+import DataSource
+
+/// A view whose layer is an `SEPlayerLayer`, so the video follows the view's animated size changes.
+final class PlayerLayerView: UIView {
+    override class var layerClass: AnyClass { SEPlayerLayer.self }
+    var playerLayer: SEPlayerLayer { layer as! SEPlayerLayer }
+}
 
 class PlayerViewController: UIViewController {
     var seekParameters: SeekParameters = .default
 
     let player: SEPlayer
+    let mediaTimeInterpolator: MediaTimeInterpolator
 
-    let playerView = SEPlayerView()
+    let playerView = PlayerLayerView()
+    let playerView2 = PlayerLayerView()
 
     var videoUrls = [URL]()
     var repeatMode: RepeatMode = .off
@@ -39,24 +48,37 @@ class PlayerViewController: UIViewController {
     let speedGestureRecogniser = UILongPressGestureRecognizer()
     let feedback = UIImpactFeedbackGenerator()
 
-    var timer: Timer?
+    private var seekContinuation: AsyncStream<(Float, SeekParameters)>.Continuation?
+    private var shouldObserveTimer = true
+    private var displayLink: CADisplayLink?
+
+    private var workingWithSlider = false
+    private var runningSeek = false
 
     init() {
         player = playerFactory.buildPlayer()
-        playerView.player = player
+        playerView.playerLayer.player = player
+        mediaTimeInterpolator = MediaTimeInterpolator(player: player)
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         player = playerFactory.buildPlayer()
-        playerView.player = player
+        playerView.playerLayer.player = player
+        mediaTimeInterpolator = MediaTimeInterpolator(player: player)
         super.init(coder: coder)
+    }
+
+    deinit {
+        player.release()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerView.frame = view.bounds
         controlsContainerView.frame = view.bounds
+
+        playerView2.frame = CGRect(x: 0, y: 0, width: 100, height: 300)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -64,22 +86,30 @@ class PlayerViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = false
     }
 
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        shouldObserveTimer = false
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         player.stop()
         player.release()
-        timer?.invalidate()
-        navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        displayLink?.invalidate()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.insertSubview(playerView, at: 0)
+
         view.addSubview(controlsContainerView)
         controlsContainerView.addSubview(currentTimeLabel)
         controlsContainerView.addSubview(durationLabel)
         controlsContainerView.addSubview(seekSlider)
+
+        view.insertSubview(playerView, at: 0)
+        view.insertSubview(playerView2, at: 1)
 //        controlsContainerView.addSubview(volumeView)
 //        controlsContainerView.addSubview(muteButton)
 
@@ -140,10 +170,11 @@ class PlayerViewController: UIViewController {
         speedGestureRecogniser.minimumPressDuration = 0.3
         speedGestureRecogniser.addTarget(self, action: #selector(handleLongPress))
 
-        try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+//        try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+        try! AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
         try! AVAudioSession.sharedInstance().setActive(true)
 
-        playerView.gravity = .resizeAspect
+        playerView.playerLayer.videoGravity = .resizeAspect
 
         player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
         if videoUrls.count == 1 {
@@ -151,7 +182,6 @@ class PlayerViewController: UIViewController {
             backwardsButton.isHidden = true
             forwardsButton.isHidden = true
         }
-        player.seekParameters = seekParameters
         player.delegate.addDelegate(self)
         player.prepare()
         player.playWhenReady = true
@@ -204,7 +234,7 @@ class PlayerViewController: UIViewController {
             if controlsContainerViewIsHidden {
                 controlsContainerView.alpha = 0
                 navigationController?.navigationBar.alpha = 0
-                timer?.invalidate()
+                displayLink?.isPaused = true
             } else {
                 updateTime()
                 controlsContainerView.alpha = 1
@@ -220,21 +250,57 @@ class PlayerViewController: UIViewController {
 
     @objc private func sliderTouchDown(_ sender: UISlider) {
 //        print("🤬 sliderTouchDown")
-        timer?.invalidate()
+//        timer?.invalidate()
+        shouldObserveTimer = false
+        displayLink?.isPaused = true
         playWhenReadyBeforeSlider = player.playWhenReady
         player.pause()
+
+        Task {
+            let (stream, continuation) = AsyncStream<(Float, SeekParameters)>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            seekContinuation = continuation
+
+            for await (value, _) in stream {
+                if seekContinuation == nil { break }
+                let time = CMTime(seconds: Double(value), preferredTimescale: 1000)
+                print("🌈 WIIIL SEEEK TO position \(time.seconds)")
+                await withCheckedContinuation { seekCont in
+                    player.seek(to: time, seekParameters: .exact) { _ in
+                        print("🌈 seek position FINISHHHHHH")
+                        seekCont.resume()
+                    }
+                }
+            }
+
+            seekContinuation = nil
+            shouldObserveTimer = true
+            player.playWhenReady = playWhenReadyBeforeSlider
+            updateTime()
+        }
     }
 
     @objc private func sliderTouchUp(_ sender: UISlider) {
-        let newTime = Int64(sender.value)
-        player.seek(to: newTime)
-        player.playWhenReady = playWhenReadyBeforeSlider
-        updateTime()
+        print("🌈 FIIIIINISH value, = \(sender.value)")
+//        seekContinuation?.yield((sender.value, .exact))
+        seekContinuation?.finish()
+        seekContinuation = nil
+        let time = CMTime(seconds: Double(sender.value), preferredTimescale: 1000)
+        player.seek(to: time, seekParameters: .exact)
+        print("🌈 seek position EEEEEEEEEEEENDNDNNDNDNDNND")
+
+        currentTimeLabel.text = "\(player.bufferedPosition.isNumeric ? Int(player.bufferedPosition.seconds) : 0)" + "|" + "\(Int64(sender.value))"
+//        updateTime()
     }
 
     @objc private func sliderValueChanged(_ sender: UISlider) {
-        currentTimeLabel.text = "\(player.bufferedPosition)" + "|" + "\(Int64(sender.value))"
-        player.seek(to: Int64(sender.value))
+        currentTimeLabel.text = "\(player.bufferedPosition.isNumeric ? Int(player.bufferedPosition.seconds) : 0)" + "|" + "\(Int64(sender.value))"
+
+        let yieldResult = seekContinuation?.yield((sender.value, .closestSync))
+        if case .enqueued = yieldResult {
+            print("🌈 YIEEEEEEEELD value, = \(sender.value)")
+        }
+//        print("🫟 seek position YIEEEEEEEEEEEEEEEEEELD = \(result)")
+//        player.seek(to: Int64(sender.value))
     }
 
     @objc private func volumeSliderDidChange(_ sender: UISlider) {
@@ -277,13 +343,13 @@ class PlayerViewController: UIViewController {
     }
 
     @objc func backwardsTap() {
-        player.seekBack()
-        handleTimer()
+        player.seekBack(seekParameters: .exact)
+//        handleTimer()
     }
 
     @objc func forwardsTap() {
-        player.seekForward()
-        handleTimer()
+        player.seekForward(seekParameters: .exact)
+//        handleTimer()
     }
 
     @objc func backwardsButtonTap() {
@@ -305,23 +371,24 @@ class PlayerViewController: UIViewController {
     }
 
     private func updateTime() {
-        timer?.invalidate()
-
-        let timer = Timer(timeInterval: 1/30, repeats: true, block: { [weak self] _ in
-            self?.handleTimer()
-        })
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        let duration = player.duration
-        if duration != .timeUnset {
-            durationLabel.text = "\(player.duration)"
-            seekSlider.maximumValue = Float(player.duration)
+        guard displayLink == nil else {
+            displayLink?.isPaused = false
+            return
         }
+
+        displayLink = CADisplayLink(target: self, selector: #selector(handleTimer))
+        displayLink?.add(to: .main, forMode: .common)
     }
 
-    private func handleTimer() {
-        let position = player.currentPosition
-        currentTimeLabel.text = "\(player.bufferedPosition)|\(position)"
+    @objc
+    private func handleTimer(displayLink: CADisplayLink) {
+//        let position = player.currentPosition.seconds
+        let position = mediaTimeInterpolator.time(at: displayLink.targetTimestamp)
+        // Unknown while a new item is still preparing: `.seconds` is NaN then, and `Int(_:)` traps.
+        let bufferedPosition = player.bufferedPosition.seconds
+        guard position.isFinite, bufferedPosition.isFinite else { return }
+
+        currentTimeLabel.text = "\(Int(bufferedPosition))|\(Int(position))"
         seekSlider.setValue(Float(position), animated: false)
     }
 
@@ -343,12 +410,37 @@ extension PlayerViewController: SEPlayerDelegate {
         print("❌❌❌ onPlayerError = \(error)")
 //        player.clearMediaItems()
 //        player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
-        player.prepare()
+//        player.prepare()
 //        player.play()
     }
 
     func player(_ player: any Player, didChangePlaybackState state: PlayerState) {
-        if state == .ready {
+        print("🫟 seek position REEEEDYYYYYYY")
+        if state == .ready, seekContinuation == nil {
+            if player.duration.isNumeric {
+                let duration = player.duration.seconds
+                durationLabel.text = "\(Int(duration))"
+                seekSlider.maximumValue = Float(duration)
+                seekSlider.isUserInteractionEnabled = true
+                updateTime()
+            }
+
+//            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+//                self.playerView2.playerLayer.player = player as? SEPlayer
+//
+//                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+//                    self.playerView2.playerLayer.player = nil
+//                    self.playerView2.removeFromSuperview()
+//                }
+//            }
+        }
+    }
+
+    func player(_ player: any Player, didChangeTimeline timeline: any Timeline, reason: TimelineChangeReason) {
+        if player.duration.isNumeric {
+            let duration = player.duration.seconds
+            durationLabel.text = "\(Int(duration))"
+            seekSlider.maximumValue = Float(duration)
             seekSlider.isUserInteractionEnabled = true
             updateTime()
         }
@@ -356,9 +448,9 @@ extension PlayerViewController: SEPlayerDelegate {
 
     func player(_ player: any Player, didTransitionMediaItem mediaItem: MediaItem?, reason: MediaItemTransitionReason?) {
         let duration = player.duration
-        if duration != .timeUnset {
-            durationLabel.text = "\(player.duration)"
-            seekSlider.maximumValue = Float(player.duration)
+        if duration.isNumeric {
+            durationLabel.text = "\(Int(player.duration.seconds))"
+            seekSlider.maximumValue = Float(player.duration.seconds)
         }
     }
 }

@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
+import CoreMedia
 import DataSource
 import Foundation
 import SEPlayerCommon
@@ -22,21 +23,12 @@ public protocol MediaSource: AnyObject {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64
+        startPosition: CMTime
     ) throws -> MediaPeriod
     func release(mediaPeriod: MediaPeriod)
     func disable(delegate: MediaSourceDelegate)
     func releaseSource(delegate: MediaSourceDelegate)
-    func continueLoadingRequested(with source: any MediaSource)
 }
-
-//protocol MediaSourceEventListener: AnyObject {
-//    func loadStarted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-//    func loadCompleted(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-//    func loadCancelled(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void)
-//    func loadError(windowIndex: Int, mediaPeriodId: MediaPeriodId?, loadEventInfo: Void, mediaLoadData: Void, error: Error, wasCancelled: Bool)
-//    func formatChanged(windowIndex: Int, mediaPeriodId: MediaPeriodId?, mediaLoadData: Void)
-//}
 
 public protocol MediaSourceDelegate: AnyObject {
     func mediaSource(_ source: any MediaSource, sourceInfo refreshed: Timeline) throws
@@ -80,13 +72,12 @@ class BaseMediaSource: MediaSource {
     func createPeriod(
         id: MediaPeriodId,
         allocator: Allocator,
-        startPosition: Int64
+        startPosition: CMTime
     ) throws -> MediaPeriod {
         fatalError("To override")
     }
     func release(mediaPeriod: MediaPeriod) { fatalError("To override") }
     func disableInternal() {}
-    func continueLoadingRequested(with source: any MediaSource) { fatalError("To override") }
 
     final func refreshSourceInfo(timeline: Timeline) throws {
         assert(queue.isCurrent())

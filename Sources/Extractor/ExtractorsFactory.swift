@@ -9,8 +9,14 @@ import Foundation.NSURL
 import SEPlayerCommon
 
 public protocol ExtractorsFactory {
-    func createExtractors() -> [Extractor]
-    func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) -> [Extractor]
+    func createExtractors() throws -> [Extractor]
+    func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) throws -> [Extractor]
+}
+
+public extension ExtractorsFactory {
+    func createExtractors() throws -> [Extractor] {
+        try createExtractors(url: nil, httpHeaders: [:])
+    }
 }
 
 public struct DefaultExtractorFactory: ExtractorsFactory {
@@ -22,14 +28,17 @@ public struct DefaultExtractorFactory: ExtractorsFactory {
         self.subtitleParserFactory = DefaultSubtitleParserFactory()
     }
 
-    public func createExtractors() -> [Extractor] {
-        createExtractors(url: nil, httpHeaders: [:])
-    }
-
-    public func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) -> [Extractor] {
-        [
-            MP4Extractor(queue: queue, subtitleParserFactory: subtitleParserFactory),
-//            FragmentedMp4Extractor(queue: queue, extractorOutput: output)
-        ]
+    public func createExtractors(url: URL?, httpHeaders: [AnyHashable : Any]) throws -> [Extractor] {
+        var extractors = [Extractor]()
+//#if ExtractorMP4
+        extractors.append(MP4Extractor(queue: queue, subtitleParserFactory: subtitleParserFactory))
+//#endif
+//#if ExtractorFMP4
+        extractors.append(FragmentedMp4Extractor(queue: queue, subtitleParserFactory: subtitleParserFactory))
+//#endif
+//#if ExtractorTS
+        try extractors.append(TsExtractor(queue: queue, subtitleParserFactory: subtitleParserFactory))
+//#endif
+        return extractors
     }
 }

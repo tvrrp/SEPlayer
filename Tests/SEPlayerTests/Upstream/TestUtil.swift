@@ -5,19 +5,20 @@
 //  Created by Damir Yackupov on 03.11.2025.
 //
 
+import CoreMedia
 @testable import SEPlayer
 
 struct TestUtil {
-    public static func buildTestData(lenght: Int) -> ByteBuffer {
-        buildTestData(lenght: lenght, seed: lenght)
+    public static func buildTestData(length: Int) -> ByteBuffer {
+        buildTestData(length: length, seed: length)
     }
 
-    public static func buildTestData(lenght: Int, seed: Int) -> ByteBuffer {
+    public static func buildTestData(length: Int, seed: Int) -> ByteBuffer {
         var buffer = ByteBuffer()
-        buffer.reserveCapacity(minimumWritableBytes: lenght)
+        buffer.reserveCapacity(minimumWritableBytes: length)
         let seed: UInt8 = seed <= Int(UInt8.max) ? UInt8(seed) : UInt8.max
 
-        for _ in 0..<lenght {
+        for _ in 0..<length {
             let randomNumber = UInt8.random(in: 0..<seed)
             buffer.writeInteger(randomNumber)
         }
@@ -32,8 +33,12 @@ struct TestUtil {
 }
 
 private extension TestUtil {
-    struct NoIdOrShufflingTimeline: Timeline {
+    final class NoIdOrShufflingTimeline: Timeline, @unchecked Sendable {
         let delegate: Timeline
+
+        init(delegate: Timeline) {
+            self.delegate = delegate
+        }
 
         func windowCount() -> Int {
             delegate.windowCount()
@@ -55,8 +60,9 @@ private extension TestUtil {
             delegate.firstWindowIndex(shuffleModeEnabled: false)
         }
 
-        func getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Int64) -> Window {
-            delegate.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjectionUs: defaultPositionProjectionUs)
+        @discardableResult
+        func getWindow(windowIndex: Int, window: Window, defaultPositionProjection: CMTime) -> Window {
+            delegate.getWindow(windowIndex: windowIndex, window: window, defaultPositionProjection: defaultPositionProjection)
             window.id = 0
             return window
         }
@@ -65,6 +71,7 @@ private extension TestUtil {
             delegate.periodCount()
         }
 
+        @discardableResult
         func getPeriod(periodIndex: Int, period: Period, setIds: Bool) -> Period {
             delegate.getPeriod(periodIndex: periodIndex, period: period, setIds: setIds)
             period.uid = 0

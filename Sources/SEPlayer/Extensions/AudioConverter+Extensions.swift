@@ -9,6 +9,7 @@ import Darwin
 
 enum AudioConverterErrors: Error {
     case osStatus(Status?)
+    case coreMediaSpecific(Error)
 
     enum Status: OSStatus {
         case formatNotSupported = 1718449215
@@ -24,9 +25,7 @@ enum AudioConverterErrors: Error {
         case hardwareInUse = 1752656245
         case noHardwarePermission = 1885696621
 
-        case custom_nilDataObjectPointer = -1001
-        case custom_sampleBufferAudioBufferEmpty = -1002
-        case custom_noMoreData = -1003
-        case custom_unknown = -1004
+        case customNoMoreData = -1001
+        case customError = -1004
     }
 }

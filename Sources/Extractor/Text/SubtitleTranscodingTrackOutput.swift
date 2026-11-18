@@ -5,34 +5,38 @@
 //  Created by tvrrp on 24.02.2026.
 //
 
-import Foundation
+import CoreMedia
 import SEPlayerCommon
 
+/// Parses the subtitle samples written to it, and writes their cues to `delegate`.
 final class SubtitleTranscodingTrackOutput: TrackOutput {
     var shouldSuppressParsingErrors: Bool = false
 
     private let delegate: TrackOutput
     private let subtitleParserFactory: SubtitleParserFactory
-    private let encoder: JSONEncoder
+    private let encoder: CueEncoder
 
     private var sampleDataStart = 0
     private var sampleDataEnd = 0
-    private var sampleData: ByteBuffer
+    private var sampleData: BlockBufferReader?
     private var currentSubtitleParser: SubtitleParser?
     private var currentFormat: Format?
 
     init(delegate: TrackOutput, subtitleParserFactory: SubtitleParserFactory) {
         self.delegate = delegate
         self.subtitleParserFactory = subtitleParserFactory
-        self.encoder = JSONEncoder()
-        sampleData = ByteBuffer()
+        self.encoder = CueEncoder()
     }
 
     func resetSubtitleParser() {
         currentSubtitleParser?.reset()
     }
 
-    func setFormat(_ format: Format, isolation: isolated any Actor) throws {
+    func setDuration(_ duration: CMTime) {
+        delegate.setDuration(duration)
+    }
+
+    func setFormat(_ format: Format) throws {
         let sampleMimeType = try format.sampleMimeType.checkNotNil()
         try checkArgument(sampleMimeType.trackType == .text)
 
@@ -46,124 +50,94 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
         }
 
         if currentSubtitleParser == nil {
-            try delegate.setFormat(format, isolation: isolation)
+            try delegate.setFormat(format)
         } else {
             try delegate.setFormat(
-                format.buildUpon()
-                    .setSampleMimeType(.applicationSEPlayerCues)
-                    .setCodecs(sampleMimeType.rawValue)
-                    .setSubsampleOffsetUs(Format.offsetSampleRelative)
-                    // TODO: .setCueReplacementBehavior
-                    .build(),
-                isolation: isolation
+                format.cuesFormat(cueReplacementBehavior: subtitleParserFactory.getCueReplacementBehavior(format: format))
+                    .setSubsampleOffset(Format.offsetSampleRelative)
+                    .build()
             )
         }
     }
 
-    @discardableResult
-    func loadSampleData(
-        input: DataReader,
-        length: Int,
-        allowEndOfInput: Bool,
-        isolation: isolated any Actor
-    ) async throws -> DataReaderReadResult {
+    func sampleData(data: CMBlockBuffer) throws {
         if currentSubtitleParser == nil {
-            return try await delegate.loadSampleData(
-                input: input,
-                length: length,
-                allowEndOfInput: allowEndOfInput,
-                isolation: isolation
-            )
-        }
-
-        switch try await input.read(to: &sampleData, offset: sampleDataEnd, length: length, isolation: isolation) {
-        case let .success(amount):
-            sampleDataEnd += amount
-            return .success(amount: amount)
-        case .endOfInput:
-            if allowEndOfInput {
-                return .endOfInput
-            }
-
-            throw EndOfFileError()
-        }
-    }
-
-    func sampleData(data: ByteBuffer, length: Int, isolation: isolated any Actor) throws {
-        if currentSubtitleParser == nil {
-            try delegate.sampleData(data: data, length: length, isolation: isolation)
+            try delegate.sampleData(data: data)
             return
         }
 
-        sampleData.writeBytes(data.readableBytesView[0..<length])
-        sampleDataEnd += length
+        guard !data.isEmpty else { return }
+        if let sampleData {
+            try sampleData.extend(with: data)
+        } else {
+            let sampleData = try BlockBufferReader()
+            try sampleData.extend(with: data)
+            self.sampleData = sampleData
+        }
+        sampleDataEnd += data.dataLength
     }
 
-    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int, isolation: isolated any Actor) throws {
-        if currentSubtitleParser == nil {
-            try delegate.sampleMetadata(
-                time: time,
-                flags: flags,
-                size: size,
-                offset: offset,
-                isolation: isolation
-            )
+    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws {
+        guard let currentSubtitleParser else {
+            try delegate.sampleMetadata(time: time, flags: flags, range: range)
             return
         }
 
-        let sampleStart = sampleDataEnd - offset - size
-        do {
-            try currentSubtitleParser?.parse(
-                data: &sampleData,
-                offset: sampleStart,
-                lenght: size,
-                outputOptions: .allCues(),
-                output: { try outputSample(cuesWithTiming: $0, timeUs: time, flags: flags, isolation: isolation) }
-            )
-        } catch {
-            if !shouldSuppressParsingErrors {
-                throw error
+        try checkArgument(range.startIndex >= 0 && range.count >= 0)
+        let sampleStart = sampleDataEnd - range.startIndex - range.count
+        try checkArgument(sampleStart >= sampleDataStart)
+
+        if range.count > 0, let sampleData {
+            do {
+                try currentSubtitleParser.parse(
+                    data: sampleData.getSlice(at: sampleStart, length: range.count),
+                    outputOptions: .allCues(),
+                    output: { try outputSample(cuesWithTiming: $0, time: time, flags: flags) }
+                )
+            } catch {
+                if !shouldSuppressParsingErrors {
+                    throw error
+                }
             }
         }
 
-        sampleDataStart = sampleStart + size
+        sampleDataStart = sampleStart + range.count
         if sampleDataStart == sampleDataEnd {
+            // The parser has used all the data it got, so it can start over.
             sampleDataStart = 0
             sampleDataEnd = 0
+            sampleData = nil
         }
     }
 
     private func outputSample(
         cuesWithTiming: CuesWithTiming,
-        timeUs: Int64,
-        flags: SampleFlags,
-        isolation: isolated any Actor
+        time: CMSampleTimingInfo,
+        flags: SampleFlags
     ) throws {
         let currentFormat = try currentFormat.checkNotNil()
 
-        let data = try ByteBuffer(data: encoder.encode(cuesWithTiming))
-        try delegate.sampleData(
-            data: data,
-            length: data.readableBytes,
-            isolation: isolation
-        )
+        let data = try encoder.encode(cues: cuesWithTiming.cues, duration: cuesWithTiming.duration)
+        try delegate.sampleData(data: data)
 
-        let outputSampleTimeUs: Int64
-        if cuesWithTiming.startTimeUs == .timeUnset {
-            assert(currentFormat.subsampleOffsetUs == Format.offsetSampleRelative)
-            outputSampleTimeUs = timeUs
-        } else if currentFormat.subsampleOffsetUs == Format.offsetSampleRelative {
-            outputSampleTimeUs = timeUs + cuesWithTiming.startTimeUs
+        let outputSampleTime: CMTime
+        if !cuesWithTiming.startTime.isValid {
+            assert(currentFormat.subsampleOffset == Format.offsetSampleRelative)
+            outputSampleTime = time.presentationTimeStamp
+        } else if currentFormat.subsampleOffset == Format.offsetSampleRelative {
+            outputSampleTime = time.presentationTimeStamp + cuesWithTiming.startTime
         } else {
-            outputSampleTimeUs = cuesWithTiming.startTimeUs + currentFormat.subsampleOffsetUs
+            outputSampleTime = cuesWithTiming.startTime + currentFormat.subsampleOffset
         }
 
         try delegate.sampleMetadata(
-            time: outputSampleTimeUs,
+            time: CMSampleTimingInfo(
+                duration: cuesWithTiming.duration.isValid ? cuesWithTiming.duration : time.duration,
+                presentationTimeStamp: outputSampleTime,
+                decodeTimeStamp: .invalid
+            ),
             flags: flags.union(.keyframe),
-            size: data.readableBytes,
-            offset: 0,
-            isolation: isolation
+            range: 0..<data.dataLength
         )
     }
 }

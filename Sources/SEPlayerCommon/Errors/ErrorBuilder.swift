@@ -15,5 +15,12 @@ public struct ErrorBuilder: Error, LocalizedError {
         self.errorDescription = errorDescription
     }
 
-    public static let illegalState = ErrorBuilder(errorDescription: "Illegal state")
+    /// An error of a state the code can't go on from, with where it was thrown.
+    public static func illegalState(
+        file: StaticString = #fileID,
+        line: UInt = #line,
+        function: StaticString = #function
+    ) -> ErrorBuilder {
+        ErrorBuilder(errorDescription: "Illegal state at \(file):\(line) in \(function)")
+    }
 }

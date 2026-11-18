@@ -6,6 +6,7 @@
 //
 
 @testable import SEPlayer
+import CoreMedia
 import Foundation
 
 enum ActionErrors: Error {
@@ -24,16 +25,19 @@ class Action {
     func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
         throw ActionErrors.unimplemented
     }
 
+    /// Called before the previous action runs.
+    func prepareToRun(player: SEPlayer) async {}
+
     final func doActionAndScheduleNext(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
@@ -52,7 +56,7 @@ class Action {
     func doActionAndScheduleNextImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
@@ -81,13 +85,14 @@ final class Seek: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
+        let position = positionMs == .timeUnset ? CMTime.invalid : CMTime(value: positionMs, timescale: 1000)
         if let mediaItemIndex {
-            player.seek(to: positionMs, of: mediaItemIndex)
+            player.seek(to: position, of: mediaItemIndex)
         } else {
-            player.seek(to: positionMs)
+            player.seek(to: position)
         }
     }
 }
@@ -104,8 +109,12 @@ final class SetMediaItems: Action {
         super.init(tag: tag)
     }
 
-    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerView?, isolation: isolated (any Actor)? = #isolation) async throws {
-        player.set(mediaSources: mediaSources, startMediaItemIndex: mediaItemIndex, startPositionMs: positionMs)
+    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerLayer?, isolation: isolated (any Actor)? = #isolation) async throws {
+        player.set(
+            mediaSources: mediaSources,
+            startMediaItemIndex: mediaItemIndex,
+            startPosition: CMTime.time(us: Time.msToUs(timeMs: positionMs))
+        )
     }
 }
 
@@ -117,7 +126,7 @@ final class AddMediaItems: Action {
         super.init(tag: tag)
     }
 
-    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerView?, isolation: isolated (any Actor)? = #isolation) async throws {
+    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerLayer?, isolation: isolated (any Actor)? = #isolation) async throws {
         player.append(mediaSources: mediaSources)
     }
 }
@@ -127,7 +136,7 @@ final class Stop: Action {
         super.init(tag: tag)
     }
 
-    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerView?, isolation: isolated (any Actor)? = #isolation) async throws {
+    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerLayer?, isolation: isolated (any Actor)? = #isolation) async throws {
         player.stop()
     }
 }
@@ -140,12 +149,18 @@ final class SetPlayWhenReady: Action {
         super.init(tag: tag)
     }
 
-    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerView?, isolation: isolated (any Actor)? = #isolation) async throws {
+    override func doActionImpl(player: any SEPlayer, trackSelector: DefaultTrackSelector, view: SEPlayerLayer?, isolation: isolated (any Actor)? = #isolation) async throws {
         player.playWhenReady = playWhenReady
     }
 }
 
 final class WaitForPlayerDelegateState: Action {
+    var preparedListener: PlayerDelegateAsyncStream?
+
+    override func prepareToRun(player: SEPlayer) async {
+        await prepareListener(player: player)
+    }
+
     private let checkForInitialState: (PlayerState) -> Bool
     private let validateEvent: (PlayerDelegateAsyncStream.Event) -> Bool
 
@@ -162,21 +177,22 @@ final class WaitForPlayerDelegateState: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {}
 
     override func doActionAndScheduleNextImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
         guard let nextAction else { return }
 
+        // Listening first: a change between looking at the state and listening would be missed.
+        let playerEventListener = await takeListener(player: player)
         if checkForInitialState(player.playbackState) == false {
-            let playerEventListener = await PlayerDelegateAsyncStream(delegate: player.delegate)
             for await event in playerEventListener.start() {
                 if validateEvent(event) { break }
             }
@@ -204,49 +220,29 @@ final class PlayUntilPosition: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {}
 
     override func doActionAndScheduleNextImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
-        let mainQueue = Queues.mainQueue
-        player
-            .createMessage { _, _ in
-                await MainActor.run { player.pause() }
-                print("❌ RUNNING PAUSE, curr = \(player.currentPosition)")
-            }
-            .setPositionMs(positionMs, mediaItemIndex: mediaItemIndex)
-            .send()
-
-        struct Box { var continuation: CheckedContinuation<Void, Never>? }
-        var box = Box(continuation: nil)
-
-        if nextAction != nil {
-            player.createMessage { _, _ in
-                box.continuation?.resume()
-            }
-            .setPositionMs(positionMs, mediaItemIndex: mediaItemIndex)
-            .setQueue(mainQueue)
-            .send()
-        }
-
-        player.play()
-        if let nextAction {
-            await withCheckedContinuation { continuation in
-                box.continuation = continuation
-            }
-            try await nextAction.schedule(player: player, trackSelector: trackSelector, view: view)
-        }
+        try await playUntilPosition(player: player, mediaItemIndex: mediaItemIndex, positionMs: positionMs)
+        try await nextAction?.schedule(player: player, trackSelector: trackSelector, view: view)
     }
 }
 
 final class WaitForTimelineChanged: Action {
+    var preparedListener: PlayerDelegateAsyncStream?
+
+    override func prepareToRun(player: SEPlayer) async {
+        await prepareListener(player: player)
+    }
+
     private let expectedTimeline: Timeline?
     private let ignoreExpectedReason: Bool
     private let expectedReason: TimelineChangeReason
@@ -268,19 +264,19 @@ final class WaitForTimelineChanged: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {}
 
     override func doActionAndScheduleNextImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
         guard let nextAction else { return }
-        let playerEventListener = await PlayerDelegateAsyncStream(delegate: player.delegate)
+        let playerEventListener = await takeListener(player: player)
 
         if let expectedTimeline,
            TestUtil.timelinesAreSame(lhs: expectedTimeline, rhs: player.timeline) {
@@ -315,20 +311,18 @@ final class WaitForPendingPlayerCommands: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {}
 
     override func doActionAndScheduleNextImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         nextAction: ActionNode?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
-        guard let nextAction else {
-            return
-        }
+        guard let nextAction else { return }
 
         await withCheckedContinuation { continuation in
             player
@@ -356,9 +350,30 @@ final class ExecuteClosure: Action {
     override func doActionImpl(
         player: SEPlayer,
         trackSelector: DefaultTrackSelector,
-        view: SEPlayerView?,
+        view: SEPlayerLayer?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
         try await closure(player)
     }
 }
+
+/// An action that waits for the player to report something: it listens from before the previous
+/// action runs.
+protocol ListeningAction: Action {
+    var preparedListener: PlayerDelegateAsyncStream? { get set }
+}
+
+extension ListeningAction {
+    func takeListener(player: SEPlayer) async -> PlayerDelegateAsyncStream {
+        defer { preparedListener = nil }
+        if let preparedListener { return preparedListener }
+        return await PlayerDelegateAsyncStream(delegate: player.delegate)
+    }
+
+    func prepareListener(player: SEPlayer) async {
+        preparedListener = await PlayerDelegateAsyncStream(delegate: player.delegate)
+    }
+}
+
+extension WaitForPlayerDelegateState: ListeningAction {}
+extension WaitForTimelineChanged: ListeningAction {}

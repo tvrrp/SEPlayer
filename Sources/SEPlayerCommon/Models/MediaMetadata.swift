@@ -139,6 +139,9 @@ public extension MediaMetadata {
 }
 
 public extension MediaMetadata {
+    /// No metadata.
+    static let empty = Builder().build()
+
     final class Builder {
         var title: String?
         var artist: String?

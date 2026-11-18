@@ -6,10 +6,19 @@
 //
 
 import AVFoundation
+import DataSource
+import Extractor
+import SEPlayerCommon
 import Testing
 @testable import SEPlayer
 
 final class TestSEPlayerFactory {
+    private static func loaderOperationQueue() -> OperationQueue {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }
+
     private(set) var trackSelector: DefaultTrackSelector
     private(set) var loadControl: LoadControl
     private(set) var bandwidthMeter: BandwidthMeter
@@ -132,7 +141,6 @@ final class TestSEPlayerFactory {
         return try SEPlayerImpl(
             identifier: UUID(),
             workQueue: queue,
-            applicationQueue: queue,
             clock: clock,
             renderersFactory: #require(renderersFactory),
             trackSelector: trackSelector,
@@ -141,17 +149,22 @@ final class TestSEPlayerFactory {
             mediaSourceFactory: mediaSourceFactory ?? DefaultMediaSourceFactory(
                 workQueue: queue,
                 loaderQueue: loaderQueue,
-                dataSourceFactory: DefaultDataSourceFactory(
-                    syncActor: loaderSyncActor,
-                    networkLoader: MockPlayerSessionLoader()
-                ),
-                extractorsFactory: DefaultExtractorFactory(queue: queue)
+                // Tests set their own media sources; this one is never asked for data.
+                makeDataSourceFactory: {
+                    DefaultDataSourceFactory(
+                        syncActor: loaderSyncActor,
+                        networkLoader: PlayerSessionLoader(configuration: .ephemeral, queue: Self.loaderOperationQueue())
+                    )
+                },
+                extractorsFactory: DefaultExtractorFactory(queue: queue),
+                decryptionMemoryPool: CMMemoryPool()
             ),
-            audioSessionManager: AudioSessionManager.shared,
+            // The tests don't touch the app's audio session.
+            audioSessionController: AudioSessionController(session: UnusedAudioSession()),
             useLazyPreparation: useLazyPreparation,
-            seekBackIncrementMs: seekBackIncrementMs,
-            seekForwardIncrementMs: seekForwardIncrementMs,
-            maxSeekToPreviousPositionMs: maxSeekToPreviousPositionMs,
+            seekBackIncrement: CMTime(value: seekBackIncrementMs, timescale: 1000),
+            seekForwardIncrement: CMTime(value: seekForwardIncrementMs, timescale: 1000),
+            maxSeekToPreviousPosition: CMTime(value: maxSeekToPreviousPositionMs, timescale: 1000)
         )
     }
 }
@@ -162,18 +175,23 @@ private struct MockRenderersFactory: RenderersFactory {
     func createRenderers(
         queue: any Queue,
         clock: SEClock,
-        renderSynchronizer: AVSampleBufferRenderSynchronizer
+        renderSynchronizer: any PlaybackSynchronizer,
+        textOutput: TextOutput,
+        videoListener: VideoRendererEventListener,
+        audioListener: AudioRendererEventListener
     ) -> [any SERenderer] {
         renderers
     }
 }
 
-private struct MockPlayerSessionLoader: IPlayerSessionLoader {
-    func createTask(request: URLRequest, delegate: any PlayerSessionDelegate) -> URLSessionDataTask {
-        URLSession.shared.dataTask(with: request)
-    }
+/// An audio session that accepts any setup and does nothing.
+private final class UnusedAudioSession: AudioSessionInterface {
+    func setCategory(
+        _ category: AVAudioSession.Category,
+        mode: AVAudioSession.Mode,
+        policy: AVAudioSession.RouteSharingPolicy,
+        options: AVAudioSession.CategoryOptions
+    ) throws {}
 
-//    func createStream(request: URLRequest) -> AsyncThrowingStream<PlayerSessionLoaderEvent, Error> {
-//        return AsyncThrowingStream<PlayerSessionLoaderEvent, Error> { $0.finish() }
-//    }
+    func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {}
 }

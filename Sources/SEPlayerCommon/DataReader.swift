@@ -5,22 +5,9 @@
 //  Created by Damir Yackupov on 23.05.2025.
 //
 
-public protocol DataReader {
-    func read(
-        to buffer: inout ByteBuffer,
-        offset: Int,
-        length: Int,
-        isolation: isolated any Actor
-    ) async throws -> DataReaderReadResult
-    func read(
-        allocation: Allocation,
-        offset: Int,
-        length: Int,
-        isolation: isolated any Actor
-    ) async throws -> DataReaderReadResult
-}
+import CoreMedia
 
-@frozen public enum DataReaderReadResult: Equatable {
-    case success(amount: Int)
-    case endOfInput
+public protocol DataReader {
+    var isolation: any Actor { get }
+    func read(range: Range<Int>, _ isolation: isolated any Actor) async throws -> CMBlockBuffer?
 }

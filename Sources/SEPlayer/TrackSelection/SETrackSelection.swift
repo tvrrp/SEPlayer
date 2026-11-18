@@ -5,6 +5,7 @@
 //  Created by Damir Yackupov on 10.01.2025.
 //
 
+import CoreMedia
 import Foundation.NSUUID
 import SEPlayerCommon
 
@@ -56,18 +57,26 @@ public protocol SETrackSelection: TrackSelection {
     func playWhenReadyChanged(_ playWhenReady: Bool)
 
     func updateSelectedTrack(
-        playbackPositionUs: Int64,
-        bufferedDurationUs: Int64,
-        availableDurationUs: Int64,
+        playbackPosition: CMTime,
+        bufferedDuration: CMTime,
+        availableDuration: CMTime,
         queue: [MediaChunk],
         mediaChunkIterators: [MediaChunkIterator],
     )
-    func evaluateQueueSize(playbackPositionUs: Int64, queue: [MediaChunk]) -> Int
-    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool
+    func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int
+    func shouldCancelChunkLoad(playbackPosition: CMTime, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool
 
-    func excludeTrack(index: Int, exclusionDurationMs: Int64) -> Bool
-    func isTrackExcluded(index: Int, nowMs: Int64) -> Bool
+    func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool
+    func isTrackExcluded(index: Int, now: CMTime) -> Bool
     func getLatestBitrateEstimate() -> Int64?
+    /// The bitrate of the selected format from its chunks loaded so far, for a format that doesn't tell its own, as the
+    /// variant of a media playlist without a multivariant playlist. `nil` until one of its chunks loaded.
+    var measuredBitrate: Int? { get }
+    /// Counts a chunk that loaded towards ``measuredBitrate``.
+    func chunkLoaded(_ chunk: MediaChunk)
+    /// Whether a transfer of `bits` loads quickly at the bandwidth the selection plans with, as the frame of a
+    /// scrubbing seek should. `nil` when nothing was measured yet.
+    func loadsQuickly(bits: Double) -> Bool?
 
     func isEquals(to other: SETrackSelection) -> Bool
 }
@@ -76,10 +85,13 @@ extension SETrackSelection {
     func onDiscontinuity() {}
     func onRebuffer() {}
     func playWhenReadyChanged(_ playWhenReady: Bool) {}
+    func loadsQuickly(bits: Double) -> Bool? { nil }
 
-    func shouldCancelChunkLoad(playbackPositionUs: Int64, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool {
+    func shouldCancelChunkLoad(playbackPosition: CMTime, loadingChunk: Chunk, queue: [MediaChunk]) -> Bool {
         false
     }
 
     func getLatestBitrateEstimate() -> Int64? { nil }
+    var measuredBitrate: Int? { nil }
+    func chunkLoaded(_ chunk: MediaChunk) {}
 }

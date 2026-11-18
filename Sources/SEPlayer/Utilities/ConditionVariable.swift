@@ -80,39 +80,77 @@ final class ConditionVariable {
     }
 }
 
-final class AsyncConditionVariable {
-    @UnfairLocked var isOpen = false
-    @UnfairLocked var waitingContinuation: CheckedContinuation<Void, Error>?
+/// Lets the loader pause while the buffer is full.
+///
+/// The open flag and the waiters share one lock, so an `open()` or a cancellation that races with
+/// `wait()` is never missed.
+final class AsyncConditionVariable: @unchecked Sendable {
+    var isOpen: Bool { lock.withLock { _isOpen } }
+
+    private let lock = UnfairLock()
+    private var _isOpen = false
+    private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
 
     @discardableResult
     func open() -> Bool {
-        guard !isOpen else { return false }
+        let waiters: [CheckedContinuation<Void, Error>]? = lock.withLock {
+            guard !_isOpen else { return nil }
+            _isOpen = true
+            defer { self.waiters.removeAll() }
+            return Array(self.waiters.values)
+        }
 
-        isOpen = true
-        waitingContinuation?.resume()
-        waitingContinuation = nil
-
-        return true
+        waiters?.forEach { $0.resume() }
+        return waiters != nil
     }
 
     @discardableResult
     func close() -> Bool {
-        let wasOpen = isOpen
-        isOpen = false
-
-        return wasOpen
+        lock.withLock {
+            let wasOpen = _isOpen
+            _isOpen = false
+            return wasOpen
+        }
     }
 
+    /// Returns once the condition is open. Throws `CancellationError` if the task is cancelled.
     func wait() async throws {
-        try await withTaskCancellationHandler {
-            while !isOpen {
-                try await withCheckedThrowingContinuation { continuation in
-                    waitingContinuation = continuation
+        let id = UUID()
+
+        try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    addWaiter(id, continuation: continuation)
                 }
+            },
+            onCancel: {
+                cancelWaiter(id)
             }
-        } onCancel: {
-            waitingContinuation?.resume(throwing: CancellationError())
-            waitingContinuation = nil
+        )
+    }
+
+    private func addWaiter(_ id: UUID, continuation: CheckedContinuation<Void, Error>) {
+        lock.lock()
+
+        // Checked under the lock: a cancellation handler that ran before this found no waiter to
+        // resume, but the task is already marked cancelled.
+        if Task.isCancelled {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+        } else if _isOpen {
+            lock.unlock()
+            continuation.resume()
+        } else {
+            waiters[id] = continuation
+            lock.unlock()
         }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        lock.lock()
+        let continuation = waiters.removeValue(forKey: id)
+        lock.unlock()
+
+        continuation?.resume(throwing: CancellationError())
     }
 }

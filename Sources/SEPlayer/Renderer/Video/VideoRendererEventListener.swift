@@ -1,0 +1,24 @@
+//
+//  VideoRendererEventListener.swift
+//  SEPlayer
+//
+
+import SEPlayerCommon
+
+/// Hears what a video renderer shows. Called on the queue of the renderer.
+public protocol VideoRendererEventListener: AnyObject {
+    /// Called when the size of the video changes: when the first frame of the new size is queued to show.
+    func onVideoSizeChanged(_ videoSize: VideoSize)
+
+    /// Called when a frame shows for the first time since the renderer was enabled, or since its position was reset.
+    func onRenderedFirstFrame()
+
+    /// Called when the format the renderer reads changes, a moment before it shows; `nil` once it is disabled.
+    func onVideoInputFormatChanged(_ format: Format?)
+}
+
+/// Hears what an audio renderer plays. Called on the queue of the renderer.
+public protocol AudioRendererEventListener: AnyObject {
+    /// Called when the format the renderer reads changes, a moment before it plays; `nil` once it is disabled.
+    func onAudioInputFormatChanged(_ format: Format?)
+}
