@@ -17,9 +17,9 @@ public protocol SEPlayer: Player {
     ///
     /// Unlike ``Player/currentTracks``, which selects every track an adaptive selection switches between, this is the
     /// one track that plays now. It changes a moment before the frames of the new format show.
-    var videoFormat: Format? { get }
+    var videoFormat: AnyFormat? { get }
     /// The format of the audio being played, or `nil` without audio. It changes a moment before the new format plays.
-    var audioFormat: Format? { get }
+    var audioFormat: AnyFormat? { get }
     var preloadConfiguration: PreloadConfiguration { get set }
     var pauseAtTheEndOfMediaItem: Bool { get set }
     /// Whether the user scrubs, as while a slider is held. While paused, every seek, an exact one too, then only needs

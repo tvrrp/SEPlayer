@@ -58,7 +58,8 @@ public enum TsPayload {
     public struct DvbSubtitleInfo {
         public let language: String?
         public let type: Int
-        public let initializationData: Data
+        public let compositionPageID: Int
+        public let ancillaryPageID: Int
     }
 
     public final class TrackIdGenerator {

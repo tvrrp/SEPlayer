@@ -444,7 +444,7 @@ class SEPlayerTests {
         final class TestFakeMediaSource: FakeMediaSource {
             let timelineRef: FakeTimeline
 
-            init(queue: Queue, timeline: FakeTimeline, formats: [Format]) throws {
+            init(queue: Queue, timeline: FakeTimeline, formats: [AnyFormat]) throws {
                 self.timelineRef = timeline
                 try super.init(queue: queue, timeline: timeline, trackGroupArray: Self.buildTrackGroupArray(formats: formats))
             }
@@ -522,7 +522,7 @@ class SEPlayerTests {
                 queue: Queue,
                 countDownLatch: CountDownLatch,
                 onPeriodCreated: @escaping (FakeMediaPeriod) -> Void,
-                formats: [Format]
+                formats: [AnyFormat]
             ) throws {
                 self.countDownLatch = countDownLatch
                 self.onPeriodCreated = onPeriodCreated
@@ -1111,7 +1111,7 @@ class SEPlayerTests {
                 let windowOffsetInFirstPeriodUs: Int64
                 let maxBufferedPositionMs: Int64
 
-                func create(format: Format, mediaPeriodId: MediaPeriodId) -> [FakeSampleStream.FakeSampleStreamItem] {
+                func create(format: AnyFormat, mediaPeriodId: MediaPeriodId) -> [FakeSampleStream.FakeSampleStreamItem] {
                     [
                         .init(oneByteSample: windowOffsetInFirstPeriodUs, flags: .keyframe),
                         .init(

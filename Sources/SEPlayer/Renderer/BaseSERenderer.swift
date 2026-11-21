@@ -36,7 +36,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     private weak var _listener: RendererCapabilitiesListener?
     private var state: SERendererState = .disabled
     private var sampleStream: SampleStream?
-    private var formats: [Format] = []
+    private var formats: [AnyFormat] = []
 
     private var streamIsFinal: Bool = false
 
@@ -87,7 +87,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     }
 
     func enable(
-        formats: [Format],
+        formats: [AnyFormat],
         stream: any SampleStream,
         position: CMTime,
         joining: Bool,
@@ -119,7 +119,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     }
 
     func replaceStream(
-        formats: [Format],
+        formats: [AnyFormat],
         stream: any SampleStream,
         startPosition: CMTime,
         offset: CMTime,
@@ -205,7 +205,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
         onRelease()
     }
 
-    func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+    func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
         .create(formatSupport: .unsupportedType)
     }
 
@@ -218,7 +218,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
     func willChangeStream(oldStream: SampleStream?, newStream: inout SampleStream) throws {}
 
     func onStreamChanged(
-        formats: [Format],
+        formats: [AnyFormat],
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
@@ -234,7 +234,7 @@ class BaseSERenderer: SERenderer, RendererCapabilitiesResolver {
 
     final func getLastResetPosition() -> CMTime { lastResetPosition }
     final func getStreamOffset() -> CMTime { streamOffset }
-    final func getStreamFormats() -> [Format] { formats }
+    final func getStreamFormats() -> [AnyFormat] { formats }
     final func getClock() -> SEClock { clock }
 
     final func readSource(readFlags: ReadFlags = .init()) throws -> SampleStreamReadResult {

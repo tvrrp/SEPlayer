@@ -94,9 +94,9 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
 
     var videoSize: VideoSize { lock.withLock { _videoSize } }
 
-    var videoFormat: Format? { lock.withLock { _videoFormat } }
+    var videoFormat: AnyFormat? { lock.withLock { _videoFormat } }
 
-    var audioFormat: Format? { lock.withLock { _audioFormat } }
+    var audioFormat: AnyFormat? { lock.withLock { _audioFormat } }
 
     var isLoading: Bool { lock.withLock { playbackInfo.isLoading } }
 
@@ -191,10 +191,12 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     private var _preloadConfiguration: PreloadConfiguration
     private var _pauseAtTheEndOfMediaItem: Bool
     private var _mediaMetadata: MediaMetadata = .empty
+    /// The timed metadata of the current item so far, which updates its media metadata, such as ICY titles.
+    private var dynamicMetadata: [Metadata] = []
     private var _playlistMetadata: MediaMetadata = .empty
     private var _videoSize: VideoSize = .unknown
-    private var _videoFormat: Format?
-    private var _audioFormat: Format?
+    private var _videoFormat: AnyFormat?
+    private var _audioFormat: AnyFormat?
 
     private var maskingWindowIndex: Int?
     private var maskingWindowPosition: CMTime = .zero
@@ -255,6 +257,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             clock: clock,
             renderSynchronizer: renderSynchronizer,
             textOutput: componentListener,
+            metadataOutput: componentListener,
             videoListener: componentListener,
             audioListener: componentListener
         )
@@ -765,11 +768,36 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         )
     }
 
+    /// The metadata of the selected tracks and the timed metadata so far, under that of the media item.
     private func mediaMetadataInternal(playbackInfo: PlaybackInfo) -> MediaMetadata {
         guard !playbackInfo.timeline.isEmpty, let windowIndex = currentWindowIndexInternal(playbackInfo: playbackInfo) else {
             return .empty
         }
-        return playbackInfo.timeline.getWindow(windowIndex: windowIndex, window: window).mediaItem.mediaMetadata
+        let staticMetadata = playbackInfo.trackSelectorResult.selections.compactMap { $0?.format(for: 0).metadata }
+        let mediaItem = playbackInfo.timeline.getWindow(windowIndex: windowIndex, window: window).mediaItem
+        return MediaMetadata.Builder()
+            .populate(from: staticMetadata)
+            .populate(from: dynamicMetadata)
+            .populate(from: mediaItem.mediaMetadata)
+            .build()
+    }
+
+    /// Updates the media metadata with timed metadata the renderers output.
+    private func addDynamicMetadata(_ metadata: Metadata) {
+        lock.withLock {
+            dynamicMetadata.append(metadata)
+            let mediaMetadata = mediaMetadataInternal(playbackInfo: playbackInfo)
+            let hasChanged = mediaMetadata != _mediaMetadata
+            if hasChanged {
+                _mediaMetadata = mediaMetadata
+                SELogger.debug(.events, "Media metadata changed")
+            }
+            DispatchQueue.main.async { [self] in
+                delegate.invokeDelegates { $0.player(self, didReceiveMetadata: metadata) }
+                guard hasChanged else { return }
+                delegate.invokeDelegates { $0.player(self, didChangeMediaMetadata: mediaMetadata) }
+            }
+        }
     }
 
     private func currentWindowIndexInternal(playbackInfo: PlaybackInfo) -> Int? {
@@ -831,6 +859,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         var mediaItem: MediaItem?
 
         if mediaItemTransitioned {
+            // The timed metadata belongs to the item that played.
+            dynamicMetadata.removeAll()
             if !newPlaybackInfo.timeline.isEmpty {
                 let windowIndex = newPlaybackInfo.timeline.periodById(
                     newPlaybackInfo.periodId.periodId,
@@ -1759,8 +1789,12 @@ private struct MediaSourceHolderSnapshot: MediaSourceInfoHolder {
 
 private extension SEPlayerImpl {
     /// Receives what the renderers output for the player, which keeps it and tells its delegates.
-    final class ComponentListener: TextOutput, VideoRendererEventListener, AudioRendererEventListener {
+    final class ComponentListener: TextOutput, MetadataOutput, VideoRendererEventListener, AudioRendererEventListener {
         weak var player: SEPlayerImpl?
+
+        func onMetadata(_ metadata: Metadata) {
+            player?.addDynamicMetadata(metadata)
+        }
 
         func onCues(_ cueGroup: CueGroup) {
             MainActor.assumeIsolated {
@@ -1782,12 +1816,12 @@ private extension SEPlayerImpl {
             }
         }
 
-        func onVideoInputFormatChanged(_ format: Format?) {
+        func onVideoInputFormatChanged(_ format: AnyFormat?) {
             guard let player else { return }
             player.lock.withLock { player._videoFormat = format }
         }
 
-        func onAudioInputFormatChanged(_ format: Format?) {
+        func onAudioInputFormatChanged(_ format: AnyFormat?) {
             guard let player else { return }
             player.lock.withLock { player._audioFormat = format }
         }

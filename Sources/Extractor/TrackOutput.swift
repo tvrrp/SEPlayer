@@ -14,7 +14,7 @@ import SEPlayerCommon
 /// a few for every sample, too many to wait for another queue.
 public protocol TrackOutput {
     func setDuration(_ duration: CMTime)
-    func setFormat(_ format: Format) throws
+    func setFormat(_ format: AnyFormat) throws
     func sampleData(data: CMBlockBuffer) throws
     func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws
 }

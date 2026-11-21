@@ -11,7 +11,7 @@ import Foundation
 import SEPlayerCommon
 
 protocol SampleQueueDelegate: AnyObject {
-    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format)
+    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: AnyFormat)
 }
 
 class SampleQueue: TriggerableQueue, TrackOutput {
@@ -56,7 +56,12 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     private let sampleDataQueue: SampleDataQueue
     private let lock: RWLock
 
-    private var downstreamFormat: Format?
+    private var downstreamFormat: AnyFormat? {
+        didSet { downstreamFormatDescription = nil }
+    }
+
+    /// The description of the samples of the downstream format, made for the first of them.
+    private var downstreamFormatDescription: CMFormatDescription?
 
     private var capacity: Int
     private var samples: ContiguousArray<SampleWrapper>
@@ -78,15 +83,15 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     private var upstreamFormatRequired: Bool
 
     private var upstreamFormatAdjustmentRequired = false
-    private var unadjustedUpstreamFormat: Format?
-    private var upstreamFormat: Format?
+    private var unadjustedUpstreamFormat: AnyFormat?
+    private var upstreamFormat: AnyFormat?
 
     private var allSamplesAreSyncSamples: Bool
     private var sampleOffset: CMTime = .zero
 
     private var pendingSplice: Bool = false
 
-    private var sharedSampleMetadata: SpannedData<Format>
+    private var sharedSampleMetadata: SpannedData<AnyFormat>
 
     private var _backBufferDuration: CMTime?
     /// Media loaded beyond the queued samples but not extracted yet: it counts as buffered.
@@ -99,7 +104,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         lock = RWLock()
         capacity = SampleQueue.sampleCapacityIncrement
         samples = ContiguousArray(repeating: .init(), count: capacity)
-        sharedSampleMetadata = SpannedData<Format>(removeCallback: { _ in }) // TODO: fix
+        sharedSampleMetadata = SpannedData<AnyFormat>(removeCallback: { _ in }) // TODO: fix
         startTime = .negativeInfinity
         largestDiscardedTimestamp = .negativeInfinity
         largestQueuedTimestamp = .negativeInfinity
@@ -218,7 +223,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         lock.withReadLock { getReadIndexLocked() }
     }
 
-    final func getUpstreamFormat() -> Format? {
+    final func getUpstreamFormat() -> AnyFormat? {
         lock.withReadLock { upstreamFormatRequired ? nil : upstreamFormat }
     }
 
@@ -460,12 +465,11 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     }
 
     /// Must be called with the write lock held (invoked from the `setFormat` path).
-    func getAdjustedUpstreamFormat(_ format: Format) -> Format {
+    func getAdjustedUpstreamFormat(_ format: AnyFormat) -> AnyFormat {
         var format = format
-        if sampleOffset != .zero, format.subsampleOffset != Format.offsetSampleRelative {
-            format = format.buildUpon()
-                .setSubsampleOffset(sampleOffset)
-                .build()
+        // Cues timed from an offset are timed from the offset of the samples too.
+        if sampleOffset != .zero, let subsampleOffset = format.text?.subsampleOffset {
+            format.text?.subsampleOffset = subsampleOffset + sampleOffset.seconds
         }
         return format
     }
@@ -476,7 +480,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         sampleDataQueue.loadSampleData(buffer: data)
     }
 
-    func setFormat(_ format: Format) {
+    func setFormat(_ format: AnyFormat) {
         lock.withWriteLock { setFormatLocked(format) }
     }
 
@@ -545,7 +549,7 @@ private extension SampleQueue {
         max(largestDiscardedTimestamp, getLargestTimestamp(length: readPosition))
     }
 
-    func setFormatLocked(_ format: Format) {
+    func setFormatLocked(_ format: AnyFormat) {
         let adjustedUpstreamFormat = getAdjustedUpstreamFormat(format)
         upstreamFormatAdjustmentRequired = false
         unadjustedUpstreamFormat = format
@@ -607,9 +611,11 @@ private extension SampleQueue {
             flags.insert(.lastSample)
         }
 
+        let formatDescription = try downstreamFormatDescription ?? format.formatDescription()
+        downstreamFormatDescription = formatDescription
         let sampleBuffer = try CMSampleBuffer(
             dataBuffer: nil,
-            formatDescription: format.buildFormatDescription(),
+            formatDescription: formatDescription,
             numSamples: 1,
             sampleTimings: [sampleInfo.time],
             sampleSizes: [sampleInfo.size]
@@ -620,9 +626,9 @@ private extension SampleQueue {
         return (.didReadBuffer(sampleBuffer), sampleInfo.offset ..< (sampleInfo.offset + sampleInfo.size))
     }
 
-    func setUpstreamFormatLocked(_ format: Format) -> Bool {
+    func setUpstreamFormatLocked(_ format: AnyFormat) -> Bool {
         upstreamFormatRequired = false
-        guard format !== upstreamFormat else { return false }
+        guard format != upstreamFormat else { return false }
 
         if !sharedSampleMetadata.isEmpty, sharedSampleMetadata.getEndValue() == format {
             upstreamFormat = sharedSampleMetadata.getEndValue()

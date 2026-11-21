@@ -14,9 +14,9 @@ class BaseTrackSelection: SETrackSelection, Hashable {
     let length: Int
     let tracks: [Int?]
     let type: TrackSelectionType
-    let formats: [Format]
+    let formats: [AnyFormat]
 
-    var selectedFormat: Format { formats[selectedIndex] }
+    var selectedFormat: AnyFormat { formats[selectedIndex] }
     var selectedIndexInTrackGroup: Int? { tracks[selectedIndex] }
     var selectedIndex: Int { fatalError("To override") }
     var selectedReason: TrackSelectionReason { fatalError("To override") }
@@ -41,7 +41,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         self.type = type
         formats = tracks
             .map { group.getFormat(index: $0) }
-            .sorted(by: { $0.bitrate > $1.bitrate })
+            .sorted(by: { ($0.bitrate ?? 0) > ($1.bitrate ?? 0) })
         var tracks = [Int?]()
         for index in 0 ..< length {
             tracks.append(group.indexOf(format: formats[index]))
@@ -51,7 +51,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         playWhenReady = false
     }
 
-    func format(for index: Int) -> Format {
+    func format(for index: Int) -> AnyFormat {
         formats[index]
     }
 
@@ -59,7 +59,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         tracks[index]
     }
 
-    func indexOf(format: Format) -> Int? {
+    func indexOf(format: AnyFormat) -> Int? {
         formats.firstIndex(where: { $0 == format })
     }
 
@@ -109,7 +109,7 @@ class BaseTrackSelection: SETrackSelection, Hashable {
     }
 
     func chunkLoaded(_ chunk: MediaChunk) {
-        guard let format = chunk.trackFormat, format.bitrate == Format.noValue, let index = indexOf(format: format),
+        guard let format = chunk.trackFormat, format.bitrate == nil, let index = indexOf(format: format),
               chunk.endTime.isNumeric, chunk.startTime.isNumeric, chunk.endTime > chunk.startTime,
               chunk.bytesLoaded > 0 else {
             return

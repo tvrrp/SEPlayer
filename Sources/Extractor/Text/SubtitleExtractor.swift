@@ -12,7 +12,7 @@ public final class SubtitleExtractor: Extractor {
     private let queue: Queue
     private let subtitleParser: SubtitleParser
     private let encoder: CueEncoder
-    private let format: Format?
+    private let format: TextFormat?
     private var samples: [Sample]
 
     private var subtitleData: BlockBufferReader?
@@ -27,11 +27,11 @@ public final class SubtitleExtractor: Extractor {
     public init(
         queue: Queue,
         subtitleParser: SubtitleParser,
-        format: Format?
+        format: TextFormat?
     ) {
         self.queue = queue
         self.subtitleParser = subtitleParser
-        self.format = format?.cuesFormat(cueReplacementBehavior: subtitleParser.getCueReplacementBehavior()).build()
+        self.format = format?.cuesFormat(cueReplacementBehavior: subtitleParser.getCueReplacementBehavior())
 
         encoder = CueEncoder()
         samples = []
@@ -55,7 +55,7 @@ public final class SubtitleExtractor: Extractor {
         let trackOutput = try output.track(for: .zero, trackType: .text)
         self.trackOutput = trackOutput
         if let format {
-            try trackOutput.setFormat(format)
+            try trackOutput.setFormat(AnyFormat(format))
             output.endTracks()
             let seekMap = SubtitleSeekMap(duration: .invalid)
             self.seekMap = seekMap

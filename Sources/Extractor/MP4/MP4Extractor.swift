@@ -20,6 +20,8 @@ final class MP4Extractor: Extractor {
         static let readAuxiliaryTracks = Flags(rawValue: 1 << 4)
         static let readWithinGopSampleDependenciesH265 = Flags(rawValue: 1 << 5)
         static let omitTrackSampleTable = Flags(rawValue: 1 << 6)
+        /// Leaves the cover art out of the metadata.
+        static let disableArtworkMetadata = Flags(rawValue: 1 << 7)
     }
 
     private let queue: Queue
@@ -332,11 +334,17 @@ private extension MP4Extractor {
         var duration = CMTime.invalid
         var tracks = [MP4Track]()
 
-//        let mvhdMetadata = try BoxParser.Mp4TimestampData(
-//            mvhd: moov.getLeafBoxOfType(type: .mvhd)?.data
-//        )
-
+        let mdtaMetadata = moov.getContainerBoxOfType(type: .meta).flatMap(boxParser.parseMdtaFromMeta(meta:))
         var gaplessInfoHolder = GaplessInfoHolder()
+        var udtaMetadata: Metadata?
+        if let udta = moov.getLeafBoxOfType(type: .udta) {
+            let ignoreArtwork = flags.contains(.disableArtworkMetadata)
+            let metadata = try boxParser.parseUdta(udtaBox: udta, ignoreArtwork: ignoreArtwork)
+            gaplessInfoHolder.setFromMetadata(metadata)
+            udtaMetadata = metadata
+        }
+        let mvhdMetadata = try moov.getLeafBoxOfType(type: .mvhd).map(boxParser.parseMvhd(mvhd:))
+
         let trackSampleTables = try boxParser.parseTraks(
             moov: moov,
             gaplessInfoHolder: &gaplessInfoHolder,
@@ -368,28 +376,25 @@ private extension MP4Extractor {
                 duration = trackDuration
             }
 
-            let maxInputSize: Int = if track.format.sampleMimeType == .audioTRUEHD {
-                trackSampleTable.maximumSize // TODO: size for TRUEHD
-            } else {
-                trackSampleTable.maximumSize
-            }
-
-            let formatBuilder = track.format.buildUpon()
-            formatBuilder.setMaxInputSize(maxInputSize)
-
+            var format = track.format
             if track.type == .video {
-                var roleFlags = track.format.roleFlags
                 if flags.contains(.markFirstVideoTrackWithMainRole) {
-                    roleFlags.insert(firstVideoTrackIndex == nil ? .main : .alternate)
+                    format.roleFlags.insert(firstVideoTrackIndex == nil ? .main : .alternate)
                 }
                 if readingAuxiliaryTracks {
-                    roleFlags.insert(.auxiliary)
-                    // TODO: formatBuilder.setAuxiliaryTrackType
+                    format.roleFlags.insert(.auxiliary)
+                    // TODO: the type of the auxiliary track
                 }
-                formatBuilder.setRoleFlags(roleFlags)
             }
-            formatBuilder.setContainerMimeType(containerMimeType)
-            try mp4Track.trackOutput.setFormat(formatBuilder.build())
+            MetadataUtil.setFormatGaplessInfo(gaplessInfoHolder: gaplessInfoHolder, format: &format)
+            MetadataUtil.setFormatMetadata(
+                mdtaMetadata: mdtaMetadata,
+                format: &format,
+                additional: udtaMetadata,
+                mvhdMetadata
+            )
+            format.containerMimeType = containerMimeType
+            try mp4Track.trackOutput.setFormat(format)
 
             if track.type == .video && firstVideoTrackIndex == nil {
                 firstVideoTrackIndex = tracks.count
@@ -505,7 +510,7 @@ private extension MP4Extractor {
         )
     }
 
-    func canReadWithinGopSampleDependencies(format: Format) -> Bool {
+    func canReadWithinGopSampleDependencies(format: AnyFormat) -> Bool {
         switch format.sampleMimeType {
         case .videoH264:
             flags.contains(.readWithinGopSampleDependencies)

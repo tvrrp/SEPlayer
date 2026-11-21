@@ -257,7 +257,7 @@ final class FakeMediaPeriod: MediaPeriod {
     func stopLoading() {}
 
     func createSampleStream(
-        initialFormat: Format,
+        initialFormat: AnyFormat,
         fakeSampleStreamItems: [FakeSampleStream.FakeSampleStreamItem]
     ) throws -> FakeSampleStream {
         try FakeSampleStream(
@@ -279,7 +279,7 @@ final class FakeMediaPeriod: MediaPeriod {
 
 extension FakeMediaPeriod {
     protocol TrackDataFactory {
-        func create(format: Format, mediaPeriodId: MediaPeriodId) -> [FakeSampleStream.FakeSampleStreamItem]
+        func create(format: AnyFormat, mediaPeriodId: MediaPeriodId) -> [FakeSampleStream.FakeSampleStreamItem]
     }
 
     struct DefaultTrackDataFactory: TrackDataFactory {
@@ -308,7 +308,7 @@ extension FakeMediaPeriod {
             return self.init(samples: samples)
         }
 
-        func create(format: Format, mediaPeriodId: MediaPeriodId) -> [FakeSampleStream.FakeSampleStreamItem] {
+        func create(format: AnyFormat, mediaPeriodId: MediaPeriodId) -> [FakeSampleStream.FakeSampleStreamItem] {
             samples
         }
     }

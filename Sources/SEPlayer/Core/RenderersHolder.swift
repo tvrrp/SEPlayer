@@ -607,7 +607,7 @@ private extension RenderersHolder {
         }
     }
 
-    func formats(from newSelection: SETrackSelection?) -> [Format] {
+    func formats(from newSelection: SETrackSelection?) -> [AnyFormat] {
         guard let newSelection else { return [] }
 
         return (0 ..< newSelection.length).map { newSelection.format(for: $0) }

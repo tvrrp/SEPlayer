@@ -20,7 +20,7 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
     private var sampleDataEnd = 0
     private var sampleData: BlockBufferReader?
     private var currentSubtitleParser: SubtitleParser?
-    private var currentFormat: Format?
+    private var currentFormat: TextFormat?
 
     init(delegate: TrackOutput, subtitleParserFactory: SubtitleParserFactory) {
         self.delegate = delegate
@@ -36,9 +36,8 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
         delegate.setDuration(duration)
     }
 
-    func setFormat(_ format: Format) throws {
-        let sampleMimeType = try format.sampleMimeType.checkNotNil()
-        try checkArgument(sampleMimeType.trackType == .text)
+    func setFormat(_ format: AnyFormat) throws {
+        let format = try format.text.checkNotNil()
 
         if format != currentFormat {
             currentFormat = format
@@ -50,13 +49,12 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
         }
 
         if currentSubtitleParser == nil {
-            try delegate.setFormat(format)
+            try delegate.setFormat(AnyFormat(format))
         } else {
-            try delegate.setFormat(
-                format.cuesFormat(cueReplacementBehavior: subtitleParserFactory.getCueReplacementBehavior(format: format))
-                    .setSubsampleOffset(Format.offsetSampleRelative)
-                    .build()
-            )
+            let behavior = try subtitleParserFactory.getCueReplacementBehavior(format: format)
+            // The cues of the samples are timed relative to them.
+            let cuesFormat = format.cuesFormat(cueReplacementBehavior: behavior).with { $0.subsampleOffset = nil }
+            try delegate.setFormat(AnyFormat(cuesFormat))
         }
     }
 
@@ -122,12 +120,13 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
 
         let outputSampleTime: CMTime
         if !cuesWithTiming.startTime.isValid {
-            assert(currentFormat.subsampleOffset == Format.offsetSampleRelative)
+            assert(currentFormat.subsampleOffset == nil)
             outputSampleTime = time.presentationTimeStamp
-        } else if currentFormat.subsampleOffset == Format.offsetSampleRelative {
-            outputSampleTime = time.presentationTimeStamp + cuesWithTiming.startTime
+        } else if let subsampleOffset = currentFormat.subsampleOffset {
+            let offset = CMTime(seconds: subsampleOffset, preferredTimescale: cuesWithTiming.startTime.timescale)
+            outputSampleTime = cuesWithTiming.startTime + offset
         } else {
-            outputSampleTime = cuesWithTiming.startTime + currentFormat.subsampleOffset
+            outputSampleTime = time.presentationTimeStamp + cuesWithTiming.startTime
         }
 
         try delegate.sampleMetadata(

@@ -15,8 +15,8 @@ final class BufferedSampleStreamWrapper: SampleStream {
     private let stream: any SampleStream
     private let batchMinDuration: CMTime
 
-    private var currentFormat: Format?
-    private var nextStreamFormat: Format?
+    private var currentFormat: AnyFormat?
+    private var nextStreamFormat: AnyFormat?
     private var bufferedSamples = [CMSampleBuffer]()
 
     init(
@@ -115,7 +115,8 @@ final class BufferedSampleStreamWrapper: SampleStream {
 
         let sampleBuffer = try CMSampleBuffer(
             dataBuffer: blockBuffer,
-            formatDescription: currentFormat?.buildFormatDescription(),
+            // The samples share the description of the current format.
+            formatDescription: bufferedSamples.first?.formatDescription,
             numSamples: bufferedSamples.count,
             sampleTimings: bufferedSamples.map {
                 CMSampleTimingInfo(

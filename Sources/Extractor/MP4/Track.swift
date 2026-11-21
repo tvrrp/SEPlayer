@@ -11,7 +11,7 @@ import SEPlayerCommon
 public struct Track {
     public let id: Int
     public let type: TrackType
-    public var format: Format
+    public var format: AnyFormat
     public let timescale: CMTimeScale
     public let movieTimescale: CMTimeScale
     public let duration: CMTime

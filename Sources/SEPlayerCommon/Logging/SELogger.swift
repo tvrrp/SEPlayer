@@ -47,6 +47,10 @@ public enum SELogTopic: String, CaseIterable, Sendable {
     case transportStream
     /// Subtitle files.
     case subtitles
+    /// Raw audio streams: MP3, ADTS, AC-3 and AC-4 files and HLS packed audio.
+    case rawAudio
+    /// Metadata: ID3 tags, MP4 tags, ICY.
+    case metadata
 
     /// Media source
     /// Progressive media: loading, the extraction window, seeks.
@@ -112,7 +116,9 @@ public enum SELogTopic: String, CaseIterable, Sendable {
         case .sniffing,
              .mp4,
              .transportStream,
-             .subtitles: .extractor
+             .subtitles,
+             .rawAudio,
+             .metadata: .extractor
         case .progressive,
              .hls,
              .playlist,

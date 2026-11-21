@@ -35,7 +35,7 @@ class FakeMediaSource: BaseMediaSource {
         try self.init(queue: syncQueue, timeline: FakeTimeline())
     }
 
-    convenience init(queue: Queue = playerSyncQueue, timeline: Timeline?, formats: [Format] = []) throws {
+    convenience init(queue: Queue = playerSyncQueue, timeline: Timeline?, formats: [AnyFormat] = []) throws {
         try self.init(
             queue: queue,
             timeline: timeline,
@@ -207,7 +207,7 @@ extension FakeMediaSource {
         }
     }
 
-    static func buildTrackGroupArray(formats: [Format]) throws -> TrackGroupArray {
+    static func buildTrackGroupArray(formats: [AnyFormat]) throws -> TrackGroupArray {
         try TrackGroupArray(trackGroups: formats.map { try TrackGroup(formats: [$0]) })
     }
 }

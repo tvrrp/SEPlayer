@@ -14,11 +14,11 @@ public protocol VideoRendererEventListener: AnyObject {
     func onRenderedFirstFrame()
 
     /// Called when the format the renderer reads changes, a moment before it shows; `nil` once it is disabled.
-    func onVideoInputFormatChanged(_ format: Format?)
+    func onVideoInputFormatChanged(_ format: AnyFormat?)
 }
 
 /// Hears what an audio renderer plays. Called on the queue of the renderer.
 public protocol AudioRendererEventListener: AnyObject {
     /// Called when the format the renderer reads changes, a moment before it plays; `nil` once it is disabled.
-    func onAudioInputFormatChanged(_ format: Format?)
+    func onAudioInputFormatChanged(_ format: AnyFormat?)
 }

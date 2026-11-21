@@ -10,23 +10,23 @@ import SEPlayerCommon
 
 /// Factory for `SubtitleParser` instances.
 public protocol SubtitleParserFactory {
-    /// Returns whether the factory is able to instantiate a `SubtitleParser` for the given `Format`.
+    /// Returns whether the factory is able to instantiate a `SubtitleParser` for the given format.
     ///
-    /// - Parameter format: The `Format`.
+    /// - Parameter format: The format of the subtitles.
     /// - Returns: Whether the factory can instantiate a suitable `SubtitleParser`.
-    func supportsFormat(_ format: Format) -> Bool
+    func supportsFormat(_ format: TextFormat) -> Bool
 
-    /// Returns the `Format.CueReplacementBehavior` of the `SubtitleParser` implementation that handles `format`.
+    /// Returns the `CueReplacementBehavior` of the `SubtitleParser` implementation that handles `format`.
     ///
     /// - Returns: The replacement behavior.
     /// - Throws: If `format` is not supported by this factory.
-    func getCueReplacementBehavior(format: Format) throws -> Format.CueReplacementBehavior
+    func getCueReplacementBehavior(format: TextFormat) throws -> CueReplacementBehavior
 
-    /// Creates a `SubtitleParser` for the given `Format`.
+    /// Creates a `SubtitleParser` for the given format.
     ///
     /// - Returns: The `SubtitleParser` instance.
     /// - Throws: If `format` is not supported by this factory.
-    func create(format: Format) throws -> SubtitleParser
+    func create(format: TextFormat) throws -> SubtitleParser
 }
 
 /// Parses subtitle data into timed `CuesWithTiming` instances.
@@ -41,9 +41,9 @@ public protocol SubtitleParser {
     /// Any samples not used from `data` will be persisted and used during subsequent calls to this method.
     ///
     /// `CuesWithTiming.startTime` in an emitted instance is derived only from the provided sample data, so has to be
-    /// considered together with any relevant `Format.subsampleOffset`. If the provided sample doesn't contain any timing
+    /// considered together with any relevant `subsampleOffset` of the format. If the provided sample doesn't contain any timing
     /// information then at most one `CuesWithTiming` instance will be emitted, with `CuesWithTiming.startTime` set to
-    /// `.invalid`, in which case `Format.subsampleOffset` **must** be `Format.offsetSampleRelative`.
+    /// `.invalid`, in which case the `subsampleOffset` of the format **must** be `nil`.
     ///
     /// - Parameters:
     ///   - data: The subtitle data to parse, its readable bytes. This must contain only complete samples. For subtitles
@@ -65,10 +65,10 @@ public protocol SubtitleParser {
     /// The default implementation is a no-op.
     func reset()
 
-    /// Returns the `Format.CueReplacementBehavior` for consecutive `CuesWithTiming` emitted by this implementation.
+    /// Returns the `CueReplacementBehavior` for consecutive `CuesWithTiming` emitted by this implementation.
     ///
     /// A given instance must always return the same value from this method.
-    func getCueReplacementBehavior() -> Format.CueReplacementBehavior
+    func getCueReplacementBehavior() -> CueReplacementBehavior
 }
 
 public extension SubtitleParser {
@@ -111,23 +111,16 @@ public struct SubtitleParserOutputOptions {
     }
 }
 
-/// Initialization data of the samples a subtitle parser outputs: each sample holds cues that `CueEncoder` encoded.
-struct CuesInitializationData: Format.InitializationData {
-    /// `sepc`.
-    static let mediaSubType = CMFormatDescription.MediaSubType(rawValue: 0x73657063)
-
-    func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {
-        try CMFormatDescription(mediaType: .text, mediaSubType: Self.mediaSubType)
-    }
-}
-
-public extension Format {
-    /// The format of the samples a subtitle parser outputs for subtitles of `self`.
-    func cuesFormat(cueReplacementBehavior: CueReplacementBehavior) -> Format.Builder {
-        buildUpon()
-            .setSampleMimeType(.applicationSEPlayerCues)
-            .setCodecs(sampleMimeType?.rawValue)
-            .setInitializationData(CuesInitializationData())
-            .setCueReplacementBehavior(cueReplacementBehavior)
+public extension Format where Scope == FormatAttributes.Text {
+    /// The format of the samples a subtitle parser outputs for subtitles of `self`: each sample holds cues that
+    /// `CueEncoder` encoded. The codec keeps the attributes of the source, such as the channel of captions.
+    func cuesFormat(cueReplacementBehavior: CueReplacementBehavior) -> TextFormat {
+        var codec = self.codec ?? TextCodec(.applicationSEPlayerCues)
+        codec.cues.source = self.codec?.mimeType
+        codec.mimeType = .applicationSEPlayerCues
+        return with {
+            $0.codec = codec
+            $0.cueReplacementBehavior = cueReplacementBehavior
+        }
     }
 }

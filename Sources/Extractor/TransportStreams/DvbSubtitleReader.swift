@@ -35,17 +35,18 @@ final class DvbSubtitleReader: ElementaryStreamReader {
         for info in subtitleInfos {
             idGenerator.generateNewId()
             let trackOutput = try output.track(for: idGenerator.getTrackId(), trackType: .text)
-            let initializationData = try BlockBufferReader()
-            try initializationData.extend(with: info.initializationData)
-            let format = try Format.Builder()
-                .setId(idGenerator.getFormatId())
-                .setContainerMimeType(.videoMP2T)
-                .setSampleMimeType(.applicationDVBSubs)
-                .setInitializationData(Format.ByteBufferInitializationData(byteBuffer: [initializationData]))
-                .setLanguage(info.language)
-                .build()
+            let formatId = try idGenerator.getFormatId()
+            let format = TextFormat {
+                $0.id = formatId
+                $0.containerMimeType = .videoMP2T
+                $0.codec = TextCodec(.applicationDVBSubs, \.dvbSubtitle) {
+                    $0.compositionPageID = info.compositionPageID
+                    $0.ancillaryPageID = info.ancillaryPageID
+                }
+                $0.language = info.language
+            }
             SELogger.debug(.transportStream, "DVB subtitle track: \(format)")
-            try trackOutput.setFormat(format)
+            try trackOutput.setFormat(AnyFormat(format))
             outputs.append(trackOutput)
         }
     }

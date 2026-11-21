@@ -9,7 +9,7 @@ import CoreMedia
 import SEPlayerCommon
 
 final class NalUnitTargetBuffer {
-    private let targetType: NalUnitUtil.H264NalUnitType
+    private let targetType: Int
     private let allocator: CFAllocator
 
     private var isFilling = false
@@ -18,7 +18,12 @@ final class NalUnitTargetBuffer {
     private(set) var nalBuffer: CMBlockBuffer
     private(set) var nalLength = 0
 
-    init(targetType: NalUnitUtil.H264NalUnitType, initialCapacity: Int = 128, memoryPool: CMMemoryPool) throws {
+    convenience init(targetType: NalUnitUtil.H264NalUnitType, initialCapacity: Int = 128, memoryPool: CMMemoryPool) throws {
+        try self.init(targetType: targetType.rawValue, initialCapacity: initialCapacity, memoryPool: memoryPool)
+    }
+
+    /// - Parameter targetType: The type of the NAL units to keep, of H.264 or of H.265.
+    init(targetType: Int, initialCapacity: Int = 128, memoryPool: CMMemoryPool) throws {
         self.targetType = targetType
         self.allocator = memoryPool.allocator
         nalBuffer = try CMBlockBuffer(
@@ -41,7 +46,7 @@ final class NalUnitTargetBuffer {
 
     func startNalUnit(type: Int) {
         precondition(!isFilling)
-        isFilling = type == targetType.rawValue
+        isFilling = type == targetType
         if isFilling {
             // Skip the three byte start code when writing data.
             nalLength = 3

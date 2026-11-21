@@ -44,9 +44,9 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
     }
 
     private let flags: Flags
-    private let closedCaptionFormats: [Format]
+    private let closedCaptionFormats: [TextFormat]
 
-    public init(flags: Flags = [], closedCaptionFormats: [Format] = []) {
+    public init(flags: Flags = [], closedCaptionFormats: [TextFormat] = []) {
         self.flags = flags
         self.closedCaptionFormats = closedCaptionFormats
     }
@@ -54,17 +54,55 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
     public func createInitialPayloadReaders() throws -> OrderedDictionary<Int, any TsPayload.Reader> { [:] }
 
     public func createPayloadReader(streamType: TSStreamType?, esInfo: TsPayload.ESInfo) throws -> (any TsPayload.Reader)? {
+        let language = esInfo.language
+        let roleFlags = esInfo.audioType.roleFlags
         switch streamType {
+        case .mpa,
+             .mpaLsf:
+            return try PesReader(
+                reader: MpegAudioReader(language: language, roleFlags: roleFlags, containerMimeType: .videoMP2T)
+            )
         case .aacAdts:
             guard !flags.contains(.ignoreAACStream) else { return nil }
-
             return try PesReader(
                 reader: AdtsReader(
                     exposeId3: false,
-                    language: esInfo.language,
-                    roleFlags: esInfo.audioType.roleFlags,
+                    language: language,
+                    roleFlags: roleFlags,
                     containerMimeType: .videoMP2T
                 )
+            )
+        case .aacLatm:
+            guard !flags.contains(.ignoreAACStream) else { return nil }
+            return try PesReader(
+                reader: LatmReader(language: language, roleFlags: roleFlags, containerMimeType: .videoMP2T)
+            )
+        case .ac3,
+             .eAc3:
+            return try PesReader(
+                reader: Ac3Reader(language: language, roleFlags: roleFlags, containerMimeType: .videoMP2T)
+            )
+        case .ac4:
+            return try PesReader(
+                reader: Ac4Reader(language: language, roleFlags: roleFlags, containerMimeType: .videoMP2T)
+            )
+        case .hdmvDts where !flags.contains(.enableHDMVDTSAudioStreams):
+            return nil
+        case .hdmvDts,
+             .dts,
+             .dtsHD,
+             .dtsUHD:
+            return try PesReader(
+                reader: DtsReader(language: language, roleFlags: roleFlags, containerMimeType: .videoMP2T)
+            )
+        case .h262,
+             .dc2H262:
+            return try PesReader(
+                reader: H262Reader(userDataReader: buildUserDataReader(with: esInfo), containerMimeType: .videoMP2T)
+            )
+        case .h263:
+            return try PesReader(
+                reader: H263Reader(userDataReader: buildUserDataReader(with: esInfo), containerMimeType: .videoMP2T)
             )
         case .h264,
              .h264Encrypted:
@@ -78,14 +116,32 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
                     containerMimeType: .videoMP2T
                 )
             )
+        case .h265:
+            return try PesReader(
+                reader: H265Reader(seiReader: buildSeiReader(with: esInfo), containerMimeType: .videoMP2T)
+            )
+        case .spliceInfo:
+            guard !flags.contains(.ignoreSpliceInfoStream) else { return nil }
+            return try SectionReader(
+                reader: PassthroughSectionPayloadReader(sampleMimeType: .applicationSCTE35, containerMimeType: .videoMP2T)
+            )
+        case .id3:
+            return try PesReader(reader: Id3Reader(containerMimeType: .videoMP2T))
         case .dvbSubs:
             return try PesReader(reader: DvbSubtitleReader(subtitleInfos: esInfo.dvbSubtitleInfos))
+        case .ait:
+            return try SectionReader(
+                reader: PassthroughSectionPayloadReader(sampleMimeType: .applicationAIT, containerMimeType: .videoMP2T)
+            )
+        case .mhas:
+            return try PesReader(reader: MpeghReader(containerMimeType: .videoMP2T))
         case .none:
             return nil
-        default:
-            // TODO: remove default
-            return nil
         }
+    }
+
+    private func buildUserDataReader(with esInfo: TsPayload.ESInfo) throws -> UserDataReader {
+        try UserDataReader(closedCaptionFormats: getClosedCaptionFormats(from: esInfo), containerMimeType: .videoMP2T)
     }
 
     private func buildSeiReader(with esInfo: TsPayload.ESInfo) -> SeiReader {
@@ -97,7 +153,7 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
 
     /// The closed captions of a video stream: those given, unless its caption service descriptor (ATSC A/65) says
     /// which there are.
-    private func getClosedCaptionFormats(from esInfo: TsPayload.ESInfo) -> [Format] {
+    private func getClosedCaptionFormats(from esInfo: TsPayload.ESInfo) -> [TextFormat] {
         guard !flags.contains(.overrideCaptionDescriptors) else {
             return closedCaptionFormats
         }
@@ -123,11 +179,15 @@ public final class DefaultTsPayloadReaderFactory: TsPayload.Factory {
                 let captionType = descriptor.removeFirst()
                 let isDigital = captionType & 0x80 != 0
                 descriptor = descriptor.dropFirst(2) // easy_reader, wide_aspect_ratio, reserved
-                formats.append(Format.Builder()
-                    .setSampleMimeType(isDigital ? .applicationCEA708 : .applicationCEA608)
-                    .setLanguage(language)
-                    .setAccessibilityChannel(isDigital ? Int(captionType & 0x3F) : 1)
-                    .build())
+                let codec = if isDigital {
+                    TextCodec(.applicationCEA708, \.cea708) { $0.serviceNumber = Int(captionType & 0x3F) }
+                } else {
+                    TextCodec(.applicationCEA608, \.cea608) { $0.channel = 1 }
+                }
+                formats.append(TextFormat {
+                    $0.codec = codec
+                    $0.language = language
+                })
             }
             SELogger.debug(.transportStream, "Caption service descriptor: \(formats.count) services")
         }

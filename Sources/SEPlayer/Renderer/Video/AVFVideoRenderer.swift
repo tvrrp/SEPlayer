@@ -49,8 +49,8 @@ final class AVFVideoRenderer: AVFBaseRenderer {
         displayLayers.delegate = self
     }
 
-    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-        guard format.sampleMimeType?.isVideo == true else {
+    override func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
+        guard format.trackType == .video else {
             return .create(formatSupport: .unsupportedType)
         }
 
@@ -101,7 +101,7 @@ final class AVFVideoRenderer: AVFBaseRenderer {
     }
 
     override func onStreamChanged(
-        formats: [Format],
+        formats: [AnyFormat],
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
@@ -157,7 +157,7 @@ final class AVFVideoRenderer: AVFBaseRenderer {
         return true
     }
 
-    override func onInputFormatChanged(_ format: Format) throws {}
+    override func onInputFormatChanged(_ format: AnyFormat) throws {}
 
     override func getDecodeBufferQueue() throws -> TypedCMBufferQueue<CMSampleBuffer>? {
         outputMode == .decode ? decodeBufferQueue : nil
@@ -253,7 +253,7 @@ final class AVFVideoRenderer: AVFBaseRenderer {
         displayLayers.stopRequestingMediaData()
     }
 
-    override func inputFormatDidChange(_ format: Format?) {
+    override func inputFormatDidChange(_ format: AnyFormat?) {
         eventListener?.onVideoInputFormatChanged(format)
     }
 

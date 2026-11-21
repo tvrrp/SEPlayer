@@ -67,13 +67,12 @@ enum VideoSampleEntryUtil {
 
     // MARK: - Boxes
 
-    /// Turns the boxes that describe the picture into extensions, and keeps the others. Of boxes that describe the
-    /// same thing, the first one wins.
+    /// Reads the boxes that describe the picture into the format. Of boxes that describe the same thing, the first
+    /// one wins.
     ///
     /// - Returns: The protection of each `sinf` box, or `nil` for a box that can't be read and that the system would
     ///   refuse.
-    static func readBoxes(_ boxes: [SampleEntryBox], into extensions: inout SampleDescriptionExtensions) -> [ProtectionScheme]? {
-        typealias Key = SampleDescriptionExtensionKey
+    static func readBoxes(_ boxes: [SampleEntryBox], into format: inout VideoFormat) -> [ProtectionScheme]? {
         var transferIsUnspecified = false
         var hasGamma = false
         var protection: [ProtectionScheme] = []
@@ -82,12 +81,12 @@ enum VideoSampleEntryUtil {
             let size = payload.readableBytes
             switch box.type {
             case .colr:
-                readColor(payload, into: &extensions, transferIsUnspecified: &transferIsUnspecified)
+                readColor(payload, into: &format, transferIsUnspecified: &transferIsUnspecified)
             case .gama:
                 guard size == 4, let gamma = try? payload.getInt(at: 0, as: Int32.self) else {
                     continue
                 }
-                extensions.addFirst(SampleDescriptionExtensions.number(Double(gamma) / 65536), for: Key.gammaLevel)
+                format.gammaLevel = format.gammaLevel ?? Double(gamma) / 65536
                 hasGamma = true
             case .pasp:
                 guard size == 8, let horizontal = try? payload.getInt(at: 0, as: Int32.self),
@@ -95,103 +94,88 @@ enum VideoSampleEntryUtil {
                       horizontal > 0, vertical > 0 else {
                     continue
                 }
-                extensions.addFirst(pixelAspectRatio(horizontal: horizontal, vertical: vertical), for: Key.pixelAspectRatio)
+                format.pixelAspectRatio = format.pixelAspectRatio
+                    ?? PixelAspectRatio(horizontalSpacing: Int(horizontal), verticalSpacing: Int(vertical))
             case .clap:
-                guard let cleanAperture = cleanAperture(payload) else {
-                    continue
-                }
-                extensions.addFirst(cleanAperture, for: Key.cleanAperture)
+                format.cleanAperture = format.cleanAperture ?? cleanAperture(payload)
             case .fiel:
                 guard size == 2, let count = try? payload.getInt(at: 0, as: UInt8.self),
                       let detail = try? payload.getInt(at: 1, as: UInt8.self) else {
                     continue
                 }
-                readFields(count: count, detail: detail, into: &extensions)
+                readFields(count: count, detail: detail, into: &format)
             case .clli:
-                guard let data = try? Data(buffer: payload) else {
-                    return nil
-                }
-                extensions.addFirst(data, for: Key.contentLightLevelInfo)
+                format.contentLightLevel = format.contentLightLevel ?? ContentLightLevel(bytes: BlockBufferView(payload))
             case .mdcv:
-                guard let data = try? Data(buffer: payload) else {
-                    return nil
-                }
-                extensions.addFirst(data, for: Key.masteringDisplayColorVolume)
+                format.masteringDisplay = format.masteringDisplay ?? MasteringDisplay(bytes: BlockBufferView(payload))
             case .amve:
-                guard let data = try? Data(buffer: payload) else {
-                    return nil
-                }
-                extensions.addFirst(data, for: Key.ambientViewingEnvironment)
+                format.ambientViewingEnvironment = format.ambientViewingEnvironment
+                    ?? AmbientViewingEnvironment(bytes: BlockBufferView(payload))
             case .cclv:
-                guard let data = try? Data(buffer: payload) else {
-                    return nil
-                }
-                extensions.addFirst(data, for: Key.contentColorVolume)
+                format.contentColorVolume = format.contentColorVolume ?? ContentColorVolume(bytes: BlockBufferView(payload))
             case .chrm:
                 guard size == 2, let top = try? payload.getInt(at: 0, as: UInt8.self),
                       let bottom = try? payload.getInt(at: 1, as: UInt8.self) else {
                     continue
                 }
-                if let top = chromaLocation(Int(top)) { extensions.addFirst(top, for: Key.chromaLocationTopField) }
-                if let bottom = chromaLocation(Int(bottom)) { extensions.addFirst(bottom, for: Key.chromaLocationBottomField) }
+                format.chromaLocationTopField = format.chromaLocationTopField ?? ChromaLocation(rawValue: Int(top))
+                format.chromaLocationBottomField = format.chromaLocationBottomField ?? ChromaLocation(rawValue: Int(bottom))
             case .atch:
                 guard size == 1, let transfer = try? payload.getInt(at: 0, as: UInt8.self) else {
                     continue
                 }
-                if transfer != 0, let name = transferFunction(Int(transfer)) {
-                    extensions.addFirst(name, for: Key.alternativeTransferCharacteristics)
+                let alternative = TransferFunction(rawValue: Int(transfer))
+                if transfer != 0, hasName(alternative) {
+                    format.alternativeTransferFunction = format.alternativeTransferFunction ?? alternative
                 }
             case .almo:
                 guard size == 4, let mode = try? payload.getInt(at: 0, as: UInt32.self) else {
                     continue
                 }
                 switch mode {
-                case 0x100: extensions.addFirst("StraightAlpha", for: Key.alphaChannelMode)
-                case 0x102: extensions.addFirst("PremultipliedAlpha", for: Key.alphaChannelMode)
+                case 0x100: format.alphaChannelMode = format.alphaChannelMode ?? .straight
+                case 0x102: format.alphaChannelMode = format.alphaChannelMode ?? .premultiplied
                 default: break
                 }
             case .rowb:
                 guard size == 4, let bytesPerRow = try? payload.getInt(at: 0, as: Int32.self) else {
                     continue
                 }
-                extensions.addFirst(SampleDescriptionExtensions.number(bytesPerRow), for: Key.bytesPerRow)
+                format.bytesPerRow = format.bytesPerRow ?? Int(bytesPerRow)
             case .hfov:
                 // The horizontal field of view, in thousandths of a degree.
                 guard size == 4, let fieldOfView = try? payload.getInt(at: 0, as: Int32.self) else {
                     continue
                 }
-                extensions.addFirst(SampleDescriptionExtensions.number(fieldOfView), for: Key.horizontalFieldOfView)
+                format.horizontalFieldOfView = format.horizontalFieldOfView ?? Int(fieldOfView)
             case .logs:
                 // The name of the log transfer function, such as Apple Log.
                 guard size > 0, let bytes = try? payload.getBytes(at: 0, length: size),
                       let name = String(bytes: bytes, encoding: .isoLatin1) else {
                     continue
                 }
-                extensions.addFirst(name, for: Key.logTransferFunction)
+                format.logTransferFunction = format.logTransferFunction ?? name
             case .vexu:
-                guard (try? VideoExtendedUsage.addExtensions(vexu: payload, to: &extensions)) != nil else {
+                guard (try? VideoExtendedUsage.read(vexu: payload, into: &format)) != nil else {
                     return nil
                 }
             case .sinf:
                 let scheme = ProtectionScheme(sinf: payload)
-                guard (try? scheme.addExtensions(to: &extensions)) != nil else {
+                guard (try? scheme.apply(to: &format)) != nil else {
                     return nil
                 }
                 protection.append(scheme)
-                extensions.addUnknownBox(box)
             case .jpgC:
                 guard size == 0 else {
                     return nil
                 }
-            case .free:
-                break
             default:
-                extensions.addUnknownBox(box)
+                break
             }
         }
-        // An unspecified transfer function of `colr` is the gamma of `gama`.
+        // An unspecified transfer function of `colr` is the gamma of `gama`, which descriptions name by the gamma.
         if transferIsUnspecified, hasGamma {
-            extensions[Key.transferFunction] = kCVImageBufferTransferFunction_UseGamma
+            format.transferFunction = .unspecified
         }
         return protection
     }
@@ -199,7 +183,7 @@ enum VideoSampleEntryUtil {
     /// A `colr` box: the code points of `nclc` or `nclx`, or an ICC profile.
     static func readColor(
         _ payload: BlockBufferReader,
-        into extensions: inout SampleDescriptionExtensions,
+        into format: inout VideoFormat,
         transferIsUnspecified: inout Bool
     ) {
         let type = (try? payload.getInt(at: 0, as: UInt32.self)).flatMap(MP4Box.BoxType.init(rawValue:))
@@ -211,24 +195,25 @@ enum VideoSampleEntryUtil {
                 return
             }
             if color.transfer == 2 { transferIsUnspecified = true }
-            addColorCodePoints(primaries: color.primaries, transfer: color.transfer, matrix: color.matrix, to: &extensions)
+            format.colorPrimaries = format.colorPrimaries ?? ColorPrimaries(rawValue: color.primaries)
+            format.transferFunction = format.transferFunction ?? TransferFunction(rawValue: color.transfer)
+            format.matrixCoefficients = format.matrixCoefficients ?? MatrixCoefficients(rawValue: color.matrix)
             if type == .nclx {
-                extensions.addFirst(color.isFullRange, for: SampleDescriptionExtensionKey.fullRangeVideo)
+                format.isFullRange = format.isFullRange ?? color.isFullRange
             }
         case .prof?,
              .rICC?:
-            guard let profile = try? payload.slice(from: 4), let data = try? Data(buffer: profile) else {
+            guard let profile = try? payload.slice(from: 4), let data = try? profile.readableData() else {
                 return
             }
-            extensions.addFirst(data, for: SampleDescriptionExtensionKey.iccProfile)
+            format.iccProfile = format.iccProfile ?? data
         default:
             break
         }
     }
 
-    /// A `clap` box: the width, height and offsets of the clean aperture as fractions, with the fractions themselves
-    /// where their denominator isn't 1.
-    static func cleanAperture(_ payload: BlockBufferReader) -> [String: Any]? {
+    /// A `clap` box: the width, height and offsets of the clean aperture as fractions.
+    static func cleanAperture(_ payload: BlockBufferReader) -> CleanAperture? {
         guard payload.readableBytes == 32,
               let fields = try? (0 ..< 8).map({ try payload.getInt(at: $0 * 4, as: UInt32.self) }) else {
             return nil
@@ -237,36 +222,29 @@ enum VideoSampleEntryUtil {
         guard !fields[0 ..< 4].contains(0), fields[5] != 0, fields[7] != 0 else {
             return nil
         }
-        let number = { (value: UInt32) in SampleDescriptionExtensions.number(Int32(bitPattern: value)) }
-        let horizontalOffset = Int32(bitPattern: fields[4]), verticalOffset = Int32(bitPattern: fields[6])
-        var aperture: [String: Any] = [
-            "Width": SampleDescriptionExtensions.number(Double(fields[0]) / Double(fields[1])),
-            "Height": SampleDescriptionExtensions.number(Double(fields[2]) / Double(fields[3])),
-            "HorizontalOffset": SampleDescriptionExtensions.number(Double(horizontalOffset) / Double(fields[5])),
-            "VerticalOffset": SampleDescriptionExtensions.number(Double(verticalOffset) / Double(fields[7])),
-        ]
-        if fields[1] != 1 { aperture["WidthAsRational"] = [number(fields[0]), number(fields[1])] }
-        if fields[3] != 1 { aperture["HeightAsRational"] = [number(fields[2]), number(fields[3])] }
-        if fields[5] != 1 { aperture["HorizontalOffsetAsRational"] = [number(fields[4]), number(fields[5])] }
-        if fields[7] != 1 { aperture["VerticalOffsetAsRational"] = [number(fields[6]), number(fields[7])] }
-        return aperture
+        return CleanAperture(
+            width: Rational(numerator: Int(fields[0]), denominator: Int(fields[1])),
+            height: Rational(numerator: Int(fields[2]), denominator: Int(fields[3])),
+            horizontalOffset: Rational(numerator: Int(Int32(bitPattern: fields[4])), denominator: Int(fields[5])),
+            verticalOffset: Rational(numerator: Int(Int32(bitPattern: fields[6])), denominator: Int(fields[7]))
+        )
     }
 
     /// A `fiel` box: the field count, and with two fields their order.
-    static func readFields(count: UInt8, detail: UInt8, into extensions: inout SampleDescriptionExtensions) {
-        extensions.addFirst(SampleDescriptionExtensions.number(Int8(bitPattern: count)), for: SampleDescriptionExtensionKey.fieldCount)
+    static func readFields(count: UInt8, detail: UInt8, into format: inout VideoFormat) {
+        guard format.fieldCount == nil else {
+            return
+        }
+        format.fieldCount = Int(Int8(bitPattern: count))
         guard count > 1 else {
             return
         }
-        let fieldDetail: String? = switch detail {
-        case 1: "TemporalTopFirst"
-        case 6: "TemporalBottomFirst"
-        case 9: "SpatialFirstLineEarly"
-        case 14: "SpatialFirstLineLate"
+        format.fieldOrder = switch detail {
+        case 1: .temporalTopFirst
+        case 6: .temporalBottomFirst
+        case 9: .spatialFirstLineEarly
+        case 14: .spatialFirstLineLate
         default: nil
-        }
-        if let fieldDetail {
-            extensions.addFirst(fieldDetail, for: SampleDescriptionExtensionKey.fieldDetail)
         }
     }
 
@@ -332,20 +310,17 @@ enum VideoSampleEntryUtil {
     /// them all the same: decoders only know the twin (`avc1`, `hvc1`, `dvh1`), and the two decode alike.
     ///
     /// - Returns: `nil` for other types, and for a config that leaves a parameter set to the samples.
-    static func twinWithParameterSetsInConfig(
-        of codec: MP4Box.BoxType,
-        extensions: SampleDescriptionExtensions
-    ) -> MP4Box.BoxType? {
+    static func twinWithParameterSetsInConfig(of codec: MP4Box.BoxType, boxes: [SampleEntryBox]) -> MP4Box.BoxType? {
         switch codec {
         case .avc3:
-            guard let avcC = extensions.unknownBoxPayloads(of: .avcC).first, AvcUtil.hasParameterSets(avcC: avcC) else {
+            guard let avcC = boxes.payload(of: .avcC), AvcUtil.hasParameterSets(avcC: avcC) else {
                 return nil
             }
             return .avc1
         case .hev1,
              .dvhe:
             let types = [HevcUtil.videoParameterSetType, HevcUtil.sequenceParameterSetType, HevcUtil.pictureParameterSetType]
-            guard let hvcC = extensions.unknownBoxPayloads(of: .hvcC).first,
+            guard let hvcC = boxes.payload(of: .hvcC),
                   let arrays = HevcUtil.nalUnits(hvcC: hvcC),
                   types.allSatisfy({ HevcUtil.firstNalUnit(of: $0, in: arrays) != nil }) else {
                 return nil
@@ -356,97 +331,60 @@ enum VideoSampleEntryUtil {
         }
     }
 
-    /// Adds the extensions the parameter sets tell and the boxes left out: chroma location, color, range, pixel
-    /// aspect ratio, progressive frames, the HDR metadata of H.265 SEI messages, alpha and bit depth.
+    /// Adds what the parameter sets of the configuration tell where the boxes told nothing: chroma location, color,
+    /// range, pixel aspect ratio, progressive frames, the HDR metadata of H.265 SEI messages, alpha and bit depth.
     ///
+    /// - Parameter config: The configuration box of the flavor, such as `avcC`.
     /// - Returns: `false` for parameters not read here.
-    static func addFallbackExtensions(
-        to values: inout [CFString: Any],
-        flavor: ParameterSetFlavor,
-        extensions: SampleDescriptionExtensions
+    static func addParameterSetAttributes(
+        to format: inout VideoFormat,
+        config: BlockBufferReader?,
+        flavor: ParameterSetFlavor
     ) -> Bool {
-        typealias Key = SampleDescriptionExtensionKey
         // Without its config, or with one that doesn't read, the codec tells nothing more.
-        guard let config = extensions.unknownBoxPayloads(of: flavor.configType).first else {
-            return true
+        guard let config, let parameters = FallbackParameters(config: config, flavor: flavor) else {
+            return config.map { FallbackParameters.isRead(config: $0, flavor: flavor) } ?? true
         }
 
-        var parameters = FallbackParameters()
-        switch flavor {
-        case .h264:
-            guard let sps = AvcUtil.firstSequenceParameterSet(avcC: config) else {
-                return true
-            }
-            let view = BlockBufferView(sps)
-            guard let parsed = try? NalUnitUtil.SpsData(data: view, nalOffset: view.startIndex + 1, nalLimit: view.endIndex) else {
-                return true
-            }
-            parameters = FallbackParameters(h264: parsed)
-        case .h265:
-            guard let arrays = HevcUtil.nalUnits(hvcC: config) else {
-                return true
-            }
-            let sps = HevcUtil.firstNalUnit(of: HevcUtil.sequenceParameterSetType, in: arrays)
-                .flatMap { try? HevcUtil.SequenceParameterSet(nalUnit: $0) }
-            parameters = FallbackParameters(h265: sps)
-            parameters.masteringDisplay = HevcUtil.seiPayload(type: 137, in: arrays).flatMap { $0.count == 24 ? $0 : nil }
-            parameters.contentLightLevel = HevcUtil.seiPayload(type: 144, in: arrays).flatMap { $0.count == 4 ? $0 : nil }
-            parameters.ambientViewing = HevcUtil.seiPayload(type: 148, in: arrays).flatMap { $0.count == 8 ? $0 : nil }
-            parameters.contentColorVolume = HevcUtil.seiPayload(type: 149, in: arrays)
-            parameters.alternativeTransfer = HevcUtil.seiPayload(type: 147, in: arrays).flatMap { $0.count == 1 ? Int($0[0]) : nil }
-            parameters.alphaIsPremultiplied = HevcUtil.seiPayload(type: 165, in: arrays).flatMap(HevcUtil.isAlphaPremultiplied)
-            parameters.hasAlphaLayer = HevcUtil.firstNalUnit(of: HevcUtil.videoParameterSetType, in: arrays)
-                .map(HevcUtil.hasAlphaLayer(videoParameterSet:)) ?? false
-        case .av1:
-            guard let av1 = Av1Configuration(av1C: config) else {
-                return true
-            }
-            // HDR metadata in the config needs converting as the system does; the system reads those.
-            guard !av1.hasMetadata else {
-                return false
-            }
-            parameters = FallbackParameters(av1: av1)
-        }
-
-        func addIfAbsent(_ key: CFString, _ value: Any?) {
-            guard values[key] == nil, let value else {
-                return
-            }
-            values[key] = value
-        }
-
-        if values[Key.chromaLocationTopField] == nil {
+        if format.chromaLocationTopField == nil {
             var (top, bottom) = parameters.chromaLocation ?? (0, 0)
             if flavor == .h264, top == 2, bottom == 2 { (top, bottom) = (1, 1) }
-            addIfAbsent(Key.chromaLocationTopField, chromaLocation(top))
-            addIfAbsent(Key.chromaLocationBottomField, chromaLocation(bottom))
+            format.chromaLocationTopField = ChromaLocation(rawValue: top)
+            format.chromaLocationBottomField = format.chromaLocationBottomField ?? ChromaLocation(rawValue: bottom)
         }
-        if values[Key.colorPrimaries] == nil, let colour = parameters.colour {
-            var colorExtensions = SampleDescriptionExtensions()
-            addColorCodePoints(primaries: colour.primaries, transfer: colour.transfer, matrix: colour.matrix, to: &colorExtensions)
-            values.merge(colorExtensions.values) { _, new in new }
+        // The colour of the parameter sets, where they name it, replaces a colour without named primaries.
+        if !hasName(format.colorPrimaries), let colour = parameters.colour {
+            let primaries = ColorPrimaries(rawValue: colour.primaries)
+            let transfer = TransferFunction(rawValue: colour.transfer)
+            let matrix = MatrixCoefficients(rawValue: colour.matrix)
+            if hasName(primaries) { format.colorPrimaries = primaries }
+            if hasName(transfer) { format.transferFunction = transfer }
+            if hasName(matrix) { format.matrixCoefficients = matrix }
         }
-        addIfAbsent(Key.fullRangeVideo, parameters.fullRange)
+        format.isFullRange = format.isFullRange ?? parameters.fullRange
         if let (horizontal, vertical) = parameters.sampleAspectRatio {
-            addIfAbsent(Key.pixelAspectRatio, pixelAspectRatio(horizontal: Int32(horizontal), vertical: Int32(vertical)))
+            format.pixelAspectRatio = format.pixelAspectRatio
+                ?? PixelAspectRatio(horizontalSpacing: horizontal, verticalSpacing: vertical)
         }
         if parameters.isProgressive == true {
-            addIfAbsent(Key.fieldCount, SampleDescriptionExtensions.number(Int32(1)))
+            format.fieldCount = format.fieldCount ?? 1
         }
-        addIfAbsent(Key.masteringDisplayColorVolume, parameters.masteringDisplay.map { Data($0) })
-        addIfAbsent(Key.contentLightLevelInfo, parameters.contentLightLevel.map { Data($0) })
-        addIfAbsent(Key.ambientViewingEnvironment, parameters.ambientViewing.map { Data($0) })
-        addIfAbsent(Key.contentColorVolume, parameters.contentColorVolume.map { Data($0) })
-        addIfAbsent(Key.alternativeTransferCharacteristics, parameters.alternativeTransfer.flatMap(transferFunction))
-        addIfAbsent(Key.alphaChannelMode, parameters.alphaIsPremultiplied.map { $0 ? "PremultipliedAlpha" : "StraightAlpha" })
+        format.masteringDisplay = format.masteringDisplay ?? parameters.masteringDisplay
+        format.contentLightLevel = format.contentLightLevel ?? parameters.contentLightLevel
+        format.ambientViewingEnvironment = format.ambientViewingEnvironment ?? parameters.ambientViewing
+        format.contentColorVolume = format.contentColorVolume ?? parameters.contentColorVolume
+        if let alternative = parameters.alternativeTransfer, hasName(alternative) {
+            format.alternativeTransferFunction = format.alternativeTransferFunction ?? alternative
+        }
+        format.alphaChannelMode = format.alphaChannelMode ?? parameters.alphaChannelMode
         if parameters.hasAlphaLayer {
-            addIfAbsent(Key.containsAlphaChannel, true)
+            format.containsAlphaChannel = format.containsAlphaChannel ?? true
         }
-        addIfAbsent(Key.bitsPerComponent, parameters.bitsPerComponent.map { SampleDescriptionExtensions.number(Int8(clamping: $0)) })
+        format.bitsPerComponent = format.bitsPerComponent ?? parameters.bitsPerComponent
 
         // H.265 can name a transfer function for displays that know it, which wins over the usual one.
-        if flavor == .h265, let alternative = values[Key.alternativeTransferCharacteristics] {
-            values[Key.transferFunction] = alternative
+        if flavor == .h265, let alternative = format.alternativeTransferFunction {
+            format.transferFunction = alternative
         }
         return true
     }
@@ -459,24 +397,70 @@ enum VideoSampleEntryUtil {
         var sampleAspectRatio: (Int, Int)?
         var isProgressive: Bool?
         var bitsPerComponent: Int?
-        var masteringDisplay: [UInt8]?
-        var contentLightLevel: [UInt8]?
-        var ambientViewing: [UInt8]?
-        var contentColorVolume: [UInt8]?
-        var alternativeTransfer: Int?
-        var alphaIsPremultiplied: Bool?
+        var masteringDisplay: MasteringDisplay?
+        var contentLightLevel: ContentLightLevel?
+        var ambientViewing: AmbientViewingEnvironment?
+        var contentColorVolume: ContentColorVolume?
+        var alternativeTransfer: TransferFunction?
+        var alphaChannelMode: AlphaChannelMode?
         var hasAlphaLayer = false
 
-        init() {}
+        /// The parameters of a configuration box, or `nil` for one that doesn't read or tells nothing here.
+        init?(config: BlockBufferReader, flavor: ParameterSetFlavor) {
+            switch flavor {
+            case .h264:
+                guard let sps = AvcUtil.firstSequenceParameterSet(avcC: config) else {
+                    return nil
+                }
+                let view = BlockBufferView(sps)
+                guard let parsed = try? NalUnitUtil.SpsData(data: view, nalOffset: view.startIndex + 1, nalLimit: view.endIndex) else {
+                    return nil
+                }
+                self.init(h264: parsed)
+            case .h265:
+                guard let arrays = HevcUtil.nalUnits(hvcC: config) else {
+                    return nil
+                }
+                let sps = HevcUtil.firstNalUnit(of: HevcUtil.sequenceParameterSetType, in: arrays)
+                    .flatMap { try? HevcUtil.SequenceParameterSet(nalUnit: $0) }
+                self.init(h265: sps)
+                masteringDisplay = HevcUtil.seiPayload(type: 137, in: arrays).flatMap(MasteringDisplay.init(bytes:))
+                contentLightLevel = HevcUtil.seiPayload(type: 144, in: arrays).flatMap(ContentLightLevel.init(bytes:))
+                ambientViewing = HevcUtil.seiPayload(type: 148, in: arrays).flatMap(AmbientViewingEnvironment.init(bytes:))
+                contentColorVolume = HevcUtil.seiPayload(type: 149, in: arrays).flatMap(ContentColorVolume.init(bytes:))
+                alternativeTransfer = HevcUtil.seiPayload(type: 147, in: arrays)
+                    .flatMap { $0.count == 1 ? TransferFunction(rawValue: Int($0[0])) : nil }
+                alphaChannelMode = HevcUtil.seiPayload(type: 165, in: arrays).flatMap(HevcUtil.isAlphaPremultiplied)
+                    .map { $0 ? .premultiplied : .straight }
+                hasAlphaLayer = HevcUtil.firstNalUnit(of: HevcUtil.videoParameterSetType, in: arrays)
+                    .map(HevcUtil.hasAlphaLayer(videoParameterSet:)) ?? false
+            case .av1:
+                guard let av1 = Av1Configuration(av1C: config), !av1.hasMetadata else {
+                    return nil
+                }
+                self.init(av1: av1)
+            }
+        }
 
-        init(h264 sps: NalUnitUtil.SpsData) {
+        /// Whether a configuration box that gives no parameters is still read here: all but AV1 with HDR metadata,
+        /// which needs converting as the system does.
+        static func isRead(config: BlockBufferReader, flavor: ParameterSetFlavor) -> Bool {
+            guard flavor == .av1, let av1 = Av1Configuration(av1C: config) else {
+                return true
+            }
+            return !av1.hasMetadata
+        }
+
+        private init() {}
+
+        private init(h264 sps: NalUnitUtil.SpsData) {
             self.init(vui: sps.vui)
             isProgressive = sps.frameMbsOnlyFlag
             // The range flag is 0 when the VUI has no video signal type.
             if sps.vui != nil { fullRange = fullRange ?? false }
         }
 
-        init(h265 sps: HevcUtil.SequenceParameterSet?) {
+        private init(h265 sps: HevcUtil.SequenceParameterSet?) {
             self.init(vui: sps?.vui)
             if let sps {
                 isProgressive = !sps.isInterlaced
@@ -486,7 +470,7 @@ enum VideoSampleEntryUtil {
             }
         }
 
-        init(av1: Av1Configuration) {
+        private init(av1: Av1Configuration) {
             chromaLocation = (av1.chromaLocationIndex, av1.chromaLocationIndex)
             if let color = av1.colorConfig {
                 colour = (color.colorPrimaries, color.transferCharacteristics, color.matrixCoefficients)
@@ -505,64 +489,27 @@ enum VideoSampleEntryUtil {
         }
     }
 
-    static func addProResExtensions(to values: inout [CFString: Any], codecType: MP4Box.BoxType, depth: Int) {
-        if values[SampleDescriptionExtensionKey.bitsPerComponent] == nil {
-            values[SampleDescriptionExtensionKey.bitsPerComponent] =
-                SampleDescriptionExtensions.number(Int32(ProResUtil.bitsPerComponent(format: codecType, depth: depth)))
-        }
+    static func addProResAttributes(to format: inout VideoFormat, codecType: MP4Box.BoxType, depth: Int) {
+        format.bitsPerComponent = format.bitsPerComponent ?? ProResUtil.bitsPerComponent(format: codecType, depth: depth)
         // ProRes of 32 bits carries alpha, straight unless the entry says otherwise.
         if depth == 32 {
-            if values[SampleDescriptionExtensionKey.containsAlphaChannel] == nil {
-                values[SampleDescriptionExtensionKey.containsAlphaChannel] = true
-            }
-            if values[SampleDescriptionExtensionKey.alphaChannelMode] == nil {
-                values[SampleDescriptionExtensionKey.alphaChannelMode] = "StraightAlpha"
-            }
+            format.containsAlphaChannel = format.containsAlphaChannel ?? true
+            format.alphaChannelMode = format.alphaChannelMode ?? .straight
         }
     }
 
-    // MARK: - Values
+    // MARK: - Names
 
-    /// Adds the color primaries, transfer function and matrix of ISO/IEC 23091-2 code points that have names.
-    static func addColorCodePoints(
-        primaries: Int,
-        transfer: Int,
-        matrix: Int,
-        to extensions: inout SampleDescriptionExtensions
-    ) {
-        if let name = CVColorPrimariesGetStringForIntegerCodePoint(Int32(primaries))?.takeUnretainedValue() {
-            extensions.addFirst(name, for: SampleDescriptionExtensionKey.colorPrimaries)
-        }
-        if let name = transferFunction(transfer) {
-            extensions.addFirst(name, for: SampleDescriptionExtensionKey.transferFunction)
-        }
-        if let name = CVYCbCrMatrixGetStringForIntegerCodePoint(Int32(matrix))?.takeUnretainedValue() {
-            extensions.addFirst(name, for: SampleDescriptionExtensionKey.yCbCrMatrix)
-        }
+    /// Whether descriptions name the code point: those they don't name are left out of them.
+    static func hasName(_ primaries: ColorPrimaries?) -> Bool {
+        primaries.map { CVColorPrimariesGetStringForIntegerCodePoint(Int32($0.rawValue)) != nil } ?? false
     }
 
-    static func transferFunction(_ codePoint: Int) -> CFString? {
-        CVTransferFunctionGetStringForIntegerCodePoint(Int32(codePoint))?.takeUnretainedValue()
+    static func hasName(_ transfer: TransferFunction?) -> Bool {
+        transfer.map { CVTransferFunctionGetStringForIntegerCodePoint(Int32($0.rawValue)) != nil } ?? false
     }
 
-    /// The chroma location of an index of H.264 Table E-1's chroma sample locations, or 255 for DV 4:2:0.
-    static func chromaLocation(_ index: Int) -> CFString? {
-        switch index {
-        case 0: kCVImageBufferChromaLocation_Left
-        case 1: kCVImageBufferChromaLocation_Center
-        case 2: kCVImageBufferChromaLocation_TopLeft
-        case 3: kCVImageBufferChromaLocation_Top
-        case 4: kCVImageBufferChromaLocation_BottomLeft
-        case 5: kCVImageBufferChromaLocation_Bottom
-        case 255: kCVImageBufferChromaLocation_DV420
-        default: nil
-        }
-    }
-
-    static func pixelAspectRatio(horizontal: Int32, vertical: Int32) -> [CFString: Any] {
-        [
-            kCMFormatDescriptionKey_PixelAspectRatioHorizontalSpacing: SampleDescriptionExtensions.number(horizontal),
-            kCMFormatDescriptionKey_PixelAspectRatioVerticalSpacing: SampleDescriptionExtensions.number(vertical),
-        ]
+    static func hasName(_ matrix: MatrixCoefficients?) -> Bool {
+        matrix.map { CVYCbCrMatrixGetStringForIntegerCodePoint(Int32($0.rawValue)) != nil } ?? false
     }
 }

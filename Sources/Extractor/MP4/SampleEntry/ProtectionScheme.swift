@@ -60,20 +60,16 @@ struct ProtectionScheme {
         }
     }
 
-    /// Adds what a Common Encryption scheme tells: that the media is protected, its original format and its track
-    /// encryption box. A scheme of another kind adds nothing, and an earlier `sinf` box wins.
-    func addExtensions(to extensions: inout SampleDescriptionExtensions) throws {
+    /// Sets what a Common Encryption scheme tells: that the media is protected, its original format and its track
+    /// encryption box. A scheme of another kind sets nothing, and an earlier `sinf` box wins.
+    func apply<Scope>(to format: inout Format<Scope>) throws {
         guard schemeType != nil else { return }
-        extensions.addFirst(kCFBooleanTrue as Any, for: SampleDescriptionExtensionKey.commonEncryptionProtected)
-        if let originalFormat {
-            extensions.addFirst(
-                SampleDescriptionExtensions.number(Int32(bitPattern: originalFormat)),
-                for: SampleDescriptionExtensionKey.commonEncryptionOriginalFormat
-            )
+        var encryption = format.encryption ?? CommonEncryption()
+        encryption.originalFormat = encryption.originalFormat ?? originalFormat.map { FourCharacterCode($0) }
+        if encryption.trackEncryptionBox == nil {
+            encryption.trackEncryptionBox = try trackEncryptionBox?.readableData()
         }
-        if let trackEncryptionBox {
-            try extensions.addFirst(Data(buffer: trackEncryptionBox), for: SampleDescriptionExtensionKey.commonEncryptionTrackEncryptionBox)
-        }
+        format.encryption = encryption
     }
 
     // MARK: - Codec types
@@ -100,21 +96,6 @@ struct ProtectionScheme {
         case .dav1 where schemeType == .cbcs: return .qdav
         case .vp09 where schemeType == .cbcs: return .qvp9
         default: return nil
-        }
-    }
-
-    /// The format of protected audio, by the format its decoder describes; the scheme doesn't matter.
-    ///
-    /// - Returns: `nil` for a format with no protected variant.
-    static func protectedAudioFormat(_ format: AudioFormatID) -> AudioFormatID? {
-        switch format {
-        case kAudioFormatMPEG4AAC: MP4Box.BoxType.qaac.rawValue
-        case kAudioFormatAC3: MP4Box.BoxType.qac3.rawValue
-        case kAudioFormatEnhancedAC3: MP4Box.BoxType.qec3.rawValue
-        case kAudioFormatAppleLossless: MP4Box.BoxType.qlac.rawValue
-        case kAudioFormatFLAC: MP4Box.BoxType.qflc.rawValue
-        case MP4Box.BoxType.apac.rawValue: MP4Box.BoxType.qapc.rawValue
-        default: nil
         }
     }
 }

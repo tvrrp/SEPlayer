@@ -21,7 +21,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         /// The variant's url.
         public let url: URL
         /// Format information associated with this variant.
-        public let format: Format
+        public let format: AnyFormat
         /// The video rendition group referenced by this variant.
         public let videoGroupId: String?
         /// The audio rendition group referenced by this variant.
@@ -37,7 +37,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
 
         public init(
             url: URL,
-            format: Format,
+            format: AnyFormat,
             videoGroupId: String? = nil,
             audioGroupId: String? = nil,
             subtitleGroupId: String? = nil,
@@ -56,15 +56,15 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         }
 
         public static func createMediaPlaylistVariantUrl(_ url: URL) -> Variant {
-            let format = Format.Builder()
-                .setId(0)
-                .setContainerMimeType(.applicationM3U8)
-                .build()
-
-            return Variant(url: url, format: format)
+            // What the media playlist has is known from its samples alone; it is taken for video until then.
+            let format = VideoFormat {
+                $0.id = "0"
+                $0.containerMimeType = .applicationM3U8
+            }
+            return Variant(url: url, format: AnyFormat(format))
         }
 
-        public func copyWithFormat(_ format: Format) -> Variant {
+        public func copyWithFormat(_ format: AnyFormat) -> Variant {
             Variant(
                 url: self.url,
                 format: format,
@@ -83,7 +83,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         /// The rendition's url, or nil if the tag does not have a URI attribute.
         public let url: URL?
         /// Format information associated with this rendition.
-        public let format: Format
+        public let format: AnyFormat
         /// The group to which this rendition belongs.
         public let groupId: String
         /// The name of the rendition.
@@ -93,7 +93,7 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
 
         public init(
             url: URL?,
-            format: Format,
+            format: AnyFormat,
             groupId: String,
             name: String,
             stableRenditionId: String?
@@ -142,11 +142,11 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
     public let closedCaptions: [Rendition]
     /// The format of the audio muxed in the variants. May be null if the playlist does not declare any
     /// muxed audio.
-    public let muxedAudioFormat: Format?
+    public let muxedAudioFormat: AnyFormat?
     /// The format of the closed captions declared by the playlist. May be empty if the playlist
     /// explicitly declares no captions are available, or null if the playlist does not declare any
     /// captions information.
-    public let muxedCaptionFormats: [Format]?
+    public let muxedCaptionFormats: [TextFormat]?
     /// Contains variable definitions, as defined by the #EXT-X-DEFINE tag.
     public let variableDefinitions: [String: String]
     /// DRM initialization data derived from #EXT-X-SESSION-KEY tags.
@@ -163,8 +163,8 @@ public struct HlsMultivariantPlaylist: HlsPlaylist, Hashable {
         audios: [Rendition],
         subtitles: [Rendition],
         closedCaptions: [Rendition],
-        muxedAudioFormat: Format?,
-        muxedCaptionFormats: [Format]?,
+        muxedAudioFormat: AnyFormat?,
+        muxedCaptionFormats: [TextFormat]?,
         hasIndependentSegments: Bool,
         variableDefinitions: [String: String],
         sessionKeyDrmInitData: [Int],

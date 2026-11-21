@@ -217,6 +217,8 @@ public extension MP4Box {
         case udi2 = 0x75646932
         case udex = 0x75646578
         case dapa = 0x64617061
+        case iamf = 0x69616d66
+        case iacb = 0x69616362
         // Codec types of protected media.
         case cavc = 0x63617663
         case qavc = 0x71617663

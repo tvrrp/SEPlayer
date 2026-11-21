@@ -18,7 +18,7 @@ public final class FragmentedMp4Extractor: Extractor {
     private let flags: Flags
     private let sideloadedTrack: Track?
 
-    private let closedCaptionFormats: [Format]
+    private let closedCaptionFormats: [TextFormat]
     private var trackBundles: OrderedDictionary<Int, TrackBundle> = .init()
 
     private let timestampSession: TimestampAdjuster.Session?
@@ -72,7 +72,7 @@ public final class FragmentedMp4Extractor: Extractor {
         flags: Flags = [],
         timestampSession: TimestampAdjuster.Session? = nil,
         sideloadedTrack: Track? = nil,
-        closedCaptionFormats: [Format] = [],
+        closedCaptionFormats: [TextFormat] = [],
         additionalEmsgTrackOutput: TrackOutput? = nil
     ) {
         self.queue = queue
@@ -125,8 +125,8 @@ public final class FragmentedMp4Extractor: Extractor {
         try initExtraTracks()
 
         if let sideloadedTrack {
-            let formatBuilder = sideloadedTrack.format.buildUpon()
-            formatBuilder.setContainerMimeType(MimeTypes(format: sideloadedTrack.format))
+            var format = sideloadedTrack.format
+            format.containerMimeType = MimeTypes(format: sideloadedTrack.format)
 
             let bundle = try await TrackBundle(
                 output: output.track(for: 0, trackType: sideloadedTrack.type),
@@ -150,7 +150,7 @@ public final class FragmentedMp4Extractor: Extractor {
                     size: 0,
                     flags: 0
                 ),
-                baseFormat: formatBuilder.build(),
+                baseFormat: format,
                 isolation
             )
 
@@ -425,11 +425,16 @@ public final class FragmentedMp4Extractor: Extractor {
             }
         }
 
-        // TODO: mdtaMetadata
-
+        let mdtaMetadata = moov.getContainerBoxOfType(type: .meta).flatMap(boxParser.parseMdtaFromMeta(meta:))
         var gaplessInfoHolder = GaplessInfoHolder()
-
-        // TODO: mdtaMetadata
+        var udtaMetadata: Metadata?
+        if let udta = moov.getLeafBoxOfType(type: .udta) {
+            let ignoreArtwork = flags.contains(.disableArtworkMetadata)
+            let metadata = try boxParser.parseUdta(udtaBox: udta, ignoreArtwork: ignoreArtwork)
+            gaplessInfoHolder.setFromMetadata(metadata)
+            udtaMetadata = metadata
+        }
+        let mvhdMetadata = try moov.getLeafBoxOfType(type: .mvhd).map(boxParser.parseMvhd(mvhd:))
 
         let sampleTables = try boxParser.parseTraks(
             moov: moov,
@@ -446,10 +451,15 @@ public final class FragmentedMp4Extractor: Extractor {
                 let track = sampleTable.track
                 let output = try extractorOutput.track(for: track.id, trackType: track.type)
                 output.setDuration(track.duration)
-                let formatBuilder = track.format.buildUpon()
-                formatBuilder.setContainerMimeType(containerMimeType)
-                // TODO: MetadataUtil.setFormatGaplessInfo
-                // TODO: MetadataUtil.setFormatMetadata
+                var format = track.format
+                format.containerMimeType = containerMimeType
+                MetadataUtil.setFormatGaplessInfo(gaplessInfoHolder: gaplessInfoHolder, format: &format)
+                MetadataUtil.setFormatMetadata(
+                    mdtaMetadata: mdtaMetadata,
+                    format: &format,
+                    additional: udtaMetadata,
+                    mvhdMetadata
+                )
 
                 let trackBundle = try await TrackBundle(
                     output: output,
@@ -458,7 +468,7 @@ public final class FragmentedMp4Extractor: Extractor {
                         defaultSampleValues: defaultSampleValuesArray,
                         trackId: track.id
                     ),
-                    baseFormat: formatBuilder.build(),
+                    baseFormat: format,
                     isolation
                 )
 
@@ -541,7 +551,7 @@ public final class FragmentedMp4Extractor: Extractor {
         guard headerLength > 0, [1, 2, 4].contains(lengthFieldLength), presentationTime.isNumeric else {
             return
         }
-        let reorderingDepth = track.format.maxNumReorderSamples == Format.noValue ? 0 : track.format.maxNumReorderSamples
+        let reorderingDepth = track.format.video?.maxReorderFrames ?? 0
         try seiReader.setReorderingQueueSize(reorderingDepth)
 
         var reader = BlockBufferReader(sample)
@@ -1154,7 +1164,7 @@ public final class FragmentedMp4Extractor: Extractor {
         )
     }
 
-    private func canReadWithinGopSampleDependencies(format: Format) -> Bool {
+    private func canReadWithinGopSampleDependencies(format: AnyFormat) -> Bool {
         switch format.sampleMimeType {
         case .videoH264:
             flags.contains(.readWithinGopSampleDependencies)
@@ -1189,6 +1199,8 @@ public extension FragmentedMp4Extractor {
         public static let readWithinGopSampleDependencies = Flags(rawValue: 1 << 5)
         public static let readWithinGopSampleDependenciesH265 = Flags(rawValue: 1 << 6)
         public static let mergeFragmentedSidx = Flags(rawValue: 1 << 7)
+        /// Leaves the cover art out of the metadata.
+        public static let disableArtworkMetadata = Flags(rawValue: 1 << 8)
     }
 }
 
@@ -1200,7 +1212,7 @@ private extension FragmentedMp4Extractor {
 
     func shouldParseLeafAtom(atom: UInt32) -> Bool {
         let atoms: [MP4Box.BoxType] = [
-            .hdlr, .mdhd, .mvhd, .sidx, .stsd, .stts, .ctts, .stsc, .stsz, .stz2, .stco, .co64, .stss, .tfdt, .tfhd, .tkhd, .trex, .trun, .pssh, .saiz, .saio, .senc, .uuid, .sbgp, .sgpd, .elst, .mehd, .emsg,
+            .hdlr, .mdhd, .mvhd, .sidx, .stsd, .stts, .ctts, .stsc, .stsz, .stz2, .stco, .co64, .stss, .tfdt, .tfhd, .tkhd, .trex, .trun, .pssh, .saiz, .saio, .senc, .uuid, .sbgp, .sgpd, .elst, .mehd, .emsg, .udta, .keys, .ilst,
         ]
         return atoms.contains(where: { $0.rawValue == atom })
     }
@@ -1217,7 +1229,7 @@ private extension FragmentedMp4Extractor {
 
     final class TrackBundle {
         let output: TrackOutput
-        let baseFormat: Format
+        let baseFormat: AnyFormat
         var fragment: TrackFragment
         var moovSampleTable: TrackSampleTable
         var defaultSampleValues: DefaultSampleValues
@@ -1239,7 +1251,7 @@ private extension FragmentedMp4Extractor {
         }
 
         /// The format of the samples: the base format, with the parameter sets the samples carried once they have.
-        private var format: Format {
+        private var format: AnyFormat {
             (try? inBandParameterSets?.format(updating: baseFormat)) ?? baseFormat
         }
 
@@ -1247,7 +1259,7 @@ private extension FragmentedMp4Extractor {
             output: TrackOutput,
             moovSampleTable: TrackSampleTable,
             defaultSampleValues: DefaultSampleValues,
-            baseFormat: Format,
+            baseFormat: AnyFormat,
             _ isolation: isolated any Actor
         ) async throws {
             self.output = output

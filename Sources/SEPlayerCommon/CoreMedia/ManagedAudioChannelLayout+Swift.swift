@@ -51,6 +51,11 @@ public extension ManagedAudioChannelLayout {
         self = fields.withUnsafeBytes { Self(copying: $0, size: size) }
     }
 
+    /// A layout of its tag alone: the layouts of `init(tag:)` have a channel description too, of no channel.
+    init(layoutTag tag: AudioChannelLayoutTag) {
+        self = [tag, 0, 0].withUnsafeBytes { Self(copying: $0, size: Self.headerSize) }
+    }
+
     /// A layout that names each channel.
     init(labels: [AudioChannelLabel]) {
         self.init(channelDescriptions: labels.map {

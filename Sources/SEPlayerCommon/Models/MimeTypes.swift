@@ -30,6 +30,7 @@ public enum MimeTypes: String, Sendable {
     case videoOGG = "video/ogg"
     case videoAVI = "video/x-msvideo"
     case videoMJPEG = "video/mjpeg"
+    case videoProRes = "video/prores"
     case videoMP42 = "video/mp42"
     case videoMP43 = "video/mp43"
     case videoMVHEVC = "video/mv-hevc"
@@ -129,6 +130,24 @@ public enum MimeTypes: String, Sendable {
 }
 
 public extension MimeTypes {
+    /// The type that the value of a `Content-Type` header names: without its parameters, in any case, by any of the
+    /// names servers give a type.
+    init?(contentType: String) {
+        let name = contentType.prefix { $0 != ";" }.trimmingCharacters(in: .whitespaces).lowercased()
+        switch name {
+        case "audio/mp3",
+             "audio/mpeg3": self = .audioMPEG
+        case "audio/aac",
+             "audio/aacp",
+             "audio/x-aac": self = .audioAAC
+        case "audio/x-flac": self = .audioFLAC
+        case "audio/x-wav": self = .audioWAV
+        case "application/x-mpegurl",
+             "application/vnd.apple.mpegurl": self = .applicationM3U8
+        default: self.init(rawValue: name)
+        }
+    }
+
     var isAudio: Bool { self.rawValue.hasPrefix("audio") }
     var isVideo: Bool { self.rawValue.hasPrefix("video") }
     var isImage: Bool { self.rawValue.hasPrefix("image") }

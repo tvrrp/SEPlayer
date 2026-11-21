@@ -41,7 +41,7 @@ extension MimeTypes {
         self = .applicationMP4; return
     }
 
-    init(format: Format) {
+    init(format: AnyFormat) {
         guard let sampleMimeType = format.sampleMimeType else {
             self = .applicationMP4; return
         }

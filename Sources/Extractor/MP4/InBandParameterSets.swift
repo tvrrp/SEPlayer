@@ -4,6 +4,7 @@
 //
 
 import CoreMedia
+import Foundation
 import SEPlayerCommon
 
 /// The H.264 parameter sets a track carries in its samples rather than in its sample entry, as `avc3` allows.
@@ -14,13 +15,10 @@ struct InBandParameterSets {
     private(set) var pictureParameterSets: [[UInt8]] = []
 
     /// Whether a track's samples carry the parameter sets: H.264 whose sample entry has none.
-    static func areCarried(by format: Format) -> Bool {
-        guard format.sampleMimeType == .videoH264 else { return false }
-        guard let config = format.initializationData as? AvcConfig else {
-            return false
-        }
-
-        return !config.hasParameterSets
+    static func areCarried(by format: AnyFormat) -> Bool {
+        guard let codec = format.video?.codec, codec.mimeType == .videoH264 else { return false }
+        let h264 = codec.h264
+        return h264.sequenceParameterSets?.isEmpty != false || h264.pictureParameterSets?.isEmpty != false
     }
 
     /// Takes the parameter sets of `sample`. A sample that repeats only one kind, such as a picture parameter set
@@ -53,27 +51,31 @@ struct InBandParameterSets {
     }
 
     /// `format` with the latest parameter sets, or `nil` until the samples have carried both kinds.
-    func format(updating format: Format) throws -> Format? {
-        guard !sequenceParameterSets.isEmpty, !pictureParameterSets.isEmpty else {
+    ///
+    /// The record of the parameter sets takes the place of the sample entry's, which has none, as `avc1`: decoders
+    /// know that type, and decode an `avc3` whose record has the parameter sets alike.
+    func format(updating format: AnyFormat) throws -> AnyFormat? {
+        guard let first = sequenceParameterSets.first, !pictureParameterSets.isEmpty, var video = format.video else {
             return nil
         }
 
-        let config = try AvcConfig(
+        let sps = try NalUnitUtil.parseSpsNalUnit(nalData: first, nalOffset: 0, nalLimit: first.count)
+        let record = AvcUtil.configurationRecord(
             sequenceParameterSets: sequenceParameterSets,
             pictureParameterSets: pictureParameterSets,
-            nalUnitLengthFieldLength: nalUnitLengthFieldLength
+            sequenceParameterSet: sps,
+            nalUnitLengthSize: nalUnitLengthFieldLength
         )
-        // A `pasp` box gave the sample entry its ratio, and wins over the parameter sets.
-        let hasRatioOfSampleEntry = format.pixelWidthHeightRatio != 1
-        let pixelWidthHeightRatio = hasRatioOfSampleEntry ? format.pixelWidthHeightRatio : config.pixelWidthHeightRatio
-
-        return format.buildUpon()
-            .setInitializationData(config)
-            .setCodecs(config.codecs ?? format.codecs)
-            .setSize(width: config.width, height: config.height)
-            .setPixelWidthHeightRatio(pixelWidthHeightRatio)
-            .setMaxNumReorderSamples(config.maxNumReorderFrames)
-            .build()
+        video.size = VideoSize(
+            width: sps.width,
+            height: sps.height,
+            pixelWidthHeightRatio: video.size?.pixelWidthHeightRatio ?? 1
+        )
+        try video.replaceConfigurationRecord(with: record, codecType: kCMVideoCodecType_H264, flavor: .h264)
+        video.codec?.h264.hasInBandParameterSets = true
+        video.codecs = video.codec?.h264.codecs() ?? video.codecs
+        video.maxReorderFrames = sps.maxNumReorderFrames
+        return AnyFormat(video)
     }
 }
 

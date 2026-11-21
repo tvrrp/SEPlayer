@@ -47,10 +47,13 @@ struct SampleEntryBox {
 }
 
 extension UInt32 {
-    /// The four characters of a code such as a box type, read as Mac OS Roman.
-    var fourCharacterCode: String {
-        let bytes = [UInt8(self >> 24), UInt8((self >> 16) & 0xFF), UInt8((self >> 8) & 0xFF), UInt8(self & 0xFF)]
-        return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+    /// The four characters of a code such as a box type.
+    var fourCharacterCode: String { FourCharacterCode(self).description }
+}
+
+extension FourCharacterCode {
+    init(_ type: MP4Box.BoxType) {
+        self.init(type.rawValue)
     }
 }
 

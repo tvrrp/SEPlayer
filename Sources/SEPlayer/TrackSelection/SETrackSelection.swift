@@ -44,7 +44,7 @@ public protocol SETrackSelectionFactory {
 }
 
 public protocol SETrackSelection: TrackSelection {
-    var selectedFormat: Format { get }
+    var selectedFormat: AnyFormat { get }
     var selectedIndexInTrackGroup: Int? { get }
     var selectedIndex: Int { get }
     var selectedReason: TrackSelectionReason { get }

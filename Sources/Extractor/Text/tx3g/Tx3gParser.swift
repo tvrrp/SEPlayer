@@ -14,8 +14,8 @@ import SEPlayerCommon
 ///
 /// Currently supports parsing of a single text track with embedded styles.
 public final class Tx3gParser: SubtitleParser {
-    /// The `Format.CueReplacementBehavior` for consecutive `CuesWithTiming` emitted by this implementation.
-    public static let cueReplacementBehavior = Format.CueReplacementBehavior.replace
+    /// The `CueReplacementBehavior` for consecutive `CuesWithTiming` emitted by this implementation.
+    public static let cueReplacementBehavior = CueReplacementBehavior.replace
 
     private let customVerticalPlacement: Bool
     private let defaultFontFace: UInt8
@@ -26,29 +26,23 @@ public final class Tx3gParser: SubtitleParser {
 
     /// Sets up a new `Tx3gParser` with default values.
     ///
-    /// - Parameter initializationData: Sample description atom ('stsd') data with default subtitle styles.
-    public init(initializationData: [BlockBufferReader]) throws {
-        if initializationData.count == 1,
-           initializationData[0].readableBytes == 48 || initializationData[0].readableBytes == 53 {
-            let initializationBytes = try initializationData[0].getBytes(
-                at: initializationData[0].readerIndex,
-                length: initializationData[0].readableBytes
-            )
-            defaultFontFace = initializationBytes[24]
-            defaultColorRgba = UInt32(initializationBytes[26]) << 24
-                | UInt32(initializationBytes[27]) << 16
-                | UInt32(initializationBytes[28]) << 8
-                | UInt32(initializationBytes[29])
+    /// - Parameter sampleEntry: The sample entry from its display flags on, with the default subtitle styles.
+    public init(sampleEntry: Data?) {
+        if let entry = sampleEntry, entry.count == 48 || entry.count == 53 {
+            /// The bytes of the entry where they are, by their offset in it.
+            func byte(_ offset: Int) -> UInt8 { entry[entry.startIndex + offset] }
+            defaultFontFace = byte(24)
+            defaultColorRgba = UInt32(byte(26)) << 24 | UInt32(byte(27)) << 16 | UInt32(byte(28)) << 8 | UInt32(byte(29))
             // Invalid UTF-8 becomes replacement characters rather than failing.
             // swiftlint:disable:next optional_data_string_conversion
-            let fontFamily = String(decoding: initializationBytes[43...], as: UTF8.self)
+            let fontFamily = String(decoding: entry[(entry.startIndex + 43)...], as: UTF8.self)
             defaultFontFamily = fontFamily == Self.tx3gSerif ? Self.serifName : Self.sansSerifName
-            // font size (initializationBytes[25]) is 5% of video height
-            let calculatedVideoTrackHeight = 20 * Int(initializationBytes[25])
+            // The font size, byte 25, is 5% of the height of the video.
+            let calculatedVideoTrackHeight = 20 * Int(byte(25))
             self.calculatedVideoTrackHeight = calculatedVideoTrackHeight
-            customVerticalPlacement = (initializationBytes[0] & 0x20) != 0
+            customVerticalPlacement = (byte(0) & 0x20) != 0
             if customVerticalPlacement {
-                let requestedVerticalPlacement = Int(initializationBytes[10]) << 8 | Int(initializationBytes[11])
+                let requestedVerticalPlacement = Int(byte(10)) << 8 | Int(byte(11))
                 defaultVerticalPlacement = Self.verticalPlacement(
                     requestedVerticalPlacement,
                     calculatedVideoTrackHeight: calculatedVideoTrackHeight
@@ -66,7 +60,7 @@ public final class Tx3gParser: SubtitleParser {
         }
     }
 
-    public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior() -> CueReplacementBehavior {
         Self.cueReplacementBehavior
     }
 

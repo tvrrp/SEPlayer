@@ -18,10 +18,8 @@ class SampleQueueTest {
     private lazy var format2 = buildFormat(id: "2")
     private lazy var format1Copy = buildFormat(id: "1")
     private lazy var formatSpliced = buildFormat(id: "spliced")
-    private let formatSyncSampleOnly1 = Format.Builder().setId("sync1").setSampleMimeType(.audioRAW)
-        .setInitializationData(FakeInitializationData()).build()
-    private let formatSyncSampleOnly2 = Format.Builder().setId("sync2").setSampleMimeType(.audioRAW)
-        .setInitializationData(FakeInitializationData()).build()
+    private lazy var formatSyncSampleOnly1 = Self.linearPCMFormat(id: "sync1")
+    private lazy var formatSyncSampleOnly2 = Self.linearPCMFormat(id: "sync2")
 
     private lazy var dataCapacity = allocationSize * 10
     private lazy var data = TestUtil.buildTestData(length: dataCapacity)
@@ -51,9 +49,9 @@ class SampleQueueTest {
     private let sampleTimestamps: [Int64] = [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]
     private let sampleFlags: [SampleFlags] = [.keyframe, [], [], [], .keyframe, [], [], []]
     private lazy var sampleFlagsSyncSamplesOnly = [SampleFlags](repeating: .keyframe, count: sampleFlags.count)
-    private lazy var sampleFormats: [Format] = [format1, format1, format1, format1, format2, format2, format2, format2]
+    private lazy var sampleFormats: [AnyFormat] = [format1, format1, format1, format1, format2, format2, format2, format2]
     private let dataSecondKeyframeIndex = 4
-    private lazy var sampleFormatsSyncSamplesOnly: [Format] = [
+    private lazy var sampleFormatsSyncSamplesOnly: [AnyFormat] = [
         formatSyncSampleOnly1,
         formatSyncSampleOnly1,
         formatSyncSampleOnly1,
@@ -1065,7 +1063,7 @@ class SampleQueueTest {
         // sample and then the end of stream.
         try assertReadFormat(
             formatRequired: false,
-            format: format2.buildUpon().setSubsampleOffset(.time(us: sampleOffsetUs)).build()
+            format: #require(adjustFormat(format: format2, sampleOffsetUs: sampleOffsetUs))
         )
         try assertReadSample(
             timeUs: unadjustedTimestampUs + sampleOffsetUs,
@@ -1186,7 +1184,7 @@ class SampleQueueTest {
         try assertReadTestData(firstSampleIndex: 0, sampleCount: 4, sampleOffsetUs: sampleOffsetUs)
         try assertReadFormat(
             formatRequired: false,
-            format: formatSpliced.buildUpon().setSubsampleOffset(.time(us: sampleOffsetUs)).build()
+            format: #require(adjustFormat(format: formatSpliced, sampleOffsetUs: sampleOffsetUs))
         )
         try assertReadSample(
             timeUs: spliceSampleTimeUs + sampleOffsetUs,
@@ -1225,11 +1223,11 @@ class SampleQueueTest {
         sampleSizes: [Int],
         sampleOffsets: [Int],
         sampleTimestamps: [Int64],
-        sampleFormats: [Format],
+        sampleFormats: [AnyFormat],
         sampleFlags: [SampleFlags]
     ) throws {
         try sampleQueue.sampleData(data: data, length: data.count, isolation: TestableSyncPlayerActor.shared)
-        var format: Format?
+        var format: AnyFormat?
 
         for index in 0 ..< sampleTimestamps.count {
             if sampleFormats[index] != format {
@@ -1273,11 +1271,11 @@ class SampleQueueTest {
     }
 
     private func assertReadTestData(
-        startFormat: Format? = nil,
+        startFormat: AnyFormat? = nil,
         firstSampleIndex: Int = 0,
         sampleCount: Int? = nil,
         sampleOffsetUs: Int64 = 0,
-        sampleFormats: [Format]? = nil,
+        sampleFormats: [AnyFormat]? = nil,
         sampleFlags: [SampleFlags]? = nil
     ) throws {
         let sampleCount = sampleCount ?? sampleTimestamps.count - firstSampleIndex
@@ -1310,7 +1308,7 @@ class SampleQueueTest {
         }
     }
 
-    private func assertNoSamplesToRead(endFormat: Format?) throws {
+    private func assertNoSamplesToRead(endFormat: AnyFormat?) throws {
         // If not formatRequired or loadingFinished, should read nothing.
         try assertReadNothing(formatRequired: false)
 
@@ -1358,7 +1356,7 @@ class SampleQueueTest {
         #expect(inputBuffer.flags.contains(.endOfStream))
     }
 
-    private func assertReadFormat(formatRequired: Bool, format: Format) throws {
+    private func assertReadFormat(formatRequired: Bool, format: AnyFormat) throws {
         clearInputBuffer()
         let result = try sampleQueue.read(
             buffer: inputBuffer,
@@ -1497,21 +1495,33 @@ class SampleQueueTest {
         inputBuffer.clear()
     }
 
-    private func adjustFormat(format: Format?, sampleOffsetUs: Int64) -> Format? {
-        if format == nil || sampleOffsetUs == 0 {
-            format
-        } else {
-            format?.buildUpon().setSubsampleOffset(.time(us: sampleOffsetUs)).build()
-        }
+    private func adjustFormat(format: AnyFormat?, sampleOffsetUs: Int64) -> AnyFormat? {
+        guard var format, sampleOffsetUs != 0 else { return format }
+        let subsampleOffset = (format.text?.subsampleOffset ?? 0) + Double(sampleOffsetUs) / 1_000_000
+        format.text?.subsampleOffset = subsampleOffset
+        return format
     }
 
-    private func buildFormat(id: String) -> Format {
-        Format.Builder().setId(id).setSubsampleOffset(.zero)
-            .setInitializationData(FakeInitializationData()).build()
+    /// Cues timed from the start of the track, whose times move with the offset of the samples.
+    private func buildFormat(id: String) -> AnyFormat {
+        AnyFormat(TextFormat {
+            $0.id = id
+            $0.codec = TextCodec(.applicationSEPlayerCues)
+            $0.subsampleOffset = 0
+        })
     }
 
-    nonisolated static func copyWithLabel(format: Format, label: String) -> Format {
-        format.buildUpon().setLabel(label).build()
+    private static func linearPCMFormat(id: String) -> AnyFormat {
+        AnyFormat(AudioFormat {
+            $0.id = id
+            $0.codec = .pcm { $0.bitDepth = 16 }
+            $0.sampleRate = 44100
+            $0.channelCount = 1
+        })
+    }
+
+    nonisolated static func copyWithLabel(format: AnyFormat, label: String) -> AnyFormat {
+        format.with { $0.label = label }
     }
 }
 
@@ -1529,7 +1539,7 @@ private final class MockSampleQueue: SampleQueue {
         try super.init(queue: queue)
     }
 
-    override func getAdjustedUpstreamFormat(_ format: Format) -> Format {
+    override func getAdjustedUpstreamFormat(_ format: AnyFormat) -> AnyFormat {
         let label: String = switch label {
         case let .usual(label):
             label
@@ -1563,7 +1573,7 @@ private final class AtomicReference<Value> {
 /// What a read hands out, without the sample buffer itself.
 enum TestReadResult: Equatable {
     case nothingRead
-    case didReadFormat(Format)
+    case didReadFormat(AnyFormat)
     case didReadBuffer
 }
 

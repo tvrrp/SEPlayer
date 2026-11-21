@@ -329,7 +329,7 @@ final class HlsMediaPeriod: MediaPeriod {
         // Variants with video make the main stream; audio-only variants are left out then.
         var variants = multivariantPlaylist.variants
         let videoVariants = variants.filter {
-            $0.format.width > 0 || Codecs.ofType($0.format.codecs, trackType: .video) != nil
+            VideoFormat($0.format)?.size != nil || Codecs.ofType($0.format.codecs, trackType: .video) != nil
         }
         if !videoVariants.isEmpty {
             variants = videoVariants
@@ -371,7 +371,7 @@ final class HlsMediaPeriod: MediaPeriod {
             }
             // The captions the playlist declares, as the cues parsed from them.
             for (index, captionFormat) in (multivariantPlaylist.muxedCaptionFormats ?? []).enumerated() {
-                let trackFormat = try cuesFormat(of: captionFormat)
+                let trackFormat = try cuesFormat(of: AnyFormat(captionFormat))
                 try trackGroups.append(TrackGroup(id: "main:cc:\(index)", formats: [trackFormat]))
             }
         } else {
@@ -407,7 +407,7 @@ final class HlsMediaPeriod: MediaPeriod {
         for name in names {
             guard let renditions = renditionsByName[name] else { continue }
             var urls: [URL] = []
-            var formats: [Format] = []
+            var formats: [AnyFormat] = []
             for rendition in renditions {
                 guard let url = rendition.url, !urls.contains(url) else {
                     continue
@@ -463,10 +463,10 @@ final class HlsMediaPeriod: MediaPeriod {
         uid: String,
         trackType: TrackType,
         playlistUrls: [URL],
-        playlistFormats: [Format],
+        playlistFormats: [AnyFormat],
         iFrameVariants: [HlsMultivariantPlaylist.Variant] = [],
-        muxedAudioFormat: Format?,
-        closedCaptionFormats: [Format]? = nil,
+        muxedAudioFormat: AnyFormat?,
+        closedCaptionFormats: [TextFormat]? = nil,
         position: CMTime
     ) throws -> HlsSampleStreamWrapper {
         let chunkSource = try HlsChunkSource(
@@ -498,12 +498,11 @@ final class HlsMediaPeriod: MediaPeriod {
 
     /// The format of the cues parsed from subtitles or captions of the format, when they can be parsed: the samples
     /// are then the cues.
-    private func cuesFormat(of format: Format) throws -> Format {
-        guard subtitleParserFactory.supportsFormat(format) else { return format }
-        return try format
-            .cuesFormat(cueReplacementBehavior: subtitleParserFactory.getCueReplacementBehavior(format: format))
-            .setSubsampleOffset(Format.offsetSampleRelative)
-            .build()
+    private func cuesFormat(of format: AnyFormat) throws -> AnyFormat {
+        guard let text = format.text, subtitleParserFactory.supportsFormat(text) else { return format }
+        let behavior = try subtitleParserFactory.getCueReplacementBehavior(format: text)
+        // The cues of the samples are timed relative to them.
+        return AnyFormat(text.cuesFormat(cueReplacementBehavior: behavior).with { $0.subsampleOffset = nil })
     }
 
     /// The smallest position, with `.positiveInfinity` for the end of the source.
@@ -514,53 +513,54 @@ final class HlsMediaPeriod: MediaPeriod {
 
 private extension HlsMediaPeriod {
     /// The video track of a variant, as the playlist describes it.
-    static func deriveVideoFormat(_ variantFormat: Format) -> Format {
+    static func deriveVideoFormat(_ variantFormat: AnyFormat) -> AnyFormat {
         let codecs = Codecs.ofType(variantFormat.codecs, trackType: .video)
-        var builder = Format.Builder()
-            .setLabel(variantFormat.label)
-            .setContainerMimeType(variantFormat.containerMimeType)
-            .setSampleMimeType(codecs.flatMap { Codecs.split($0).first }.flatMap(Codecs.mediaMimeType(forCodec:)))
-            .setCodecs(codecs)
-            .setAverageBitrate(variantFormat.averageBitrate)
-            .setPeakBitrate(variantFormat.peakBitrate)
-            .setSize(width: variantFormat.width, height: variantFormat.height)
-            .setFrameRate(variantFormat.frameRate)
-            .setVideoRange(variantFormat.videoRange)
-            .setSelectionFlags(variantFormat.selectionFlags)
-            .setRoleFlags(variantFormat.roleFlags)
-        if let id = variantFormat.id { builder = builder.setId(id) }
-        return builder.build()
+        let variant = variantFormat.video
+        var format = VideoFormat()
+        format.id = variantFormat.id
+        format.label = variantFormat.label
+        format.containerMimeType = variantFormat.containerMimeType
+        format.codec = Codecs.mediaMimeType(ofType: .video, in: codecs).map(VideoCodec.init)
+        format.codecs = codecs
+        format.averageBitrate = variantFormat.averageBitrate
+        format.peakBitrate = variantFormat.peakBitrate
+        format.size = variant?.size
+        format.frameRate = variant?.frameRate
+        format.transferFunction = variant?.transferFunction
+        format.selectionFlags = variantFormat.selectionFlags
+        format.roleFlags = variantFormat.roleFlags
+        return AnyFormat(format)
     }
 
     /// The audio track of a variant, as the playlist describes it, with what the rendition tag adds.
     static func deriveAudioFormat(
-        variantFormat: Format,
-        mediaTagFormat: Format?,
+        variantFormat: AnyFormat,
+        mediaTagFormat: AnyFormat?,
         isPrimaryTrackInVariant: Bool
-    ) -> Format {
+    ) -> AnyFormat {
         let codecs = mediaTagFormat?.codecs ?? Codecs.ofType(variantFormat.codecs, trackType: .audio)
-        var builder = Format.Builder()
-            .setLabel(mediaTagFormat?.label ?? variantFormat.label)
-            .setContainerMimeType(variantFormat.containerMimeType)
-            .setSampleMimeType(codecs.flatMap { Codecs.split($0).first }.flatMap(Codecs.mediaMimeType(forCodec:)))
-            .setCodecs(codecs)
-            .setAverageBitrate(isPrimaryTrackInVariant ? variantFormat.averageBitrate : Format.noValue)
-            .setPeakBitrate(isPrimaryTrackInVariant ? variantFormat.peakBitrate : Format.noValue)
-            .setSelectionFlags(mediaTagFormat?.selectionFlags ?? variantFormat.selectionFlags)
-            .setRoleFlags(mediaTagFormat?.roleFlags ?? variantFormat.roleFlags)
-            .setLanguage(mediaTagFormat?.language ?? variantFormat.language)
-        if let channelCount = mediaTagFormat?.channelCount, channelCount > 0 {
-            builder = builder.setChannelCount(channelCount)
+        var format = AudioFormat()
+        format.id = mediaTagFormat?.id ?? variantFormat.id
+        format.label = mediaTagFormat?.label ?? variantFormat.label
+        format.containerMimeType = variantFormat.containerMimeType
+        format.codec = Codecs.mediaMimeType(ofType: .audio, in: codecs).map(AudioCodec.init)
+        format.codecs = codecs
+        format.averageBitrate = isPrimaryTrackInVariant ? variantFormat.averageBitrate : nil
+        format.peakBitrate = isPrimaryTrackInVariant ? variantFormat.peakBitrate : nil
+        format.selectionFlags = mediaTagFormat?.selectionFlags ?? variantFormat.selectionFlags
+        format.roleFlags = mediaTagFormat?.roleFlags ?? variantFormat.roleFlags
+        format.language = mediaTagFormat?.language ?? variantFormat.language
+        if let channelCount = mediaTagFormat.flatMap(AudioFormat.init)?.channelCount, channelCount > 0 {
+            format.channelCount = channelCount
         }
-        if let id = mediaTagFormat?.id ?? variantFormat.id { builder = builder.setId(id) }
-        return builder.build()
+        return AnyFormat(format)
     }
 
     /// The audio codecs the extractors don't read yet.
     static let unsupportedAudioTypes: Set<MimeTypes> = [.audioAC4, .audioDTS, .audioDTSHD, .audioDTSExpress, .audioDTSX]
 
     /// Whether the extractors can read the samples of the format. Formats without codecs might be readable.
-    static func isExtractable(_ format: Format) -> Bool {
+    static func isExtractable(_ format: AnyFormat) -> Bool {
         !Codecs.split(format.codecs).contains { codec in
             Codecs.mediaMimeType(forCodec: codec).map(unsupportedAudioTypes.contains) ?? false
         }

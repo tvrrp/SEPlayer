@@ -10,8 +10,8 @@ import SEPlayerCommon
 public struct DefaultSubtitleParserFactory: SubtitleParserFactory {
     public init() {}
 
-    public func supportsFormat(_ format: Format) -> Bool {
-        switch format.sampleMimeType {
+    public func supportsFormat(_ format: TextFormat) -> Bool {
+        switch format.codec?.mimeType {
         case .applicationTX3G,
              .textVTT,
              .applicationMP4VTT,
@@ -25,8 +25,8 @@ public struct DefaultSubtitleParserFactory: SubtitleParserFactory {
         }
     }
 
-    public func getCueReplacementBehavior(format: Format) throws -> Format.CueReplacementBehavior {
-        switch format.sampleMimeType {
+    public func getCueReplacementBehavior(format: TextFormat) throws -> CueReplacementBehavior {
+        switch format.codec?.mimeType {
         case .applicationTX3G:
             Tx3gParser.cueReplacementBehavior
         case .textVTT:
@@ -45,20 +45,25 @@ public struct DefaultSubtitleParserFactory: SubtitleParserFactory {
         }
     }
 
-    public func create(format: Format) throws -> SubtitleParser {
-        switch format.sampleMimeType {
+    public func create(format: TextFormat) throws -> SubtitleParser {
+        let codec = try format.codec.checkNotNil()
+        return switch codec.mimeType {
         case .applicationTX3G:
-            try Tx3gParser(initializationData: format.initializationData?.getInitializationData() ?? [])
+            Tx3gParser(sampleEntry: codec.tx3g.sampleEntry)
         case .textVTT:
             WebvttParser()
         case .applicationMP4VTT:
             Mp4WebvttParser()
-        case let .some(mimeType) where mimeType == .applicationCEA608 || mimeType == .applicationMP4CEA608:
-            Cea608Parser(mimeType: mimeType, accessibilityChannel: format.accessibilityChannel)
+        case .applicationCEA608,
+             .applicationMP4CEA608:
+            Cea608Parser(mimeType: codec.mimeType, channel: codec.cea608.channel)
         case .applicationCEA708:
-            Cea708Parser(accessibilityChannel: format.accessibilityChannel)
+            Cea708Parser(serviceNumber: codec.cea708.serviceNumber)
         case .applicationDVBSubs:
-            try DvbParser(initializationData: format.initializationData?.getInitializationData() ?? [])
+            try DvbParser(
+                compositionPageID: codec.dvbSubtitle.compositionPageID.checkNotNil(),
+                ancillaryPageID: codec.dvbSubtitle.ancillaryPageID.checkNotNil()
+            )
         default:
             throw UnexpectedStateError()
         }
@@ -69,13 +74,13 @@ public struct DefaultSubtitleParserFactory: SubtitleParserFactory {
 public struct UnsupportedSubtitleParserFactory: SubtitleParserFactory {
     public init() {}
 
-    public func supportsFormat(_ format: Format) -> Bool { false }
+    public func supportsFormat(_ format: TextFormat) -> Bool { false }
 
-    public func getCueReplacementBehavior(format: Format) throws -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior(format: TextFormat) throws -> CueReplacementBehavior {
         .merge
     }
 
-    public func create(format: Format) throws -> SubtitleParser {
+    public func create(format: TextFormat) throws -> SubtitleParser {
         throw ErrorBuilder(errorDescription: "This SubtitleParserFactory doesn't support any formats.")
     }
 }

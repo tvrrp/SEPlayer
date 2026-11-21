@@ -129,12 +129,12 @@ public final class WebvttExtractor: Extractor {
     private func buildTrackOutput(subsampleOffset: CMTime, _ isolation: isolated any Actor) async throws -> TrackOutput {
         guard let output else { throw UnexpectedStateError() }
         let trackOutput = try output.track(for: 0, trackType: .text)
-        let format = Format.Builder()
-            .setSampleMimeType(.textVTT)
-            .setLanguage(language)
-            .setSubsampleOffset(subsampleOffset)
-            .build()
-        try trackOutput.setFormat(format)
+        let format = TextFormat {
+            $0.codec = TextCodec(.textVTT)
+            $0.language = language
+            $0.subsampleOffset = subsampleOffset.seconds
+        }
+        try trackOutput.setFormat(AnyFormat(format))
         output.endTracks()
         return trackOutput
     }

@@ -31,7 +31,7 @@ class FakeRenderer: BaseSERenderer {
     private var controlTimebase: CMTimebase?
     private var streamToken: QueueTriggerToken?
     private var wasReady = false
-    private(set) var formatsRead = [Format]()
+    private(set) var formatsRead = [AnyFormat]()
 
     override init(queue: Queue = playerSyncQueue, trackType: TrackType, clock: SEClock) {
         readAheadTimer = DispatchSource.makeTimerSource(queue: queue.queue)
@@ -54,7 +54,7 @@ class FakeRenderer: BaseSERenderer {
     }
 
     override func onStreamChanged(
-        formats: [Format],
+        formats: [AnyFormat],
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
@@ -113,15 +113,15 @@ class FakeRenderer: BaseSERenderer {
 
     override func isEnded() -> Bool { _isEnded }
 
-    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-        if format.sampleMimeType?.trackType == trackType {
+    override func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
+        if format.trackType == trackType {
             .create(formatSupport: .handled, adaptiveSupport: .seamless, tunnelingSupport: .notSupported)
         } else {
             .create(formatSupport: .unsupportedType)
         }
     }
 
-    func onFormatChange(format: Format) {}
+    func onFormatChange(format: AnyFormat) {}
 
     func shouldProcessBuffer(bufferTime: CMTime, playbackPosition: CMTime) throws -> Bool {
         bufferTime < playbackPosition + sourceReadahead
@@ -170,7 +170,7 @@ class FakeRenderer: BaseSERenderer {
 
             switch try readSource() {
             case let .didReadFormat(format):
-                guard format.sampleMimeType?.trackType == trackType else {
+                guard format.trackType == trackType else {
                     throw ErrorBuilder(errorDescription: "wrong track type")
                 }
                 formatsRead.append(format)

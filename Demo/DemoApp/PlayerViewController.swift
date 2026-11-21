@@ -25,6 +25,7 @@ class PlayerViewController: UIViewController {
 
     let playerView = PlayerLayerView()
     let playerView2 = PlayerLayerView()
+    private lazy var debugView = PlayerDebugView(player: player)
 
     var videoUrls = [URL]()
     var repeatMode: RepeatMode = .off
@@ -74,6 +75,17 @@ class PlayerViewController: UIViewController {
         player.release()
     }
 
+    /// The debug overlay over the video, shown or hidden from the navigation bar.
+    private func installDebugOverlay() {
+        debugView.frame = view.bounds
+        debugView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.insertSubview(debugView, aboveSubview: playerView2)
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "ladybug"),
+            primaryAction: UIAction { [weak self] _ in self?.debugView.isHidden.toggle() }
+        )
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerView.frame = view.bounds
@@ -111,6 +123,7 @@ class PlayerViewController: UIViewController {
 
         view.insertSubview(playerView, at: 0)
         view.insertSubview(playerView2, at: 1)
+        installDebugOverlay()
 //        controlsContainerView.addSubview(volumeView)
 //        controlsContainerView.addSubview(muteButton)
 
@@ -432,6 +445,7 @@ extension PlayerViewController: SEPlayerDelegate {
     func player(_ player: any Player, didChangePlaybackState state: PlayerState) {
         print("🫟 seek position REEEEDYYYYYYY")
         if state == .ready, seekContinuation == nil {
+            print(player.mediaMetadata)
             if player.duration.isNumeric {
                 let duration = player.duration.seconds
                 durationLabel.text = "\(Int(duration))"
@@ -467,5 +481,10 @@ extension PlayerViewController: SEPlayerDelegate {
             durationLabel.text = "\(Int(player.duration.seconds))"
             seekSlider.maximumValue = Float(player.duration.seconds)
         }
+    }
+
+    func player(_ player: any Player, didReceiveMetadata metadata: Metadata) {
+        print(metadata)
+        print()
     }
 }

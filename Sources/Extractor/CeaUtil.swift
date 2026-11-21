@@ -23,8 +23,8 @@ enum CeaUtil {
     private static let providerCodeAtsc = 0x31
     private static let providerCodeDirecTV = 0x2F
     /// `GA94`.
-    private static let userIdentifierGA94: UInt32 = 0x4741_3934
-    private static let userDataTypeCodeMpegCc = 0x03
+    static let userIdentifierGA94: UInt32 = 0x4741_3934
+    static let userDataTypeCodeMpegCc = 0x03
 
     /// The caption data in the unescaped content of an SEI NAL unit, without its start code and header.
     static func ccData(presentationTime: CMTime, seiBuffer: inout BlockBufferReader) throws -> [CcData] {
@@ -71,7 +71,7 @@ enum CeaUtil {
     }
 
     /// Reads `cc_data()`: nothing if its process flag is off.
-    private static func ccData(presentationTime: CMTime, buffer: inout BlockBufferReader, limit: Int) throws -> CcData? {
+    static func ccData(presentationTime: CMTime, buffer: inout BlockBufferReader, limit: Int) throws -> CcData? {
         guard buffer.readerIndex + 2 <= limit else { return nil }
         let firstByte = try buffer.readInt(as: UInt8.self)
         guard firstByte & 0x40 != 0 else { return nil } // process_cc_data_flag

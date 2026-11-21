@@ -683,7 +683,7 @@ public extension MediaItem {
         /// The label.
         public let label: String?
 
-        /// The ID of the subtitles. This will be propagated to the `Format.id` of the subtitle track created from this
+        /// The ID of the subtitles. This will be propagated to the `id` of the subtitle track created from this
         /// configuration.
         public let id: String?
 

@@ -68,8 +68,11 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         forgetAudioFormat()
     }
 
-    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-        .create(formatSupport: format.sampleMimeType?.isAudio == true ? .handled : .unsupportedType)
+    override func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
+        guard format.trackType == .audio else {
+            return .create(formatSupport: .unsupportedType)
+        }
+        return try super.supportsFormat(format)
     }
 
     /// The player's clock starts, stops and moves the synchronizer; the audio only plays in it.
@@ -153,9 +156,9 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         return true
     }
 
-    override func onInputFormatChanged(_ format: Format) throws {}
+    override func onInputFormatChanged(_ format: AnyFormat) throws {}
 
-    override func inputFormatDidChange(_ format: Format?) {
+    override func inputFormatDidChange(_ format: AnyFormat?) {
         eventListener?.onAudioInputFormatChanged(format)
     }
 

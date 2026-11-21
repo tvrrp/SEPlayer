@@ -60,10 +60,9 @@ extension FormatSupport: CustomStringConvertible, CustomDebugStringConvertible {
     public var debugDescription: String { "FormatSupport.\(description)" }
 }
 
-extension Format.VideoRange: CustomStringConvertible {
+extension VideoRange: CustomStringConvertible {
     public var description: String {
         switch self {
-        case .unknown: "unknown"
         case .sdr: "SDR"
         case .hlg: "HLG"
         case .pq: "PQ"

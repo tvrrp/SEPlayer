@@ -402,13 +402,31 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
         #endif
     }
 
+    /// The track of a renderer of another type, such as metadata: the first supported one, the tracks the renderer
+    /// handles within its capabilities first, then the default ones.
     private func selectOtherTrack(
         trackType: TrackType,
         groups: TrackGroupArray,
         formatSupport: [[RendererCapabilities.Support]],
         params: Parameters
     ) throws -> SETrackSelectionDefinition? {
-        nil
+        var selected: (group: TrackGroup, trackIndex: Int, score: Int)?
+        for (groupIndex, group) in groups.enumerated() {
+            for trackIndex in 0 ..< group.count {
+                let support = formatSupport[groupIndex][trackIndex]
+                let allowsExceeding = params.exceedRendererCapabilitiesIfNecessary
+                guard support.isFormatSupported(allowExceedsCapabilities: allowsExceeding) else { continue }
+
+                // Being within the capabilities counts more than being a default track.
+                let isWithinCapabilities = support.isFormatSupported(allowExceedsCapabilities: false)
+                let isDefault = group[trackIndex].selectionFlags.contains(.default)
+                let score = (isWithinCapabilities ? 2 : 0) + (isDefault ? 1 : 0)
+                // The first of equal tracks stays.
+                if let selected, selected.score >= score { continue }
+                selected = (group, trackIndex, score)
+            }
+        }
+        return selected.map { SETrackSelectionDefinition(group: $0.group, tracks: [$0.trackIndex]) }
     }
 
     private func selectImageTrack(
@@ -555,7 +573,7 @@ public extension DefaultTrackSelector {
         let rendererIndex: Int
         let trackGroup: TrackGroup
         let trackIndex: Int
-        let format: Format
+        let format: AnyFormat
 
         init(rendererIndex: Int, trackGroup: TrackGroup, trackIndex: Int) {
             self.rendererIndex = rendererIndex
@@ -581,7 +599,7 @@ public extension DefaultTrackSelector {
             return trackRoleFlags.intersection(preferredRoleFlags).rawValue.nonzeroBitCount
         }
 
-        static func getBestLabelMatchIndex(format: Format, preferredLabels: [String]) -> Int {
+        static func getBestLabelMatchIndex(format: AnyFormat, preferredLabels: [String]) -> Int {
             for i in 0 ..< preferredLabels.count {
                 for label in format.labels {
                     if label == preferredLabels[i] { return i }
@@ -591,7 +609,7 @@ public extension DefaultTrackSelector {
         }
 
         static func getFormatLanguageScore(
-            format: Format,
+            format: AnyFormat,
             language: String?,
             allowUndeterminedFormatLanguage: Bool
         ) -> Int {
@@ -636,15 +654,16 @@ public extension DefaultTrackSelector {
             }
         }
 
-        static func formatValueOrderingReversed(_ first: Int, _ second: Int) -> CFComparisonResult {
+        static func formatValueOrderingReversed(_ first: Int?, _ second: Int?) -> CFComparisonResult {
             formatValueOrdering(second, first)
         }
 
-        static func formatValueOrdering(_ first: Int, _ second: Int) -> CFComparisonResult {
-            if first == Format.noValue {
-                return (second == Format.noValue) ? .compareEqualTo : .compareLessThan
+        /// Orders values of formats, an unknown one first.
+        static func formatValueOrdering(_ first: Int?, _ second: Int?) -> CFComparisonResult {
+            guard let first else {
+                return second == nil ? .compareEqualTo : .compareLessThan
             }
-            if second == Format.noValue {
+            guard let second else {
                 return .compareGreaterThan
             }
             if first < second { return .compareLessThan }
@@ -659,8 +678,8 @@ public extension DefaultTrackSelector {
         private let isWithinMinConstraints: Bool
         private let isWithinRendererCapabilities: Bool
         private let hasReasonableFrameRate: Bool
-        private let bitrate: Int
-        private let pixelCount: Int
+        private let bitrate: Int?
+        private let pixelCount: Int?
         private let preferredMimeTypeMatchIndex: Int
         private let preferredLanguageIndex: Int
         private let preferredLanguageScore: Int
@@ -686,6 +705,9 @@ public extension DefaultTrackSelector {
             isAllowedByVariantFilters: Bool = true
         ) {
             let format = trackGroup[trackIndex]
+            let video = format.video
+            let width = video?.size?.width ?? 0
+            let height = video?.size?.height ?? 0
             // TODO: a lot of stuff
             self.parameters = parameters
             let requiredAdaptiveSupport: RendererCapabilities.Support.AdaptiveSupport = if parameters.allowVideoNonSeamlessAdaptiveness {
@@ -699,15 +721,15 @@ public extension DefaultTrackSelector {
 
             // Unknown values are within the limits.
             isWithinMaxConstraints = isSuitableForViewport
-                && (format.width <= 0 || CGFloat(format.width) <= parameters.maxVideoSize.width)
-                && (format.height <= 0 || CGFloat(format.height) <= parameters.maxVideoSize.height)
-                && (format.frameRate <= 0 || format.frameRate <= Float(parameters.maxVideoFrameRate))
-                && (format.bitrate <= 0 || format.bitrate <= parameters.maxVideoBitrate)
+                && (width <= 0 || CGFloat(width) <= parameters.maxVideoSize.width)
+                && (height <= 0 || CGFloat(height) <= parameters.maxVideoSize.height)
+                && (video?.frameRate).map { $0 <= 0 || $0 <= Float(parameters.maxVideoFrameRate) } ?? true
+                && format.bitrate.map { $0 <= 0 || $0 <= parameters.maxVideoBitrate } ?? true
             isWithinMinConstraints = true
             isWithinRendererCapabilities = formatSupport.isFormatSupported(allowExceedsCapabilities: false)
             hasReasonableFrameRate = true // TODO:
             bitrate = format.bitrate
-            pixelCount = format.width > 0 && format.height > 0 ? format.width * format.height : Format.noValue
+            pixelCount = width > 0 && height > 0 ? width * height : nil
 
             var bestLanguageIndex = Int.max
             var bestLanguageScore = 0
@@ -819,21 +841,21 @@ public extension DefaultTrackSelector {
             var hasSuitableSizedTrack = false
             var smallest: (pixels: Int, indices: [Int])?
             for (index, format) in group.enumerated() {
-                guard format.width > 0, format.height > 0 else {
+                guard let size = format.video?.size, size.width > 0, size.height > 0 else {
                     suitable.insert(index)
                     continue
                 }
                 let shown = maxVideoSizeInViewport(
-                    video: CGSize(width: format.width, height: format.height),
+                    video: CGSize(width: size.width, height: size.height),
                     viewport: viewport,
                     orientationMayChange: orientationMayChange
                 )
-                if Double(format.width) < shown.width * viewportSizeMargin,
-                   Double(format.height) < shown.height * viewportSizeMargin {
+                if Double(size.width) < shown.width * viewportSizeMargin,
+                   Double(size.height) < shown.height * viewportSizeMargin {
                     suitable.insert(index)
                     hasSuitableSizedTrack = true
                 }
-                let pixels = format.width * format.height
+                let pixels = size.width * size.height
                 if pixels < smallest?.pixels ?? .max {
                     smallest = (pixels, [index])
                 } else if pixels == smallest?.pixels {
@@ -878,7 +900,7 @@ public extension DefaultTrackSelector {
         }
 
         static func evaluateSelectionEligibility(
-            format: Format,
+            format: AnyFormat,
             params: Parameters,
             isWithinMinConstraints: Bool,
             isWithinMaxConstraints: Bool,
@@ -898,7 +920,7 @@ public extension DefaultTrackSelector {
             return rendererSupport.isFormatSupported(allowExceedsCapabilities: false)
                 && isWithinMinConstraints
                 && isWithinMaxConstraints
-                && format.bitrate != Format.noValue
+                && format.bitrate != nil
                 && !params.forceHighestSupportedBitrate
                 && !params.forceLowestBitrate
                 // Any of the required kinds of adaptation will do.
@@ -1153,13 +1175,14 @@ public extension DefaultTrackSelector {
         private let localeLanguageMatchIndex: Int
         private let localeLanguageScore: Int
         private let isDefaultSelectionFlag: Bool
-        private let channelCount: Int
-        private let sampleRate: Int
-        private let bitrate: Int
+        private let channelCount: Int?
+        private let sampleRate: Int?
+        private let bitrate: Int?
         private let preferredMimeTypeMatchIndex: Int
         private let usesPrimaryDecoder: Bool
         private let usesHardwareAcceleration: Bool
         private let isObjectBasedAudio: Bool
+        private let codecPreferenceScore: Int
 
         init(
             rendererIndex: Int,
@@ -1168,7 +1191,7 @@ public extension DefaultTrackSelector {
             parameters: Parameters,
             formatSupport: RendererCapabilities.Support,
             hasMappedVideoTracks: Bool,
-            withinAudioChannelCountConstraints: (Format) -> Bool,
+            withinAudioChannelCountConstraints: (AnyFormat) -> Bool,
             mixedMimeTypeAdaptationSupport: RendererCapabilities.Support.AdaptiveSupport
         ) {
             let format = trackGroup[trackIndex]
@@ -1220,14 +1243,16 @@ public extension DefaultTrackSelector {
             isDefaultSelectionFlag = format.selectionFlags.contains(.default)
 
             isObjectBasedAudio = format.sampleMimeType.isObjectBasedAudio
+            codecPreferenceScore = format.sampleMimeType.audioCodecPreferenceScore
 
-            channelCount = format.channelCount
-            sampleRate = format.sampleRate
+            let audio = format.audio
+            channelCount = audio?.channelCount
+            sampleRate = audio?.sampleRate
             bitrate = format.bitrate
 
             isWithinConstraints =
-                (format.bitrate == Format.noValue || format.bitrate <= parameters.maxAudioBitrate)
-                && (format.channelCount == Format.noValue || format.channelCount <= parameters.maxAudioChannelCount)
+                (format.bitrate.map { $0 <= parameters.maxAudioBitrate } ?? true)
+                && (audio?.channelCount.map { $0 <= parameters.maxAudioChannelCount } ?? true)
                 && withinAudioChannelCountConstraints(format)
 
             // Locale language match (first match wins)
@@ -1280,7 +1305,7 @@ public extension DefaultTrackSelector {
             params: Parameters,
             formatSupport: [RendererCapabilities.Support],
             hasMappedVideoTracks: Bool,
-            withinAudioChannelCountConstraints: (Format) -> Bool,
+            withinAudioChannelCountConstraints: (AnyFormat) -> Bool,
             mixedMimeTypeAdaptationSupport: RendererCapabilities.Support.AdaptiveSupport
         ) -> [AudioTrackInfo] {
             trackGroup.indices.map { index in
@@ -1307,11 +1332,11 @@ public extension DefaultTrackSelector {
             }
 
             return (parameters.allowAudioMixedChannelCountAdaptiveness
-                || (format.channelCount != Format.noValue && format.channelCount == otherTrack.format.channelCount))
+                || (channelCount != nil && channelCount == otherTrack.channelCount))
                 && (allowMixedMimeTypes
                     || (format.sampleMimeType != nil && format.sampleMimeType == otherTrack.format.sampleMimeType))
                 && (parameters.allowAudioMixedSampleRateAdaptiveness
-                    || (format.sampleRate != Format.noValue && format.sampleRate == otherTrack.format.sampleRate))
+                    || (sampleRate != nil && sampleRate == otherTrack.sampleRate))
                 && (parameters.allowAudioMixedDecoderSupportAdaptiveness
                     || (usesPrimaryDecoder == otherTrack.usesPrimaryDecoder
                         && usesHardwareAcceleration == otherTrack.usesHardwareAcceleration))
@@ -1365,6 +1390,7 @@ public extension DefaultTrackSelector {
                     .compareFalseFirst(usesPrimaryDecoder, other.usesPrimaryDecoder)
                     .compareFalseFirst(usesHardwareAcceleration, other.usesHardwareAcceleration)
                     // 5) Technical quality
+                    .compare(codecPreferenceScore, other.codecPreferenceScore)
                     .compareFalseFirst(isObjectBasedAudio, other.isObjectBasedAudio)
                     .compare(channelCount, other.channelCount, qualityOrdering)
                     .compare(sampleRate, other.sampleRate, qualityOrdering)
@@ -1377,7 +1403,7 @@ public extension DefaultTrackSelector {
         }
 
         static func evaluateSelectionEligibility(
-            format: Format,
+            format: AnyFormat,
             params: Parameters,
             isWithinConstraints: Bool,
             rendererSupport: RendererCapabilities.Support,
@@ -1395,7 +1421,7 @@ public extension DefaultTrackSelector {
 
             return rendererSupport.isFormatSupported(allowExceedsCapabilities: false)
                 && isWithinConstraints
-                && format.bitrate != Format.noValue
+                && format.bitrate != nil
                 && !params.forceHighestSupportedBitrate
                 && !params.forceLowestBitrate
                 && (params.allowMultipleAdaptiveSelections || !hasMappedVideoTracks)
@@ -1659,6 +1685,11 @@ private extension MimeTypes? {
         default:
             return 0
         }
+    }
+
+    /// APAC, positional audio, over the others.
+    var audioCodecPreferenceScore: Int {
+        self == .audioAPAC ? 1 : 0
     }
 
     var isObjectBasedAudio: Bool {

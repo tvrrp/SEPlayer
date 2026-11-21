@@ -9,7 +9,7 @@ public struct TrackGroup: Hashable, Sendable {
     public var length: Int { formats.count }
     public let id: String
     public let type: TrackType
-    private let formats: [Format]
+    private let formats: [AnyFormat]
 
     public enum TrackGroupError: Error {
         case emptyFormats
@@ -18,18 +18,12 @@ public struct TrackGroup: Hashable, Sendable {
 
     public init(
         id: String = "",
-        formats: [Format]
+        formats: [AnyFormat]
     ) throws(TrackGroupError) {
         guard !formats.isEmpty else { throw .emptyFormats }
         self.id = id
         self.formats = formats
-
-        let sampleMimeType = formats[0].sampleMimeType
-        self.type = if let sampleMimeType, sampleMimeType.rawValue.isEmpty {
-            formats[0].containerMimeType.trackType
-        } else {
-            sampleMimeType.trackType
-        }
+        self.type = formats[0].trackType
 
         try verifyCorrectness()
     }
@@ -38,11 +32,11 @@ public struct TrackGroup: Hashable, Sendable {
         try TrackGroup(id: id, formats: formats)
     }
 
-    public func getFormat(index: Int) -> Format {
+    public func getFormat(index: Int) -> AnyFormat {
         formats[index]
     }
 
-    public func indexOf(format: Format) -> Int? {
+    public func indexOf(format: AnyFormat) -> Int? {
         formats.firstIndex(of: format)
     }
 
@@ -56,8 +50,8 @@ public struct TrackGroup: Hashable, Sendable {
 }
 
 extension TrackGroup: Collection {
-    public typealias Index = Array<Format>.Index
-    public typealias Element = Format
+    public typealias Index = Array<AnyFormat>.Index
+    public typealias Element = AnyFormat
     public var startIndex: Int { formats.startIndex }
     public var endIndex: Int { formats.endIndex }
 

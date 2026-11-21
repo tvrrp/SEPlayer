@@ -56,3 +56,13 @@ public extension ExtractorInput {
         try await peekFully(length: length, allowEndOfInput: false, isolation).buffer
     }
 }
+
+extension ExtractorInput {
+    /// Peeks `length` bytes, or `nil` if the input ends before them.
+    func peekReader(length: Int, _ isolation: isolated any Actor) async throws -> BlockBufferReader? {
+        guard length > 0 else { return try BlockBufferReader() }
+        let (buffer, isEndOfInput) = try await peekFully(length: length, allowEndOfInput: true, isolation)
+        guard !isEndOfInput, buffer.dataLength == length else { return nil }
+        return BlockBufferReader(buffer)
+    }
+}

@@ -10,7 +10,7 @@ import SEPlayerCommon
 
 /// Writes the closed captions of SEI messages to text tracks, one per caption format, in presentation order.
 final class SeiReader {
-    let closedCaptionFormats: [Format]
+    let closedCaptionFormats: [TextFormat]
     let containerMimeType: MimeTypes
     let reorderingBufferQueue: ReorderingBufferQueue
     var outputs: [TrackOutput]
@@ -18,7 +18,7 @@ final class SeiReader {
     /// Caption data in presentation order, waiting to be written.
     private var pendingCcData: [CeaUtil.CcData] = []
 
-    init(closedCaptionFormats: [Format], containerMimeType: MimeTypes) {
+    init(closedCaptionFormats: [TextFormat], containerMimeType: MimeTypes) {
         self.closedCaptionFormats = closedCaptionFormats
         self.containerMimeType = containerMimeType
         reorderingBufferQueue = ReorderingBufferQueue()
@@ -35,19 +35,17 @@ final class SeiReader {
             idGenerator.generateNewId()
             let output = try extractorOutput.track(for: idGenerator.getTrackId(), trackType: .text)
             let formatId = try channelFormat.id ?? idGenerator.getFormatId()
-            let format = Format.Builder()
-                .setId(formatId)
-                .setLabel(channelFormat.label)
-                .setContainerMimeType(containerMimeType)
-                .setSampleMimeType(channelFormat.sampleMimeType)
-                .setSelectionFlags(channelFormat.selectionFlags)
-                .setRoleFlags(channelFormat.roleFlags)
-                .setLanguage(channelFormat.language)
-                .setAccessibilityChannel(channelFormat.accessibilityChannel)
-                .setInitializationData(channelFormat.initializationData)
-                .build()
+            let format = TextFormat {
+                $0.id = formatId
+                $0.label = channelFormat.label
+                $0.containerMimeType = containerMimeType
+                $0.codec = channelFormat.codec
+                $0.selectionFlags = channelFormat.selectionFlags
+                $0.roleFlags = channelFormat.roleFlags
+                $0.language = channelFormat.language
+            }
             SELogger.debug(.transportStream, "Caption track \(formatId): \(format)")
-            try output.setFormat(format)
+            try output.setFormat(AnyFormat(format))
             outputs.append(output)
         }
     }

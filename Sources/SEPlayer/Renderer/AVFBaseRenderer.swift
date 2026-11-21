@@ -96,22 +96,10 @@ class AVFBaseRenderer: BaseSERenderer {
         recoveryTimer?.cancel()
     }
 
-    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
-        guard let codecs = format.codecs.map(Codecs.withParameterSetsOutOfBand) else {
-            return .create(formatSupport: .unsupportedType)
-        }
+    override func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
+        let isPlayable = Self.playabilityQueries(for: format).contains(where: AVURLAsset.isPlayableExtendedMIMEType)
 
-        let mimeTypes = [
-            format.containerMimeType?.rawValue,
-            format.sampleMimeType?.rawValue,
-            "video/mp4", // fallback probe
-        ].compactMap { $0 }
-
-        let result = mimeTypes.contains { mime in
-            AVURLAsset.isPlayableExtendedMIMEType("\(mime); codecs=\"\(codecs)\"")
-        }
-
-        return if result {
+        return if isPlayable {
             .create(
                 formatSupport: .handled,
                 adaptiveSupport: .seamless,
@@ -121,6 +109,30 @@ class AVFBaseRenderer: BaseSERenderer {
         } else {
             .create(formatSupport: .unsupportedSubtype)
         }
+    }
+
+    /// The extended MIME types that tell whether the system plays `format`.
+    private static func playabilityQueries(for format: AnyFormat) -> [String] {
+        var mimeTypes = [String]()
+        if let containerMimeType = format.containerMimeType {
+            mimeTypes.append(containerMimeType.rawValue)
+        }
+        if let sampleMimeType = format.sampleMimeType {
+            mimeTypes.append(sampleMimeType.rawValue)
+        }
+
+        // A stream read without a container that names its codec, as MP3 or AC-3 in MPEG-TS, is asked about by the
+        // codec of its type.
+        var codecs = format.codecs
+        if codecs == nil, let sampleMimeType = format.sampleMimeType {
+            codecs = Codecs.codec(forSampleMimeType: sampleMimeType)
+        }
+        guard let codecs else { return mimeTypes }
+
+        // The last query asks about the codec alone, whatever the container.
+        mimeTypes.append(MimeTypes.videoMP4.rawValue)
+        let parameter = Codecs.withParameterSetsOutOfBand(codecs)
+        return mimeTypes.map { "\($0); codecs=\"\(parameter)\"" }
     }
 
     override func handleMessage(_ message: RendererMessage) throws {
@@ -157,7 +169,7 @@ class AVFBaseRenderer: BaseSERenderer {
     }
 
     override func onStreamChanged(
-        formats: [Format],
+        formats: [AnyFormat],
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
@@ -446,9 +458,9 @@ class AVFBaseRenderer: BaseSERenderer {
 
     func getDecodeBufferQueue() throws -> TypedCMBufferQueue<CMSampleBuffer>? { fatalError("To override") }
     func feedOutputBuffer(_ buffer: CMSampleBuffer) throws -> Bool { fatalError("To override") }
-    func onInputFormatChanged(_ format: Format) throws { fatalError("To override") }
+    func onInputFormatChanged(_ format: AnyFormat) throws { fatalError("To override") }
     /// Called with each format the renderer reads, and `nil` once it is disabled: what it renders from now on.
-    func inputFormatDidChange(_ format: Format?) {}
+    func inputFormatDidChange(_ format: AnyFormat?) {}
     func requestOutputMediaDataWhenReady(_ callback: @Sendable @escaping () -> Void) { fatalError("To override") }
     func stopRequestingOutputMediaData() { fatalError("To override") }
 

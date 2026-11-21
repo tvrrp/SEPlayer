@@ -8,6 +8,12 @@
 import Foundation
 
 public extension BlockBufferReader {
+    /// A copy of the readable bytes, for a value that outlives the reader: bytes that referred to a slice would keep
+    /// the whole buffer it is a slice of, such as a `moov` box.
+    func readableData() throws -> Data {
+        try getData(at: readerIndex, length: readableBytes, byteTransferStrategy: .copy)
+    }
+
     /// The `length` bytes at `offset`, whatever the reader index is.
     mutating func getSliceIgnoringReaderOffset(at offset: Int, length: Int) throws -> BlockBufferReader {
         let currentOffset = readerIndex

@@ -20,7 +20,7 @@ import SEPlayerCommon
 /// underline, and the G0, G1, G2 and G3 character sets. Pen locations within a window move to a new row only; window
 /// borders, print and scroll directions, word wrap and delays are not supported.
 public final class Cea708Parser: SubtitleParser {
-    public static let cueReplacementBehavior: Format.CueReplacementBehavior = .replace
+    public static let cueReplacementBehavior: CueReplacementBehavior = .replace
 
     private let selectedServiceNumber: Int
     private let windows: [Window] = (0 ..< Cea708Parser.windowCount).map { _ in Window() }
@@ -32,12 +32,12 @@ public final class Cea708Parser: SubtitleParser {
     /// The cues last emitted.
     private var emittedCues: [Cue] = []
 
-    /// - Parameter accessibilityChannel: The service number, 1 to 63; anything else is service 1.
-    public init(accessibilityChannel: Int) {
-        selectedServiceNumber = (1 ... 63).contains(accessibilityChannel) ? accessibilityChannel : 1
+    /// - Parameter serviceNumber: 1 to 63; anything else is service 1.
+    public init(serviceNumber: Int?) {
+        selectedServiceNumber = serviceNumber.flatMap { (1 ... 63).contains($0) ? $0 : nil } ?? 1
     }
 
-    public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior() -> CueReplacementBehavior {
         Self.cueReplacementBehavior
     }
 

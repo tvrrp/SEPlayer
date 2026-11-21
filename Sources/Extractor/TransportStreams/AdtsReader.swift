@@ -109,13 +109,13 @@ final class AdtsReader: ElementaryStreamReader {
         guard exposeId3 else { return }
         idGenerator.generateNewId()
         let id3Output = try output.track(for: idGenerator.getTrackId(), trackType: .metadata)
-        try id3Output.setFormat(
-            Format.Builder()
-                .setId(idGenerator.getFormatId())
-                .setContainerMimeType(containerMimeType)
-                .setSampleMimeType(.applicationID3)
-                .build()
-        )
+        let id3FormatId = try idGenerator.getFormatId()
+        let id3Format = MetadataFormat {
+            $0.id = id3FormatId
+            $0.containerMimeType = containerMimeType
+            $0.codec = .applicationID3
+        }
+        try id3Output.setFormat(AnyFormat(id3Format))
         self.id3Output = id3Output
     }
 
@@ -434,28 +434,18 @@ final class AdtsReader: ElementaryStreamReader {
                 sampleRateIndex: firstFrameSampleRateIndex,
                 channelConfig: channelConfig
             )
-            let format = try Format.Builder()
-                .setId(formatId.checkNotNil())
-                .setContainerMimeType(containerMimeType)
-                .setSampleMimeType(.audioAAC)
-                .setCodecs(aacConfig.codecs)
-                .setChannelCount(aacConfig.channelCount)
-                .setSampleRate(aacConfig.sampleRate)
-                .setInitializationData(
-                    FormatInitializationData(
-                        audioSpecificConfig: aacConfig.audioSpecificConfig
-                    )
-                )
-                .setLanguage(language)
-                .setRoleFlags(roleFlags)
-                .build()
+            var format = try AudioFormat(audioSpecificConfig: aacConfig.audioSpecificConfig)
+            format.id = try formatId.checkNotNil()
+            format.containerMimeType = containerMimeType
+            format.language = language
+            format.roleFlags = roleFlags
             // In this class a sample is an access unit, but the sample rate specifies the number of
             // PCM audio samples per second.
             sampleDuration = CMTime(
                 value: CMTimeValue(Int.samplesPerFrame),
                 timescale: CMTimeScale(aacConfig.sampleRate)
             )
-            try output.setFormat(format)
+            try output.setFormat(AnyFormat(format))
             hasOutputFormat = true
         } else {
             header.skipBits(10)
@@ -526,8 +516,6 @@ private extension AdtsReader {
     /// Holds sample format information for AAC audio.
     struct AacConfig {
         let sampleRate: Int
-        let channelCount: Int
-        let codecs: String
         /// A simple AudioSpecificConfig, as defined in ISO 14496-3 4.4.1.
         let audioSpecificConfig: [UInt8]
 
@@ -543,66 +531,11 @@ private extension AdtsReader {
                 )
             }
             sampleRate = [Int].audioSpecificConfigSampleRates[sampleRateIndex]
-            channelCount = [Int].audioSpecificConfigChannelCounts[channelConfig]
-            codecs = "mp4a.40.\(audioObjectType)"
             audioSpecificConfig = [
                 UInt8(((audioObjectType << 3) & 0xF8) | ((sampleRateIndex >> 1) & 0x07)),
                 UInt8(((sampleRateIndex << 7) & 0x80) | ((channelConfig << 3) & 0x78)),
             ]
         }
-    }
-
-    struct FormatInitializationData: Format.InitializationData {
-        let formatDescription: CMFormatDescription
-
-        init(audioSpecificConfig: [UInt8]) throws {
-            let esds = try BlockBufferReader(bytes: [UInt8].esDescriptor(audioSpecificConfig: audioSpecificConfig))
-            formatDescription = try Mpeg4AudioUtil.formatDescription(esds: esds)
-        }
-
-        func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {
-            formatDescription
-        }
-    }
-}
-
-private extension BlockBufferReader {
-    mutating func readSynchSafeInt() throws -> Int {
-        let firstByte = try Int(readInt(as: UInt8.self))
-        let secondByte = try Int(readInt(as: UInt8.self))
-        let thirdByte = try Int(readInt(as: UInt8.self))
-        let fourthByte = try Int(readInt(as: UInt8.self))
-        return (firstByte << 21) | (secondByte << 14) | (thirdByte << 7) | fourthByte
-    }
-}
-
-private extension [UInt8] {
-    /// An elementary stream descriptor of ISO/IEC 14496-1 for MPEG-4 audio of `audioSpecificConfig`.
-    static func esDescriptor(audioSpecificConfig: [UInt8]) -> [UInt8] {
-        // Start of the DecoderSpecificInfo.
-        let decoderSpecificInfo: [UInt8] = [
-            .decoderSpecificInfoTag, UInt8(audioSpecificConfig.count),
-        ] + audioSpecificConfig
-
-        // Start of the DecoderConfigDescriptor (defined in ISO/IEC 14496-1)
-        let decoderConfigDescriptor: [UInt8] = [
-            .objectTypeMPEG4Audio,
-            .streamTypeAudio,
-            0x00, 0x00, 0x00, // bufferSizeDB
-            0x00, 0x00, 0x00, 0x00, // maxBitrate
-            0x00, 0x00, 0x00, 0x00, // avgBitrate
-        ] + decoderSpecificInfo
-
-        // Start of the ES_Descriptor (defined in ISO/IEC 14496-1)
-        let esDescriptor: [UInt8] = [
-            0x00, 0x00, // ES_ID
-            0x00, // flags
-        ]
-            + [.decoderConfigDescriptorTag, UInt8(decoderConfigDescriptor.count)]
-            + decoderConfigDescriptor
-            + [.slConfigDescriptorTag, 0x01, .slConfigPredefinedMP4]
-
-        return [.esDescriptorTag, UInt8(esDescriptor.count)] + esDescriptor
     }
 }
 
@@ -617,17 +550,6 @@ private extension Int {
     static let indexUnset = -1
 
     static let samplesPerFrame = 1024
-}
-
-private extension UInt8 {
-    static let esDescriptorTag: UInt8 = 0x03
-    static let decoderConfigDescriptorTag: UInt8 = 0x04
-    static let decoderSpecificInfoTag: UInt8 = 0x05
-    static let slConfigDescriptorTag: UInt8 = 0x06
-
-    static let objectTypeMPEG4Audio: UInt8 = 0x40
-    static let streamTypeAudio: UInt8 = 0x15
-    static let slConfigPredefinedMP4: UInt8 = 0x02
 }
 
 private extension [UInt8] {

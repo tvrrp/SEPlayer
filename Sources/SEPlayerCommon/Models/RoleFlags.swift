@@ -6,7 +6,7 @@
 //
 
 @frozen
-public struct RoleFlags: OptionSet, Hashable {
+public struct RoleFlags: OptionSet, Hashable, Sendable {
     public let rawValue: Int
 
     public init(rawValue: Int) {

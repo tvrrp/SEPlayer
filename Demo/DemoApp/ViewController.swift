@@ -34,31 +34,7 @@ final class ViewController: UIViewController {
 struct UrlListScreen: View {
     weak var hostViewController: UIViewController?
 
-    @State private var urls: [String] = [
-        //        Bundle.main.url(forResource: "ts-file", withExtension: "mp4")!.absoluteString,
-//        "https://media.axprod.net/TestVectors/Hls/protected_hls_1080p_h264_singlekey/video-H264-1080-3000k_1.ts",
-//        "https://test-streams.mux.dev/x36xhzz/url_8/url_590/193039199_mp4_h264_aac_fhd_7.ts",
-//        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/v5/main.mp4",
-//        "https://storage.googleapis.com/exoplayer-test-media-1/gen-3/screens/dash-vod-single-segment/video-avc-baseline-480.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-1/gen-3/screens/dash-vod-single-segment/video-137.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_1.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_2.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_3.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_4.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_5.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_6.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_7.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_8.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_9.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_10.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-0/shorts_android_developers/shorts_11.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
-        "https://streams.videolan.org/streams/mp4/GHOST_IN_THE_SHELL_V5_DOLBY%20-%203.m4v",
-        "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4",
-        "https://github.com/chthomos/video-media-samples/raw/refs/heads/master/big-buck-bunny-1080p-60fps-30sec.mp4",
-        "https://storage.googleapis.com/exoplayer-test-media-1/mp4/frame-counter-one-hour.mp4",
-        "https://download.dolby.com/us/en/test-tones/dolby-atmos-trailer_amaze_1080.mp4",
-    ]
+    @State private var categories: [ContentCategory] = ContentCategory.samplesWithBundledFiles
     @State private var newUrl: String = ""
     @State private var seekParameters: PlayerSeekParameters = .default
 
@@ -71,16 +47,11 @@ struct UrlListScreen: View {
 
         var seekParameters: SeekParameters {
             switch self {
-            case .default:
-                SeekParameters.default
-            case .exact:
-                SeekParameters.exact
-            case .closestSync:
-                SeekParameters.closestSync
-            case .previousSync:
-                SeekParameters.previousSync
-            case .nextSync:
-                SeekParameters.nextSync
+            case .default: SeekParameters.default
+            case .exact: SeekParameters.exact
+            case .closestSync: SeekParameters.closestSync
+            case .previousSync: SeekParameters.previousSync
+            case .nextSync: SeekParameters.nextSync
             }
         }
     }
@@ -113,22 +84,32 @@ struct UrlListScreen: View {
                 .pickerStyle(.automatic)
 
                 List {
-                    ForEach(urls, id: \.self) { url in
-                        Text(url)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .onTapGesture {
-                                openPlayer(urls: [url])
+                    ForEach($categories) { $category in
+                        Section {
+                            ForEach(category.items) { item in
+                                Text(item.url)
+                                    .lineLimit(2)
+                                    .truncationMode(.middle)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { openPlayer(urls: item.playlistUrls) }
                             }
+                            .onDelete { category.items.remove(atOffsets: $0) }
+                            .onMove { category.items.move(fromOffsets: $0, toOffset: $1) }
+                        } header: {
+                            HStack {
+                                Text(category.title)
+                                Spacer()
+                                Text(category.format.rawValue)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
-                    .onDelete(perform: delete)
-                    .onMove(perform: move)
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
 
                 HStack {
                     Button("Play") {
-                        openPlayer(urls: urls)
+                        openPlayer(urls: allUrls)
                     }
                     .buttonStyle(.borderedProminent)
                     .padding()
@@ -145,19 +126,29 @@ struct UrlListScreen: View {
         }
     }
 
+    /// The urls of every item of every category, in order.
+    private var allUrls: [String] {
+        categories.flatMap(\.items).flatMap(\.playlistUrls)
+    }
+
+    /// Adds the typed url to the category of added urls, which comes first once there is one.
     private func addUrl() {
         let trimmed = newUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        urls.append(trimmed)
+        let item = ContentItem(url: trimmed)
+        if let index = categories.firstIndex(where: { $0.title == ContentCategory.customTitle }) {
+            categories[index].items.append(item)
+        } else {
+            var category = ContentCategory(ContentCategory.customTitle, format: Self.format(of: trimmed), urls: [])
+            category.items = [item]
+            categories.insert(category, at: 0)
+        }
         newUrl = ""
     }
 
-    private func delete(at offsets: IndexSet) {
-        urls.remove(atOffsets: offsets)
-    }
-
-    private func move(from source: IndexSet, to destination: Int) {
-        urls.move(fromOffsets: source, toOffset: destination)
+    /// The format of a typed url, from its extension.
+    private static func format(of url: String) -> ContentFormat {
+        URL(string: url)?.pathExtension.lowercased() == "m3u8" ? .hlsOnDemand : .progressive
     }
 
     private func openPlayer(urls: [String]) {
@@ -184,9 +175,8 @@ struct UrlListScreen: View {
         let vcs = (0 ..< 6).compactMap { _ in (try? playerFactory.buildPlayer()).map(PlayerViewController.init(player:)) }
 
         for vc in vcs {
-//            vc.repeatMode = .all
             vc.seekParameters = seekParameters.seekParameters
-            vc.videoUrls = urls.map { URL(string: $0)! }
+            vc.videoUrls = allUrls.compactMap(URL.init(string:))
         }
 
         let container = ContnainerVC(vcs: vcs)

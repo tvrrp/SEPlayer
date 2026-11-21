@@ -5,10 +5,7 @@
 //  Created by Damir Yackupov on 06.01.2025.
 //
 
-// swiftlint:disable file_length
-
-import AudioToolbox
-import CoreMedia.CMTime
+import CoreMedia
 import QuartzCore
 import SEPlayerCommon
 
@@ -49,12 +46,6 @@ public struct BoxParser {
                     omitTrackSampleTable: omitTrackSampleTable
                 )
             }
-    }
-
-    func parseUdta(udtaBox: LeafBox) throws -> Metadata {
-        var udtaData = udtaBox.data
-        udtaData.moveReaderIndex(to: MP4Box.headerSize)
-        return Metadata()
     }
 
     func maybeSkipRemainingMetaBoxHeaderBytes(meta: inout BlockBufferReader) throws {
@@ -168,7 +159,7 @@ public struct BoxParser {
         ]
         let textSampleEntries: Set<MP4Box.BoxType> = [.TTML, .tx3g, .wvtt, .stpp, .c608, .mp4s]
 
-        for index in 0 ..< numberOfEntries {
+        for _ in 0 ..< numberOfEntries {
             let childStartPosition = stsd.readerIndex
             let childAtomSize = try Int(stsd.readInt(as: UInt32.self))
             let rawChildAtomType = try stsd.readInt(as: UInt32.self)
@@ -184,7 +175,7 @@ public struct BoxParser {
                 videoSampleEntries.contains(type) || MpegVideoUtil.mpeg2ProfileFormats.contains(type)
             } ?? false
             let isAudioSampleEntry = childAtomType.map(audioSampleEntries.contains) == true
-                || AudioSampleEntryUtil.reads(rawChildAtomType)
+                || AudioSampleEntry.isKnown(rawChildAtomType)
 
             if let childAtomType, isVideoSampleEntry {
                 try parseVideoSampleEntry(
@@ -193,11 +184,9 @@ public struct BoxParser {
                     position: childStartPosition,
                     size: childAtomSize,
                     trackId: tkhdData.trackId,
-                    rotationDegrees: tkhdData.rotationDegrees,
-                    transform3D: tkhdData.transform3D,
+                    rotation: Int(tkhdData.rotationDegrees),
                     isQuickTime: isQuickTime,
-                    out: &out,
-                    entryIndex: index
+                    out: &out
                 )
             } else if isAudioSampleEntry {
                 try parseAudioSampleEntry(
@@ -207,8 +196,7 @@ public struct BoxParser {
                     trackId: tkhdData.trackId,
                     language: language,
                     isQuickTime: isQuickTime,
-                    out: &out,
-                    entryIndex: index
+                    out: &out
                 )
             } else if let childAtomType, textSampleEntries.contains(childAtomType) {
                 try parseTextSampleEntry(
@@ -241,49 +229,30 @@ public struct BoxParser {
     ) throws {
         parent.moveReaderIndex(to: position + MP4Box.headerSize + StsdData2.headerSize)
 
-        var initializationData: (any Format.InitializationData)?
-        var subsampleOffset = Format.offsetSampleRelative // TODO: make as func to properly compare because need to use CMTime.isPositiveInfinity
-
-        var mimeType: MimeTypes?
-
-        if atomType == .TTML {
-            mimeType = .applicationTTML
-        } else if atomType == .tx3g {
-            mimeType = .applicationTX3G
+        var format = TextFormat()
+        switch atomType {
+        case .TTML:
+            format.codec = TextCodec(.applicationTTML)
+        case .tx3g:
             let sampleDescriptionLength = atomSize - MP4Box.headerSize - 8
-            let slice = try parent.getSlice(at: parent.readerIndex, length: sampleDescriptionLength)
-            initializationData = Format.ByteBufferInitializationData(byteBuffer: [slice])
-        } else if atomType == .wvtt {
-            mimeType = .applicationMP4VTT
-        } else if atomType == .stpp {
-            mimeType = .applicationTTML
-            subsampleOffset = .zero
-        } else if atomType == .c608 {
-            mimeType = .applicationCEA608
-            // TODO: out.requiredSampleTransformation
-        } else if atomType == .mp4s {
-            let position = parent.readerIndex
-            parent.moveReaderIndex(forwardBy: 4) // child atom size
-            let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
-            if childAtomType == .esds {
-//                let esds = try parseEs
-                // TODO: parseEsdsData
-            }
-            return
-        } else {
-            // TODO: need to throw error
+            let sampleEntry = try parent.getData(at: parent.readerIndex, length: sampleDescriptionLength)
+            format.codec = TextCodec(.applicationTX3G, \.tx3g) { $0.sampleEntry = sampleEntry }
+        case .wvtt:
+            format.codec = TextCodec(.applicationMP4VTT)
+        case .stpp:
+            format.codec = TextCodec(.applicationTTML)
+            // The times of its cues are those of the track.
+            format.subsampleOffset = 0
+        case .c608:
+            format.codec = TextCodec(.applicationCEA608)
+        default:
+            // TODO: `mp4s` with an `esds` box, and an error for the others.
             return
         }
 
-        if let mimeType {
-            out.format = Format.Builder()
-                .setId(tkhdData.trackId)
-                .setSampleMimeType(mimeType)
-                .setLanguage(language)
-                .setSubsampleOffset(subsampleOffset)
-                .setInitializationData(initializationData)
-                .build()
-        }
+        format.id = String(tkhdData.trackId)
+        format.language = language
+        out.format = AnyFormat(format)
     }
 
     private func parseVideoSampleEntry(
@@ -292,179 +261,39 @@ public struct BoxParser {
         position: Int,
         size: Int,
         trackId: Int,
-        rotationDegrees: CGFloat,
-        transform3D: CATransform3D,
+        rotation: Int,
         isQuickTime: Bool,
-        out: inout StsdData2,
-        entryIndex: Int
+        out: inout StsdData2
     ) throws {
-        parent.moveReaderIndex(to: position + MP4Box.headerSize + StsdData2.headerSize)
-        parent.moveReaderIndex(forwardBy: 16)
-
-        let width = try parent.readInt(as: UInt16.self)
-        let height = try parent.readInt(as: UInt16.self)
-        var pixelWidthHeightRatioFromPasp = false
-        var pixelWidthHeightRatio: Float = 1
-        // Set default luma and chroma bit depths to 8 as old codecs might not even signal them
-        var bitdepthLuma = 8
-        var bitdepthChroma = 8
-        parent.moveReaderIndex(forwardBy: 50)
-
-        var childPosition = parent.readerIndex
-
-        var mimeType: MimeTypes?
-
-        var initializationData: (any Format.InitializationData)?
-        var codecs: String?
-        let maxNumReorderSamples = Format.noValue
-        let usesParameterSetsInBand = atomType == .hev1 || atomType == .dvhe
-        var hevcConfig: HevcUtil.Configuration?
-        var dolbyVisionConfig: DolbyVisionUtil.Configuration?
-        var colorInfo: ColorInfo?
-        // The range the codec's config tells, for codecs whose parameter sets aren't read here.
-        var configVideoRange: Format.VideoRange?
-
-        while childPosition - position < size {
-            parent.moveReaderIndex(to: childPosition)
-            let childStartPosition = parent.readerIndex
-            let childAtomSize = try Int(parent.readInt(as: UInt32.self))
-            if childAtomSize == 0 && parent.readerIndex - position == size {
-                // Handle optional terminating four zero bytes in MOV files.
-                break
-            }
-
-            guard childAtomSize > 0 else {
-                throw BoxParserErrors.badBoxContent(type: atomType, reason: "childAtomSize must be positive")
-            }
-
-            let bmffBox = try parent.getSliceIgnoringReaderOffset(at: childStartPosition, length: childAtomSize)
-            let childAtomType = try MP4Box.BoxType(rawValue: parent.readInt(as: UInt32.self))
-
-            switch childAtomType {
-            case .avcC:
-                guard mimeType == nil else {
-                    throw BoxParserErrors.badBoxContent(type: atomType, reason: "Invalid box content")
-                }
-
-                mimeType = .videoH264
-                parent.moveReaderIndex(to: childStartPosition + MP4Box.headerSize)
-                let avcConfig = try AvcConfig(data: &parent)
-                initializationData = avcConfig
-                out.nalUnitLengthFieldLength = avcConfig.nalUnitLengthFieldLength
-                if !pixelWidthHeightRatioFromPasp {
-                    pixelWidthHeightRatio = avcConfig.pixelWidthHeightRatio
-                }
-                codecs = avcConfig.codecs
-                bitdepthLuma = avcConfig.bitdepthLuma
-                bitdepthChroma = avcConfig.bitdepthChroma
-            case .pasp:
-                pixelWidthHeightRatio = try parsePaspFrom(&parent, position: childStartPosition)
-                pixelWidthHeightRatioFromPasp = true
-            case .hvcC:
-                guard mimeType == nil else {
-                    throw BoxParserErrors.badBoxContent(type: atomType, reason: "Invalid box content")
-                }
-                mimeType = .videoH265
-                parent.moveReaderIndex(to: childStartPosition + MP4Box.headerSize)
-                let config = try HevcUtil.Configuration(reader: &parent, sampleEntryType: usesParameterSetsInBand ? .hev1 : .hvc1)
-                hevcConfig = config
-                out.nalUnitLengthFieldLength = config.nalUnitLengthFieldLength
-                codecs = config.codecs
-                bitdepthLuma = config.bitdepthLuma
-                bitdepthChroma = config.bitdepthChroma
-            case .dvcC,
-                 .dvvC,
-                 .dvwC:
-                parent.moveReaderIndex(to: childStartPosition + MP4Box.headerSize)
-                dolbyVisionConfig = try DolbyVisionUtil.Configuration(reader: &parent)
-            case .colr:
-                parent.moveReaderIndex(to: childStartPosition + MP4Box.headerSize)
-                colorInfo = try ColorInfo(reader: &parent)
-            case .vpcC:
-                if let vpc = try VpcConfiguration(vpcC: bmffBox.slice(from: MP4Box.headerSize)) {
-                    codecs = vpc.codecs(sampleEntryType: atomType == .encv ? .vp09 : atomType)
-                    configVideoRange = vpc.videoRange
-                }
-            case .av1C:
-                if let av1 = try Av1Configuration(av1C: bmffBox.slice(from: MP4Box.headerSize)) {
-                    codecs = av1.codecs
-                    configVideoRange = av1.videoRange
-                }
-            default:
-                break
-            }
-
-            childPosition += childAtomSize
-        }
-
         let entry = try parent.getSliceIgnoringReaderOffset(at: position, length: size)
-        let video = readVideoSampleEntry(entry, isQuickTime: isQuickTime)
-        if let video, let avcConfig = initializationData as? AvcConfig, avcConfig.hasParameterSets {
-            initializationData = SampleEntryFormatDescription(formatDescription: video.formatDescription)
+        // Entries not read here are described by the system.
+        let format = if let video = readVideoSampleEntry(entry, isQuickTime: isQuickTime) {
+            try? video.format.with { format in try format.readCodec { type in video.boxes.payload(of: type) } }
+        } else {
+            (try? Self.systemVideoDescription(entry: entry, isQuickTime: isQuickTime))
+                .flatMap { try? VideoFormat(formatDescription: $0) }
         }
-
-        var videoRange = colorInfo?.videoRange ?? .unknown
-        if let hevcConfig {
-            if let video {
-                initializationData = SampleEntryFormatDescription(formatDescription: video.formatDescription)
-            } else {
-                // Entries not read here are described by the system.
-                initializationData = try CoreMediaParsedVideo(entry: entry, isQuickTime: isQuickTime)
-            }
-
-            if let dolbyVisionConfig {
-                // Dolby Vision entries, and profiles whose base layer other decoders can't show, play as Dolby Vision.
-                // Others keep their HEVC base layer, which any HEVC decoder shows.
-                if atomType == .dvh1 || atomType == .dvhe || !dolbyVisionConfig.isBaseLayerCompatible {
-                    mimeType = .videoDolbyVision
-                    codecs = dolbyVisionConfig.codecs(sampleEntryType: usesParameterSetsInBand ? .dvhe : .dvh1)
-                }
-                if colorInfo == nil { videoRange = .pq }
-            }
-        }
-
-        guard let mimeType else {
-            // Codecs without a config read here take their format from the description of the entry.
-            if let video {
-                out.format = videoFormat(
-                    video,
-                    trackId: trackId,
-                    codecs: codecs,
-                    pixelWidthHeightRatio: pixelWidthHeightRatio,
-                    rotationDegrees: rotationDegrees,
-                    transform3D: transform3D,
-                    videoRange: colorInfo?.videoRange ?? configVideoRange ?? videoRange
-                )
-            } else {
-                _ = try? CoreMediaParsedVideo.create(
-                    parent: &parent,
-                    position: position,
-                    size: size,
-                    trackId: trackId,
-                    rotationDegrees: rotationDegrees,
-                    transform3D: transform3D,
-                    isQuickTime: isQuickTime,
-                    out: &out,
-                    entryIndex: entryIndex
-                )
-            }
+        guard var format else {
+            SELogger.debug(.mp4, "Skipping the video sample entry \(atomType.rawValue.fourCharacterCode) of track \(trackId)")
             return
         }
 
-        let formatBuilder = Format.Builder()
-            .setId(trackId)
-            .setSampleMimeType(mimeType)
-            .setCodecs(codecs)
-            .setSize(width: Int(width), height: Int(height))
-            .setPixelWidthHeightRatio(pixelWidthHeightRatio)
-            .setRotationDegrees(rotationDegrees)
-            .setTransform3D(transform3D)
-            .setInitializationData(initializationData)
-            .setMaxNumReorderSamples(maxNumReorderSamples)
-            .setMaxSubLayers(hevcConfig?.maxSubLayers ?? .zero)
-            .setVideoRange(videoRange)
+        // Profiles whose base layer other decoders can't show play as Dolby Vision. Others keep their HEVC base
+        // layer, which any HEVC decoder shows.
+        if var codec = format.codec, codec.mimeType == .videoH265, !codec.dolbyVision.isEmpty,
+           !codec.dolbyVision.isBaseLayerCompatible {
+            codec.mimeType = .videoDolbyVision
+            format.codec = codec
+        }
+        if format.codec?.mimeType == .videoDolbyVision, format.transferFunction == nil {
+            format.transferFunction = .pq
+        }
 
-        out.format = formatBuilder.build()
+        format.id = String(trackId)
+        format.codecs = format.codec.flatMap { Self.videoCodecs($0, sampleEntryType: atomType) }
+        format.rotation = rotation
+        out.format = AnyFormat(format)
+        out.nalUnitLengthFieldLength = format.codec.map(Self.nalUnitLengthSize) ?? 0
     }
 
     private func parseAudioSampleEntry(
@@ -474,253 +303,26 @@ public struct BoxParser {
         trackId: Int,
         language: String,
         isQuickTime: Bool,
-        out: inout StsdData2,
-        entryIndex: Int
+        out: inout StsdData2
     ) throws {
+        guard out.format == nil else { return }
         let entry = try parent.getSliceIgnoringReaderOffset(at: position, length: size)
-        guard out.format == nil, let audio = readAudioSampleEntry(entry, isQuickTime: isQuickTime) else {
-            // Formats not read here, and protected media, are described by the system.
-            _ = try? CoreMediaParsedAudio.create(
-                parent: &parent,
-                position: position,
-                size: size,
-                trackId: trackId,
-                language: language,
-                isQuickTime: isQuickTime,
-                out: &out,
-                entryIndex: entryIndex
-            )
+        guard var (format, descriptor) = AudioSampleEntry.format(entry: entry, isQuickTime: isQuickTime) else {
+            SELogger.debug(.mp4, "Skipping an audio sample entry of track \(trackId)")
             return
         }
 
-        out.format = audioFormat(audio, trackId: trackId, language: language)
+        format.id = String(trackId)
+        format.language = language
+        format.codecs = descriptor?.codecs ?? format.codec.flatMap { Self.audioCodecs($0) }
+        if let descriptor {
+            format.averageBitrate = descriptor.averageBitrate > 0 ? descriptor.averageBitrate : nil
+            format.peakBitrate = descriptor.maxBitrate > 0 ? descriptor.maxBitrate : nil
+        }
+        out.format = AnyFormat(format)
     }
 
-    /// Reads an audio sample entry into the format description decoders need: the stream description, the channel
-    /// layout, the magic cookie, and the entry itself with the boxes nothing here reads.
-    ///
-    /// - Parameters:
-    ///   - entry: The whole sample entry, from its size field, its indices starting at 0.
-    ///   - isQuickTime: Whether the file is a QuickTime movie rather than an ISO file.
-    /// - Returns: `nil` for an entry of a format not read here, or one that can't be read.
-    private func readAudioSampleEntry(_ entry: BlockBufferReader, isQuickTime: Bool) -> AudioSampleEntryData? {
-        guard let sound = SoundDescription(entry: entry, isQuickTime: isQuickTime),
-              var boxes = sound.readBoxes(isQuickTime: isQuickTime) else {
-            return nil
-        }
-
-        // Protected media is described as the codec its config box names, whatever the `frma` box says; the format
-        // of protected media then replaces the codec's.
-        let protection = boxes.sinf.map { ProtectionScheme(sinf: $0.payload) }
-        let isProtected = sound.format == .enca
-        var rawFormat = sound.rawFormat
-        var registeredCodec: AudioSampleEntryUtil.RegisteredCodec?
-        if isProtected {
-            guard boxes.dOps == nil else {
-                return nil
-            }
-            if let codec = AudioSampleEntryUtil.protectedCodec(boxes: boxes) {
-                rawFormat = codec.rawValue
-            } else {
-                registeredCodec = AudioSampleEntryUtil.RegisteredCodec(boxes: boxes.unknown, isQuickTime: isQuickTime)
-            }
-        } else if !AudioSampleEntryUtil.reads(sound.rawFormat) {
-            // Codecs known by their config box, such as APAC.
-            guard let codec = AudioSampleEntryUtil.RegisteredCodec(boxes: boxes.unknown, isQuickTime: isQuickTime) else {
-                return nil
-            }
-            registeredCodec = codec
-        }
-        if let registeredCodec {
-            rawFormat = registeredCodec.format
-            boxes.unknown.remove(at: registeredCodec.configBoxIndex)
-        }
-
-        let esds = boxes.esds.flatMap { try? $0.payload.slice(from: 4) }
-        let descriptor = esds.flatMap { ElementaryStreamDescriptor(esds: $0, readsClockReference: false) }
-        let opusHead = boxes.dOps.flatMap { OpusUtil.magicCookie(dOps: $0.box) }
-
-        guard var cookie = AudioSampleEntryUtil.magicCookie(
-            format: rawFormat,
-            boxes: boxes,
-            esds: esds,
-            opusHead: opusHead,
-            isQuickTime: isQuickTime
-        ), var description = AudioSampleEntryUtil.sampleEntryDescription(
-            sound: sound,
-            format: rawFormat,
-            boxes: boxes,
-            isQuickTime: isQuickTime
-        ) else {
-            return nil
-        }
-        if let registeredCodec { cookie.reader = registeredCodec.magicCookie }
-
-        switch MP4Box.BoxType(rawValue: description.mFormatID) {
-        case ._mp3? where sound.usesQuickTimeBoxes:
-            break
-        case .MAC3?:
-            description.mBytesPerPacket = description.mChannelsPerFrame * 2
-            description.mFramesPerPacket = 6
-        case .MAC6?:
-            description.mBytesPerPacket = description.mChannelsPerFrame
-            description.mFramesPerPacket = 6
-        case .ac_3?:
-            if let dac3 = boxes.dac3 {
-                guard let ac3 = Ac3Util.ac3StreamDescription(dac3: dac3.box) else {
-                    return nil
-                }
-                description = ac3
-            }
-        case .ec_3?:
-            guard let dec3 = boxes.dec3, let (eac3, _) = Ac3Util.eac3Configuration(dec3: dec3.box) else {
-                return nil
-            }
-            description = eac3
-        case .alac?:
-            if let alac = boxes.alac {
-                guard let lossless = AlacUtil.streamDescription(alac: alac.box) else {
-                    return nil
-                }
-                description = lossless
-            }
-        case .fLaC?,
-             .flac?:
-            description.mFormatID = kAudioFormatFLAC
-            if let dfLa = boxes.dfLa {
-                guard let flac = FlacUtil.streamDescription(dfLa: dfLa.box, sampleEntryDescription: description) else {
-                    return nil
-                }
-                description = flac
-            }
-        case .ipcm?,
-             .fpcm?:
-            let isFloat = description.mFormatID == MP4Box.BoxType.fpcm.rawValue
-            description.mFormatID = kAudioFormatLinearPCM
-            if let pcmC = boxes.pcmC {
-                guard let pcm = PcmUtil.streamDescription(
-                    pcmC: pcmC.box,
-                    isFloat: isFloat,
-                    sampleRate: description.mSampleRate,
-                    channelCount: Int(description.mChannelsPerFrame)
-                ) else {
-                    return nil
-                }
-                description = pcm
-            }
-        case .lpcm?:
-            break
-        case .mp4a?,
-             .m4ae?:
-            if let esds {
-                guard let (mpeg4, mpeg4Cookie) = Mpeg4AudioUtil.streamDescription(
-                    esds: esds,
-                    descriptor: descriptor,
-                    sampleEntryDescription: description
-                ) else {
-                    return nil
-                }
-                description = mpeg4
-                cookie.reader = mpeg4Cookie
-            } else {
-                description.mFormatID = kAudioFormatMPEG4AAC
-                description.mFramesPerPacket = 1024
-            }
-        case .samr?,
-             .sawb?:
-            guard let format = MP4Box.BoxType(rawValue: description.mFormatID), let amrCookie = cookie.reader,
-                  let amr = AmrUtil.streamDescription(format: format, magicCookie: amrCookie) else {
-                return nil
-            }
-            description = amr
-        default:
-            // The decoder completes the fields of the entry from the codec's config, such as Opus's frame size.
-            if let opusHead {
-                guard let opus = OpusUtil.streamDescription(magicCookie: opusHead, sampleEntryDescription: description) else {
-                    return nil
-                }
-                description = opus
-            }
-            if let completed = try? AudioFormatProperties.formatInfo(description: description, magicCookie: cookie.reader) {
-                description = completed
-            }
-        }
-
-        guard let explicitLayout = AudioSampleEntryUtil.explicitLayout(boxes: boxes, description: description) else {
-            return nil
-        }
-
-        var extensions = SampleDescriptionExtensions()
-        do {
-            try extensions.setVerbatimEntry(entry, isQuickTime: isQuickTime)
-            if let protection { try protection.addExtensions(to: &extensions) }
-        } catch {
-            return nil
-        }
-        boxes.unknown.forEach { extensions.addUnknownBox($0) }
-
-        let fallbackLayout: () -> ManagedAudioChannelLayout? = {
-            if let layout = descriptor.flatMap(Mpeg4AudioUtil.channelLayout(descriptor:)) {
-                return layout
-            }
-            guard explicitLayout.layout == nil, cookie.reader != nil else {
-                return nil
-            }
-            if description.mFormatID == kAudioFormatAC3, let dac3 = boxes.dac3 {
-                return Ac3Util.ac3ChannelLayout(dac3: dac3.box)
-            }
-            if description.mFormatID == kAudioFormatEnhancedAC3, let dec3 = boxes.dec3,
-               let (_, layout) = Ac3Util.eac3Configuration(dec3: dec3.box) {
-                return ManagedAudioChannelLayout(tag: layout.tag)
-            }
-            return nil
-        }
-
-        guard let builtExtensions = try? extensions.build(),
-              var (description, layout) = try? AudioSampleEntryUtil.resolveDescription(
-                  description: description,
-                  magicCookie: cookie.reader,
-                  explicitLayout: explicitLayout.layout,
-                  fallbackLayout: fallbackLayout
-              ) else {
-            return nil
-        }
-
-        if isProtected {
-            if rawFormat != sound.rawFormat {
-                guard let protectedFormat = ProtectionScheme.protectedAudioFormat(description.mFormatID) else {
-                    return nil
-                }
-                description.mFormatID = protectedFormat
-                guard let protectedCookie = AudioSampleEntryUtil.protectedMagicCookie(boxes: boxes, esds: esds) else {
-                    return nil
-                }
-                if let protectedCookie = protectedCookie.reader ?? registeredCodec?.magicCookie {
-                    cookie.reader = protectedCookie
-                }
-            } else {
-                // Protected media of a codec without a config, such as linear PCM, has no cookie.
-                cookie.reader = nil
-            }
-        }
-
-        guard let formatDescription = try? CMFormatDescription(
-            audioStreamBasicDescription: description,
-            layout: layout,
-            magicCookie: cookie.reader,
-            extensions: builtExtensions
-        ) else {
-            return nil
-        }
-
-        return AudioSampleEntryData(
-            formatDescription: formatDescription,
-            streamDescription: description,
-            elementaryStreamDescriptor: descriptor
-        )
-    }
-
-    /// Reads a video sample entry into the format description decoders need: the codec, the size, and the
+    /// Reads a video sample entry into what a format description of it holds: the codec type, the size, and the
     /// extensions the fields and boxes of the entry describe.
     ///
     /// - Parameters:
@@ -733,98 +335,75 @@ public struct BoxParser {
         }
         let entry = header.entry
         let rawFormat = header.rawFormat
-        let format = MP4Box.BoxType(rawValue: rawFormat)
         // Uncompressed RGB names its codec by its depth, and an entry with a color table has one before its boxes.
         // The system reads those.
-        guard format != .raw_, header.colorTableID != 0, header.width > 0, header.height > 0, header.depth >= 0 else {
+        guard MP4Box.BoxType(rawValue: rawFormat) != .raw_, header.colorTableID != 0, header.width > 0, header.height > 0, header.depth >= 0 else {
             return nil
         }
 
-        var extensions = SampleDescriptionExtensions()
+        var format = VideoFormat()
+        format.size = VideoSize(width: header.width, height: header.height)
         let boxes = SampleEntryBox.boxes(in: entry, from: VideoSampleEntryUtil.headerSize).boxes
-        guard let protection = VideoSampleEntryUtil.readBoxes(boxes, into: &extensions) else {
+        guard let protection = VideoSampleEntryUtil.readBoxes(boxes, into: &format) else {
             return nil
         }
 
         var codecType = rawFormat
-        if let format, MpegVideoUtil.mpeg2ProfileFormats.contains(format) {
-            extensions[SampleDescriptionExtensionKey.conformsToMPEG2VideoProfile] =
-                SampleDescriptionExtensions.number(Int32(bitPattern: rawFormat))
+        if let type = MP4Box.BoxType(rawValue: rawFormat), MpegVideoUtil.mpeg2ProfileFormats.contains(type) {
+            // Profiles of MPEG-2 named by their format, such as XDCAM, are MPEG-2 video of that profile.
+            format.mpeg2Profile = FourCharacterCode(rawFormat)
             codecType = MP4Box.BoxType.mp2v.rawValue
         }
+        format.sampleEntryFields = VisualSampleEntryFields(
+            version: header.version,
+            revisionLevel: header.revisionLevel,
+            vendor: FourCharacterCode(header.vendor),
+            temporalQuality: header.temporalQuality,
+            spatialQuality: header.spatialQuality,
+            compressorName: header.formatName,
+            depth: header.depth
+        )
 
-        do {
-            try extensions.setVerbatimEntry(entry, isQuickTime: isQuickTime)
-        } catch {
-            return nil
-        }
-        extensions[SampleDescriptionExtensionKey.formatName] = header.formatName
-        extensions[SampleDescriptionExtensionKey.version] = SampleDescriptionExtensions.number(header.version)
-        extensions[SampleDescriptionExtensionKey.revisionLevel] = SampleDescriptionExtensions.number(header.revisionLevel)
-        extensions[SampleDescriptionExtensionKey.temporalQuality] = SampleDescriptionExtensions.number(header.temporalQuality)
-        extensions[SampleDescriptionExtensionKey.spatialQuality] = SampleDescriptionExtensions.number(header.spatialQuality)
-        if header.vendor != 0 {
-            extensions[SampleDescriptionExtensionKey.vendor] = header.vendor.fourCharacterCode
-        }
-        if header.depth != 0 {
-            extensions[SampleDescriptionExtensionKey.depth] = SampleDescriptionExtensions.number(Int16(header.depth))
-        }
-
-        if format == .mp4v {
+        if MP4Box.BoxType(rawValue: rawFormat) == .mp4v {
             // The elementary stream descriptor tells the codec: MPEG-4 visual, or older MPEG video and JPEG.
-            guard let esds = extensions.unknownBoxPayloads(of: .esds).first,
+            guard let esds = boxes.payload(of: .esds),
                   let descriptor = (try? esds.slice(from: esds.readerIndex + 4)).flatMap { ElementaryStreamDescriptor(esds: $0) },
                 let type = MpegVideoUtil.codecType(descriptor: descriptor) else {
                 return nil
             }
             codecType = type.rawValue
-        } else if format == .encv, let protectedType = protection.lazy.compactMap(\.protectedVideoCodecType).first {
+        } else if MP4Box.BoxType(rawValue: rawFormat) == .encv,
+                  let protectedType = protection.lazy.compactMap(\.protectedVideoCodecType).first {
             // Protected video is named by its original format and scheme, as decoders of protected media know it.
             codecType = protectedType.rawValue
         }
 
-        guard var values = try? extensions.build() else {
-            return nil
-        }
         let codec = MP4Box.BoxType(rawValue: codecType)
         if let codec, let flavor = VideoSampleEntryUtil.ParameterSetFlavor(codecType: codec) {
-            guard VideoSampleEntryUtil.addFallbackExtensions(to: &values, flavor: flavor, extensions: extensions) else {
+            let config = boxes.payload(of: flavor.configType)
+            guard VideoSampleEntryUtil.addParameterSetAttributes(to: &format, config: config, flavor: flavor) else {
                 return nil
             }
         }
         if let codec, ProResUtil.formats.contains(codec) {
-            VideoSampleEntryUtil.addProResExtensions(to: &values, codecType: codec, depth: header.depth)
+            VideoSampleEntryUtil.addProResAttributes(to: &format, codecType: codec, depth: header.depth)
         }
-        if codec == .s263, !extensions.unknownBoxPayloads(of: .d263).isEmpty {
+        if codec == .s263, boxes.payload(of: .d263) != nil {
             codecType = MP4Box.BoxType.h263.rawValue
         } else if codec == .mjpg, !isQuickTime {
             codecType = MP4Box.BoxType.jpeg.rawValue
-        } else if let codec, let twin = VideoSampleEntryUtil.twinWithParameterSetsInConfig(of: codec, extensions: extensions) {
+        } else if let codec, let twin = VideoSampleEntryUtil.twinWithParameterSetsInConfig(of: codec, boxes: boxes) {
             codecType = twin.rawValue
         }
+        format.codecType = FourCharacterCode(codecType)
 
-        guard let formatDescription = try? CMFormatDescription(
-            videoCodecType: CMFormatDescription.MediaSubType(rawValue: codecType),
-            width: header.width,
-            height: header.height,
-            extensions: values
-        ) else {
+        do {
+            try format.setSampleEntry(entry, isQuickTime: isQuickTime)
+            try format.keepBoxes(boxes)
+        } catch {
             return nil
         }
-
-        return VideoSampleEntryData(
-            formatDescription: formatDescription,
-            codecType: codecType,
-            width: header.width,
-            height: header.height
-        )
-    }
-
-    private func parsePaspFrom(_ parent: inout BlockBufferReader, position: Int) throws -> Float {
-        parent.moveReaderIndex(to: position + MP4Box.headerSize)
-        let hSpacing = try parent.readInt(as: UInt32.self)
-        let vSpacing = try parent.readInt(as: UInt32.self)
-        return Float(hSpacing) / Float(vSpacing)
+        return VideoSampleEntryData(format: format, boxes: boxes)
     }
 
     private func parseHdlr(hdlr: BlockBufferReader) throws -> UInt32 {
@@ -835,33 +414,10 @@ public struct BoxParser {
 }
 
 extension BoxParser {
-    struct Mp4TimestampData {
-        let creationTimestampSeconds: Int64
-        let modificationTimestampSeconds: Int64
-        let timescale: CMTimeScale
-
-        init(mvhd: BlockBufferReader?) throws {
-            guard var mvhd else {
-                throw BoxParserErrors.missingBox(type: .mvhd)
-            }
-            mvhd.moveReaderIndex(to: Int(MP4Box.headerSize))
-            let (version, _) = try BoxParser.readFullboxExtra(reader: &mvhd)
-            if version == 0 {
-                creationTimestampSeconds = try Int64(mvhd.readInt(as: UInt32.self))
-                modificationTimestampSeconds = try Int64(mvhd.readInt(as: UInt32.self))
-            } else {
-                creationTimestampSeconds = try Int64(mvhd.readInt(as: UInt64.self))
-                modificationTimestampSeconds = try Int64(mvhd.readInt(as: UInt64.self))
-            }
-            self.timescale = try CMTimeScale(mvhd.readInt(as: UInt32.self))
-        }
-    }
-
     struct TkhdData {
         let trackId: Int
         let durationTimeValue: CMTimeValue?
         let rotationDegrees: CGFloat
-        let transform3D: CATransform3D
 
         init(tkhd: BlockBufferReader) throws {
             var tkhd = tkhd
@@ -917,27 +473,15 @@ extension BoxParser {
             let c = try int32()
             let d = try int32()
             _ = try int32() // usually 0
-            let tx = try int32()
-            let ty = try int32()
+            _ = try int32() // tx
+            _ = try int32() // ty
             let w = try int32() // usually 1<<30 (i.e. 1.0)
 
             let aF = fx16(a)
             let bF = fx16(b)
             let cF = fx16(c)
             let dF = fx16(d)
-            let txF = fx16(tx)
-            let tyF = fx16(ty)
             _ = fx30(w) // generally 1.0; not used below
-
-            // 4×4 CATransform3D (same as CATransform3DMakeAffineTransform(affine))
-            var t = CATransform3DIdentity
-            t.m11 = aF
-            t.m12 = bF
-            t.m21 = cF
-            t.m22 = dF
-            t.m41 = txF
-            t.m42 = tyF
-            self.transform3D = t
 
             // Derive rotation in degrees from the 2×2 submatrix.
             // Normalize by scale to be robust if a/c include scale.
@@ -1043,23 +587,15 @@ extension BoxParser {
         }
     }
 
-    struct AudioSampleEntryData {
-        let formatDescription: CMAudioFormatDescription
-        let streamDescription: AudioStreamBasicDescription
-        /// The elementary stream descriptor of MPEG-4 audio.
-        let elementaryStreamDescriptor: ElementaryStreamDescriptor?
-    }
-
+    /// A video sample entry read: the format of what it describes, and the boxes it keeps, read in place.
     struct VideoSampleEntryData {
-        let formatDescription: CMVideoFormatDescription
-        let codecType: CMVideoCodecType
-        let width: Int
-        let height: Int
+        let format: VideoFormat
+        let boxes: [SampleEntryBox]
     }
 
     struct StsdData2 {
         static let headerSize = 8
-        var format: Format?
+        var format: AnyFormat?
         var nalUnitLengthFieldLength: Int = 0
 
         init() {}

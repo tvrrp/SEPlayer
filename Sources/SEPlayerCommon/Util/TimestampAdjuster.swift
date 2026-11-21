@@ -126,6 +126,7 @@ public extension TimestampAdjuster {
         private var unwrapper = PtsUnwrapper()
         private var offset: CMTime?
         private var desired: CMTime?
+        private var lastAdjusted = CMTime.invalid
 
         fileprivate init(adjuster: TimestampAdjuster, desiredFirstSampleTime: CMTime?) {
             self.adjuster = adjuster
@@ -135,7 +136,8 @@ public extension TimestampAdjuster {
         public func adjust(_ time: CMTime) -> CMTime {
             guard time.isNumeric else { return time }
             return withResolvedOffset(observing: time) { offset in
-                CMTimeAdd(time, offset)
+                lastAdjusted = CMTimeAdd(time, offset)
+                return lastAdjusted
             }
         }
 
@@ -147,11 +149,17 @@ public extension TimestampAdjuster {
                 let dts = CMTime(value: dtsTicks, timescale: Self.tsTimescale)
                 let pts = CMTime(value: ptsTicks, timescale: Self.tsTimescale)
                 let (offset, waiters) = resolveOffsetLocked(observing: dts)
-                return ((CMTimeAdd(pts, offset), CMTimeAdd(dts, offset)), waiters)
+                lastAdjusted = CMTimeAdd(pts, offset)
+                return ((lastAdjusted, CMTimeAdd(dts, offset)), waiters)
             }
 
             waiters.forEach { $0.resume() }
             return result
+        }
+
+        /// The last time adjusted, as of the last packet read; `.invalid` before the first.
+        public var lastAdjustedTime: CMTime {
+            adjuster.lock.usingLock { lastAdjusted }
         }
 
         public var hasEstablishedOffset: Bool {
@@ -166,6 +174,7 @@ public extension TimestampAdjuster {
             let pending: [CheckedContinuation<Void, Error>] = adjuster.lock.usingLock {
                 offset = nil
                 desired = time
+                lastAdjusted = .invalid
                 unwrapper.reset()
                 return adjuster.resetLocked(mode: .firstSampleAt(time))
             }

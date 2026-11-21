@@ -499,11 +499,11 @@ extension HlsPlaylistTracker {
         }
         let codec = VariantFilters.VideoFormat(codecs: first.format.codecs)
         let candidates = variants.filter {
-            $0.format.bitrate > 0 && VariantFilters.VideoFormat(codecs: $0.format.codecs) == codec
+            ($0.format.bitrate ?? 0) > 0 && VariantFilters.VideoFormat(codecs: $0.format.codecs) == codec
         }
-        let fitting = candidates.filter { $0.format.bitrate <= bitrate }
-        return fitting.max { $0.format.bitrate < $1.format.bitrate }
-            ?? candidates.min { $0.format.bitrate < $1.format.bitrate }
+        let fitting = candidates.filter { ($0.format.bitrate ?? 0) <= bitrate }
+        return fitting.max { ($0.format.bitrate ?? 0) < ($1.format.bitrate ?? 0) }
+            ?? candidates.min { ($0.format.bitrate ?? 0) < ($1.format.bitrate ?? 0) }
             ?? first
     }
 }

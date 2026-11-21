@@ -21,7 +21,7 @@ enum VariantFilters {
     /// What the rules depend on.
     struct Environment {
         /// The best dynamic range the display shows.
-        var displayVideoRange: Format.VideoRange
+        var displayVideoRange: VideoRange
         var supportsDolbyVision: Bool
         var isLowPowerModeEnabled: Bool
         var isHardwareDecodeSupported: (VideoFormat) -> Bool
@@ -99,8 +99,10 @@ enum VariantFilters {
     }
 
     /// The indices of `formats` the rules keep. Never empty for a non-empty `formats`.
-    static func allowedIndices(of formats: [Format], environment: Environment) -> [Int] {
-        let variants = formats.enumerated().map { Variant(index: $0.offset, format: $0.element) }
+    static func allowedIndices(of formats: [AnyFormat], environment: Environment) -> [Int] {
+        let variants = formats.enumerated().map {
+            Variant(index: $0.offset, format: $0.element, supportsDolbyVision: environment.supportsDolbyVision)
+        }
         var kept = variants
 
         kept = kept.filter { supportsVideoRange($0, environment: environment) }
@@ -120,18 +122,23 @@ enum VariantFilters {
 
     private struct Variant {
         let index: Int
-        let format: Format
+        let format: AnyFormat
         let videoFormat: VideoFormat
 
-        init(index: Int, format: Format) {
+        init(index: Int, format: AnyFormat, supportsDolbyVision: Bool) {
             self.index = index
             self.format = format
             let codecs = format.codecs ?? format.sampleMimeType.flatMap(Self.codec(of:))
-            videoFormat = VideoFormat(codecs: codecs)
+            // A Dolby Vision layer on another codec is played where the display supports it; elsewhere the base is.
+            if supportsDolbyVision, let supplementalCodecs = format.supplementalCodecs {
+                videoFormat = max(VideoFormat(codecs: codecs), VideoFormat(codecs: supplementalCodecs))
+            } else {
+                videoFormat = VideoFormat(codecs: codecs)
+            }
         }
 
         var hasVideo: Bool { videoFormat != .none }
-        var range: Format.VideoRange { format.videoRange == .unknown ? .sdr : format.videoRange }
+        var range: VideoRange { format.video?.videoRange ?? .sdr }
 
         func isHardwareDecoded(_ environment: Environment) -> Bool {
             environment.isHardwareDecodeSupported(videoFormat)
@@ -172,7 +179,7 @@ enum VariantFilters {
             ? VideoFormat.av1.rawValue + 1
             : Int.max
 
-        func rangeScore(_ range: Format.VideoRange) -> (Bool, Int) {
+        func rangeScore(_ range: VideoRange) -> (Bool, Int) {
             // Ranges the display shows come first, the highest first; then the others, the nearest first.
             range <= preferredRange ? (true, range.rawValue) : (false, -range.rawValue)
         }
@@ -227,10 +234,10 @@ enum VariantFilters {
     /// Upper heights of the resolution buckets.
     private static let resolutionBucketLimits = [240, 360, 480, 900, 1440, 2700, 3780]
 
-    private static func resolutionBucket(of format: Format) -> Int? {
-        guard format.height != Format.noValue, format.height > 0 else {
+    private static func resolutionBucket(of format: AnyFormat) -> Int? {
+        guard let height = format.video?.size?.height, height > 0 else {
             return nil
         }
-        return resolutionBucketLimits.firstIndex { format.height <= $0 } ?? resolutionBucketLimits.count
+        return resolutionBucketLimits.firstIndex { height <= $0 } ?? resolutionBucketLimits.count
     }
 }

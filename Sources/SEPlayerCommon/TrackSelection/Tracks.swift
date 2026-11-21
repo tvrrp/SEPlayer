@@ -81,7 +81,7 @@ public extension Tracks {
         /// The type of the tracks in the group.
         public var type: TrackType { mediaTrackGroup.type }
 
-        public func format(trackIndex: Int) -> Format {
+        public func format(trackIndex: Int) -> AnyFormat {
             mediaTrackGroup[trackIndex]
         }
 

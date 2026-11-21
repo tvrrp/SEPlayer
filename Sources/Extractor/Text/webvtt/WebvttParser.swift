@@ -13,13 +13,13 @@ import SEPlayerCommon
 /// A file is a header, then STYLE blocks, comments and cues. The cues are emitted as events: between two times where
 /// cues start or end, all the cues that show.
 public final class WebvttParser: SubtitleParser {
-    public static let cueReplacementBehavior = Format.CueReplacementBehavior.merge
+    public static let cueReplacementBehavior = CueReplacementBehavior.merge
 
     private let cssParser = WebvttCssParser()
 
     public init() {}
 
-    public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior() -> CueReplacementBehavior {
         WebvttParser.cueReplacementBehavior
     }
 

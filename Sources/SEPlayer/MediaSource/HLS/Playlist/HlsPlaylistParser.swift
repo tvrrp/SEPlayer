@@ -151,8 +151,8 @@ private extension HlsPlaylistParser {
         var audios: [HlsMultivariantPlaylist.Rendition] = []
         var subtitles: [HlsMultivariantPlaylist.Rendition] = []
         var closedCaptions: [HlsMultivariantPlaylist.Rendition] = []
-        var muxedAudioFormat: Format?
-        var muxedCaptionFormats: [Format]?
+        var muxedAudioFormat: AnyFormat?
+        var muxedCaptionFormats: [TextFormat]?
 
         for attributes in mediaTags {
             let value = { (name: String) in
@@ -168,31 +168,32 @@ private extension HlsPlaylistParser {
                 return resolved
             }
 
-            let builder = Format.Builder()
-                .setId("\(groupId):\(name)")
-                .setLabel(name)
-                .setContainerMimeType(.applicationM3U8)
-                .setSelectionFlags(selectionFlags(attributes))
-                .setRoleFlags(roleFlags(attributes))
-                .setLanguage(value("LANGUAGE"))
+            func setCommonAttributes<S>(_ format: inout Format<S>) {
+                format.id = "\(groupId):\(name)"
+                format.label = name
+                format.containerMimeType = .applicationM3U8
+                format.selectionFlags = selectionFlags(attributes)
+                format.roleFlags = roleFlags(attributes)
+                format.language = value("LANGUAGE")
+            }
 
             switch type {
             case "VIDEO":
                 let variant = allVariants.first { $0.videoGroupId == groupId }
                 let codecs = Codecs.ofType(variant?.format.codecs, trackType: .video)
-                var videoBuilder = builder
-                    .setCodecs(codecs)
-                    .setSampleMimeType(codecs.flatMap(Codecs.mediaMimeType(forCodec:)))
-                if let variant {
-                    videoBuilder = videoBuilder
-                        .setSize(width: variant.format.width, height: variant.format.height)
-                        .setFrameRate(variant.format.frameRate)
+                var videoFormat = VideoFormat()
+                setCommonAttributes(&videoFormat)
+                videoFormat.codecs = codecs
+                videoFormat.codec = Codecs.mediaMimeType(ofType: .video, in: codecs).map(VideoCodec.init)
+                if let variant = variant.flatMap({ VideoFormat($0.format) }) {
+                    videoFormat.size = variant.size
+                    videoFormat.frameRate = variant.frameRate
                 }
                 // A rendition without a URI is in the variant itself.
                 if let renditionUrl {
                     let rendition = HlsMultivariantPlaylist.Rendition(
                         url: renditionUrl,
-                        format: videoBuilder.build(),
+                        format: AnyFormat(videoFormat),
                         groupId: groupId,
                         name: name,
                         stableRenditionId: value("STABLE-RENDITION-ID")
@@ -202,39 +203,40 @@ private extension HlsPlaylistParser {
             case "AUDIO":
                 let variant = allVariants.first { $0.audioGroupId == groupId }
                 let codecs = Codecs.ofType(variant?.format.codecs, trackType: .audio)
-                var audioBuilder = builder
-                    .setCodecs(codecs)
-                    .setSampleMimeType(codecs.flatMap(Codecs.mediaMimeType(forCodec:)))
+                var audioFormat = AudioFormat()
+                setCommonAttributes(&audioFormat)
+                audioFormat.codecs = codecs
+                audioFormat.codec = Codecs.mediaMimeType(ofType: .audio, in: codecs).map(AudioCodec.init)
                 if let channels = value("CHANNELS")?.split(separator: "/").first, let count = Int(channels) {
-                    audioBuilder = audioBuilder.setChannelCount(count)
+                    audioFormat.channelCount = count
                 }
                 if let sampleRate = value("SAMPLE-RATE").flatMap(Int.init) {
-                    audioBuilder = audioBuilder.setSampleRate(sampleRate)
+                    audioFormat.sampleRate = sampleRate
                 }
                 if let renditionUrl {
                     let rendition = HlsMultivariantPlaylist.Rendition(
                         url: renditionUrl,
-                        format: audioBuilder.build(),
+                        format: AnyFormat(audioFormat),
                         groupId: groupId,
                         name: name,
                         stableRenditionId: value("STABLE-RENDITION-ID")
                     )
                     audios.append(rendition)
                 } else if variant != nil {
-                    muxedAudioFormat = audioBuilder.build()
+                    muxedAudioFormat = AnyFormat(audioFormat)
                 }
             case "SUBTITLES":
                 let variant = allVariants.first { $0.subtitleGroupId == groupId }
                 let codecs = Codecs.ofType(variant?.format.codecs, trackType: .text)
-                let sampleMimeType = codecs.flatMap(Codecs.mediaMimeType(forCodec:)) ?? .textVTT
-                let subtitleFormat = builder
-                    .setCodecs(codecs)
-                    .setSampleMimeType(sampleMimeType)
-                    .build()
+                let sampleMimeType = Codecs.mediaMimeType(ofType: .text, in: codecs) ?? .textVTT
+                var subtitleFormat = TextFormat()
+                setCommonAttributes(&subtitleFormat)
+                subtitleFormat.codecs = codecs
+                subtitleFormat.codec = TextCodec(sampleMimeType)
                 if let renditionUrl {
                     let rendition = HlsMultivariantPlaylist.Rendition(
                         url: renditionUrl,
-                        format: subtitleFormat,
+                        format: AnyFormat(subtitleFormat),
                         groupId: groupId,
                         name: name,
                         stableRenditionId: value("STABLE-RENDITION-ID")
@@ -245,14 +247,17 @@ private extension HlsPlaylistParser {
                 guard let instreamId = value("INSTREAM-ID") else { continue }
                 // CC1 to CC4 are CEA-608 channels; SERVICE1 to SERVICE63 CEA-708 services.
                 let isCea608 = instreamId.hasPrefix("CC")
-                let channel = Int(instreamId.dropFirst(isCea608 ? 2 : 7)) ?? Format.noValue
-                let captionFormat = builder
-                    .setSampleMimeType(isCea608 ? .applicationCEA608 : .applicationCEA708)
-                    .setAccessibilityChannel(channel)
-                    .build()
+                let channel = Int(instreamId.dropFirst(isCea608 ? 2 : 7))
+                var captionFormat = TextFormat()
+                setCommonAttributes(&captionFormat)
+                captionFormat.codec = if isCea608 {
+                    TextCodec(.applicationCEA608, \.cea608) { $0.channel = channel }
+                } else {
+                    TextCodec(.applicationCEA708, \.cea708) { $0.serviceNumber = channel }
+                }
                 let rendition = HlsMultivariantPlaylist.Rendition(
                     url: nil,
-                    format: captionFormat,
+                    format: AnyFormat(captionFormat),
                     groupId: groupId,
                     name: name,
                     stableRenditionId: value("STABLE-RENDITION-ID")
@@ -296,31 +301,36 @@ private extension HlsPlaylistParser {
             throw ParseError.malformed("EXT-X-STREAM-INF without BANDWIDTH")
         }
 
-        var builder = Format.Builder()
-            .setId(index)
-            .setContainerMimeType(.applicationM3U8)
-            .setCodecs(value("CODECS"))
-            .setPeakBitrate(peakBitrate)
-            .setAverageBitrate(value("AVERAGE-BANDWIDTH").flatMap(Int.init) ?? Format.noValue)
+        // A variant is its video, or its audio when it has no video.
+        var format = VideoFormat()
+        format.id = String(index)
+        format.containerMimeType = .applicationM3U8
+        format.codecs = value("CODECS")
+        format.peakBitrate = peakBitrate
+        format.averageBitrate = value("AVERAGE-BANDWIDTH").flatMap(Int.init)
+        format.codec = Codecs.mediaMimeType(ofType: .video, in: format.codecs).map(VideoCodec.init)
 
         if let resolution = value("RESOLUTION") {
             let parts = resolution.split(separator: "x").compactMap { Int($0) }
             // Zero or negative sizes are treated as unknown.
             if parts.count == 2, parts[0] > 0, parts[1] > 0 {
-                builder = builder.setSize(width: parts[0], height: parts[1])
+                format.size = VideoSize(width: parts[0], height: parts[1])
             }
         }
-        if let frameRate = value("FRAME-RATE").flatMap(Float.init) {
-            builder = builder.setFrameRate(frameRate)
+        format.frameRate = value("FRAME-RATE").flatMap(Float.init)
+        // The range is that of the transfer function: SDR leaves it unknown.
+        switch value("VIDEO-RANGE").flatMap(VideoRange.init(hlsAttribute:)) {
+        case .pq?: format.transferFunction = .pq
+        case .hlg?: format.transferFunction = .hlg
+        default: break
         }
-        if let videoRange = value("VIDEO-RANGE") {
-            builder = builder.setVideoRange(Format.VideoRange(hlsAttribute: videoRange))
-        }
+        format.supplementalCodecs = supplementalCodecs(value("SUPPLEMENTAL-CODECS"), videoRange: value("VIDEO-RANGE"))
+        let hasVideo = format.size != nil || format.codec != nil
 
         let closedCaptions = value("CLOSED-CAPTIONS")
         return HlsMultivariantPlaylist.Variant(
             url: info.url,
-            format: builder.build(),
+            format: hasVideo ? AnyFormat(format) : AnyFormat(audioFormat(ofAudioOnlyVariant: format)),
             videoGroupId: value("VIDEO"),
             audioGroupId: value("AUDIO"),
             subtitleGroupId: value("SUBTITLES"),
@@ -329,6 +339,41 @@ private extension HlsPlaylistParser {
             pathwayId: value("PATHWAY-ID"),
             stableVariantId: value("STABLE-VARIANT-ID")
         )
+    }
+
+    /// The format of a variant without video: its common attributes and the codec of its audio.
+    func audioFormat(ofAudioOnlyVariant variant: VideoFormat) -> AudioFormat {
+        var format = AudioFormat()
+        format.id = variant.id
+        format.containerMimeType = variant.containerMimeType
+        format.codecs = variant.codecs
+        format.peakBitrate = variant.peakBitrate
+        format.averageBitrate = variant.averageBitrate
+        format.codec = Codecs.mediaMimeType(ofType: .audio, in: variant.codecs).map(AudioCodec.init)
+        return format
+    }
+
+    /// The supplemental video codec of a variant: the first one of `SUPPLEMENTAL-CODECS`, a list of codecs with their
+    /// compatibility brands (`dvh1.08.07/db4h`), if it is a Dolby Vision layer that agrees with the video range.
+    func supplementalCodecs(_ attribute: String?, videoRange: String?) -> String? {
+        // Only the first codec is read.
+        guard let first = attribute?.split(separator: ",").first else { return nil }
+        let parts = first.split(separator: "/", omittingEmptySubsequences: false)
+        let supplementalCodec = parts[0].trimmingCharacters(in: .whitespaces)
+        let profiles = parts.count > 1 ? String(parts[1]) : nil
+        guard Codecs.mediaMimeType(forCodec: supplementalCodec) == .videoDolbyVision else {
+            SELogger.debug(.playlist, "Supplemental codec \(supplementalCodec) isn't read")
+            return nil
+        }
+        // The brand says which range the enhancement layer is for: PQ (db1p), SDR (db2g) or HLG (db4g, db4h).
+        guard let videoRange, let profiles else { return nil }
+        let agrees = switch videoRange.uppercased() {
+        case "PQ": profiles == "db1p"
+        case "SDR": profiles == "db2g"
+        case "HLG": profiles.hasPrefix("db4")
+        default: false
+        }
+        return agrees ? supplementalCodec : nil
     }
 
     func selectionFlags(_ attributes: AttributeList) -> SelectionFlags {

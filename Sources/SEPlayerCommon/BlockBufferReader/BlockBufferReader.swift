@@ -354,6 +354,48 @@ public struct BlockBufferReader: Hashable {
         return string
     }
 
+    /// Get a `String` decoding the bytes from `index` up to the next zero byte with `encoding`. This will not change the
+    /// reader index.
+    ///
+    /// - parameters:
+    ///     - index: The starting index of the bytes of interest into the `BlockBufferReader`.
+    ///     - encoding: The `String` encoding to be used.
+    /// - returns: A `String` value, or `nil` if no zero byte follows `index` or the bytes cannot be decoded with the
+    ///     given encoding.
+    public func getNullTerminatedString(at index: Int, encoding: String.Encoding = .utf8) -> String? {
+        guard let length = nullTerminatedStringLength(at: index) else {
+            return nil
+        }
+        return getString(at: index, length: length, encoding: encoding)
+    }
+
+    /// Read a `String` decoding the bytes up to the next zero byte with `encoding`, moving the `readerIndex` past the
+    /// zero byte.
+    ///
+    /// - parameters:
+    ///     - encoding: The `String` encoding to be used.
+    /// - returns: A `String` value, or `nil` if no zero byte follows or the bytes cannot be decoded with the given
+    ///     encoding.
+    public mutating func readNullTerminatedString(encoding: String.Encoding = .utf8) -> String? {
+        guard let length = nullTerminatedStringLength(at: readerIndex),
+              let string = readString(length: length, encoding: encoding) else {
+            return nil
+        }
+        moveReaderIndex(forwardBy: 1)
+        return string
+    }
+
+    /// The number of bytes from `index` to the next zero byte, or `nil` if there is none.
+    private func nullTerminatedStringLength(at index: Int) -> Int? {
+        guard readerIndex <= index, index < readerIndex + readableBytes else {
+            return nil
+        }
+        guard let endIndex = bytesView[index...].firstIndex(of: 0) else {
+            return nil
+        }
+        return endIndex &- index
+    }
+
     /// Returns a slice of size `length` bytes, starting at `index`. The `BlockBufferReader` this is invoked on and the
     /// `BlockBufferReader` returned will share the same underlying storage. However, the byte at `index` in this `BlockBufferReader`
     /// will correspond to index `0` in the returned `BlockBufferReader`.

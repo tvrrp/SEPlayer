@@ -5,78 +5,61 @@
 //  Created by Damir Yackupov on 13.10.2026.
 //
 
-import AudioToolbox
-import CoreMedia
-import QuartzCore
 import SEPlayerCommon
 
 extension BoxParser {
-    /// The format of an audio track whose sample entry was read into a format description.
-    func audioFormat(_ audio: AudioSampleEntryData, trackId: Int, language: String) -> Format {
-        let description = audio.streamDescription
-        let subtype = CMAudioFormatDescription.MediaSubType(rawValue: description.mFormatID)
-        let descriptor = audio.elementaryStreamDescriptor
-
-        let builder = Format.Builder()
-            .setId(trackId)
-            .setSampleMimeType(descriptor?.audioMimeType ?? subtype.audioMimeType)
-            .setCodecs(descriptor?.codecs ?? Self.audioCodecs(subtype))
-            .setChannelCount(Int(description.mChannelsPerFrame))
-            .setSampleRate(Int(description.mSampleRate))
-            .setInitializationData(SampleEntryFormatDescription(formatDescription: audio.formatDescription))
-            .setLanguage(language)
-        if let descriptor {
-            builder
-                .setAverageBitrate(descriptor.averageBitrate > 0 ? descriptor.averageBitrate : Format.noValue)
-                .setPeakBitrate(descriptor.maxBitrate > 0 ? descriptor.maxBitrate : Format.noValue)
-        }
-        return builder.build()
-    }
-
-    /// The codec string of RFC 6381 of formats that have one besides MPEG-4 audio.
-    private static func audioCodecs(_ subtype: CMAudioFormatDescription.MediaSubType) -> String? {
-        switch subtype {
-        case .ac3: "ac-3"
-        case .enhancedAC3: "ec-3"
-        case .appleLossless: "alac"
-        case .flac: "fLaC"
-        case .opus: "Opus"
-        default: MP4Box.BoxType(rawValue: subtype.rawValue) == .apac ? "apac" : nil
+    /// The codec string of RFC 6381 of a video codec read from a sample entry of `sampleEntryType`.
+    static func videoCodecs(_ codec: VideoCodec, sampleEntryType: MP4Box.BoxType) -> String? {
+        let usesParameterSetsInBand = sampleEntryType == .hev1 || sampleEntryType == .dvhe
+        switch codec.mimeType {
+        case .videoH264:
+            return codec.h264.codecs()
+        case .videoH265:
+            return codec.hevc.codecs(sampleEntryType: usesParameterSetsInBand ? .hev1 : .hvc1)
+        case .videoDolbyVision:
+            let type: MP4Box.BoxType = switch codec.dolbyVision.baseLayer {
+            case .videoH264?: sampleEntryType == .dvav ? .dvav : .dva1
+            case .videoAV1?: .dav1
+            default: usesParameterSetsInBand ? .dvhe : .dvh1
+            }
+            return codec.dolbyVision.codecs(sampleEntryType: type)
+        case .videoAV1:
+            return codec.av1.codecs
+        case .videoVP9,
+             .videoVP8:
+            return codec.vp9.codecs(sampleEntryType: codec.mimeType == .videoVP8 ? .vp08 : .vp09)
+        default:
+            return nil
         }
     }
-}
 
-extension BoxParser {
-    /// The format of a video track whose sample entry was read into a format description, for codecs without a
-    /// config read here.
-    func videoFormat(
-        _ video: VideoSampleEntryData,
-        trackId: Int,
-        codecs: String?,
-        pixelWidthHeightRatio: Float,
-        rotationDegrees: CGFloat,
-        transform3D: CATransform3D,
-        videoRange: Format.VideoRange
-    ) -> Format {
-        let subtype = CMVideoFormatDescription.MediaSubType(rawValue: video.codecType)
-        var ratio = pixelWidthHeightRatio
-        if let aspect = video.formatDescription.extensionValue(for: kCMFormatDescriptionExtension_PixelAspectRatio) as? [String: Any],
-           let horizontal = (aspect[kCMFormatDescriptionKey_PixelAspectRatioHorizontalSpacing as String] as? NSNumber)?.floatValue,
-           let vertical = (aspect[kCMFormatDescriptionKey_PixelAspectRatioVerticalSpacing as String] as? NSNumber)?.floatValue,
-           horizontal > 0, vertical > 0 {
-            ratio = horizontal / vertical
+    /// The codec string of RFC 6381 of audio codecs that have one besides MPEG-4 audio, whose descriptor gives it.
+    static func audioCodecs(_ codec: AudioCodec) -> String? {
+        switch codec.mimeType {
+        case .audioAC3: "ac-3"
+        case .audioEAC3,
+             .audioEAC3JOC: "ec-3"
+        case .audioALAC: "alac"
+        case .audioFLAC: "fLaC"
+        case .audioOPUS: "Opus"
+        case .audioAPAC: codec.apac.codecs ?? "apac"
+        default: nil
         }
-        return Format.Builder()
-            .setId(trackId)
-            .setSampleMimeType(subtype.videoMimeType)
-            .setCodecs(codecs)
-            .setSize(width: video.width, height: video.height)
-            .setPixelWidthHeightRatio(ratio)
-            .setRotationDegrees(rotationDegrees)
-            .setTransform3D(transform3D)
-            .setInitializationData(SampleEntryFormatDescription(formatDescription: video.formatDescription))
-            .setMaxSubLayers(.zero)
-            .setVideoRange(videoRange)
-            .build()
+    }
+
+    /// The size of the length before each NAL unit of the samples of a codec of NAL units, or 0 for others.
+    static func nalUnitLengthSize(_ codec: VideoCodec) -> Int {
+        switch codec.mimeType {
+        case .videoH264:
+            codec.h264.nalUnitLengthSize ?? 0
+        case .videoH265:
+            codec.hevc.nalUnitLengthSize ?? 0
+        case .videoDolbyVision:
+            codec.dolbyVision.baseLayer == .videoH264
+                ? codec.h264.nalUnitLengthSize ?? 0
+                : codec.hevc.nalUnitLengthSize ?? 0
+        default:
+            0
+        }
     }
 }

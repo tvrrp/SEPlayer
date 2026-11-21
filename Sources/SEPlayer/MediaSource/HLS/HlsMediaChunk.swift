@@ -61,12 +61,12 @@ final class HlsMediaChunk: MediaChunk, @unchecked Sendable {
 
     override var isLoadCompleted: Bool { lock.withLock { loadCompleted } }
 
-    private let format: Format
+    private let format: AnyFormat
     /// The format of the variant or rendition as the playlist declares it, with all its codecs: the extractor tells
     /// from it which streams of the segment there are.
-    private let playlistFormat: Format
+    private let playlistFormat: AnyFormat
     /// The closed captions in the video, as the playlist declares them; `nil` if it doesn't.
-    private let closedCaptionFormats: [Format]?
+    private let closedCaptionFormats: [TextFormat]?
     /// The queue the load runs on, which extractors and their input assert.
     private let extractorQueue: Queue
     private let dataSourceFactory: DataSourceFactory
@@ -95,7 +95,7 @@ final class HlsMediaChunk: MediaChunk, @unchecked Sendable {
     init(
         uid: Int,
         dataSpec: DataSpec,
-        format: Format,
+        format: AnyFormat,
         trackSelectionReason: TrackSelectionReason,
         trackSelectionData: Any?,
         startTime: CMTime,
@@ -110,7 +110,7 @@ final class HlsMediaChunk: MediaChunk, @unchecked Sendable {
         isMasterTimestampSource: Bool,
         timestampAdjuster: TimestampAdjuster,
         previousChunk: HlsMediaChunk?,
-        playlistFormat: Format? = nil,
+        playlistFormat: AnyFormat? = nil,
         shouldSpliceIn: Bool = false,
         isIndependent: Bool = true,
         isPreload: Bool = false,
@@ -120,7 +120,7 @@ final class HlsMediaChunk: MediaChunk, @unchecked Sendable {
         decryptionMemoryPool: CMMemoryPool,
         extractorFactory: HlsExtractorFactory,
         transferListener: TransferListener?,
-        closedCaptionFormats: [Format]? = nil,
+        closedCaptionFormats: [TextFormat]? = nil,
         isIFrameOnly: Bool = false
     ) {
         self.isIFrameOnly = isIFrameOnly
@@ -423,7 +423,7 @@ private final class FirstSampleTrackOutput: TrackOutput {
         output.setDuration(duration)
     }
 
-    func setFormat(_ format: Format) throws {
+    func setFormat(_ format: AnyFormat) throws {
         try output.setFormat(format)
     }
 

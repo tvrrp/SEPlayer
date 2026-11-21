@@ -270,4 +270,14 @@ public extension CMFormatDescription {
     func extensionValue(for key: CFString) -> Any? {
         CMFormatDescriptionGetExtension(self, extensionKey: key)
     }
+
+    /// The width of a pixel over its height, or `nil` if the description doesn't tell.
+    var pixelWidthHeightRatio: Float? {
+        let aspect = extensionValue(for: kCMFormatDescriptionExtension_PixelAspectRatio) as? [String: Any]
+        let horizontal = aspect?[kCMFormatDescriptionKey_PixelAspectRatioHorizontalSpacing as String] as? NSNumber
+        let vertical = aspect?[kCMFormatDescriptionKey_PixelAspectRatioVerticalSpacing as String] as? NSNumber
+        guard let horizontal = horizontal?.floatValue, let vertical = vertical?.floatValue else { return nil }
+        guard horizontal > 0, vertical > 0 else { return nil }
+        return horizontal / vertical
+    }
 }

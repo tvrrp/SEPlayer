@@ -279,8 +279,8 @@ final class DefaultLoadControl: LoadControl {
         let isNetwork = window.map { !($0.mediaItem.localConfiguration?.url.isFileURL ?? false) } ?? true
         let demandBitrate = trackSelections.reduce(0) { total, selection in
             guard let format = selection?.selectedFormat else { return total }
-            let bitrate = format.averageBitrate != Format.noValue ? format.averageBitrate : format.bitrate
-            return bitrate != Format.noValue ? total + bitrate : total
+            let bitrate = format.averageBitrate ?? format.bitrate
+            return total + (bitrate ?? 0)
         }
         let rates = bandwidthMeter?.transferRates()
         let bytesPerSecond = rates.map { $0.movingAverage > 0 ? $0.movingAverage : $0.average } ?? 0
@@ -326,8 +326,7 @@ final class DefaultLoadControl: LoadControl {
     private func requiredBitrate() -> Int {
         trackSelections.reduce(0) { required, selection in
             guard let selection else { return required }
-            let declared = selection.selectedFormat.bitrate
-            guard let bitrate = declared != Format.noValue ? declared : selection.measuredBitrate else {
+            guard let bitrate = selection.selectedFormat.bitrate ?? selection.measuredBitrate else {
                 return required
             }
             return max(required, bitrate)

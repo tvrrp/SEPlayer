@@ -17,6 +17,7 @@ public protocol RenderersFactory {
         clock: SEClock,
         renderSynchronizer: any PlaybackSynchronizer,
         textOutput: TextOutput,
+        metadataOutput: MetadataOutput,
         videoListener: VideoRendererEventListener,
         audioListener: AudioRendererEventListener
     ) -> [any SERenderer]
@@ -49,6 +50,7 @@ public struct DefaultRenderersFactory: RenderersFactory {
         clock: SEClock,
         renderSynchronizer: any PlaybackSynchronizer,
         textOutput: TextOutput,
+        metadataOutput: MetadataOutput,
         videoListener: VideoRendererEventListener,
         audioListener: AudioRendererEventListener
     ) -> [any SERenderer] {
@@ -59,6 +61,11 @@ public struct DefaultRenderersFactory: RenderersFactory {
             eventListener: audioListener
         )
         let video = try? AVFVideoRenderer(queue: queue, clock: clock, eventListener: videoListener)
-        return [audio, video, TextRenderer(queue: queue, clock: clock, output: textOutput)].compactMap { $0 }
+        return [
+            audio,
+            video,
+            TextRenderer(queue: queue, clock: clock, output: textOutput),
+            MetadataRenderer(queue: queue, clock: clock, output: metadataOutput),
+        ].compactMap { $0 }
     }
 }

@@ -19,20 +19,18 @@ import SEPlayerCommon
 /// Supports display definitions, page, region, CLUT and object segments with 2, 4 and 8-bit pixel code strings and
 /// map tables. Objects coded as character strings are not drawn.
 public final class DvbParser: SubtitleParser {
-    public static let cueReplacementBehavior: Format.CueReplacementBehavior = .replace
+    public static let cueReplacementBehavior: CueReplacementBehavior = .replace
 
     private let service: SubtitleService
 
-    /// - Parameter initializationData: The subtitling descriptor's composition page id and ancillary page id.
-    public init(initializationData: [BlockBufferReader]) throws {
-        guard let data = initializationData.first, data.readableBytes >= 4 else {
-            throw ParserError.createForMalformedContainer(message: "DVB subtitles without page ids")
-        }
-        var reader = SubtitleBitReader(data.readableBytesView)
-        service = SubtitleService(pageId: reader.readBits(16), ancillaryPageId: reader.readBits(16))
+    /// - Parameters:
+    ///   - compositionPageID: The page of the subtitles, as the subtitling descriptor names it.
+    ///   - ancillaryPageID: The page of what the subtitles of several services share.
+    public init(compositionPageID: Int, ancillaryPageID: Int) {
+        service = SubtitleService(pageId: compositionPageID, ancillaryPageId: ancillaryPageID)
     }
 
-    public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior() -> CueReplacementBehavior {
         Self.cueReplacementBehavior
     }
 

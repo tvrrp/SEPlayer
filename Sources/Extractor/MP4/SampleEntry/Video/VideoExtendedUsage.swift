@@ -5,7 +5,6 @@
 //  Created by Damir Yackupov on 14.10.2026.
 //
 
-import CoreMedia
 import SEPlayerCommon
 
 /// Reads the video extended usage box, `vexu`, of stereo and immersive video: which eyes the views hold, the hero
@@ -21,19 +20,17 @@ enum VideoExtendedUsage {
         case lensCollection
     }
 
-    /// Adds the extensions of a `vexu` box.
+    /// Reads a `vexu` box into the format.
     ///
     /// - Parameter vexu: The payload of the box, its indices starting at 0.
-    static func addExtensions(vexu: BlockBufferReader, to extensions: inout SampleDescriptionExtensions) throws(ReadError) {
-        var reader = Reader(extensions: extensions)
+    static func read(vexu: BlockBufferReader, into format: inout VideoFormat) throws(ReadError) {
+        var reader = Reader(format: format)
         try reader.readContainer(vexu, path: [.vexu])
         if !reader.unrecognizedPaths.isEmpty {
-            let paths = reader.unrecognizedPaths.map { path in
-                path.map { SampleDescriptionExtensions.number(Int32(bitPattern: $0)) }
-            }
-            reader.extensions.addFirst(paths, for: SampleDescriptionExtensionKey.requiredButUnrecognizedFormatAtoms)
+            reader.format.unrecognizedRequiredBoxPaths = reader.format.unrecognizedRequiredBoxPaths
+                ?? reader.unrecognizedPaths.map { path in path.map { FourCharacterCode($0) } }
         }
-        extensions = reader.extensions
+        format = reader.format
     }
 
     /// The boxes each box holds that are read here.
@@ -51,7 +48,7 @@ enum VideoExtendedUsage {
     }
 
     private struct Reader {
-        var extensions: SampleDescriptionExtensions
+        var format: VideoFormat
         /// The paths, from `vexu` on, of the boxes a `must` box requires that aren't read here.
         var unrecognizedPaths: [[UInt32]] = []
 
@@ -132,49 +129,48 @@ enum VideoExtendedUsage {
         }
 
         private mutating func readLeaf(_ type: MP4Box.BoxType, payload: BlockBufferReader) throws(ReadError) {
-            typealias Key = SampleDescriptionExtensionKey
             switch type {
             case .stri:
                 // Stereo view information: has left eye (bit 0), right eye (1), additional views (2), eye views
                 // reversed (3).
                 let flags = try field(payload, as: UInt8.self)
-                let keys = [Key.hasLeftStereoEyeView, Key.hasRightStereoEyeView, Key.hasAdditionalViews, Key.hasEyeViewsReversed]
-                for (bit, key) in keys.enumerated() where flags & (1 << bit) != 0 {
-                    extensions.addFirst(kCFBooleanTrue as Any, for: key)
-                }
+                format.stereoViews = format.stereoViews ?? StereoViews(rawValue: Int(flags & 0x0F))
             case .hero:
-                let eye = switch try field(payload, as: UInt8.self) {
-                case 0: "Unspecified"
-                case 1: "Left"
-                case 2: "Right"
-                default: "Reserved"
+                let eye: HeroEye = switch try field(payload, as: UInt8.self) {
+                case 0: .unspecified
+                case 1: .left
+                case 2: .right
+                default: .reserved
                 }
-                extensions.addFirst(eye, for: Key.heroEye)
+                format.heroEye = format.heroEye ?? eye
             case .blin:
                 // The baseline between the cameras, in micrometers.
-                try extensions.addFirst(SampleDescriptionExtensions.number(field(payload, as: UInt32.self)), for: Key.stereoCameraBaseline)
+                let baseline = try field(payload, as: UInt32.self)
+                format.stereoCameraBaseline = format.stereoCameraBaseline ?? baseline
             case .dadj:
-                try extensions.addFirst(SampleDescriptionExtensions.number(field(payload, as: Int32.self)), for: Key.horizontalDisparityAdjustment)
+                let adjustment = try field(payload, as: Int32.self)
+                format.horizontalDisparityAdjustment = format.horizontalDisparityAdjustment ?? adjustment
             case .tiny:
-                try extensions.addFirst(SampleDescriptionExtensions.number(field(payload, as: UInt32.self)), for: Key.transportIdentifier)
+                let identifier = try field(payload, as: UInt32.self)
+                format.transportIdentifier = format.transportIdentifier ?? identifier
             case .prji:
-                let kind: String? = switch try MP4Box.BoxType(rawValue: field(payload, as: UInt32.self)) {
-                case .rect?: "Rectilinear"
-                case .equi?: "Equirectangular"
-                case .hequ?: "HalfEquirectangular"
-                case .fish?: "AppleImmersiveVideo"
-                case .prim?: "ParametricImmersive"
+                let projection: VideoProjection? = switch try MP4Box.BoxType(rawValue: field(payload, as: UInt32.self)) {
+                case .rect?: .rectilinear
+                case .equi?: .equirectangular
+                case .hequ?: .halfEquirectangular
+                case .fish?: .appleImmersiveVideo
+                case .prim?: .parametricImmersive
                 default: nil
                 }
-                if let kind { extensions.addFirst(kind, for: Key.projectionKind) }
+                format.projection = format.projection ?? projection
             case .pkin:
                 let packing = try field(payload, as: UInt32.self)
-                let kind: String? = switch MP4Box.BoxType(rawValue: packing) {
-                case .side?: "SideBySide"
-                case .over?: "OverUnder"
-                default: packing == 0 ? "Unspecified" : nil
+                let kind: ViewPacking? = switch MP4Box.BoxType(rawValue: packing) {
+                case .side?: .sideBySide
+                case .over?: .overUnder
+                default: packing == 0 ? .unspecified : nil
                 }
-                if let kind { extensions.addFirst(kind, for: Key.viewPackingKind) }
+                format.viewPacking = format.viewPacking ?? kind
             default:
                 break
             }

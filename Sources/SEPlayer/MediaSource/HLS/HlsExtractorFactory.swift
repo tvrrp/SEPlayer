@@ -55,31 +55,24 @@ protocol HlsExtractorFactory {
     ///   - timestampSession: Maps sample times to the discontinuity's timeline.
     func createExtractor(
         url: URL,
-        format: Format,
-        closedCaptionFormats: [Format]?,
+        format: AnyFormat,
+        closedCaptionFormats: [TextFormat]?,
         timestampSession: TimestampAdjuster.Session,
         input: any ExtractorInput,
         _ isolation: isolated any Actor
     ) async throws -> HlsMediaChunkExtractor
 }
 
-/// Creates extractors for MPEG-TS, fragmented MP4 and WebVTT segments.
+/// Creates extractors for MPEG-TS, fragmented MP4, packed audio (ADTS, AC-3, AC-4, MP3) and WebVTT segments.
 struct DefaultHlsExtractorFactory: HlsExtractorFactory {
-    private enum FileType: CaseIterable {
-        case ts
-        case fragmentedMp4
-        case webvtt
-    }
-
     private let queue: Queue
     private let subtitleParserFactory: SubtitleParserFactory
 
     /// CC1, the closed captions a video without a declaration may have.
-    private static let defaultClosedCaptionFormat = Format.Builder()
-        .setSampleMimeType(.applicationCEA608)
-        .setAccessibilityChannel(1)
-        .setLabel("CC1")
-        .build()
+    private static let defaultClosedCaptionFormat = TextFormat {
+        $0.codec = TextCodec(.applicationCEA608, \.cea608) { $0.channel = 1 }
+        $0.label = "CC1"
+    }
 
     /// - Parameter queue: The queue extractors run on.
     init(queue: Queue, subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory()) {
@@ -89,19 +82,26 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
 
     func createExtractor(
         url: URL,
-        format: Format,
-        closedCaptionFormats: [Format]?,
+        format: AnyFormat,
+        closedCaptionFormats: [TextFormat]?,
         timestampSession: TimestampAdjuster.Session,
         input: any ExtractorInput,
         _ isolation: isolated any Actor
     ) async throws -> HlsMediaChunkExtractor {
-        // The file type the url suggests goes first; the others are tried after it.
-        var fileTypes = FileType.allCases
-        let inferred = inferFileType(url: url, format: format)
+        // The file type the url or the format suggests goes first; the others are tried after it.
+        let inferred = FileType(url: url) ?? inferFileType(format: format)
+        var fileTypes = Self.fileTypes
         if let inferred, let index = fileTypes.firstIndex(of: inferred) {
             fileTypes.remove(at: index)
             fileTypes.insert(inferred, at: 0)
         }
+
+        // Packed audio starts with an ID3 tag that gives the MPEG-TS time of its first sample.
+        let id3Timestamp = try await Id3Peeker.peekTransportStreamTimestamp(input: input, isolation)
+        // Adjusted only if an extractor of packed audio is made: adjusting it sets the timeline of the discontinuity.
+        lazy var packedAudioStartTime = id3Timestamp.map { timestampSession.adjustTS(pts33: $0, dts33: nil).pts }
+            ?? timestampSession.desiredFirstSampleTime
+            ?? .zero
 
         var sniffFailures: [any SniffFailure] = []
         for fileType in fileTypes {
@@ -109,14 +109,14 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
                 fileType,
                 format: format,
                 closedCaptionFormats: closedCaptionFormats,
-                timestampSession: timestampSession
+                timestampSession: timestampSession,
+                firstSampleTime: fileType.isPackedAudio ? packedAudioStartTime : .zero
             )
             defer { input.resetPeekPosition(isolation) }
             do {
                 if try await extractor.sniff(input: input, isolation) {
                     SELogger.debug(.sniffing, "\(url.lastPathComponent) is \(fileType): \(type(of: extractor))")
-                    // A WebVTT segment is read whole, with its own header.
-                    return HlsMediaChunkExtractor(extractor: extractor, isReusable: fileType != .webvtt)
+                    return HlsMediaChunkExtractor(extractor: extractor, isReusable: fileType.isReusable)
                 }
                 sniffFailures.append(contentsOf: extractor.getSniffFailureDetails(isolation))
             } catch is EndOfFileError {
@@ -135,9 +135,10 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
                 inferred,
                 format: format,
                 closedCaptionFormats: closedCaptionFormats,
-                timestampSession: timestampSession
+                timestampSession: timestampSession,
+                firstSampleTime: inferred.isPackedAudio ? packedAudioStartTime : .zero
             )
-            return HlsMediaChunkExtractor(extractor: extractor, isReusable: inferred != .webvtt)
+            return HlsMediaChunkExtractor(extractor: extractor, isReusable: inferred.isReusable)
         }
 
         SELogger.error(.sniffing, "No extractor reads \(url.lastPathComponent): \(sniffFailures)")
@@ -150,14 +151,32 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
 
     private func makeExtractor(
         _ fileType: FileType,
-        format: Format,
-        closedCaptionFormats: [Format]?,
-        timestampSession: TimestampAdjuster.Session
+        format: AnyFormat,
+        closedCaptionFormats: [TextFormat]?,
+        timestampSession: TimestampAdjuster.Session,
+        firstSampleTime: CMTime
     ) throws -> any Extractor {
         switch fileType {
+        case .mp4:
+            // Only the captions the playlist declares: unlike in MPEG-TS, nothing in the file would show them.
+            return FragmentedMp4Extractor(
+                queue: queue,
+                subtitleParserFactory: subtitleParserFactory,
+                timestampSession: timestampSession,
+                closedCaptionFormats: closedCaptionFormats ?? []
+            )
+        case .webvtt:
+            return WebvttExtractor(
+                queue: queue,
+                language: format.language,
+                timestampSession: timestampSession,
+                subtitleParserFactory: subtitleParserFactory
+            )
         case .ts:
             // The captions the playlist declares are the ones there are; without a declaration, CC1 may be there.
             var flags: DefaultTsPayloadReaderFactory.Flags = closedCaptionFormats == nil ? [] : .overrideCaptionDescriptors
+            // SCTE-35 cues belong with date ranges and ads, which aren't read.
+            flags.insert(.ignoreSpliceInfoStream)
             // Segments may declare AAC and H.264 streams that aren't there: those the codecs leave out are ignored.
             let codecs = Codecs.split(format.codecs).compactMap(Codecs.mediaMimeType(forCodec:))
             if !codecs.isEmpty {
@@ -174,56 +193,48 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
                     closedCaptionFormats: closedCaptionFormats ?? [Self.defaultClosedCaptionFormat]
                 )
             )
-        case .fragmentedMp4:
-            // Only the captions the playlist declares: unlike in MPEG-TS, nothing in the file would show them.
-            return FragmentedMp4Extractor(
-                queue: queue,
-                subtitleParserFactory: subtitleParserFactory,
-                timestampSession: timestampSession,
-                closedCaptionFormats: closedCaptionFormats ?? []
-            )
-        case .webvtt:
-            return WebvttExtractor(
-                queue: queue,
-                language: format.language,
-                timestampSession: timestampSession,
-                subtitleParserFactory: subtitleParserFactory
-            )
+        case .adts:
+            return try AdtsExtractor(firstSampleTime: firstSampleTime)
+        case .ac3:
+            return try Ac3Extractor(firstSampleTime: firstSampleTime)
+        case .ac4:
+            return try Ac4Extractor(firstSampleTime: firstSampleTime)
+        case .mp3:
+            return Mp3Extractor(queue: queue, forcedFirstSampleTime: firstSampleTime)
         }
     }
 
-    private func inferFileType(url: URL, format: Format) -> FileType? {
-        switch url.pathExtension.lowercased() {
-        case "ts",
-             "tsa",
-             "tsv",
-             "m2ts",
-             "mts":
-            return .ts
-        case "mp4",
-             "m4s",
-             "m4a",
-             "m4v",
-             "cmfv",
-             "cmfa",
-             "cmft":
-            return .fragmentedMp4
-        case "vtt",
-             "webvtt":
-            return .webvtt
-        default:
-            // The format of a subtitle rendition may already be that of its parsed cues, with the original type in
-            // its codecs.
-            if format.sampleMimeType == .textVTT || format.codecs == MimeTypes.textVTT.rawValue {
-                return .webvtt
-            }
-            switch format.containerMimeType {
-            case .videoMP2T: return .ts
-            case .videoMP4,
-                 .audioMP4,
-                 .applicationMP4: return .fragmentedMp4
-            default: return nil
-            }
+    /// The file type the format of a rendition suggests.
+    private func inferFileType(format: AnyFormat) -> FileType? {
+        // The format of a subtitle rendition may already be that of its parsed cues, with the original type in its
+        // codecs.
+        if format.codecs == MimeTypes.textVTT.rawValue { return .webvtt }
+        // AAC in a container isn't packed audio.
+        if format.sampleMimeType == .audioAAC, format.containerMimeType != nil {
+            return FileType(mimeType: format.containerMimeType)
+        }
+        return FileType(mimeType: format.sampleMimeType) ?? FileType(mimeType: format.containerMimeType)
+    }
+}
+
+private extension DefaultHlsExtractorFactory {
+    /// The file types in the order they are sniffed when neither the url nor the format tells.
+    static let fileTypes: [FileType] = [.mp4, .webvtt, .ts, .adts, .ac3, .ac4, .mp3]
+}
+
+private extension FileType {
+    /// Whether segments are elementary audio streams, whose times come from an ID3 tag.
+    var isPackedAudio: Bool {
+        switch self {
+        case .adts,
+             .ac3,
+             .ac4,
+             .mp3: true
+        default: false
         }
     }
+
+    /// Whether the extractor of a segment reads the next one too. A WebVTT segment is read whole, with its own
+    /// header; packed audio has its own times.
+    var isReusable: Bool { self != .webvtt && !isPackedAudio }
 }

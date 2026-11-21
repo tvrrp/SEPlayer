@@ -56,7 +56,7 @@ final class HlsSampleStreamWrapper {
 
     private let queue: Queue
     private let chunkSource: HlsChunkSource
-    private let muxedAudioFormat: Format?
+    private let muxedAudioFormat: AnyFormat?
     private let loadErrorHandlingPolicy: LoadErrorHandlingPolicy
     /// Hears how many bytes the sample queues hold.
     private let allocator: Allocator?
@@ -70,7 +70,7 @@ final class HlsSampleStreamWrapper {
         callback: Callback,
         chunkSource: HlsChunkSource,
         positionUs: CMTime,
-        muxedAudioFormat: Format?,
+        muxedAudioFormat: AnyFormat?,
         queue: Queue,
         loaderQueue: Queue,
         loadErrorHandlingPolicy: LoadErrorHandlingPolicy,
@@ -729,7 +729,7 @@ private extension HlsSampleStreamWrapper {
         var primaryExtractorTrackType = TrackType.unknown
         var primaryExtractorTrackIndex: Int?
         for (index, sampleQueue) in state.sampleQueues.enumerated() {
-            let type = sampleQueue.getUpstreamFormat()?.sampleMimeType.trackType ?? .unknown
+            let type = sampleQueue.getUpstreamFormat()?.trackType ?? .unknown
             if rank(type) > rank(primaryExtractorTrackType) {
                 primaryExtractorTrackType = type
                 primaryExtractorTrackIndex = index
@@ -745,14 +745,14 @@ private extension HlsSampleStreamWrapper {
             guard let sampleFormat = sampleQueue.getUpstreamFormat() else {
                 continue
             }
-            let formats: [Format]
+            let formats: [AnyFormat]
             if index == primaryExtractorTrackIndex {
                 formats = chunkSourceTrackGroup.map {
                     Self.deriveFormat(playlistFormat: $0, sampleFormat: sampleFormat, propagateBitrates: true)
                 }
                 state.primaryTrackGroupIndex = index
             } else {
-                let isMuxedAudio = primaryExtractorTrackType == .video && sampleFormat.sampleMimeType?.isAudio == true
+                let isMuxedAudio = primaryExtractorTrackType == .video && sampleFormat.trackType == .audio
                 let format = Self.deriveFormat(
                     playlistFormat: isMuxedAudio ? muxedAudioFormat : nil,
                     sampleFormat: sampleFormat,
@@ -771,48 +771,50 @@ private extension HlsSampleStreamWrapper {
 
     /// - Parameter sampleTrackType: The type the extractor declared the track with: it is known even when the
     ///   sample format has no MIME type.
-    static func formatsMatch(manifestFormat: Format, sampleFormat: Format, sampleTrackType: TrackType) -> Bool {
-        let manifestType = manifestFormat.sampleMimeType.trackType
-        guard manifestType == sampleTrackType else { return false }
-        if manifestType == .text {
+    static func formatsMatch(manifestFormat: AnyFormat, sampleFormat: AnyFormat, sampleTrackType: TrackType) -> Bool {
+        guard manifestFormat.trackType == sampleTrackType else { return false }
+        if let manifestText = manifestFormat.text {
             // Closed captions of one video tell their channels apart.
-            return manifestFormat.sampleMimeType == sampleFormat.sampleMimeType
-                && manifestFormat.accessibilityChannel == sampleFormat.accessibilityChannel
+            let sampleCodec = sampleFormat.text?.codec
+            return manifestText.codec?.mimeType == sampleCodec?.mimeType
+                && manifestText.codec?.cea608 == sampleCodec?.cea608
+                && manifestText.codec?.cea708 == sampleCodec?.cea708
         }
         return true
     }
 
     /// The type of the samples a playlist format describes: the video of a variant that has some, else audio.
-    static func primaryType(of playlistFormat: Format) -> TrackType {
-        playlistFormat.width > 0 || Codecs.ofType(playlistFormat.codecs, trackType: .video) != nil ? .video : .audio
+    static func primaryType(of playlistFormat: AnyFormat) -> TrackType {
+        let hasSize = playlistFormat.video?.size != nil
+        return hasSize || Codecs.ofType(playlistFormat.codecs, trackType: .video) != nil ? .video : .audio
     }
 
     /// The format of the samples, with what the playlist says about the rendition.
-    static func deriveFormat(playlistFormat: Format?, sampleFormat: Format, propagateBitrates: Bool) -> Format {
+    static func deriveFormat(playlistFormat: AnyFormat?, sampleFormat: AnyFormat, propagateBitrates: Bool) -> AnyFormat {
         guard let playlistFormat else { return sampleFormat }
-        let sampleTrackType = sampleFormat.sampleMimeType.trackType
-
-        var builder = sampleFormat.buildUpon()
-            .setLabel(playlistFormat.label)
-            .setLanguage(playlistFormat.language)
-            .setSelectionFlags(playlistFormat.selectionFlags)
-            .setRoleFlags(playlistFormat.roleFlags)
-            .setAverageBitrate(propagateBitrates ? playlistFormat.averageBitrate : Format.noValue)
-            .setPeakBitrate(propagateBitrates ? playlistFormat.peakBitrate : Format.noValue)
+        var format = sampleFormat
+        format.label = playlistFormat.label
+        format.language = playlistFormat.language
+        format.selectionFlags = playlistFormat.selectionFlags
+        format.roleFlags = playlistFormat.roleFlags
+        format.averageBitrate = propagateBitrates ? playlistFormat.averageBitrate : nil
+        format.peakBitrate = propagateBitrates ? playlistFormat.peakBitrate : nil
         if let id = playlistFormat.id {
-            builder = builder.setId(id)
+            format.id = id
         }
-        if let codecs = Codecs.ofType(playlistFormat.codecs, trackType: sampleTrackType) {
-            builder = builder.setCodecs(codecs)
+        if let codecs = Codecs.ofType(playlistFormat.codecs, trackType: sampleFormat.trackType) {
+            format.codecs = codecs
         }
-        if sampleTrackType == .video, playlistFormat.width > 0, playlistFormat.height > 0 {
-            builder = builder.setSize(width: playlistFormat.width, height: playlistFormat.height)
-            if playlistFormat.frameRate > 0 { builder = builder.setFrameRate(playlistFormat.frameRate) }
+        if let size = playlistFormat.video?.size {
+            format.video?.size = size
+            if let frameRate = playlistFormat.video?.frameRate, frameRate > 0 {
+                format.video?.frameRate = frameRate
+            }
         }
-        if sampleTrackType == .audio, playlistFormat.channelCount > 0 {
-            builder = builder.setChannelCount(playlistFormat.channelCount)
+        if let channelCount = playlistFormat.audio?.channelCount, channelCount > 0 {
+            format.audio?.channelCount = channelCount
         }
-        return builder.build()
+        return format
     }
 
     func makeTrackOutput(_ state: inout State, id: Int, trackType: TrackType) throws -> TrackOutput {
@@ -1055,7 +1057,7 @@ extension HlsSampleStreamWrapper: HlsMediaChunkOutput {
 // MARK: - SampleQueueDelegate
 
 extension HlsSampleStreamWrapper: SampleQueueDelegate {
-    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format) {
+    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: AnyFormat) {
         withState { state, effects in maybeFinishPrepare(&state, effects: &effects) }
     }
 }
@@ -1076,7 +1078,7 @@ private extension HlsSampleStreamWrapper {
 
         var mediaChunks: [HlsMediaChunk] = []
         /// The variant or rendition of the chunk loading.
-        var loadingPlaylistFormat: Format?
+        var loadingPlaylistFormat: AnyFormat?
         var streams: [Weak<HlsSampleStream>] = []
 
         var isPrepared = false
@@ -1103,10 +1105,10 @@ private extension HlsSampleStreamWrapper {
 /// first sample of the new variant.
 final class HlsSampleQueue: SampleQueue, @unchecked Sendable {
     private let playlistFormatLock = UnfairLock()
-    private var playlistFormat: Format? // Guarded by playlistFormatLock.
+    private var playlistFormat: AnyFormat? // Guarded by playlistFormatLock.
 
     /// The playlist format of what loads from now on.
-    func setPlaylistFormat(_ format: Format) {
+    func setPlaylistFormat(_ format: AnyFormat) {
         let changed = playlistFormatLock.withLock { () -> Bool in
             guard playlistFormat != format else { return false }
             playlistFormat = format
@@ -1115,7 +1117,7 @@ final class HlsSampleQueue: SampleQueue, @unchecked Sendable {
         if changed { invalidateUpstreamFormatAdjustment() }
     }
 
-    override func getAdjustedUpstreamFormat(_ format: Format) -> Format {
+    override func getAdjustedUpstreamFormat(_ format: AnyFormat) -> AnyFormat {
         let playlistFormat = playlistFormatLock.withLock { self.playlistFormat }
         let derived = HlsSampleStreamWrapper.deriveFormat(
             playlistFormat: playlistFormat,
@@ -1128,7 +1130,7 @@ final class HlsSampleQueue: SampleQueue, @unchecked Sendable {
 
 /// Takes samples of tracks no sample queue reads, and drops them.
 final class DiscardingTrackOutput: TrackOutput {
-    func setFormat(_ format: Format) throws {}
+    func setFormat(_ format: AnyFormat) throws {}
     func sampleData(data: CMBlockBuffer) throws {}
     func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws {}
 }

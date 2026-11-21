@@ -30,10 +30,39 @@ public enum Codecs {
         }.joined(separator: ",")
     }
 
+    /// The codec string of a sample MIME type whose codec has one, for a format that doesn't give its codecs.
+    public static func codec(forSampleMimeType mimeType: MimeTypes) -> String? {
+        switch mimeType {
+        case .audioAAC: "mp4a.40.2"
+        case .audioMPEGL1: "mp4a.40.32"
+        case .audioMPEGL2: "mp4a.40.33"
+        case .audioAC3: "ac-3"
+        case .audioEAC3,
+             .audioEAC3JOC: "ec-3"
+        case .audioAC4: "ac-4"
+        case .audioDTS: "dtsc"
+        case .audioDTSHD: "dtsh"
+        case .audioDTSExpress: "dtse"
+        case .audioDTSX: "dtsx"
+        case .audioTRUEHD: "mlpa"
+        case .audioMPEGHMHA1: "mha1"
+        case .audioMPEGHMHM1: "mhm1"
+        case .audioALAC: "alac"
+        case .audioFLAC: "fLaC"
+        case .audioOPUS: "opus"
+        default: nil
+        }
+    }
+
     /// The codecs of `codecs` that are of `trackType`, joined again, or `nil` if there are none.
     public static func ofType(_ codecs: String?, trackType: TrackType) -> String? {
         let matching = split(codecs).filter { mediaMimeType(forCodec: $0).trackType == trackType }
         return matching.isEmpty ? nil : matching.joined(separator: ",")
+    }
+
+    /// The sample MIME type of the first codec of a comma-separated list that is of `trackType`.
+    public static func mediaMimeType(ofType trackType: TrackType, in codecs: String?) -> MimeTypes? {
+        split(codecs).lazy.compactMap(mediaMimeType(forCodec:)).first { $0.trackType == trackType }
     }
 
     /// The sample MIME type for a codec, or `nil` if it isn't known.
@@ -78,6 +107,8 @@ public enum Codecs {
             return .audioFLAC
         } else if codec.hasPrefix("alac") {
             return .audioALAC
+        } else if codec.hasPrefix("apac") {
+            return .audioAPAC
         } else if codec.hasPrefix("stpp") {
             return .applicationTTML
         } else if codec.hasPrefix("wvtt") {

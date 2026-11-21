@@ -42,7 +42,7 @@ extension BoxParser {
 
         if track.type == .video, track.mediaDuration.isValid, track.mediaDurationUs > 0 {
             let frameRate = Float(sampleCount) / (Float(track.mediaDurationUs) / 1_000_000)
-            track.format = track.format.buildUpon().setFrameRate(frameRate).build()
+            track.format.video?.frameRate = frameRate
         }
 
         // Entries are byte offsets of chunks.
@@ -301,8 +301,7 @@ extension BoxParser {
                 roundingMode: .down
             )
             if averageBitrate > 0, averageBitrate < .max {
-                let format = track.format.buildUpon().setAverageBitrate(Int(averageBitrate)).build()
-                track.format = format
+                track.format.averageBitrate = Int(averageBitrate)
             }
         }
 
@@ -387,7 +386,7 @@ extension BoxParser {
                 editEndTime: mapping.source.end
             ) {
                 let paddingDuration = totalDuration - mapping.source.end
-                let sampleRateTimescale = CMTimeScale(track.format.sampleRate)
+                let sampleRateTimescale = CMTimeScale(track.format.audio?.sampleRate ?? 0)
 
                 let encoderDelay = (mapping.source.start - ptsValues[0])
                     .convertScale(sampleRateTimescale, method: .default).value
@@ -501,7 +500,7 @@ extension BoxParser {
                     maxValidIndexInWindow = j
                 } else {
                     samplesSeenAfterEnd += 1
-                    if samplesSeenAfterEnd > track.format.maxNumReorderSamples {
+                    if samplesSeenAfterEnd > track.format.video?.maxReorderFrames ?? -1 {
                         break
                     }
                 }
@@ -544,7 +543,6 @@ extension BoxParser {
             ? Array(repeating: CMTime.zero, count: editedSampleCount) : sampleDurations
 
         var sampleIndex = 0
-        var hasPrerollSamples = false
 
         for (index, mapping) in editMappings.enumerated() {
             guard mapping.source.isValid else { continue }
@@ -576,8 +574,6 @@ extension BoxParser {
                     dtsValues[j], fromRange: mapping.source, toRange: mapping.target
                 )
 
-                if ptsValues[j] < mapping.source.start { hasPrerollSamples = true }
-
                 if copyMetadata, editedSizes[sampleIndex] > editedMaximumSize {
                     editedMaximumSize = sizes[j]
                 }
@@ -589,10 +585,6 @@ extension BoxParser {
         }
 
         let editedDuration = targetStart
-        if hasPrerollSamples {
-            let newFormat = track.format.buildUpon().setHasPrerollSamples(true).build()
-            track.format = newFormat
-        }
 
         return try TrackSampleTable(
             track: track,

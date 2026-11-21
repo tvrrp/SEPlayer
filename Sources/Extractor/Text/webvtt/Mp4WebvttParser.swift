@@ -10,11 +10,11 @@ import SEPlayerCommon
 /// A ``SubtitleParser`` for WebVTT samples in MP4 (ISO/IEC 14496-30): each sample holds the cues that show for its
 /// duration, as `vttc` boxes, or none, as an empty-cue box.
 public final class Mp4WebvttParser: SubtitleParser {
-    public static let cueReplacementBehavior = Format.CueReplacementBehavior.replace
+    public static let cueReplacementBehavior = CueReplacementBehavior.replace
 
     public init() {}
 
-    public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior() -> CueReplacementBehavior {
         Mp4WebvttParser.cueReplacementBehavior
     }
 

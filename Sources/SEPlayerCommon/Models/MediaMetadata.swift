@@ -5,6 +5,7 @@
 //  Created by tvrrp on 10.03.2026.
 //
 
+import CoreMedia
 import Foundation
 
 public struct MediaMetadata: Hashable, Sendable {
@@ -15,7 +16,7 @@ public struct MediaMetadata: Hashable, Sendable {
     public let displayTitle: String?
     public let subtitle: String?
     public let description: String?
-    public let durationMs: Int64?
+    public let duration: CMTime?
 //    public let overallRating: Rating
     public let artworkData: Data?
     public let artworkDataType: PictureType?
@@ -24,14 +25,17 @@ public struct MediaMetadata: Hashable, Sendable {
     public let totalTrackCount: Int?
     public let isBrowsable: Bool?
     public let isPlayable: Bool?
-    public let recordingDate: Date?
-    public let releaseDate: Date?
+    /// When the media was recorded: the year, or the year and the month, when no more is known.
+    public let recordingDate: DateComponents?
+    /// When the media was released: the year, or the year and the month, when no more is known.
+    public let releaseDate: DateComponents?
     public let writer: String?
     public let author: String?
     public let composer: String?
     public let conductor: String?
     public let discNumber: Int?
     public let totalDiscCount: Int?
+    public let discSubtitle: String?
     public let genre: String?
     public let compilation: String?
     public let station: String?
@@ -45,7 +49,7 @@ public struct MediaMetadata: Hashable, Sendable {
         displayTitle = builder.displayTitle
         subtitle = builder.subtitle
         description = builder.description
-        durationMs = builder.durationMs
+        duration = builder.duration
 //        overallRating = builder.overallRating
         artworkData = builder.artworkData
         artworkDataType = builder.artworkDataType
@@ -62,6 +66,7 @@ public struct MediaMetadata: Hashable, Sendable {
         conductor = builder.conductor
         discNumber = builder.discNumber
         totalDiscCount = builder.totalDiscCount
+        discSubtitle = builder.discSubtitle
         genre = builder.genre
         compilation = builder.compilation
         station = builder.station
@@ -113,7 +118,8 @@ public extension MediaMetadata {
         case folderMovies
     }
 
-    enum PictureType: Hashable, Sendable {
+    /// The type of a picture, numbered as in ID3 APIC frames.
+    enum PictureType: Int, Hashable, Sendable {
         case other
         case fileIcon
         case fileIconOther
@@ -150,7 +156,7 @@ public extension MediaMetadata {
         var displayTitle: String?
         var subtitle: String?
         var description: String?
-        var durationMs: Int64?
+        var duration: CMTime?
         var artworkData: Data?
         var artworkDataType: PictureType?
         var artworkUrl: URL?
@@ -158,14 +164,15 @@ public extension MediaMetadata {
         var totalTrackCount: Int?
         var isBrowsable: Bool?
         var isPlayable: Bool?
-        var recordingDate: Date?
-        var releaseDate: Date?
+        var recordingDate: DateComponents?
+        var releaseDate: DateComponents?
         var writer: String?
         var author: String?
         var composer: String?
         var conductor: String?
         var discNumber: Int?
         var totalDiscCount: Int?
+        var discSubtitle: String?
         var genre: String?
         var compilation: String?
         var station: String?
@@ -181,7 +188,7 @@ public extension MediaMetadata {
             displayTitle = mediaMetadata.displayTitle
             subtitle = mediaMetadata.subtitle
             description = mediaMetadata.description
-            durationMs = mediaMetadata.durationMs
+            duration = mediaMetadata.duration
             artworkData = mediaMetadata.artworkData
             artworkDataType = mediaMetadata.artworkDataType
             artworkUrl = mediaMetadata.artworkUrl
@@ -197,6 +204,7 @@ public extension MediaMetadata {
             conductor = mediaMetadata.conductor
             discNumber = mediaMetadata.discNumber
             totalDiscCount = mediaMetadata.totalDiscCount
+            discSubtitle = mediaMetadata.discSubtitle
             genre = mediaMetadata.genre
             compilation = mediaMetadata.compilation
             station = mediaMetadata.station
@@ -246,8 +254,8 @@ public extension MediaMetadata {
         }
 
         @discardableResult
-        public func setDurationMs(_ durationMs: Int64?) -> Builder {
-            self.durationMs = durationMs
+        public func setDuration(_ duration: CMTime?) -> Builder {
+            self.duration = duration
             return self
         }
 
@@ -294,13 +302,25 @@ public extension MediaMetadata {
         }
 
         @discardableResult
-        public func setRecordingDate(_ recordingDate: Date?) -> Builder {
+        public func setRecordingDate(_ recordingDate: DateComponents?) -> Builder {
             self.recordingDate = recordingDate
             return self
         }
 
+        /// Sets the parts of the recording date that are given, and keeps the others: tags may tell the year apart
+        /// from the month and the day.
         @discardableResult
-        public func setReleaseDate(_ releaseDate: Date?) -> Builder {
+        public func setRecordingDate(year: Int? = nil, month: Int? = nil, day: Int? = nil) -> Builder {
+            var date = recordingDate ?? DateComponents()
+            if let year { date.year = year }
+            if let month { date.month = month }
+            if let day { date.day = day }
+            recordingDate = date
+            return self
+        }
+
+        @discardableResult
+        public func setReleaseDate(_ releaseDate: DateComponents?) -> Builder {
             self.releaseDate = releaseDate
             return self
         }
@@ -362,6 +382,70 @@ public extension MediaMetadata {
         @discardableResult
         public func setMediaType(_ mediaType: MediaType?) -> Builder {
             self.mediaType = mediaType
+            return self
+        }
+
+        @discardableResult
+        public func setDiscSubtitle(_ discSubtitle: String?) -> Builder {
+            self.discSubtitle = discSubtitle
+            return self
+        }
+
+        /// Sets the artwork unless there is front cover artwork already and this isn't a front cover.
+        @discardableResult
+        public func maybeSetArtworkData(_ artworkData: Data, pictureType: PictureType?) -> Builder {
+            if self.artworkData == nil || pictureType == .frontCover || artworkDataType != .frontCover {
+                self.artworkData = artworkData
+                artworkDataType = pictureType
+            }
+            return self
+        }
+
+        /// Sets the fields the entries of `metadata` describe.
+        @discardableResult
+        public func populate(from metadata: [Metadata]) -> Builder {
+            for entry in metadata.flatMap(\.entries) {
+                entry.populateMediaMetadata(self)
+            }
+            return self
+        }
+
+        /// Sets the fields that `mediaMetadata` has.
+        @discardableResult
+        public func populate(from mediaMetadata: MediaMetadata) -> Builder {
+            func merge<T>(_ keyPath: ReferenceWritableKeyPath<Builder, T?>, _ value: T?) {
+                if let value { self[keyPath: keyPath] = value }
+            }
+            merge(\.title, mediaMetadata.title)
+            merge(\.artist, mediaMetadata.artist)
+            merge(\.albumTitle, mediaMetadata.albumTitle)
+            merge(\.albumArtist, mediaMetadata.albumArtist)
+            merge(\.displayTitle, mediaMetadata.displayTitle)
+            merge(\.subtitle, mediaMetadata.subtitle)
+            merge(\.description, mediaMetadata.description)
+            merge(\.duration, mediaMetadata.duration)
+            if let artworkData = mediaMetadata.artworkData {
+                self.artworkData = artworkData
+                artworkDataType = mediaMetadata.artworkDataType
+            }
+            merge(\.artworkUrl, mediaMetadata.artworkUrl)
+            merge(\.trackNumber, mediaMetadata.trackNumber)
+            merge(\.totalTrackCount, mediaMetadata.totalTrackCount)
+            merge(\.isBrowsable, mediaMetadata.isBrowsable)
+            merge(\.isPlayable, mediaMetadata.isPlayable)
+            merge(\.recordingDate, mediaMetadata.recordingDate)
+            merge(\.releaseDate, mediaMetadata.releaseDate)
+            merge(\.writer, mediaMetadata.writer)
+            merge(\.author, mediaMetadata.author)
+            merge(\.composer, mediaMetadata.composer)
+            merge(\.conductor, mediaMetadata.conductor)
+            merge(\.discNumber, mediaMetadata.discNumber)
+            merge(\.totalDiscCount, mediaMetadata.totalDiscCount)
+            merge(\.discSubtitle, mediaMetadata.discSubtitle)
+            merge(\.genre, mediaMetadata.genre)
+            merge(\.compilation, mediaMetadata.compilation)
+            merge(\.station, mediaMetadata.station)
+            merge(\.mediaType, mediaMetadata.mediaType)
             return self
         }
 

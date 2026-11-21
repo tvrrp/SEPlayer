@@ -194,14 +194,14 @@ class AdaptiveTrackSelection: BaseTrackSelection {
     }
 
     /// The bitrate a format needs at the playback speed, in bits per second.
-    private func requiredBitrate(_ format: Format) -> Int {
-        Int((Float(format.bitrate) * max(1, abs(playbackSpeed))).rounded())
+    private func requiredBitrate(_ format: AnyFormat) -> Int {
+        Int((Float(format.bitrate ?? 0) * max(1, abs(playbackSpeed))).rounded())
     }
 
     /// The bandwidth to plan with for chunks of `format`: the safe part of the prediction. Chunks are larger at higher
     /// bitrates, so the latency of their requests weighs less.
-    private func bandwidth(for format: Format, chunkDuration: CMTime) -> Int {
-        let averageBitrate = format.averageBitrate != Format.noValue ? format.averageBitrate : format.bitrate
+    private func bandwidth(for format: AnyFormat, chunkDuration: CMTime) -> Int {
+        let averageBitrate = format.averageBitrate ?? format.bitrate ?? 0
         let chunkBytes = chunkDuration.isNumeric && averageBitrate > 0
             ? Int(chunkDuration.seconds * Double(averageBitrate) / 8)
             : nil

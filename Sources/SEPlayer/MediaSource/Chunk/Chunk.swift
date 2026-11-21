@@ -20,7 +20,7 @@ open class Chunk: Loadable, @unchecked Sendable {
     /// The data type of the chunk.
     public let dataType: DataType
     /// The format of the track to which this chunk belongs.
-    public let trackFormat: Format?
+    public let trackFormat: AnyFormat?
     /// One of the selection reasons if the chunk belongs to a track.
     public let trackSelectionReason: TrackSelectionReason
     /// Optional data associated with the selection of the track to which this chunk belongs.
@@ -44,7 +44,7 @@ open class Chunk: Loadable, @unchecked Sendable {
     public init(
         dataSpec: DataSpec,
         dataType: DataType,
-        trackFormat: Format?,
+        trackFormat: AnyFormat?,
         trackSelectionReason: TrackSelectionReason,
         trackSelectionData: Any?,
         startTime: CMTime,

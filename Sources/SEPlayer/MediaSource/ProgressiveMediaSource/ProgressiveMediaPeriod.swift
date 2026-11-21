@@ -519,7 +519,8 @@ private extension ProgressiveMediaPeriod {
             },
             extractionDidAdvance: { [weak self] in
                 self?.extractionDidAdvance() ?? false
-            }
+            },
+            icyListener: self
         )
 
         if state.isPrepared {
@@ -613,6 +614,8 @@ private extension ProgressiveMediaPeriod {
     }
 
     func setSeekMap(_ state: inout State, seekMap: SeekMap, effects: inout [Effect]) {
+        // An internet radio stream can't be seeked, whatever its frames look like.
+        let seekMap = state.icyHeaders == nil ? seekMap : Unseekable(duration: .invalid)
         state.duration = seekMap.getDuration()
         state.seekMap = seekMap
         if state.isPrepared {
@@ -639,11 +642,15 @@ private extension ProgressiveMediaPeriod {
         var isAudioOrVideo: [Bool] = []
 
         for index in 0 ..< state.sampleQueues.count {
-            guard let format = state.sampleQueues[index].getUpstreamFormat() else {
+            guard var format = state.sampleQueues[index].getUpstreamFormat() else {
                 continue
             }
 
             do {
+                if let icyHeaders = state.icyHeaders {
+                    let isIcyTrack = state.sampleQueueTrackIds[index] == Self.icyTrackId
+                    format = Self.format(format, withIcyHeaders: icyHeaders, isIcyTrack: isIcyTrack)
+                }
                 // NOTE: a `continue` here desynchronizes trackGroup indices from sampleQueue
                 // indices, which the rest of the type treats as one index space. Preparation
                 // should fail instead of skipping a track.
@@ -652,7 +659,6 @@ private extension ProgressiveMediaPeriod {
                 let isAudioVideo = isAudio || (format.sampleMimeType?.isVideo ?? false)
                 isAudioOrVideo.append(isAudioVideo)
                 state.haveAudioVideoTracks = state.haveAudioVideoTracks || isAudioVideo
-                // TODO: icy metadata
             } catch {
                 continue
             }
@@ -1027,12 +1033,64 @@ extension ProgressiveMediaPeriod: ExtractorOutput {
     }
 }
 
+// MARK: - ICY
+
+/// What a load asks the period for when the server sends ICY headers.
+protocol IcyListener: AnyObject {
+    /// Keeps `headers`, and gives the track of the ICY metadata if the stream has some.
+    func icyTrackOutput(for headers: IcyHeaders) throws -> TrackOutput?
+    /// The time of the last sample queued, of all the tracks.
+    func largestQueuedTimestamp() -> CMTime
+}
+
+extension ProgressiveMediaPeriod: IcyListener {
+    func icyTrackOutput(for headers: IcyHeaders) throws -> TrackOutput? {
+        let output = try stateLock.withLock { state -> TrackOutput? in
+            state.icyHeaders = headers
+            guard headers.metadataInterval != nil else { return nil }
+            return try prepareTrackOutput(&state, id: Self.icyTrackId)
+        }
+        // The sample queue tells the period of its format, which takes the lock.
+        try output?.setFormat(Self.icyFormat)
+        return output
+    }
+
+    func largestQueuedTimestamp() -> CMTime {
+        stateLock.withLock { state in
+            state.sampleQueues.map { $0.getLargestQueuedTimestamp() }.filter(\.isNumeric).max() ?? .invalid
+        }
+    }
+}
+
+private extension ProgressiveMediaPeriod {
+    /// The id of the ICY metadata track, which no extractor gives.
+    static let icyTrackId = Int.min
+    static let icyFormat = AnyFormat(MetadataFormat {
+        $0.id = "icy"
+        $0.codec = .applicationICY
+    })
+
+    /// The format of a track of an ICY stream: the audio, and the ICY track, have the headers as metadata, and the
+    /// audio has their bitrate if it has none.
+    static func format(_ format: AnyFormat, withIcyHeaders icyHeaders: IcyHeaders, isIcyTrack: Bool) -> AnyFormat {
+        let isAudio = format.sampleMimeType?.isAudio ?? false
+        guard isAudio || isIcyTrack else { return format }
+        let metadata = format.metadata?.appending([icyHeaders]) ?? Metadata(icyHeaders)
+        var format = format
+        format.metadata = metadata
+        if isAudio, format.averageBitrate == nil, format.peakBitrate == nil {
+            format.averageBitrate = icyHeaders.bitrate
+        }
+        return format
+    }
+}
+
 // MARK: - SampleQueueDelegate
 
 extension ProgressiveMediaPeriod: SampleQueueDelegate {
     /// Invoked from the extractor thread. Requires `SampleQueue` to call its delegate outside its
     /// own lock — `maybeFinishPrepare` re-enters `getUpstreamFormat()`.
-    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: Format) {
+    func sampleQueue(_ sampleQueue: SampleQueue, didChange format: AnyFormat) {
         withState { state, effects in
             maybeFinishPrepare(&state, effects: &effects)
         }
@@ -1054,6 +1112,8 @@ private extension ProgressiveMediaPeriod {
         var haveAudioVideoTracks: Bool = false
         var trackState: TrackState = .empty
         var seekMap: SeekMap?
+        /// The ICY headers of the response, for internet radio.
+        var icyHeaders: IcyHeaders?
         var duration: CMTime = .zero
         var isLive: Bool = false
 
@@ -1165,7 +1225,9 @@ extension ProgressiveMediaPeriod {
         private let requestContiniueLoading: () -> Void
         /// Lets the period pause the extractor; `true` if the period, not the player, decides when it runs.
         private let extractionDidAdvance: () -> Bool
+        private weak var icyListener: IcyListener?
         private var position: Int = 0
+        private var seenIcyMetadata = false
 
         private var pendingExtractorSeek = true
         private var seekTime: CMTime = .zero
@@ -1182,7 +1244,8 @@ extension ProgressiveMediaPeriod {
             continueLoadingCheckIntervalBytes: Int,
             readAhead: ReadAhead,
             requestContiniueLoading: @escaping () -> Void,
-            extractionDidAdvance: @escaping () -> Bool
+            extractionDidAdvance: @escaping () -> Bool,
+            icyListener: IcyListener?
         ) {
             self.url = url
             self.syncActor = syncActor
@@ -1195,6 +1258,7 @@ extension ProgressiveMediaPeriod {
             self.readAhead = readAhead
             self.requestContiniueLoading = requestContiniueLoading
             self.extractionDidAdvance = extractionDidAdvance
+            self.icyListener = icyListener
         }
 
         func load(_ isolation: isolated any Actor) async throws {
@@ -1214,8 +1278,9 @@ extension ProgressiveMediaPeriod {
                     let length = try await dataSource.open(dataSpec: dataSpec, isolation).map { $0 + position }
                     guard !Task.isCancelled else { throw CancellationError() }
 
+                    let dataReader = try icyDataReader(dataSource: dataSource, isolation) ?? dataSource
                     try await progressiveMediaExtractor.prepare(
-                        dataReader: dataSource,
+                        dataReader: dataReader,
                         url: url,
                         response: dataSource.getURLResponse(isolation),
                         position: position,
@@ -1268,6 +1333,44 @@ extension ProgressiveMediaPeriod {
             }
         }
 
+        /// A reader of the stream without its ICY metadata, if the server sends some.
+        private func icyDataReader(dataSource: any DataSource, _ isolation: isolated any Actor) throws -> DataReader? {
+            let responseHeaders = dataSource.getURLResponse(isolation)?.allHeaderFields ?? [:]
+            guard let icyHeaders = IcyHeaders.parse(responseHeaders: responseHeaders), let icyListener else {
+                return nil
+            }
+            SELogger.info(.progressive, "ICY stream: \(icyHeaders)")
+            let icyTrackOutput = try icyListener.icyTrackOutput(for: icyHeaders)
+            guard let metadataInterval = icyHeaders.metadataInterval, let icyTrackOutput else { return nil }
+            return IcyDataReader(
+                upstream: dataSource,
+                start: position,
+                metadataInterval: metadataInterval,
+                onMetadata: { [weak self] in self?.onIcyMetadata($0, output: icyTrackOutput) }
+            )
+        }
+
+        /// Writes a block of ICY metadata as a sample, at the time of the audio read so far.
+        private func onIcyMetadata(_ metadata: CMBlockBuffer, output: TrackOutput) {
+            // The first block is of the position the load starts at.
+            var time = seekTime
+            let largestQueuedTimestamp = icyListener?.largestQueuedTimestamp() ?? .invalid
+            if seenIcyMetadata, largestQueuedTimestamp.isNumeric {
+                time = max(largestQueuedTimestamp, seekTime)
+            }
+            seenIcyMetadata = true
+            do {
+                try output.sampleData(data: metadata)
+                try output.sampleMetadata(
+                    time: CMSampleTimingInfo(duration: .zero, presentationTimeStamp: time, decodeTimeStamp: .invalid),
+                    flags: .keyframe,
+                    range: 0 ..< metadata.dataLength
+                )
+            } catch {
+                SELogger.warning(.progressive, "Writing ICY metadata failed: \(error)")
+            }
+        }
+
         func setLoadPosition(position: Int, time: CMTime) {
             self.position = position
             self.seekTime = time
@@ -1299,7 +1402,8 @@ extension ProgressiveMediaPeriod {
                 // TODO: .setKey(customCacheKey)
                 // A file doesn't change: played again, it comes from storage where the player keeps it.
                 .setFlags([.dontCacheIfLengthUnknown, .allowCacheFragmentation, .keepLoadedBytes, .storeOnDisk])
-                // TODO: .setAllHTTPHeaderFields(requestHeaders)
+                // Asks internet radio servers for the titles of what they play.
+                .setAllHTTPHeaderFields([IcyHeaders.requestHeaderEnableMetadataName: IcyHeaders.requestHeaderEnableMetadataValue])
                 .build()
         }
     }

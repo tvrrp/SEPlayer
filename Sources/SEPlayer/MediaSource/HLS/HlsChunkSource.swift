@@ -69,10 +69,10 @@ final class HlsChunkSource {
     private let extractorFactory: HlsExtractorFactory
     private let playlistTracker: HlsPlaylistTracker
     private let playlistUrls: [URL]
-    private let playlistFormats: [Format]
+    private let playlistFormats: [AnyFormat]
     private let iFrameVariants: [HlsMultivariantPlaylist.Variant]
     /// The closed captions in the variants, as the playlist declares them; `nil` if it doesn't.
-    private let closedCaptionFormats: [Format]?
+    private let closedCaptionFormats: [TextFormat]?
     private let dataSourceFactory: DataSourceFactory
     private let timestampAdjusterProvider: TimestampAdjusterProvider
     private let loaderQueue: Queue
@@ -103,14 +103,14 @@ final class HlsChunkSource {
         extractorFactory: HlsExtractorFactory,
         playlistTracker: HlsPlaylistTracker,
         playlistUrls: [URL],
-        playlistFormats: [Format],
+        playlistFormats: [AnyFormat],
         dataSourceFactory: DataSourceFactory,
         decryptionMemoryPool: CMMemoryPool,
         timestampAdjusterProvider: TimestampAdjusterProvider,
         loaderQueue: Queue,
         transferListener: TransferListener?,
         iFrameVariants: [HlsMultivariantPlaylist.Variant] = [],
-        closedCaptionFormats: [Format]? = nil
+        closedCaptionFormats: [TextFormat]? = nil
     ) throws {
         self.iFrameVariants = iFrameVariants
         self.closedCaptionFormats = closedCaptionFormats
@@ -482,10 +482,10 @@ final class HlsChunkSource {
     private var scrubbingIFrameVariants: [HlsMultivariantPlaylist.Variant] {
         let variants = iFrameVariants
             .filter { !failedIFramePlaylistUrls.contains($0.url) }
-            .sorted { $0.format.bitrate > $1.format.bitrate }
-        let height = playlistFormats[selectedTrackIndex].height
+            .sorted { ($0.format.bitrate ?? 0) > ($1.format.bitrate ?? 0) }
+        let height = Self.height(of: playlistFormats[selectedTrackIndex])
         let closest = variants.indices.min {
-            abs(variants[$0].format.height - height) < abs(variants[$1].format.height - height)
+            abs(Self.height(of: variants[$0].format) - height) < abs(Self.height(of: variants[$1].format) - height)
         }
         guard height > 0, let closest else { return variants }
         return Array(variants[closest...])
@@ -503,7 +503,7 @@ final class HlsChunkSource {
         // An I-frame variant's bandwidth is the size of a keyframe over the time to the next one.
         let interval = playlist.targetDuration.seconds
         return variants.first {
-            trackSelection.loadsQuickly(bits: Double($0.format.bitrate) * interval) != false
+            trackSelection.loadsQuickly(bits: Double($0.format.bitrate ?? 0) * interval) != false
         } ?? variants.last
     }
 
@@ -545,9 +545,9 @@ final class HlsChunkSource {
             stayInBounds: true
         )
         let segment = playlist.segments[index]
-        let currentBitrate = Double(max(1, variants[current].format.bitrate))
+        let currentBitrate = Double(max(1, variants[current].format.bitrate ?? 0))
         let currentBits = segment.byteRangeLength.map { Double($0) * 8 } ?? currentBitrate * segment.duration.seconds
-        func bits(_ index: Int) -> Double { currentBits * Double(variants[index].format.bitrate) / currentBitrate }
+        func bits(_ index: Int) -> Double { currentBits * Double(variants[index].format.bitrate ?? 0) / currentBitrate }
 
         var target = current
         if trackSelection.loadsQuickly(bits: bits(current)) == false {
@@ -864,7 +864,7 @@ final class HlsChunkSource {
     }
 
     /// The selection's format of the track: the selection recognizes it in the queue of loaded chunks.
-    private func selectedFormat(ofTrack trackIndex: Int) -> Format {
+    private func selectedFormat(ofTrack trackIndex: Int) -> AnyFormat {
         trackSelection.map { $0.trackGroup.getFormat(index: trackIndex) } ?? playlistFormats[trackIndex]
     }
 
@@ -872,7 +872,12 @@ final class HlsChunkSource {
         guard let format = iFrameVariants.first(where: { $0.url == url })?.format else {
             return url.lastPathComponent
         }
-        return "\(format.height)p at \(format.bitrate / 1000) kbit/s"
+        return "\(Self.height(of: format))p at \((format.bitrate ?? 0) / 1000) kbit/s"
+    }
+
+    /// The height of the video of a variant, or 0 when the playlist doesn't tell.
+    private static func height(of format: AnyFormat) -> Int {
+        format.video?.size?.height ?? 0
     }
 
     private func logChunk(
@@ -1128,7 +1133,7 @@ final class HlsEncryptionKeyChunk: Chunk, @unchecked Sendable {
 
     init(
         dataSpec: DataSpec,
-        trackFormat: Format,
+        trackFormat: AnyFormat,
         trackSelectionReason: TrackSelectionReason,
         trackSelectionData: Any?,
         dataSourceFactory: DataSourceFactory

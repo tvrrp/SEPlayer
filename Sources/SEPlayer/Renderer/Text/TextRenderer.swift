@@ -24,7 +24,7 @@ final class TextRenderer: BaseSERenderer {
 
     private var controlTimebase: CMTimebase?
     private var cuesResolver: CuesResolver?
-    private var streamFormat: Format?
+    private var streamFormat: AnyFormat?
     private var sampleStreamToken: QueueTriggerToken?
     private var inputStreamEnded = false
     private var outputStreamEnded = false
@@ -48,10 +48,10 @@ final class TextRenderer: BaseSERenderer {
 
     override var name: String { "TextRenderer" }
 
-    override func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support {
+    override func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
         if format.sampleMimeType == .applicationSEPlayerCues {
             .create(formatSupport: .handled)
-        } else if format.sampleMimeType?.isText == true {
+        } else if format.trackType == .text {
             .create(formatSupport: .unsupportedSubtype)
         } else {
             .create(formatSupport: .unsupportedType)
@@ -71,7 +71,7 @@ final class TextRenderer: BaseSERenderer {
     }
 
     override func onStreamChanged(
-        formats: [Format],
+        formats: [AnyFormat],
         startPosition: CMTime,
         offset: CMTime,
         mediaPeriodId: MediaPeriodId
@@ -80,7 +80,7 @@ final class TextRenderer: BaseSERenderer {
         self.streamFormat = streamFormat
 
         // Cues are kept in renderer time, so the ones of the previous stream still show until they end.
-        switch streamFormat.cueReplacementBehavior {
+        switch streamFormat.text?.cueReplacementBehavior ?? .merge {
         case .merge:
             if !(cuesResolver is MergingCuesResolver) { cuesResolver = MergingCuesResolver() }
         case .replace:

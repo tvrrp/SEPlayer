@@ -47,7 +47,7 @@ public protocol SERenderer: AnyObject {
     var isRecoveringWhileTimelineAdvances: Bool { get }
     func recoverOutput(at position: CMTime, reason: RendererRecoveryReason) throws -> Bool
     func enable(
-        formats: [Format],
+        formats: [AnyFormat],
         stream: SampleStream,
         position: CMTime,
         joining: Bool,
@@ -61,7 +61,7 @@ public protocol SERenderer: AnyObject {
     func start() throws
 
     func replaceStream(
-        formats: [Format],
+        formats: [AnyFormat],
         stream: SampleStream,
         startPosition: CMTime,
         offset: CMTime,

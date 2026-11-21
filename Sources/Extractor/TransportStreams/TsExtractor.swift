@@ -538,7 +538,7 @@ private final class PmtReader: SectionPayloadReader {
         }
         sectionData.moveReaderIndex(forwardBy: programInfoLength)
 
-        if state.mode == .hls || state.id3Reader == nil {
+        if state.mode == .hls, state.id3Reader == nil {
             // Setup an ID3 track regardless of whether there's a corresponding entry, in case one
             // appears intermittently during playback.
             let id3EsInfo = TsPayload.ESInfo(
@@ -709,11 +709,13 @@ private final class PmtReader: SectionPayloadReader {
                 while data.readerIndex < positionOfNextDescriptor {
                     let dvbLanguage = data.readString(length: 3, encoding: .utf8)
                     let dvbSubtitlingType = try data.readInt(as: UInt8.self)
-                    let initializationData = try data.readData(length: 4)
+                    let compositionPageID = try Int(data.readInt(as: UInt16.self))
+                    let ancillaryPageID = try Int(data.readInt(as: UInt16.self))
                     dvbSubtitleInfos?.append(.init(
                         language: dvbLanguage,
                         type: Int(dvbSubtitlingType),
-                        initializationData: initializationData
+                        compositionPageID: compositionPageID,
+                        ancillaryPageID: ancillaryPageID
                     ))
                 }
             case .ait:

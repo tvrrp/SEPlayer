@@ -21,7 +21,7 @@ open class MediaChunk: Chunk, @unchecked Sendable {
 
     public init(
         dataSpec: DataSpec,
-        trackFormat: Format,
+        trackFormat: AnyFormat,
         trackSelectionReason: TrackSelectionReason,
         trackSelectionData: Any?,
         startTime: CMTime,

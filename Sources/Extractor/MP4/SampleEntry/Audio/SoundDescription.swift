@@ -172,8 +172,8 @@ struct SoundDescription {
 // MARK: - Boxes
 
 extension SoundDescription {
-    /// The boxes after the fields that describe the codec, the channels or the protection, and those kept as they
-    /// are for the decoder.
+    /// The boxes after the fields: those that describe the codec, the channels or the protection, and all of them
+    /// as they are.
     struct Boxes {
         var esds: SampleEntryBox?
         var dac3: SampleEntryBox?
@@ -184,8 +184,6 @@ extension SoundDescription {
         /// The AMR decoder config: a `damr` box in ISO files, a `samr` box in a QuickTime `wave` box.
         var amrConfig: BlockBufferReader?
         var pcmC: SampleEntryBox?
-        var chnl: SampleEntryBox?
-        var chan: SampleEntryBox?
         /// The payload of a QuickTime `wave` box: the codec's own boxes.
         var wave: BlockBufferReader?
         /// Whether a QuickTime `enda` box marks the samples little-endian.
@@ -194,8 +192,8 @@ extension SoundDescription {
         var sampleRate: UInt32?
         /// The protection scheme box, `sinf`.
         var sinf: SampleEntryBox?
-        /// The boxes the decoder may need although nothing here describes them.
-        var unknown: [SampleEntryBox] = []
+        /// Every box, in the order of the entry.
+        var all: [SampleEntryBox] = []
     }
 
     /// The boxes after the fields. A QuickTime entry of version 0 has none that count.
@@ -205,11 +203,10 @@ extension SoundDescription {
         var boxes = Boxes()
         guard !(version == 0 && isQuickTime) else { return boxes }
 
-        for box in SampleEntryBox.boxes(in: entry, from: extensionsOffset).boxes {
-            var isConsumed = true
+        boxes.all = SampleEntryBox.boxes(in: entry, from: extensionsOffset).boxes
+        for box in boxes.all {
             if usesQuickTimeBoxes {
                 switch box.type {
-                case .chan: if boxes.chan == nil { boxes.chan = box }
                 case .wave:
                     if boxes.wave == nil {
                         boxes.wave = box.payload
@@ -217,21 +214,14 @@ extension SoundDescription {
                             return nil
                         }
                     }
-                case .sinf:
-                    if boxes.sinf == nil { boxes.sinf = box }
-                    isConsumed = false
+                case .sinf: if boxes.sinf == nil { boxes.sinf = box }
                 case .dOps: if boxes.dOps == nil { boxes.dOps = box }
-                default: isConsumed = false
+                default: break
                 }
             } else {
                 switch box.type {
-                case .sinf:
-                    if boxes.sinf == nil { boxes.sinf = box }
-                    isConsumed = false
+                case .sinf: if boxes.sinf == nil { boxes.sinf = box }
                 case .alac: if boxes.alac == nil { boxes.alac = box }
-                case .chnl:
-                    if boxes.chnl == nil { boxes.chnl = box }
-                    isConsumed = false
                 case .dac3: if boxes.dac3 == nil { boxes.dac3 = box }
                 case .damr: if boxes.amrConfig == nil { boxes.amrConfig = box.payload }
                 case .dec3: if boxes.dec3 == nil { boxes.dec3 = box }
@@ -243,12 +233,8 @@ extension SoundDescription {
                     }
                 case .pcmC: if boxes.pcmC == nil { boxes.pcmC = box }
                 case .dOps: if boxes.dOps == nil { boxes.dOps = box }
-                default: isConsumed = false
+                default: break
                 }
-            }
-            // The codec's config boxes become its magic cookie; others are kept for the decoder as they are.
-            if !isConsumed, !(box.type.map(Self.boxesNeverKept.contains) ?? false) {
-                boxes.unknown.append(box)
             }
         }
         return boxes
@@ -279,9 +265,4 @@ extension SoundDescription {
         }
         return true
     }
-
-    /// Boxes the entry's own fields or config replace, never kept as they are.
-    private static let boxesNeverKept: Set<MP4Box.BoxType> = [
-        .adrm, .alac, .chan, .dac3, .damr, .dec3, .dfLa, .esds, .free, .pcmC, .samr, .srat, .wave, .dOps,
-    ]
 }

@@ -122,7 +122,7 @@ public protocol RendererCapabilitiesResolver: AnyObject {
     var name: String { get }
     var trackType: TrackType { get }
     var listener: RendererCapabilitiesListener? { get set }
-    func supportsFormat(_ format: Format) throws -> RendererCapabilities.Support
+    func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support
     func supportsMixedMimeTypeAdaptation() throws -> RendererCapabilities.Support.AdaptiveSupport
 }
 

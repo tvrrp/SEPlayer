@@ -19,7 +19,7 @@ import SEPlayerCommon
 /// Supports pop-on, roll-up and paint-on captions, the basic, special and extended character sets, preamble address
 /// codes, mid-row styles (colors, italics, underline) and tab offsets.
 public final class Cea608Parser: SubtitleParser {
-    public static let cueReplacementBehavior: Format.CueReplacementBehavior = .replace
+    public static let cueReplacementBehavior: CueReplacementBehavior = .replace
     /// How long cues stay on screen without any change.
     public static let validDataChannelTimeout = CMTime(value: 16, timescale: 1)
 
@@ -43,10 +43,10 @@ public final class Cea608Parser: SubtitleParser {
     /// Whether the data is captions rather than text or extended data services.
     private var isInCaptionService = true
 
-    /// - Parameter accessibilityChannel: 1 to 4 for CC1 to CC4; anything else is CC1.
-    public init(mimeType: MimeTypes, accessibilityChannel: Int) {
+    /// - Parameter channel: 1 to 4 for CC1 to CC4; anything else is CC1.
+    public init(mimeType: MimeTypes, channel: Int?) {
         packetLength = mimeType == .applicationMP4CEA608 ? 2 : 3
-        switch accessibilityChannel {
+        switch channel {
         case 2: (selectedChannel, selectedField) = (1, 0)
         case 3: (selectedChannel, selectedField) = (0, 1)
         case 4: (selectedChannel, selectedField) = (1, 1)
@@ -56,7 +56,7 @@ public final class Cea608Parser: SubtitleParser {
         cueBuilders = [currentCueBuilder]
     }
 
-    public func getCueReplacementBehavior() -> Format.CueReplacementBehavior {
+    public func getCueReplacementBehavior() -> CueReplacementBehavior {
         Self.cueReplacementBehavior
     }
 

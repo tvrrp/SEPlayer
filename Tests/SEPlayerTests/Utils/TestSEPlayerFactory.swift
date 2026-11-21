@@ -177,6 +177,7 @@ private struct MockRenderersFactory: RenderersFactory {
         clock: SEClock,
         renderSynchronizer: any PlaybackSynchronizer,
         textOutput: TextOutput,
+        metadataOutput: MetadataOutput,
         videoListener: VideoRendererEventListener,
         audioListener: AudioRendererEventListener
     ) -> [any SERenderer] {

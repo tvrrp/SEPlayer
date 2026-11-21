@@ -21,12 +21,12 @@ final class FakeSampleStream: SampleStream {
     private var sampleStreamItems: [FakeSampleStreamItem]
 
     private var sampleStreamItemsWritePosition: Int = 0
-    private var downstreamFormat: Format?
-    private var notifiedDownstreamFormat: Format?
+    private var downstreamFormat: AnyFormat?
+    private var notifiedDownstreamFormat: AnyFormat?
 
     init(
         queue: Queue,
-        initialFormat: Format,
+        initialFormat: AnyFormat,
         fakeSampleStreamItems: [FakeSampleStreamItem]
     ) throws {
         self.queue = queue
@@ -44,7 +44,7 @@ final class FakeSampleStream: SampleStream {
             sampleQueue.setStartTime(.time(us: startPositionUs))
         }
         var writtenFirstFormat = false
-        var pendingFirstFormat: Format?
+        var pendingFirstFormat: AnyFormat?
 
         for (index, fakeSampleStreamItem) in sampleStreamItems.enumerated() {
             guard let sampleInfo = fakeSampleStreamItem.sampleInfo else {
@@ -165,7 +165,7 @@ final class FakeSampleStream: SampleStream {
 
 extension FakeSampleStream {
     struct FakeSampleStreamItem {
-        fileprivate var format: Format?
+        fileprivate var format: AnyFormat?
         fileprivate var sampleInfo: SampleInfo?
 
         static let endOfStream = FakeSampleStreamItem(
@@ -174,7 +174,7 @@ extension FakeSampleStream {
             timeUs: .max
         )
 
-        init(format: Format) {
+        init(format: AnyFormat) {
             self.init(format: format, sampleInfo: nil)
         }
 
@@ -186,7 +186,7 @@ extension FakeSampleStream {
             self.init(sampleInfo: .init(data: data, flags: flags, timeUs: timeUs))
         }
 
-        private init(format: Format? = nil, sampleInfo: SampleInfo? = nil) {
+        private init(format: AnyFormat? = nil, sampleInfo: SampleInfo? = nil) {
             precondition((format == nil) != (sampleInfo == nil))
             self.format = format
             self.sampleInfo = sampleInfo
@@ -197,33 +197,5 @@ extension FakeSampleStream {
         fileprivate let data: [UInt8]
         fileprivate let flags: SampleFlags
         fileprivate let timeUs: Int64
-    }
-}
-
-/// Format descriptions for the tests' formats, which carry no codec configuration: a sample
-/// queue builds one for every sample it hands out.
-struct FakeInitializationData: Format.InitializationData {
-    func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {
-        switch format.sampleMimeType?.trackType {
-        case .audio:
-            let description = AudioStreamBasicDescription(
-                mSampleRate: Float64(max(format.sampleRate, 1)),
-                mFormatID: kAudioFormatMPEG4AAC,
-                mFormatFlags: 0,
-                mBytesPerPacket: 0,
-                mFramesPerPacket: 1024,
-                mBytesPerFrame: 0,
-                mChannelsPerFrame: UInt32(max(format.channelCount, 1)),
-                mBitsPerChannel: 0,
-                mReserved: 0
-            )
-            return try CMAudioFormatDescription(audioStreamBasicDescription: description)
-        default:
-            return try CMVideoFormatDescription(
-                videoCodecType: .h264,
-                width: max(format.width, 1),
-                height: max(format.height, 1)
-            )
-        }
     }
 }

@@ -53,7 +53,7 @@ open class ForwardingRenderer: SERenderer {
     }
 
     public func enable(
-        formats: [Format],
+        formats: [AnyFormat],
         stream: any SampleStream,
         position: CMTime,
         joining: Bool,
@@ -81,7 +81,7 @@ open class ForwardingRenderer: SERenderer {
     }
 
     open func replaceStream(
-        formats: [Format],
+        formats: [AnyFormat],
         stream: SampleStream,
         startPosition: CMTime,
         offset: CMTime,

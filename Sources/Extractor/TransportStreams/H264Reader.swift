@@ -268,37 +268,25 @@ final class H264Reader: ElementaryStreamReader {
                         nalOffset: 3,
                         nalLimit: pps.nalLength
                     )
-                    let codecs = String(
-                        format: "avc1.%02X%02X%02X",
-                        spsData.profileIdc,
-                        spsData.constraintsFlagsAndReservedZero2Bits,
-                        spsData.levelIdc
-                    )
-
                     // The parameter sets go in without the start code and with emulation
                     // prevention bytes intact, so the 3-byte prefix is dropped here.
-                    let formatDescription = try CMFormatDescription(
-                        h264ParameterSets: [
-                            Data(spsView[3...]),
-                            Data(ppsView[3...]),
-                        ],
-                        nalUnitHeaderLength: 4
+                    let record = AvcUtil.configurationRecord(
+                        sequenceParameterSets: [spsView[3 ..< sps.nalLength]],
+                        pictureParameterSets: [ppsView[3 ..< pps.nalLength]],
+                        sequenceParameterSet: spsData
                     )
-
-                    try output.setFormat(
-                        Format.Builder()
-                            .setId(formatId)
-                            .setContainerMimeType(containerMimeType)
-                            .setSampleMimeType(.videoH264)
-                            .setCodecs(codecs)
-                            .setSize(width: spsData.width, height: spsData.height)
-                            .setPixelWidthHeightRatio(spsData.pixelWidthHeightRatio)
-                            .setInitializationData(
-                                FormatInitializationData(formatDescription: formatDescription)
-                            )
-                            .setMaxNumReorderSamples(spsData.maxNumReorderFrames)
-                            .build()
+                    var format = try VideoFormat(
+                        codecType: kCMVideoCodecType_H264,
+                        width: spsData.width,
+                        height: spsData.height,
+                        configurationRecord: record,
+                        flavor: .h264
                     )
+                    format.id = formatId
+                    format.containerMimeType = containerMimeType
+                    format.codecs = format.codec?.h264.codecs()
+                    format.maxReorderFrames = spsData.maxNumReorderFrames
+                    try output.setFormat(AnyFormat(format))
                     hasOutputFormat = true
                     try seiReader.setReorderingQueueSize(spsData.maxNumReorderFrames)
                     sampleReader.putSps(spsData)
@@ -356,7 +344,8 @@ final class H264Reader: ElementaryStreamReader {
 }
 
 private final class SampleReader {
-    private let trackOutput: TrackOutput
+    /// Samples are written one behind, so that the duration of each comes from the time of the next.
+    private let delayedOutput: DelayedSampleOutput
     private let allowNonIdrKeyframes: Bool
     private let detectAccessUnits: Bool
     private let accumulator: NalUnitAccumulator
@@ -382,18 +371,13 @@ private final class SampleReader {
     private var randomAccessIndicator = false
     private var currentOffset = 0
 
-    // Output is delayed by one sample so that each sample's duration can be derived from the
-    // timestamp of the sample that follows it.
-    private var pendingSample: PendingSample?
-    private var lastSampleDuration: CMTime = .invalid
-
     init(
         trackOutput: TrackOutput,
         allowNonIdrKeyframes: Bool,
         detectAccessUnits: Bool,
         accumulator: NalUnitAccumulator
     ) throws {
-        self.trackOutput = trackOutput
+        delayedOutput = DelayedSampleOutput(trackOutput: trackOutput)
         self.allowNonIdrKeyframes = allowNonIdrKeyframes
         self.detectAccessUnits = detectAccessUnits
         self.accumulator = accumulator
@@ -419,8 +403,7 @@ private final class SampleReader {
         // Called on a seek and on a transport stream discontinuity. The held back sample is dropped
         // rather than output: its data may be truncated by the packet loss, and the timestamps that
         // follow are not contiguous with it, so they cannot provide its duration.
-        pendingSample = nil
-        lastSampleDuration = .invalid
+        delayedOutput.reset()
     }
 
     func startNalUnit(
@@ -593,74 +576,18 @@ private final class SampleReader {
             return
         }
 
-        let sample = PendingSample(
+        try delayedOutput.output(
             data: blockBuffer,
             time: sampleTime,
             decodeTime: sampleDecodeTime,
             flags: sampleIsKeyframe ? .keyframe : []
         )
-
-        if let pendingSample {
-            try output(pendingSample, followedBy: sample)
-        }
-        pendingSample = sample
     }
 
     /// Outputs the sample held back for duration derivation, estimating its duration. Called when no
     /// further sample will follow it, i.e. at the end of the input.
     func flushPendingSample() throws {
-        guard let sample = pendingSample else { return }
-        pendingSample = nil
-        try output(sample, followedBy: nil)
-    }
-
-    private func output(
-        _ sample: PendingSample,
-        followedBy next: PendingSample?
-    ) throws {
-        let duration = duration(of: sample, followedBy: next)
-        lastSampleDuration = duration
-
-        try trackOutput.sampleData(data: sample.data)
-        try trackOutput.sampleMetadata(
-            time: CMSampleTimingInfo(
-                duration: duration,
-                presentationTimeStamp: sample.time,
-                decodeTimeStamp: sample.decodeTime
-            ),
-            flags: sample.flags,
-            range: 0 ..< sample.data.dataLength
-        )
-    }
-
-    private func duration(of sample: PendingSample, followedBy next: PendingSample?) -> CMTime {
-        guard let next else { return lastSampleDuration }
-        // Samples are output in decode order, so the decode timestamps are the monotonic ones.
-        let useDecodeTimes = sample.decodeTime.isNumeric && next.decodeTime.isNumeric
-        let start = useDecodeTimes ? sample.decodeTime : sample.time
-        let end = useDecodeTimes ? next.decodeTime : next.time
-        guard start.isNumeric, end.isNumeric else { return lastSampleDuration }
-
-        let duration = end - start
-        // A timestamp discontinuity that is not signalled by a continuity counter break (a PCR/PTS
-        // jump or a 33 bit wraparound) yields a nonsensical delta. Several access units may also
-        // share a single PES packet, and therefore a single timestamp, which yields a zero delta.
-        // Estimate from the previous sample in both cases.
-        guard duration > .zero, duration <= Self.maxPlausibleSampleDuration else {
-            return lastSampleDuration
-        }
-        return duration
-    }
-}
-
-private extension SampleReader {
-    static var maxPlausibleSampleDuration: CMTime { CMTime(value: 1, timescale: 1) }
-
-    struct PendingSample {
-        let data: CMBlockBuffer
-        let time: CMTime
-        let decodeTime: CMTime
-        let flags: SampleFlags
+        try delayedOutput.flush()
     }
 }
 
@@ -756,15 +683,5 @@ private struct SliceHeaderData {
                     || deltaPicOrderCnt1 != other.deltaPicOrderCnt1))
             || idrPicFlag != other.idrPicFlag
             || (idrPicFlag && idrPicId != other.idrPicId)
-    }
-}
-
-private extension H264Reader {
-    struct FormatInitializationData: Format.InitializationData {
-        let formatDescription: CMFormatDescription
-
-        func buildCMFormatDescription(using format: Format) throws -> CMFormatDescription {
-            formatDescription
-        }
     }
 }

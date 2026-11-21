@@ -30,6 +30,8 @@ public protocol SEPlayerDelegate: AnyObject {
     func player(_ player: Player, didChangeMaxSeekToPreviousPosition maxSeekToPreviousPositionMs: Int64)
     /// Called when there is a change in the `CueGroup`.
     func player(_ player: Player, didChangeCues cueGroup: CueGroup)
+    /// Called when the playback position reaches timed metadata of the stream: ID3 tags, ICY titles, event messages.
+    func player(_ player: Player, didReceiveMetadata metadata: Metadata)
     /// Called when ``Player/currentTracks`` changes.
     ///
     /// - Parameter tracks: The tracks of the current media item. May have no groups.
@@ -82,6 +84,7 @@ public extension SEPlayerDelegate {
     func player(_ player: Player, didChangeSeekForwardIncrement seekForwardIncrementMs: Int64) {}
     func player(_ player: Player, didChangeMaxSeekToPreviousPosition maxSeekToPreviousPositionMs: Int64) {}
     func player(_ player: Player, didChangeCues cueGroup: CueGroup) {}
+    func player(_ player: Player, didReceiveMetadata metadata: Metadata) {}
     func player(_ player: Player, didChangeTracks tracks: Tracks) {}
     func player(_ player: Player, didChangeTrackSelectionParameters parameters: TrackSelectionParameters) {}
     func player(_ player: Player, didChangeMediaMetadata mediaMetadata: MediaMetadata) {}

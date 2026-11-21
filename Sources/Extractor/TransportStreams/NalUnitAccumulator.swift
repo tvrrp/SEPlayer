@@ -82,6 +82,23 @@ final class NalUnitAccumulator {
         return sample
     }
 
+    /// Commits the units before the one started last, and keeps that one as the start of the next sample.
+    func commitExcludingLastUnit() throws -> CMBlockBuffer? {
+        let end = startOfNewNal
+        guard end > 0 else { return nil }
+        let sample = try sampleMemory.copy(buffer, range: 0 ..< end)
+
+        let remaining = writePosition - end
+        if remaining > 0 {
+            var lastUnit = [UInt8](repeating: 0, count: remaining)
+            try lastUnit.withUnsafeMutableBytes { try buffer.copyDataBytes(atOffset: end, to: $0) }
+            try lastUnit.withUnsafeBytes { try buffer.replaceDataBytes(with: $0, atOffset: 0) }
+        }
+        writePosition = remaining
+        startOfNewNal = 0
+        return sample
+    }
+
     /// Discards everything accumulated so far, e.g. after a seek or a stream discontinuity.
     func reset() {
         filling = false

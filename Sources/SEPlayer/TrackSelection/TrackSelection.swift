@@ -18,14 +18,14 @@ public protocol TrackSelection {
     var trackGroup: TrackGroup { get }
     var length: Int { get }
 
-    func format(for index: Int) -> Format
+    func format(for index: Int) -> AnyFormat
     func indexInTrackGroup(_ index: Int) -> Int?
-    func indexOf(format: Format) -> Int?
+    func indexOf(format: AnyFormat) -> Int?
     func indexOf(indexInTrackGroup: Int) -> Int?
 }
 
 extension TrackSelection {
-    func format(for index: Int) -> Format {
+    func format(for index: Int) -> AnyFormat {
         trackGroup[index]
     }
 }

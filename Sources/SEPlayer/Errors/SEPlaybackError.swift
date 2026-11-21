@@ -67,7 +67,7 @@ public struct SEPlaybackError: Error, PlaybackErrorCodeProviding {
         rendererName: String,
         rendererIndex: Int,
         trackType: TrackType,
-        format: Format?,
+        format: AnyFormat?,
         mediaPeriodId: MediaPeriodId,
         isRecoverable: Bool = false
     ) -> SEPlaybackError {
@@ -122,7 +122,7 @@ public extension SEPlaybackError {
     struct RendererError: Error {
         public let rendererName: String
         public let rendererIndex: Int
-        public let rendererFormat: Format?
+        public let rendererFormat: AnyFormat?
         public let rendererFormatSupport: RendererCapabilities.Support.FormatSupport?
     }
 }

@@ -10,28 +10,40 @@ import CoreMedia
 import Testing
 
 final class SEPlayerTestRunner: @unchecked Sendable {
-    static let videoFormat = Format.Builder()
-        .setSampleMimeType(.videoH264)
-        .setAverageBitrate(800_000)
-        .setSize(width: 1280, height: 720)
-        .setInitializationData(FakeInitializationData())
-        .build()
+    /// H.264 with parameter sets that only start like real ones: the tests decode nothing, but a sample queue
+    /// describes every sample it hands out.
+    static let videoFormat = AnyFormat(VideoFormat {
+        $0.codecType = FourCharacterCode(kCMVideoCodecType_H264)
+        $0.codec = .h264 {
+            $0.profile = .high
+            $0.level = .init(rawValue: 31)
+            $0.sequenceParameterSets = [Data([0x67, 0x64, 0x00, 0x1F])]
+            $0.pictureParameterSets = [Data([0x68, 0xEB, 0xE3, 0xCB])]
+        }
+        $0.averageBitrate = 800_000
+        $0.size = VideoSize(width: 1280, height: 720)
+    })
 
-    static let audioFormat = Format.Builder()
-        .setSampleMimeType(.audioAAC)
-        .setCodecs("mp4a.40.2")
-        .setAverageBitrate(100_000)
-        .setChannelCount(2)
-        .setSampleRate(44100)
-        .setInitializationData(FakeInitializationData())
-        .build()
+    /// AAC LC at 44100 Hz in stereo.
+    static let audioFormat = AnyFormat(AudioFormat {
+        $0.codec = .aac {
+            $0.objectType = .lowComplexity
+            $0.coreSampleRate = 44100
+            $0.channelConfiguration = 2
+            $0.audioSpecificConfig = Data([0x12, 0x10])
+        }
+        $0.codecs = "mp4a.40.2"
+        $0.averageBitrate = 100_000
+        $0.channelCount = 2
+        $0.sampleRate = 44100
+    })
 
     final class Builder {
         private let queue: Queue
         private let playerFactory: TestSEPlayerFactory
         private var timeline: Timeline?
         private var mediaSources: [MediaSource]
-        private var supportedFormats: [Format]
+        private var supportedFormats: [AnyFormat]
         private var actionSchedule: ActionSchedule?
         private var view: SEPlayerLayer?
         private weak var playerDelegate: SEPlayerDelegate?
@@ -73,7 +85,7 @@ final class SEPlayerTestRunner: @unchecked Sendable {
         }
 
         @discardableResult
-        func setSupportedFormats(_ supportedFormats: Format...) -> Builder {
+        func setSupportedFormats(_ supportedFormats: AnyFormat...) -> Builder {
             self.supportedFormats = supportedFormats
             return self
         }
