@@ -4,6 +4,13 @@
 //
 //  Created by tvrrp on 18.05.2026.
 //
+//  Derived from SwiftNIO (https://github.com/apple/swift-nio):
+//    NIOCore/ByteBuffer-core.swift, NIOCore/ByteBuffer-int.swift, NIOCore/ByteBuffer-aux.swift,
+//    NIOFoundationEssentialsCompat/ByteBuffer-foundation.swift
+//  Copyright (c) 2017-2024 Apple Inc. and the SwiftNIO project authors
+//  Licensed under the Apache License, Version 2.0; see LICENSE and NOTICE.
+//  Changed from the original: rewritten to read a CMBlockBuffer.
+//
 
 import CoreMedia
 
@@ -93,13 +100,26 @@ public struct BlockBufferReader: Hashable {
         with data: T,
         permitEmptyReference: Bool = false
     ) throws where T.Element == UInt8 {
+        guard !data.isEmpty else { return }
         let blockBuffer = try data.withContiguousStorageIfAvailable {
             let blockBuffer = try CMBlockBuffer(length: $0.count, flags: .assureMemoryNow)
             try blockBuffer.replaceDataBytes(with: UnsafeRawBufferPointer($0))
             return blockBuffer
-        }
-        guard let blockBuffer else { return }
+        } ?? Self.makeBlockBufferSlowPath(copying: data)
         try extend(with: blockBuffer, permitEmptyReference: permitEmptyReference)
+    }
+
+    /// A block buffer with a copy of bytes that aren't in one piece of memory, such as a range or a lazy collection,
+    /// copied as the collection hands them out.
+    private static func makeBlockBufferSlowPath<T: Collection>(
+        copying bytes: T
+    ) throws -> CMBlockBuffer where T.Element == UInt8 {
+        let blockBuffer = try CMBlockBuffer(length: bytes.count, flags: .assureMemoryNow)
+        // The memory was allocated at once, so it is one block.
+        try blockBuffer.withUnsafeMutableBlockBytes { destination in
+            destination.copyBytes(from: bytes)
+        }
+        return blockBuffer
     }
 
     public mutating func clear() throws(BlockBufferError) {

@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.TrackOutput
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -16,7 +22,8 @@ public protocol TrackOutput {
     func setDuration(_ duration: CMTime)
     func setFormat(_ format: AnyFormat) throws
     func sampleData(data: CMBlockBuffer) throws
-    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws
+    /// Tells about a sample whose bytes were written.
+    func sampleMetadata(_ properties: SampleProperties) throws
 }
 
 public extension TrackOutput {

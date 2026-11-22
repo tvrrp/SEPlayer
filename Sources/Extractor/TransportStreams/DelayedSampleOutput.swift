@@ -12,9 +12,8 @@ import SEPlayerCommon
 final class DelayedSampleOutput {
     private struct PendingSample {
         let data: CMBlockBuffer
-        let time: CMTime
-        let decodeTime: CMTime
-        let flags: SampleFlags
+        /// Without its duration.
+        var properties: SampleProperties
     }
 
     private let trackOutput: TrackOutput
@@ -27,8 +26,19 @@ final class DelayedSampleOutput {
     }
 
     /// Holds back a sample, and writes the one before it.
-    func output(data: CMBlockBuffer, time: CMTime, decodeTime: CMTime, flags: SampleFlags) throws {
-        let sample = PendingSample(data: data, time: time, decodeTime: decodeTime, flags: flags)
+    func output(data: CMBlockBuffer, time: CMTime, decodeTime: CMTime, flags: SampleProperties.Flags) throws {
+        let sample = PendingSample(
+            data: data,
+            properties: SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: .invalid,
+                    presentationTimeStamp: time,
+                    decodeTimeStamp: decodeTime
+                ),
+                dataRange: 0 ..< data.dataLength,
+                flags: flags
+            )
+        )
         if let pendingSample {
             try output(pendingSample, followedBy: sample)
         }
@@ -53,24 +63,21 @@ final class DelayedSampleOutput {
         let duration = duration(of: sample, followedBy: next)
         lastSampleDuration = duration
 
+        var properties = sample.properties
+        properties.timingInfo.duration = duration
         try trackOutput.sampleData(data: sample.data)
-        try trackOutput.sampleMetadata(
-            time: CMSampleTimingInfo(
-                duration: duration,
-                presentationTimeStamp: sample.time,
-                decodeTimeStamp: sample.decodeTime
-            ),
-            flags: sample.flags,
-            range: 0 ..< sample.data.dataLength
-        )
+        try trackOutput.sampleMetadata(properties)
     }
 
     private func duration(of sample: PendingSample, followedBy next: PendingSample?) -> CMTime {
-        guard let next else { return lastSampleDuration }
+        guard let next = next?.properties.timingInfo else {
+            return lastSampleDuration
+        }
+        let sample = sample.properties.timingInfo
         // Samples are written in decode order, so the decode times are the ones that grow.
-        let useDecodeTimes = sample.decodeTime.isNumeric && next.decodeTime.isNumeric
-        let start = useDecodeTimes ? sample.decodeTime : sample.time
-        let end = useDecodeTimes ? next.decodeTime : next.time
+        let useDecodeTimes = sample.decodeTimeStamp.isNumeric && next.decodeTimeStamp.isNumeric
+        let start = useDecodeTimes ? sample.decodeTimeStamp : sample.presentationTimeStamp
+        let end = useDecodeTimes ? next.decodeTimeStamp : next.presentationTimeStamp
         guard start.isNumeric, end.isNumeric else { return lastSampleDuration }
 
         let duration = end - start

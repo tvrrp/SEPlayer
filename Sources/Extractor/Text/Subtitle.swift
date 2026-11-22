@@ -2,6 +2,13 @@
 //  Subtitle.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.text.Subtitle
+//    androidx.media3.extractor.text.LegacySubtitleUtil
+//  Copyright (C) 2016, 2023 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon

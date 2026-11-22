@@ -26,7 +26,9 @@ extension CodecAttributes where Scope == AudioCodec.APAC {
 
     /// The codec string of RFC 6381: the profile and the level in decimal, such as `apac.05.00`.
     var codecs: String? {
-        guard let profile = self.profile, let level = self.level else { return nil }
+        guard let profile = self.profile, let level = self.level else {
+            return nil
+        }
         return String(format: "apac.%02d.%02d", profile, level)
     }
 

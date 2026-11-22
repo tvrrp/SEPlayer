@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.LatmReader
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -222,9 +228,15 @@ final class LatmReader: ElementaryStreamReader {
         // packetStarted must be called before a frame is read.
         try checkArgument(time.isNumeric)
         try output.sampleMetadata(
-            time: CMSampleTimingInfo(duration: sampleDuration, presentationTimeStamp: time, decodeTimeStamp: .invalid),
-            flags: .keyframe,
-            range: 0 ..< muxLengthBytes
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: sampleDuration,
+                    presentationTimeStamp: time,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< muxLengthBytes,
+                flags: .keyframe
+            )
         )
         time = time + sampleDuration
     }

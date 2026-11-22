@@ -41,7 +41,9 @@ extension CodecAttributes where Scope == VideoCodec.VP {
     ///
     /// - Parameter sampleEntryType: `vp08` or `vp09`, which starts the string.
     func codecs(sampleEntryType: MP4Box.BoxType) -> String? {
-        guard let profile = self.profile, let level = self.level else { return nil }
+        guard let profile = self.profile, let level = self.level else {
+            return nil
+        }
         let type = sampleEntryType.rawValue.fourCharacterCode
         return String(format: "%@.%02d.%02d.%02d", type, profile, level, self.bitDepth ?? 8)
     }

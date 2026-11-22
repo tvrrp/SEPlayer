@@ -2,6 +2,12 @@
 //  HlsChunkSource.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.HlsChunkSource
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -812,13 +818,17 @@ final class HlsChunkSource {
         trackIndex: Int
     ) -> HlsEncryptionKeyChunk? {
         let keyUrls = [initializationSegment?.encryption?.keyUrl, encryption?.keyUrl].compactMap { $0 }
-        guard let keyUrl = keyUrls.first(where: { keyCache[$0] == nil }) else { return nil }
+        guard let keyUrl = keyUrls.first(where: { keyCache[$0] == nil }) else {
+            return nil
+        }
         return makeKeyChunk(keyUrl: keyUrl, trackIndex: trackIndex)
     }
 
     /// The loaded key and the initialization vector of a segment of the media sequence, if it is encrypted.
     private func segmentKey(_ encryption: HlsMediaPlaylist.SegmentEncryption?, mediaSequence: Int) -> HlsSegmentKey? {
-        guard let encryption, let key = keyCache[encryption.keyUrl] else { return nil }
+        guard let encryption, let key = keyCache[encryption.keyUrl] else {
+            return nil
+        }
         return HlsSegmentKey(key: key, iv: encryption.iv(forMediaSequence: mediaSequence))
     }
 

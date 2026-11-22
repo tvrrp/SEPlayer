@@ -3,6 +3,13 @@
 //  SEPlayer
 //
 //  Created by Damir Yackupov on 27.06.2025.
+//
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.FragmentedMp4Extractor
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -453,7 +460,6 @@ public final class FragmentedMp4Extractor: Extractor {
                 output.setDuration(track.duration)
                 var format = track.format
                 format.containerMimeType = containerMimeType
-                MetadataUtil.setFormatGaplessInfo(gaplessInfoHolder: gaplessInfoHolder, format: &format)
                 MetadataUtil.setFormatMetadata(
                     mdtaMetadata: mdtaMetadata,
                     format: &format,
@@ -1101,9 +1107,18 @@ public final class FragmentedMp4Extractor: Extractor {
             sampleCurrentNalBytesRemaining = 0
         }
 
-//        let track = trackBundle.moovSampleTable.track
+        let track = trackBundle.moovSampleTable.track
         let output = trackBundle.output
-        var sampleTimingInfo = trackBundle.getCurrentSampleTimingInfo()
+        var sample = SampleProperties(timingInfo: trackBundle.getCurrentSampleTimingInfo())
+        if !trackBundle.currentlyInFragment {
+            if let attributes = trackBundle.moovSampleTable.attributes[trackBundle.currentSampleIndex] {
+                sample.attributes = attributes
+            }
+        } else if track.type == .audio, isEdtsListDurationForEntireMediaTimeline(track: track) {
+            // Audio that the edit moves before the start of the track only primes the decoder.
+            sample.trim(to: CMTimeRange(start: .zero, end: .positiveInfinity))
+        }
+        var sampleTimingInfo = sample.timingInfo
         if let timestampSession, sampleTimingInfo.presentationTimeStamp.isNumeric {
             // One offset for both times, taken from the presentation time as the session expects.
             let presentationTime = sampleTimingInfo.presentationTimeStamp
@@ -1136,11 +1151,10 @@ public final class FragmentedMp4Extractor: Extractor {
 
         // TODO: cryptoData
 
-        try output.sampleMetadata(
-            time: sampleTimingInfo,
-            flags: sampleFlags,
-            range: 0 ..< sampleSize
-        )
+        sample.timingInfo = sampleTimingInfo
+        sample.dataRange = 0 ..< sampleSize
+        sample.flags = sampleFlags
+        try output.sampleMetadata(sample)
 
         // After we have the sampleTimingInfo, we can commit all the pending metadata samples
         outputPendingMetadataSamples(sampleTiming: sampleTimingInfo)
@@ -1316,6 +1330,9 @@ private extension FragmentedMp4Extractor {
                 }
                 searchIndex += 1
             }
+            if moovSampleTable.track.type == .audio, moovSampleTable.track.format.sampleMimeType != .audioRAW {
+                firstSampleToOutputIndex = max(currentSampleIndex, firstSampleToOutputIndex - 1)
+            }
         }
 
         func getCurrentSampleTimingInfo() -> CMSampleTimingInfo {
@@ -1342,7 +1359,7 @@ private extension FragmentedMp4Extractor {
             }
         }
 
-        func getCurrentSampleFlags() -> SampleFlags {
+        func getCurrentSampleFlags() -> SampleProperties.Flags {
             if !currentlyInFragment {
                 moovSampleTable.flags[currentSampleIndex]
             } else {

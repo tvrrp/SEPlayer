@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 22.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.ExoPlayerImpl
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -231,6 +237,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
         bandwidthMeter: BandwidthMeter,
         mediaSourceFactory: MediaSourceFactory,
         audioSessionController: AudioSessionController,
+        livePlaybackSpeedControl: LivePlaybackSpeedControl? = nil,
         useLazyPreparation: Bool = true,
         seekBackIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
         seekForwardIncrement: CMTime = CMTime(seconds: 5, preferredTimescale: 1000),
@@ -290,7 +297,8 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             outboundTimebase: timebase,
             mediaClock: DefaultMediaClock(clock: clock, outboundTimebase: timebase, renderSynchronizer: clock.runsOnRenderSynchronizer ? renderSynchronizer : nil),
             identifier: identifier,
-            preloadConfiguration: _preloadConfiguration
+            preloadConfiguration: _preloadConfiguration,
+            livePlaybackSpeedControl: livePlaybackSpeedControl
         )
 
         internalPlayer.playbackInfoUpdateListener = self

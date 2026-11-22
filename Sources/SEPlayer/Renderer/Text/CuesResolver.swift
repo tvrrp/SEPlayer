@@ -4,6 +4,14 @@
 //
 //  Created by tvrrp on 02.10.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.text.CuesResolver
+//    androidx.media3.exoplayer.text.MergingCuesResolver
+//    androidx.media3.exoplayer.text.ReplacingCuesResolver
+//  Copyright (C) 2023 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Extractor

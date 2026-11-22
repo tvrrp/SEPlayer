@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 07.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.MediaSourceList
+//  Copyright (C) 2019 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -169,7 +175,7 @@ final class MediaSourceList {
 
     func createPeriod(
         id: MediaPeriodId,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         startPosition: CMTime
     ) throws -> MediaPeriod {
         let mediaSourceHolderId = mediaSourceHolderId(for: id.periodId)
@@ -182,7 +188,7 @@ final class MediaSourceList {
         holder.activeMediaPeriodIds.append(childMediaPeriodId)
         let mediaPeriod = try holder.mediaSource.createPeriod(
             id: childMediaPeriodId,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             startPosition: startPosition
         )
 

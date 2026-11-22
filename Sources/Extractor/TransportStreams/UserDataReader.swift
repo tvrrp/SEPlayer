@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.UserDataReader
+//  Copyright (C) 2018 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -76,13 +82,15 @@ final class UserDataReader {
             for output in outputs {
                 try output.sampleData(data: data.packets.blockBuffer)
                 try output.sampleMetadata(
-                    time: CMSampleTimingInfo(
-                        duration: .invalid,
-                        presentationTimeStamp: data.presentationTime,
-                        decodeTimeStamp: .invalid
-                    ),
-                    flags: .keyframe,
-                    range: 0 ..< data.packets.readableBytes
+                    SampleProperties(
+                        timingInfo: CMSampleTimingInfo(
+                            duration: .invalid,
+                            presentationTimeStamp: data.presentationTime,
+                            decodeTimeStamp: .invalid
+                        ),
+                        dataRange: 0 ..< data.packets.readableBytes,
+                        flags: .keyframe
+                    )
                 )
             }
         }

@@ -4,7 +4,14 @@
 //
 //  Created by Damir Yackupov on 20.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.ShuffleOrder
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
+/// The order the items of a playlist play in when shuffling is on.
 public protocol ShuffleOrder: Sendable {
     var count: Int { get }
     var lastIndex: Int? { get }
@@ -16,21 +23,23 @@ public protocol ShuffleOrder: Sendable {
     func cloneAndClear() -> ShuffleOrder
 }
 
-struct DefaultShuffleOrder: ShuffleOrder {
-    var count: Int { shuffled.count }
+/// A ``ShuffleOrder`` in random order, which inserted items join at random places.
+public struct DefaultShuffleOrder: ShuffleOrder {
+    public var count: Int { shuffled.count }
 
-    var lastIndex: Int? {
+    public var lastIndex: Int? {
         shuffled.count > 0 ? shuffled[shuffled.count - 1] : nil
     }
 
-    var firstIndex: Int? {
+    public var firstIndex: Int? {
         shuffled.count > 0 ? shuffled[0] : nil
     }
 
     private let shuffled: [Int]
     private let indexInShuffled: [Int]
 
-    init(length: Int) {
+    /// A random order of `length` items.
+    public init(length: Int) {
         var shuffled = [Int](repeating: 0, count: length)
         for i in 0 ..< length {
             let swapIndex = Int.random(in: 0 ... i)
@@ -40,22 +49,27 @@ struct DefaultShuffleOrder: ShuffleOrder {
         self.init(shuffled: shuffled)
     }
 
-    init(shuffled: [Int]) {
+    /// The order `shuffled`: the indices of the items, each once, in the order they play.
+    public init(shuffled: [Int]) {
+        var indexInShuffled = [Int](repeating: 0, count: shuffled.count)
+        for (position, index) in shuffled.enumerated() {
+            indexInShuffled[index] = position
+        }
         self.shuffled = shuffled
-        self.indexInShuffled = shuffled
+        self.indexInShuffled = indexInShuffled
     }
 
-    func nextIndex(index: Int) -> Int? {
+    public func nextIndex(index: Int) -> Int? {
         let shuffledIndex = indexInShuffled[index] + 1
         return shuffledIndex < shuffled.count ? shuffled[shuffledIndex] : nil
     }
 
-    func previousIndex(index: Int) -> Int? {
+    public func previousIndex(index: Int) -> Int? {
         let shuffledIndex = indexInShuffled[index] - 1
         return shuffledIndex >= 0 ? shuffled[shuffledIndex] : nil
     }
 
-    func cloneAndInsert(insertionIndex: Int, insertionCount: Int) -> ShuffleOrder {
+    public func cloneAndInsert(insertionIndex: Int, insertionCount: Int) -> ShuffleOrder {
         var insertionPoints = (0 ..< insertionCount).map { _ in Int.random(in: 0 ... shuffled.count) }
         var insertionValues = [Int](repeating: 0, count: insertionCount)
 
@@ -88,7 +102,7 @@ struct DefaultShuffleOrder: ShuffleOrder {
         return DefaultShuffleOrder(shuffled: newShuffled)
     }
 
-    func cloneAndRemove(indexFrom: Int, indexToExclusive: Int) -> ShuffleOrder {
+    public func cloneAndRemove(indexFrom: Int, indexToExclusive: Int) -> ShuffleOrder {
         let removeCount = indexToExclusive - indexFrom
         var newShuffled = [Int]()
 
@@ -101,39 +115,44 @@ struct DefaultShuffleOrder: ShuffleOrder {
         return DefaultShuffleOrder(shuffled: newShuffled)
     }
 
-    func cloneAndClear() -> any ShuffleOrder {
+    public func cloneAndClear() -> any ShuffleOrder {
         DefaultShuffleOrder(length: .zero)
     }
 }
 
-struct UnshuffledShuffleOrder: ShuffleOrder {
-    let count: Int
+/// A ``ShuffleOrder`` that keeps the order of the playlist.
+public struct UnshuffledShuffleOrder: ShuffleOrder {
+    public let count: Int
 
-    var lastIndex: Int? {
+    public init(count: Int) {
+        self.count = count
+    }
+
+    public var lastIndex: Int? {
         count > 0 ? count - 1 : nil
     }
 
-    var firstIndex: Int? {
+    public var firstIndex: Int? {
         count > 0 ? 0 : nil
     }
 
-    func nextIndex(index: Int) -> Int? {
+    public func nextIndex(index: Int) -> Int? {
         index + 1 < count ? index : nil
     }
 
-    func previousIndex(index: Int) -> Int? {
+    public func previousIndex(index: Int) -> Int? {
         index - 1 >= 0 ? index : nil
     }
 
-    func cloneAndInsert(insertionIndex: Int, insertionCount: Int) -> ShuffleOrder {
+    public func cloneAndInsert(insertionIndex: Int, insertionCount: Int) -> ShuffleOrder {
         UnshuffledShuffleOrder(count: count + insertionCount)
     }
 
-    func cloneAndRemove(indexFrom: Int, indexToExclusive: Int) -> ShuffleOrder {
+    public func cloneAndRemove(indexFrom: Int, indexToExclusive: Int) -> ShuffleOrder {
         UnshuffledShuffleOrder(count: count - indexToExclusive + indexFrom)
     }
 
-    func cloneAndClear() -> ShuffleOrder {
+    public func cloneAndClear() -> ShuffleOrder {
         UnshuffledShuffleOrder(count: .zero)
     }
 }

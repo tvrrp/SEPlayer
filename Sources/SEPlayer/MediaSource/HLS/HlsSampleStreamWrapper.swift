@@ -2,6 +2,12 @@
 //  HlsSampleStreamWrapper.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.HlsSampleStreamWrapper
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -59,7 +65,7 @@ final class HlsSampleStreamWrapper {
     private let muxedAudioFormat: AnyFormat?
     private let loadErrorHandlingPolicy: LoadErrorHandlingPolicy
     /// Hears how many bytes the sample queues hold.
-    private let allocator: Allocator?
+    private let bufferedBytesCounter: BufferedBytesCounter?
     private let loader: Loader
     private weak var callback: Callback?
     private let stateLock = UnfairMutex(State())
@@ -74,9 +80,9 @@ final class HlsSampleStreamWrapper {
         queue: Queue,
         loaderQueue: Queue,
         loadErrorHandlingPolicy: LoadErrorHandlingPolicy,
-        allocator: Allocator? = nil
+        bufferedBytesCounter: BufferedBytesCounter? = nil
     ) {
-        self.allocator = allocator
+        self.bufferedBytesCounter = bufferedBytesCounter
         self.uid = uid
         self.trackType = trackType
         self.callback = callback
@@ -836,7 +842,7 @@ private extension HlsSampleStreamWrapper {
             return DiscardingTrackOutput()
         }
 
-        let sampleQueue = try HlsSampleQueue(queue: queue, allocator: allocator)
+        let sampleQueue = try HlsSampleQueue(queue: queue, bufferedBytesCounter: bufferedBytesCounter)
         sampleQueue.delegate = self
         // Samples go once the renderer has read this far past them. The player discards behind playback only when it
         // updates, which can be rare while playback runs.
@@ -910,7 +916,10 @@ extension HlsSampleStreamWrapper: Loader.Callback {
 
     func onLoadCompleted(loadable: Chunk, onTime: DispatchTime, loadDuration: DispatchTimeInterval) {
         let name = loadable.dataSpec.url.lastPathComponent
-        SELogger.debug(.hls, "HLS \(uid) loaded \(name) in \(loadDuration.totalMilliseconds)ms")
+        SELogger.debug(
+            .hls,
+            "HLS \(uid) loaded \(name), \(loadable.bytesLoaded) bytes, in \(loadDuration.totalMilliseconds)ms"
+        )
         chunkSource.onChunkLoadCompleted(loadable)
         let isPrepared = stateLock.withLock { $0.isPrepared }
         if isPrepared {
@@ -1119,11 +1128,16 @@ final class HlsSampleQueue: SampleQueue, @unchecked Sendable {
 
     override func getAdjustedUpstreamFormat(_ format: AnyFormat) -> AnyFormat {
         let playlistFormat = playlistFormatLock.withLock { self.playlistFormat }
-        let derived = HlsSampleStreamWrapper.deriveFormat(
+        var derived = HlsSampleStreamWrapper.deriveFormat(
             playlistFormat: playlistFormat,
             sampleFormat: format,
             propagateBitrates: true
         )
+        // The size of the samples goes into their format description, which the decoder takes the picture size from:
+        // the playlist's can differ, as that of the variant an I-frame stands for.
+        if let size = format.video?.size {
+            derived.video?.size = size
+        }
         return super.getAdjustedUpstreamFormat(derived)
     }
 }
@@ -1132,5 +1146,5 @@ final class HlsSampleQueue: SampleQueue, @unchecked Sendable {
 final class DiscardingTrackOutput: TrackOutput {
     func setFormat(_ format: AnyFormat) throws {}
     func sampleData(data: CMBlockBuffer) throws {}
-    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws {}
+    func sampleMetadata(_ properties: SampleProperties) throws {}
 }

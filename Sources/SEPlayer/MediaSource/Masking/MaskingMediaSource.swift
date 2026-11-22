@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 20.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.MaskingMediaSource
+//  Copyright (C) 2019 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation.NSUUID
@@ -59,8 +65,8 @@ final class MaskingMediaSource: WrappingMediaSource {
         }
     }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> any MediaPeriod {
-        let mediaPeriod = MaskingMediaPeriod(id: id, allocator: allocator, preparePosition: startPosition)
+    override func createPeriod(id: MediaPeriodId, bufferedBytesCounter: BufferedBytesCounter, startPosition: CMTime) throws -> any MediaPeriod {
+        let mediaPeriod = MaskingMediaPeriod(id: id, bufferedBytesCounter: bufferedBytesCounter, preparePosition: startPosition)
         mediaPeriod.setMediaSource(mediaSource)
         if isPrepared {
             let idInSource = id.copy(with: internalPeriodId(for: id.periodId))

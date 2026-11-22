@@ -30,7 +30,10 @@ final class PlayerWorkQueue: @unchecked Sendable {
     private var currentUpdateRequestId: UInt64 = 0
     private var isUpdateRequested = false
     private var delayedUpdateRequest: DispatchWorkItem?
-    private var isInvalidated = false
+    private var invalidated = false
+
+    /// Whether the queue was invalidated: nothing posted to it runs any more.
+    var isInvalidated: Bool { lock.withLock { invalidated } }
 
     init(scheduler: PlayerScheduler) {
         self.scheduler = scheduler
@@ -56,7 +59,7 @@ final class PlayerWorkQueue: @unchecked Sendable {
     /// Runs the update after the work posted so far, unless one is already requested.
     func requestUpdate() {
         let requestId: UInt64? = lock.withLock {
-            guard !isUpdateRequested, !isInvalidated else { return nil }
+            guard !isUpdateRequested, !invalidated else { return nil }
 
             isUpdateRequested = true
             return currentUpdateRequestId
@@ -70,7 +73,7 @@ final class PlayerWorkQueue: @unchecked Sendable {
     func requestUpdate(after delay: DispatchTimeInterval) {
         let newRequest = scheduler.post(after: delay) { [weak self] in self?.requestUpdate() }
         let replacedRequest: DispatchWorkItem? = lock.withLock {
-            guard !isInvalidated else { return newRequest }
+            guard !invalidated else { return newRequest }
 
             let replacedRequest = delayedUpdateRequest
             delayedUpdateRequest = newRequest
@@ -96,7 +99,7 @@ final class PlayerWorkQueue: @unchecked Sendable {
     /// Stops running anything, posted already or later.
     func invalidate() {
         let delayedRequest: DispatchWorkItem? = lock.withLock {
-            isInvalidated = true
+            invalidated = true
             urgentWork.removeAll()
 
             let delayedRequest = delayedUpdateRequest
@@ -109,7 +112,6 @@ final class PlayerWorkQueue: @unchecked Sendable {
     private func run(_ work: () -> Void) {
         runUrgentWork()
 
-        let isInvalidated = lock.withLock { self.isInvalidated }
         guard !isInvalidated else { return }
 
         work()
@@ -123,7 +125,7 @@ final class PlayerWorkQueue: @unchecked Sendable {
 
     private func nextUrgentWork() -> (() -> Void)? {
         lock.withLock {
-            guard !isInvalidated, !urgentWork.isEmpty else { return nil }
+            guard !invalidated, !urgentWork.isEmpty else { return nil }
 
             return urgentWork.removeFirst()
         }
@@ -132,7 +134,7 @@ final class PlayerWorkQueue: @unchecked Sendable {
     private func runUpdate(requestId: UInt64) {
         runUrgentWork()
 
-        let isCurrentRequest = lock.withLock { !isInvalidated && requestId == currentUpdateRequestId }
+        let isCurrentRequest = lock.withLock { !invalidated && requestId == currentUpdateRequestId }
         guard isCurrentRequest else { return }
 
         cancelPendingUpdates()

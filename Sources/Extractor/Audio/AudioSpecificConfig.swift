@@ -36,7 +36,9 @@ struct AudioSpecificConfig {
 
     /// The channels of the core coder: of channelConfiguration, or of the program config element.
     var channelCount: Int? {
-        guard channelConfiguration != 0 else { return programConfig?.channelCount }
+        guard channelConfiguration != 0 else {
+            return programConfig?.channelCount
+        }
         return Self.configurationChannelCounts[channelConfiguration]
     }
 
@@ -95,7 +97,9 @@ struct AudioSpecificConfig {
             let hasExtension = try bits.readBit()
             if channelConfiguration == 0 {
                 let element = try ProgramConfigElement(reader: &bits, configStart: start)
-                guard element.sampleRate == sampleRate else { throw AudioConfigError() }
+                guard element.sampleRate == sampleRate else {
+                    throw AudioConfigError()
+                }
                 programConfig = element
             }
             if hasExtension {
@@ -126,9 +130,13 @@ struct AudioSpecificConfig {
             announcesSbr = try bits.readBits(11) == Self.sbrSyncExtension
         }
         if announcesSbr, !hasSbr, bits.bitsLeft > 4 {
-            guard (1 ... 4).contains(objectType) else { throw AudioConfigError() }
+            guard (1 ... 4).contains(objectType) else {
+                throw AudioConfigError()
+            }
             let extensionType = try Self.readAudioObjectType(&bits)
-            guard extensionType != Self.bitSlicedArithmeticCoding else { throw AudioConfigError() }
+            guard extensionType != Self.bitSlicedArithmeticCoding else {
+                throw AudioConfigError()
+            }
             if extensionType == Self.spectralBandReplication {
                 if try bits.readBit() {
                     let rate = try Self.readSampleRate(&bits)
@@ -213,7 +221,9 @@ struct AudioSpecificConfig {
 
     /// Checks that SBR doubles the core rate or keeps it.
     private static func checkExtensionSampleRate(_ rate: Int, sampleRate: Int) throws {
-        guard rate == sampleRate || rate == 2 * sampleRate else { throw AudioConfigError() }
+        guard rate == sampleRate || rate == 2 * sampleRate else {
+            throw AudioConfigError()
+        }
     }
 }
 
@@ -223,7 +233,9 @@ struct AudioConfigError: Error {}
 extension BlockBufferBitReader {
     /// Skips `count` bits, throwing when fewer are left.
     mutating func skip(bits count: Int) throws {
-        guard count >= 0, bitsLeft >= count else { throw BlockBufferReaderErrors(.outOfBounds) }
+        guard count >= 0, bitsLeft >= count else {
+            throw BlockBufferReaderErrors(.outOfBounds)
+        }
         skipBits(count)
     }
 

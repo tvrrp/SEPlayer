@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.02.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -13,17 +19,18 @@ import SEPlayerCommon
 /// A track fits when its bitrate, at the playback speed, is within the safe part of the predicted bandwidth. The
 /// selection moves down as soon as the selected track no longer fits. It moves up only when the bandwidth exceeds the
 /// next higher track's bitrate by a margin, and the next chunk of the new track loads before the buffer runs out.
-class AdaptiveTrackSelection: BaseTrackSelection {
-    /// Factory for ``AdaptiveTrackSelection`` instances.
-    final class Factory: SETrackSelectionFactory {
+public class AdaptiveTrackSelection: BaseTrackSelection {
+    /// Makes adaptive selections of the groups with several tracks, and fixed selections of those with one.
+    public final class Factory: SETrackSelectionFactory {
         private let bandwidthFraction: Float
 
         /// - Parameter bandwidthFraction: The fraction of the safe bandwidth the selection plans with.
-        init(bandwidthFraction: Float = 1) {
+        /// - Parameter bandwidthFraction: The part of the predicted bandwidth the selected tracks may use.
+        public init(bandwidthFraction: Float = 1) {
             self.bandwidthFraction = bandwidthFraction
         }
 
-        func createTrackSelections(
+        public func createTrackSelections(
             definitions: [SETrackSelectionDefinition?],
             bandwidthMeter: BandwidthMeter,
             mediaPeriodId: MediaPeriodId,
@@ -51,9 +58,9 @@ class AdaptiveTrackSelection: BaseTrackSelection {
         }
     }
 
-    override var selectedIndex: Int { _selectedIndex }
-    override var selectedReason: TrackSelectionReason { reason }
-    override var selectionData: Any? { nil }
+    public override var selectedIndex: Int { _selectedIndex }
+    public override var selectedReason: TrackSelectionReason { reason }
+    public override var selectionData: Any? { nil }
 
     private let bandwidthMeter: BandwidthMeter
     private let bandwidthFraction: Float
@@ -62,7 +69,7 @@ class AdaptiveTrackSelection: BaseTrackSelection {
     private var _selectedIndex = 0
     private var reason: TrackSelectionReason = .unknown
 
-    init(
+    public init(
         group: TrackGroup,
         tracks: [Int],
         type: TrackSelectionType,
@@ -75,22 +82,22 @@ class AdaptiveTrackSelection: BaseTrackSelection {
         _selectedIndex = determineIdealSelectedIndex(now: CMClock.hostTimeClock.time, chunkDuration: .invalid)
     }
 
-    override func enable() {
+    public override func enable() {
         reason = .unknown
     }
 
-    override func playbackSpeedDidChange(_ playbackSpeed: Float) {
+    public override func playbackSpeedDidChange(_ playbackSpeed: Float) {
         self.playbackSpeed = playbackSpeed
     }
 
-    override func loadsQuickly(bits: Double) -> Bool? {
+    public override func loadsQuickly(bits: Double) -> Bool? {
         guard let bandwidth = bandwidthMeter.predict(expectedTransferBytes: Int(bits / 8))?.safeBitrate else {
             return nil
         }
         return bits / (Double(bandwidth) * Double(bandwidthFraction)) <= Self.quickLoadDuration
     }
 
-    override func updateSelectedTrack(
+    public override func updateSelectedTrack(
         playbackPosition: CMTime,
         bufferedDuration: CMTime,
         availableDuration: CMTime,
@@ -185,7 +192,9 @@ class AdaptiveTrackSelection: BaseTrackSelection {
             return false
         }
 
-        guard chunkDuration.isNumeric, bufferedDuration.isNumeric else { return true }
+        guard chunkDuration.isNumeric, bufferedDuration.isNumeric else {
+            return true
+        }
         let candidateFormat = format(for: candidate)
         let candidateBandwidth = Double(bandwidth(for: candidateFormat, chunkDuration: chunkDuration))
         let chunkBits = Double(requiredBitrate(candidateFormat)) * chunkDuration.seconds

@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.11.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.test.utils.FakeMediaPeriod
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -24,7 +30,7 @@ final class FakeMediaPeriod: MediaPeriod {
     private let sampleStreams: NSHashTable<FakeSampleStream>
     private let trackDataFactory: TrackDataFactory
     private let syncSampleTimestampsUs: [Int64]?
-    private let allocator: Allocator
+    private let bufferedBytesCounter: BufferedBytesCounter
 //    private let fakePreparationLoadTaskId: Int
 
     private var prepareCallback: (any MediaPeriodCallback)?
@@ -37,14 +43,14 @@ final class FakeMediaPeriod: MediaPeriod {
     convenience init(
         queue: Queue,
         trackGroups: TrackGroupArray,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         singleSampleTimeUs: Int64,
         deferOnPrepared: Bool = false
     ) throws {
         try self.init(
             queue: queue,
             trackGroups: trackGroups,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             trackDataFactory: DefaultTrackDataFactory.singleSampleWithTimeUs(sampleTimeUs: singleSampleTimeUs),
             deferOnPrepared: deferOnPrepared
         )
@@ -53,7 +59,7 @@ final class FakeMediaPeriod: MediaPeriod {
     init(
         queue: Queue,
         trackGroups: TrackGroupArray,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         trackDataFactory: TrackDataFactory,
         syncSampleTimestampsUs: [Int64]? = nil,
         deferOnPrepared: Bool
@@ -66,7 +72,7 @@ final class FakeMediaPeriod: MediaPeriod {
             try #require(!syncSampleTimestampsUs.isEmpty)
         }
         self.syncSampleTimestampsUs = syncSampleTimestampsUs?.sorted()
-        self.allocator = allocator
+        self.bufferedBytesCounter = bufferedBytesCounter
         sampleStreams = .init()
         discontinuityPositionUs = .timeUnset
     }

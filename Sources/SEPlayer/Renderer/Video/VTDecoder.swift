@@ -25,7 +25,20 @@ enum VideoDecoderError: Error, CustomNSError {
     }
 }
 
-final class VTDecoder {
+// TODO: add a real VideoDecoderFactory that makes this decoder, for apps that want decoded frames of the formats
+// the system plays, and expose it in DefaultRenderersFactory.
+
+/// A ``VideoDecoder`` on VideoToolbox, with a decompression session for each format it decodes.
+final class VTDecoder: VideoDecoder {
+    let name = "VideoToolbox"
+    /// Whether the session decodes in hardware, which it does when the device has a decoder of the format.
+    var isHardwareAccelerated: Bool {
+        guard #available(iOS 17, tvOS 17, macCatalyst 17, *) else {
+            return false
+        }
+        return copyProperty(kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder) as? Bool ?? false
+    }
+
     private let decodeQueue: Queue
     private let outputBufferQueue: TypedCMBufferQueue<CMSampleBuffer>
     private var decompressionSession: VTDecompressionSession?
@@ -59,6 +72,37 @@ final class VTDecoder {
         copyTimeProperty(kVTDecompressionPropertyKey_MaxOutputPresentationTimeStampOfFramesBeingDecoded)
     }
 
+    /// Reused when its session decodes the new format too, such as another resolution of the same codec. Another codec,
+    /// or one the device has no decoder for, such as AV1 without hardware, needs a decoder the factory picks.
+    func canReuse(oldFormat: AnyFormat, newFormat: AnyFormat) -> DecoderReuseResult {
+        // Without a session nothing was decoded yet: a decoder of the new format costs nothing more.
+        guard let decompressionSession, let description = try? newFormat.formatDescription() else {
+            return .no
+        }
+
+        // Whether the decoder of the session decodes samples of the description too.
+        let canAccept = VTDecompressionSessionCanAcceptFormatDescription(
+            decompressionSession,
+            formatDescription: description
+        )
+        return canAccept ? .yesWithoutReconfiguration : .no
+    }
+
+    func signalEndOfStream(_ completion: @escaping @Sendable () -> Void) {
+        guard let decompressionSession else {
+            completion()
+            return
+        }
+
+        // Emits the frames the session holds back to reorder.
+        VTDecompressionSessionFinishDelayedFrames(decompressionSession)
+        // Blocks until the frames being decoded are out, which the output handler enqueues: not on the decode queue.
+        DispatchQueue.global(qos: .userInitiated).async {
+            VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
+            completion()
+        }
+    }
+
     /// Drops the frames being decoded, without waiting for them.
     func flush() {
         SELogger.debug(.decoder, "Flushing the video decoder: frames being decoded are dropped")
@@ -75,7 +119,7 @@ final class VTDecoder {
         currentInputFormatDescription = nil
     }
 
-    func queueInputBuffer(buffer: CMSampleBuffer, flags: VTDecodeFrameFlags) throws {
+    func queueInputBuffer(_ buffer: CMSampleBuffer) throws {
         switch decompressionSession {
         case let .some(session):
             guard let currentFormat = currentInputFormatDescription,
@@ -110,7 +154,7 @@ final class VTDecoder {
         let result = VTDecompressionSessionDecodeFrame(
             decompressionSession,
             sampleBuffer: buffer,
-            flags: flags.union(._EnableAsynchronousDecompression),
+            flags: ._EnableAsynchronousDecompression,
             infoFlagsOut: nil,
             outputHandler: { [weak self, outputBufferQueue] status, infoFlags, imageBuffer, pts, duration in
                 if status != noErr {

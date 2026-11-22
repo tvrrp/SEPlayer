@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 04.11.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.MediaPeriodQueueTest
+//  Copyright (C) 2018 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -35,7 +41,7 @@ class MediaPeriodQueueTest {
     private var playbackInfo: PlaybackInfo?
     private var rendererCapabilities: [RendererCapabilitiesResolver]
     private let trackSelector: TrackSelector
-    private let allocator: Allocator
+    private let bufferedBytesCounter: BufferedBytesCounter
     private let mediaSourceList: MediaSourceList
     private var fakeMediaSources: [FakeMediaSource]
     private var mediaPeriodHolderFactoryInfos: [MediaPeriodInfo] = []
@@ -45,7 +51,7 @@ class MediaPeriodQueueTest {
         mediaSourceList = MediaSourceList(playerId: playerId)
         rendererCapabilities = []
         trackSelector = DefaultTrackSelector()
-        allocator = DefaultAllocator()
+        bufferedBytesCounter = DefaultBufferedBytesCounter()
         fakeMediaSources = []
 
         mediaPeriodQueue = MediaPeriodQueue(preloadConfiguration: .default)
@@ -61,7 +67,7 @@ class MediaPeriodQueueTest {
                 rendererCapabilities: rendererCapabilities,
                 rendererPositionOffset: rendererPositionOffset,
                 trackSelector: trackSelector,
-                allocator: allocator,
+                bufferedBytesCounter: bufferedBytesCounter,
                 mediaSourceList: mediaSourceList,
                 info: info,
                 emptyTrackSelectorResult: TrackSelectorResult(

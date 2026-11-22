@@ -4,6 +4,15 @@
 //
 //  Created by tvrrp on 02.10.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.common.text.RubySpan
+//    androidx.media3.common.text.TextEmphasisSpan
+//    androidx.media3.common.text.HorizontalTextInVerticalContextSpan
+//    androidx.media3.common.text.TextAnnotation
+//  Copyright (C) 2020, 2021 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreGraphics
 import Foundation

@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.DtsReader
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -219,9 +225,15 @@ final class DtsReader: ElementaryStreamReader {
         try checkArgument(time.isNumeric)
         let emittedTime = time
         try output.sampleMetadata(
-            time: CMSampleTimingInfo(duration: sampleDuration, presentationTimeStamp: time, decodeTimeStamp: .invalid),
-            flags: isKeyframe ? .keyframe : [],
-            range: 0 ..< size
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: sampleDuration,
+                    presentationTimeStamp: time,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< size,
+                flags: isKeyframe ? .keyframe : []
+            )
         )
         time = time + sampleDuration
         if pendingTime.isNumeric {
@@ -304,7 +316,9 @@ final class DtsReader: ElementaryStreamReader {
     }
 
     private func updateFormat(with header: DtsUtil.DtsHeader, output: TrackOutput) throws {
-        guard let sampleRate = header.sampleRate, let channelCount = header.channelCount else { return }
+        guard let sampleRate = header.sampleRate, let channelCount = header.channelCount else {
+            return
+        }
         let sampleMimeType = header.mimeType ?? format?.codec?.mimeType
         guard format == nil
             || coreFormatPendingEmit

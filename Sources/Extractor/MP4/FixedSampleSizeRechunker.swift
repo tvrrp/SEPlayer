@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 09.03.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.FixedSampleSizeRechunker
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import SEPlayerCommon
 
@@ -15,7 +21,7 @@ enum FixedSampleSizeRechunker {
         let sizes: [Int]
         let maximumSize: Int
         let timestamps: [Int64]
-        let flags: [SampleFlags]
+        let flags: [SampleProperties.Flags]
         let duration: Int64
         let totalSize: Int
     }
@@ -31,7 +37,7 @@ enum FixedSampleSizeRechunker {
         var offsets = [Int]()
         var sizes = [Int]()
         var timestamps = [Int64]()
-        var flags = [SampleFlags]()
+        var flags = [SampleProperties.Flags]()
         var maximumSize = 0
         var totalSize = 0
         var originalSampleIndex = 0

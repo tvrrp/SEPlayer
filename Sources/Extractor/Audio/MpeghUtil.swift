@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.MpeghUtil
+//  Copyright (C) 2024 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import Foundation
 import SEPlayerCommon
@@ -57,9 +63,13 @@ enum MpeghUtil {
     ///
     /// - Returns: Whether the whole header was there.
     static func parseMhasPacketHeader(_ data: inout BlockBufferBitReader, header: inout MhasPacketHeader) throws -> Bool {
-        guard let packetType = try readEscapedIntValue(&data, 3, 8, 8) else { return false }
+        guard let packetType = try readEscapedIntValue(&data, 3, 8, 8) else {
+            return false
+        }
         header.packetType = packetType
-        guard let packetLabel = try readEscapedLongValue(&data, 2, 8, 32) else { return false }
+        guard let packetLabel = try readEscapedLongValue(&data, 2, 8, 32) else {
+            return false
+        }
         header.packetLabel = packetLabel
         if packetLabel > 0x10 {
             throw ParserError.createForUnsupportedContainerFeature(
@@ -78,7 +88,9 @@ enum MpeghUtil {
                 break
             }
         }
-        guard let packetLength = try readEscapedIntValue(&data, 11, 24, 24) else { return false }
+        guard let packetLength = try readEscapedIntValue(&data, 11, 24, 24) else {
+            return false
+        }
         header.packetLength = packetLength
         return true
     }

@@ -350,3 +350,20 @@ public extension AudioCodec {
         public init() {}
     }
 }
+
+// MARK: - Playing from a time
+
+public extension Format where Scope == FormatAttributes.Audio {
+    /// How many packets before the one decoding starts at a decoder needs for its output to be right. A decoder of
+    /// compressed audio makes the audio of a packet with that of the packet before it.
+    var decoderPrerollSampleCount: Int { sampleMimeType == .audioRAW ? 0 : 1 }
+}
+
+public extension Format where Scope == FormatAttributes.AnyMedia {
+    /// Whether a sample can play from a time within it. Audio can; a picture or a cue is shown whole.
+    var playsSamplesInPart: Bool { trackType == .audio }
+
+    /// How many samples before the one decoding starts at a decoder needs for its output to be right: those the
+    /// format of audio tells, none for other media.
+    var decoderPrerollSampleCount: Int { audio?.decoderPrerollSampleCount ?? 0 }
+}

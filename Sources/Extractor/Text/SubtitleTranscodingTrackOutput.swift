@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 24.02.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.text.SubtitleTranscodingTrackOutput
+//  Copyright (C) 2023 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -75,12 +81,13 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
         sampleDataEnd += data.dataLength
     }
 
-    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws {
+    func sampleMetadata(_ properties: SampleProperties) throws {
         guard let currentSubtitleParser else {
-            try delegate.sampleMetadata(time: time, flags: flags, range: range)
+            try delegate.sampleMetadata(properties)
             return
         }
 
+        let range = properties.dataRange
         try checkArgument(range.startIndex >= 0 && range.count >= 0)
         let sampleStart = sampleDataEnd - range.startIndex - range.count
         try checkArgument(sampleStart >= sampleDataStart)
@@ -90,7 +97,9 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
                 try currentSubtitleParser.parse(
                     data: sampleData.getSlice(at: sampleStart, length: range.count),
                     outputOptions: .allCues(),
-                    output: { try outputSample(cuesWithTiming: $0, time: time, flags: flags) }
+                    output: {
+                        try outputSample(cuesWithTiming: $0, time: properties.timingInfo, flags: properties.flags)
+                    }
                 )
             } catch {
                 if !shouldSuppressParsingErrors {
@@ -111,14 +120,11 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
     private func outputSample(
         cuesWithTiming: CuesWithTiming,
         time: CMSampleTimingInfo,
-        flags: SampleFlags
+        flags: SampleProperties.Flags
     ) throws {
         let currentFormat = try currentFormat.checkNotNil()
 
-        let data = try encoder.encode(cues: cuesWithTiming.cues, duration: cuesWithTiming.duration)
-        try delegate.sampleData(data: data)
-
-        let outputSampleTime: CMTime
+        var outputSampleTime: CMTime
         if !cuesWithTiming.startTime.isValid {
             assert(currentFormat.subsampleOffset == nil)
             outputSampleTime = time.presentationTimeStamp
@@ -128,15 +134,31 @@ final class SubtitleTranscodingTrackOutput: TrackOutput {
         } else {
             outputSampleTime = time.presentationTimeStamp + cuesWithTiming.startTime
         }
+        var duration = cuesWithTiming.duration
+
+        // A sample that times its cues itself, as TTML in MP4 does, describes only its own time: a cue that goes on
+        // past it is in the next sample too, and would show twice.
+        let isTimedBySample = currentFormat.subsampleOffset != nil && time.duration.isValid && time.duration > .zero
+        if isTimedBySample, cuesWithTiming.startTime.isValid, duration.isValid {
+            let endTime = min(outputSampleTime + duration, time.presentationTimeStamp + time.duration)
+            outputSampleTime = max(outputSampleTime, time.presentationTimeStamp)
+            guard endTime > outputSampleTime else { return }
+            duration = endTime - outputSampleTime
+        }
+
+        let data = try encoder.encode(cues: cuesWithTiming.cues, duration: duration)
+        try delegate.sampleData(data: data)
 
         try delegate.sampleMetadata(
-            time: CMSampleTimingInfo(
-                duration: cuesWithTiming.duration.isValid ? cuesWithTiming.duration : time.duration,
-                presentationTimeStamp: outputSampleTime,
-                decodeTimeStamp: .invalid
-            ),
-            flags: flags.union(.keyframe),
-            range: 0 ..< data.dataLength
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: duration.isValid ? duration : time.duration,
+                    presentationTimeStamp: outputSampleTime,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< data.dataLength,
+                flags: flags.union(.keyframe)
+            )
         )
     }
 }

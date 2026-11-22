@@ -2,6 +2,12 @@
 //  HlsPlaylistTracker.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.playlist.DefaultHlsPlaylistTracker
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -321,7 +327,9 @@ private extension HlsPlaylistTracker {
             numberOfExcludedTracks: excludedCount
         )
         let fallback = loadErrorHandlingPolicy.getFallbackSelection(for: fallbackOptions, loadErrorInfo: errorInfo)
-        guard let fallback, fallback.type == .track, bundles[url] != nil else { return }
+        guard let fallback, fallback.type == .track, bundles[url] != nil else {
+            return
+        }
 
         _ = excludeMediaPlaylist(url: url, exclusionDuration: fallback.exclusionDuration)
     }
@@ -802,7 +810,9 @@ private extension HlsPlaylistTracker {
         /// The playlist's name in logs: with its directory, as renditions often share a file name.
         private var logName: String {
             let directory = url.deletingLastPathComponent().lastPathComponent
-            guard !directory.isEmpty, directory != "/" else { return url.lastPathComponent }
+            guard !directory.isEmpty, directory != "/" else {
+                return url.lastPathComponent
+            }
             return "\(directory.prefix(12))/\(url.lastPathComponent)"
         }
 

@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.Ac4Extractor
+//  Copyright (C) 2019 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -26,7 +32,9 @@ public final class Ac4Extractor: Extractor {
         var headerPosition = startPosition
         var validFramesCount = 0
         while true {
-            guard let header = try await input.peekReader(length: 7, isolation) else { return false }
+            guard let header = try await input.peekReader(length: 7, isolation) else {
+                return false
+            }
             let syncBytes = try Int(header.getInt(at: 0, as: UInt16.self))
             if syncBytes != Ac4Util.ac40SyncWord, syncBytes != Ac4Util.ac41SyncWord {
                 validFramesCount = 0
@@ -41,7 +49,9 @@ public final class Ac4Extractor: Extractor {
                 if validFramesCount >= 4 {
                     return true
                 }
-                guard let frameSize = Ac4Util.parseAc4SyncFrameSize(header.bytesView, syncWord: syncBytes) else { return false }
+                guard let frameSize = Ac4Util.parseAc4SyncFrameSize(header.bytesView, syncWord: syncBytes) else {
+                    return false
+                }
                 try input.advancePeekPosition(length: frameSize - 7, isolation)
             }
         }

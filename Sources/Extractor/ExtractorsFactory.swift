@@ -4,6 +4,13 @@
 //
 //  Created by Damir Yackupov on 23.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ExtractorsFactory
+//    androidx.media3.extractor.DefaultExtractorsFactory
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import Foundation.NSURL
 import SEPlayerCommon
@@ -23,9 +30,12 @@ public struct DefaultExtractorFactory: ExtractorsFactory {
     private let queue: Queue
     private let subtitleParserFactory: SubtitleParserFactory
 
-    public init(queue: Queue) {
+    /// - Parameters:
+    ///   - queue: The queue the extractors run on.
+    ///   - subtitleParserFactory: Parses the subtitles in the files into cues as they are read.
+    public init(queue: Queue, subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory()) {
         self.queue = queue
-        self.subtitleParserFactory = DefaultSubtitleParserFactory()
+        self.subtitleParserFactory = subtitleParserFactory
     }
 
     public func createExtractors(url: URL?, httpHeaders: [AnyHashable: Any]) throws -> [Extractor] {

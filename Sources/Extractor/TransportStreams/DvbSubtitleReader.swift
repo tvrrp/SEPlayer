@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 10.10.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.DvbSubtitleReader
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -81,9 +87,15 @@ final class DvbSubtitleReader: ElementaryStreamReader {
         guard sampleTime.isNumeric else { return }
         for output in outputs {
             try output.sampleMetadata(
-                time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: sampleTime, decodeTimeStamp: .invalid),
-                flags: .keyframe,
-                range: 0 ..< sampleBytesWritten
+                SampleProperties(
+                    timingInfo: CMSampleTimingInfo(
+                        duration: .invalid,
+                        presentationTimeStamp: sampleTime,
+                        decodeTimeStamp: .invalid
+                    ),
+                    dataRange: 0 ..< sampleBytesWritten,
+                    flags: .keyframe
+                )
             )
         }
     }

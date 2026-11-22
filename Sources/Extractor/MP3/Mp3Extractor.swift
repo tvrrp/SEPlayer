@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp3.Mp3Extractor
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -38,6 +44,10 @@ public final class Mp3Extractor: Extractor {
     /// The time of the first sample read since the last seek; `.invalid` before it.
     private var basisTime = CMTime.invalid
     private var samplesRead: Int64 = 0
+    /// Whether samplesRead is an exact count from the start of the stream.
+    private var readingFromStart = true
+    /// The samples of the stream, its encoder delay and padding included, as its Xing or Info frame counts them.
+    private var streamSampleCount: Int64?
     private var firstSamplePosition = 0
     private var endPositionOfLastSampleRead: Int?
     private var sampleBytesRemaining = 0
@@ -70,12 +80,13 @@ public final class Mp3Extractor: Extractor {
     }
 
     public func read(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> ExtractorReadResult {
-        let extractorOutput = try extractorOutput.checkNotNil()
         let trackOutput = try trackOutput.checkNotNil()
 
         if synchronizedHeaderData == 0 {
             do {
-                guard try await synchronize(input: input, sniffing: false, isolation) else { return .endOfInput }
+                guard try await synchronize(input: input, sniffing: false, isolation) else {
+                    return .endOfInput
+                }
             } catch is EndOfFileError {
                 return .endOfInput
             }
@@ -84,8 +95,7 @@ public final class Mp3Extractor: Extractor {
         if seeker == nil {
             let seeker = try await computeSeeker(input: input, isolation)
             self.seeker = seeker
-            trackOutput.setDuration(seeker.getDuration())
-            extractorOutput.seekMap(seekMap: seeker)
+            publishSeekMap(seeker)
 
             let metadata = flags.contains(.disableId3Metadata) ? nil : id3Metadata
             var format = AudioFormat(header: synchronizedHeader)
@@ -110,6 +120,7 @@ public final class Mp3Extractor: Extractor {
         synchronizedHeaderData = 0
         basisTime = .invalid
         samplesRead = 0
+        readingFromStart = position <= firstSamplePosition
         sampleBytesRemaining = 0
         endPositionOfLastSampleRead = nil
     }
@@ -122,7 +133,9 @@ public final class Mp3Extractor: Extractor {
         let seeker = try seeker.checkNotNil()
         if sampleBytesRemaining == 0 {
             input.resetPeekPosition(isolation)
-            guard let headerData = try await peekHeader(input: input, isolation) else { return .endOfInput }
+            guard let headerData = try await peekHeader(input: input, isolation) else {
+                return .endOfInput
+            }
             guard Self.headersMatch(headerData, synchronizedHeaderData),
                   MpegAudioUtil.frameSize(headerData: headerData) != nil else {
                 // Lost synchronization: look for it again from the next byte.
@@ -157,17 +170,46 @@ public final class Mp3Extractor: Extractor {
         }
 
         let sampleRate = CMTimeScale(synchronizedHeader.sampleRate)
-        try trackOutput.sampleMetadata(
-            time: CMSampleTimingInfo(
-                duration: CMTime(value: CMTimeValue(synchronizedHeader.samplesPerFrame), timescale: sampleRate),
-                presentationTimeStamp: basisTime + CMTime(value: samplesRead, timescale: sampleRate),
+        let duration = CMTime(value: CMTimeValue(synchronizedHeader.samplesPerFrame), timescale: sampleRate)
+        let readTime = basisTime + CMTime(value: samplesRead, timescale: sampleRate)
+        var sample = SampleProperties(
+            timingInfo: CMSampleTimingInfo(
+                duration: duration,
+                presentationTimeStamp: readTime,
                 decodeTimeStamp: .invalid
             ),
-            flags: .keyframe,
-            range: 0 ..< synchronizedHeader.frameSize
+            dataRange: 0 ..< synchronizedHeader.frameSize,
+            flags: .keyframe
         )
+        applyGaplessInfo(to: &sample)
+        try trackOutput.sampleMetadata(sample)
         samplesRead += Int64(synchronizedHeader.samplesPerFrame)
         return .continueRead
+    }
+
+    /// Moves the sample so that the audio after the encoder delay starts at the start of the stream, and trims what
+    /// the delay and the padding take of it.
+    ///
+    /// The trim needs the sample's exact place in the stream: it is known only when reading from the start.
+    private func applyGaplessInfo(to sample: inout SampleProperties) {
+        guard !forcedFirstSampleTime.isNumeric, gaplessInfoHolder.hasGaplessInfo else {
+            return
+        }
+
+        let timescale = sample.timingInfo.duration.timescale
+        let delay = CMTime(value: CMTimeValue(max(gaplessInfoHolder.encoderDelay ?? 0, 0)), timescale: timescale)
+        let readTime = sample.timingInfo.presentationTimeStamp
+        guard readingFromStart else {
+            sample.timingInfo.presentationTimeStamp = readTime - delay
+            return
+        }
+
+        let padding = CMTime(value: CMTimeValue(max(gaplessInfoHolder.encoderPadding ?? 0, 0)), timescale: timescale)
+        let end = streamSampleCount.map { CMTime(value: $0, timescale: timescale) - padding } ?? .positiveInfinity
+        // In the stream's own samples, counted from its start.
+        sample.timingInfo.presentationTimeStamp = CMTime(value: samplesRead, timescale: timescale)
+        sample.trim(to: CMTimeRange(start: delay, end: end))
+        sample.timingInfo.presentationTimeStamp = readTime - delay
     }
 
     /// Finds four frames whose headers match, after the ID3 tags at the start.
@@ -260,7 +302,9 @@ public final class Mp3Extractor: Extractor {
         if let dataEndPosition = seeker?.dataEndPosition, input.getPeekPosition(isolation) > dataEndPosition - 4 {
             return nil
         }
-        guard let header = try await input.peekReader(length: 4, isolation) else { return nil }
+        guard let header = try await input.peekReader(length: 4, isolation) else {
+            return nil
+        }
         return try Int(header.getInt(at: 0, as: UInt32.self))
     }
 
@@ -317,7 +361,9 @@ public final class Mp3Extractor: Extractor {
         guard !isEndOfInput, buffer.dataLength == frameSize else { return nil }
 
         var frame = BlockBufferReader(buffer)
-        guard let tag = try Self.readSeekFrameTag(&frame, header: synchronizedHeader) else { return nil }
+        guard let tag = try Self.readSeekFrameTag(&frame, header: synchronizedHeader) else {
+            return nil
+        }
         let framePosition = input.getPosition(isolation)
         let streamLength = input.getLength(isolation)
 
@@ -330,6 +376,7 @@ public final class Mp3Extractor: Extractor {
                 gaplessInfoHolder.encoderDelay = delay
                 gaplessInfoHolder.encoderPadding = padding
             }
+            streamSampleCount = xingFrame.frameCount.map { Int64($0) * Int64(synchronizedHeader.samplesPerFrame) }
             try input.skip(length: frameSize, isolation)
             guard tag == .xing else {
                 return constantBitrateSeeker(
@@ -374,7 +421,9 @@ public final class Mp3Extractor: Extractor {
         fallbackStreamLength: Int?
     ) -> (any Mp3Seeker)? {
         let duration = infoFrame.duration
-        guard duration.isNumeric, let frameCount = infoFrame.frameCount else { return nil }
+        guard duration.isNumeric, let frameCount = infoFrame.frameCount else {
+            return nil
+        }
         let streamLength: Int
         let audioLength: Int
         if let dataSize = infoFrame.dataSize {
@@ -399,6 +448,21 @@ public final class Mp3Extractor: Extractor {
         )
     }
 
+    private func publishSeekMap(_ seeker: any Mp3Seeker) {
+        let rate = CMTimeScale(synchronizedHeader.sampleRate)
+        let usesGaplessInfo = !forcedFirstSampleTime.isNumeric && gaplessInfoHolder.hasGaplessInfo
+        let delay = usesGaplessInfo ? gaplessInfoHolder.encoderDelay ?? 0 : 0
+        let padding = usesGaplessInfo && streamSampleCount != nil ? gaplessInfoHolder.encoderPadding ?? 0 : 0
+        let map = Mp3PlaybackSeekMap(
+            seeker: seeker,
+            frameDuration: CMTime(value: Int64(synchronizedHeader.samplesPerFrame), timescale: rate),
+            delay: CMTime(value: Int64(delay), timescale: rate),
+            padding: CMTime(value: Int64(padding), timescale: rate)
+        )
+        extractorOutput?.seekMap(seekMap: map)
+        trackOutput?.setDuration(map.getDuration())
+    }
+
     /// At the end of a CBR stream, the duration up to the end of the last frame.
     private func maybeUpdateConstantBitrateDurationToLastSample() throws {
         guard let seeker = seeker as? ConstantBitrateSeeker, seeker.isSeekable(),
@@ -407,8 +471,7 @@ public final class Mp3Extractor: Extractor {
         }
         let updated = seeker.withDataEndPosition(endPositionOfLastSampleRead)
         self.seeker = updated
-        extractorOutput?.seekMap(seekMap: updated)
-        trackOutput?.setDuration(updated.getDuration())
+        publishSeekMap(updated)
     }
 }
 
@@ -457,7 +520,9 @@ private extension Mp3Extractor {
     }
 
     static func mlltSeeker(metadata: Metadata?, firstFramePosition: Int) -> MlltSeeker? {
-        guard let metadata, let mlltFrame = metadata.first(of: MlltFrame.self) else { return nil }
+        guard let metadata, let mlltFrame = metadata.first(of: MlltFrame.self) else {
+            return nil
+        }
         // TLEN: the length in milliseconds.
         let duration = metadata.entries
             .compactMap { $0 as? TextInformationFrame }

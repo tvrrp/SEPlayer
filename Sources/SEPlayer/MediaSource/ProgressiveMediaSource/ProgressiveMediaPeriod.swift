@@ -4,12 +4,17 @@
 //
 //  Created by Damir Yackupov on 02.08.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.ProgressiveMediaPeriod
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
 import CoreMedia
 import DataSource
-import Decoder
 import Extractor
 import Foundation
 import os
@@ -51,7 +56,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
     private let dataSourceFactory: DataSourceFactory
     private let transferListener: TransferListener?
     private weak var listener: Listener?
-    private let allocator: Allocator
+    private let bufferedBytesCounter: BufferedBytesCounter
     private let continueLoadingCheckIntervalBytes: Int
     private let loadErrorHandlingPolicy: LoadErrorHandlingPolicy
     private let loader: Loader
@@ -71,7 +76,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         transferListener: TransferListener? = nil,
         progressiveMediaExtractor: ProgressiveMediaExtractor,
         listener: Listener,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         continueLoadingCheckIntervalBytes: Int,
         loadErrorHandlingPolicy: LoadErrorHandlingPolicy = DefaultLoadErrorHandlingPolicy(),
         eventDispatch: EventDispatch? = nil
@@ -85,7 +90,7 @@ final class ProgressiveMediaPeriod: MediaPeriod {
         self.progressiveMediaExtractor = progressiveMediaExtractor
         self.loadCondition = AsyncConditionVariable()
         self.listener = listener
-        self.allocator = allocator
+        self.bufferedBytesCounter = bufferedBytesCounter
         self.continueLoadingCheckIntervalBytes = continueLoadingCheckIntervalBytes
         self.loadErrorHandlingPolicy = loadErrorHandlingPolicy
         self.eventDispatch = eventDispatch ?? { work in queue.async { work() } }
@@ -603,7 +608,7 @@ private extension ProgressiveMediaPeriod {
             return state.sampleQueues[index]
         }
 
-        let trackOutput = try SampleQueue(queue: queue, allocator: allocator)
+        let trackOutput = try SampleQueue(queue: queue, bufferedBytesCounter: bufferedBytesCounter)
         trackOutput.delegate = self
         // Samples go once the renderer has read this far past them. The player discards behind playback only when it
         // updates, which can be rare while playback runs.
@@ -1341,7 +1346,9 @@ extension ProgressiveMediaPeriod {
             }
             SELogger.info(.progressive, "ICY stream: \(icyHeaders)")
             let icyTrackOutput = try icyListener.icyTrackOutput(for: icyHeaders)
-            guard let metadataInterval = icyHeaders.metadataInterval, let icyTrackOutput else { return nil }
+            guard let metadataInterval = icyHeaders.metadataInterval, let icyTrackOutput else {
+                return nil
+            }
             return IcyDataReader(
                 upstream: dataSource,
                 start: position,
@@ -1362,9 +1369,15 @@ extension ProgressiveMediaPeriod {
             do {
                 try output.sampleData(data: metadata)
                 try output.sampleMetadata(
-                    time: CMSampleTimingInfo(duration: .zero, presentationTimeStamp: time, decodeTimeStamp: .invalid),
-                    flags: .keyframe,
-                    range: 0 ..< metadata.dataLength
+                    SampleProperties(
+                        timingInfo: CMSampleTimingInfo(
+                            duration: .zero,
+                            presentationTimeStamp: time,
+                            decodeTimeStamp: .invalid
+                        ),
+                        dataRange: 0 ..< metadata.dataLength,
+                        flags: .keyframe
+                    )
                 )
             } catch {
                 SELogger.warning(.progressive, "Writing ICY metadata failed: \(error)")

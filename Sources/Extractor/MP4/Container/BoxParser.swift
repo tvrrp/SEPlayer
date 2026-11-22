@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.BoxParser
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import QuartzCore
@@ -18,7 +24,8 @@ public struct BoxParser {
         isQuickTime: Bool,
         omitTrackSampleTable: Bool
     ) throws -> [TrackSampleTable] {
-        try moov.containerChildren
+        let movieGaplessInfo = gaplessInfoHolder
+        return try moov.containerChildren
             .filter { $0.type == .trak }
             .compactMap { atom in
                 guard var track = try parseTrak(
@@ -39,12 +46,16 @@ public struct BoxParser {
                     .getContainerBoxOfType(type: .stbl)
                     .checkNotNil(BoxParserErrors.missingBox(type: .stbl))
 
-                return try parseStbl(
+                var trackGaplessInfo = movieGaplessInfo
+                MetadataUtil.setFormatGaplessInfo(gaplessInfoHolder: trackGaplessInfo, format: &track.format)
+                let table = try parseStbl(
                     track: &track,
                     stblBox: stbl,
-                    gaplessInfoHolder: &gaplessInfoHolder,
+                    gaplessInfoHolder: &trackGaplessInfo,
                     omitTrackSampleTable: omitTrackSampleTable
                 )
+                if trackGaplessInfo.hasGaplessInfo { gaplessInfoHolder = trackGaplessInfo }
+                return table
             }
     }
 

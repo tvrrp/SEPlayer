@@ -6,6 +6,17 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     private let outputFactory: () -> any AudioSampleBufferOutput
     private var audioOutput: any AudioSampleBufferOutput
     private let decodeBufferQueue: TypedCMBufferQueue<CMSampleBuffer>
+    /// Makes the decoders of the decode output mode.
+    private let decoderFactory: AudioDecoderFactory?
+    /// The decoder of the decode output mode, or `nil` when nothing decodes the input format.
+    private var audioDecoder: AudioDecoder?
+    /// The format of the samples read last.
+    private var inputFormat: AnyFormat?
+    private var reinitializationState = DecoderReinitializationState.none
+    /// Whether the decoder got samples since it was made or flushed: a decoder that did is drained before it is
+    /// replaced, so the audio it holds still plays.
+    private var decoderReceivedBuffers = false
+    private var lowWaterMarkToken: CMBufferQueueTriggerToken?
     private var outputGeneration: UInt64 = 0
     private var effectiveRateObserver: NSObjectProtocol?
     private weak var eventListener: AudioRendererEventListener?
@@ -14,6 +25,7 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     /// Sample rate and channel count of the last sample enqueued.
     private var enqueuedAudioFormat: (sampleRate: Float64, channels: UInt32)?
     /// The first sample of a new format, kept until just before it plays; see ``holdsBackNewFormat(_:)``.
+    private var pendingPreroll: AudioPacketBatch?
     private var heldSample: CMSampleBuffer?
     private let heldSampleTimer: DispatchSourceTimer
     private var volume: Float = 1
@@ -24,9 +36,11 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         clock: SEClock,
         renderSynchronizer: any PlaybackSynchronizer,
         eventListener: AudioRendererEventListener? = nil,
+        decoderFactory: AudioDecoderFactory? = nil,
         outputFactory: @escaping () -> any AudioSampleBufferOutput = { AVFAudioSampleBufferOutput() }
     ) throws {
         self.eventListener = eventListener
+        self.decoderFactory = decoderFactory
         self.renderSynchronizer = renderSynchronizer
         self.outputFactory = outputFactory
         audioOutput = outputFactory()
@@ -64,15 +78,34 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         super.onDisabled()
         audioOutput.flush()
         replaceOutput()
+        releaseDecoder()
+        inputFormat = nil
         try? decodeBufferQueue.reset()
         forgetAudioFormat()
+    }
+
+    override func onRelease() {
+        super.onRelease()
+
+        audioOutput.detach(from: renderSynchronizer)
     }
 
     override func supportsFormat(_ format: AnyFormat) throws -> RendererCapabilities.Support {
         guard format.trackType == .audio else {
             return .create(formatSupport: .unsupportedType)
         }
-        return try super.supportsFormat(format)
+
+        // The system plays what it can, and a decoder of the factory decodes the rest.
+        let systemSupport = try super.supportsFormat(format)
+        if systemSupport.formatSupport == .handled {
+            return systemSupport
+        }
+        // Only the system output decrypts protected samples: a decoder of the factory can't.
+        if format.encryption != nil {
+            return .create(formatSupport: .unsupportedDrm)
+        }
+        guard let decoderFactory else { return systemSupport }
+        return decoderFactory.supportsFormat(format)
     }
 
     /// The player's clock starts, stops and moves the synchronizer; the audio only plays in it.
@@ -94,6 +127,7 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     /// the item still playing.
     override func onPositionReset(position: CMTime, joining: Bool) throws {
         try super.onPositionReset(position: position, joining: joining)
+        try flushDecoder()
         try decodeBufferQueue.reset()
         audioOutput.flush()
         forgetAudioFormat()
@@ -149,6 +183,7 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         audioOutput.flush()
         forgetAudioFormat()
         try resetOutputPipeline()
+        try flushDecoder()
         try decodeBufferQueue.reset()
         beginOutputRecovery()
         resumeMediaData()
@@ -156,7 +191,24 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         return true
     }
 
-    override func onInputFormatChanged(_ format: AnyFormat) throws {}
+    /// Keeps the output mode: passing through goes on while the system plays the format, and a format it doesn't
+    /// play is decoded from the next keyframe; decoding goes on, with the decoder or one of the new format.
+    override func onInputFormatChanged(_ format: AnyFormat) throws {
+        let oldFormat = inputFormat
+        inputFormat = format
+        switch targetOutputMode {
+        case .passthrough:
+            guard try super.supportsFormat(format).formatSupport != .handled else {
+                return
+            }
+            try updateDecoder(oldFormat: oldFormat, newFormat: format)
+            changeOutputMode(to: .decode)
+        case .decode:
+            // TODO: pass a format protected by DRM through to the system output, which alone decrypts it, once DRM is
+            // supported.
+            try updateDecoder(oldFormat: oldFormat, newFormat: format)
+        }
+    }
 
     override func inputFormatDidChange(_ format: AnyFormat?) {
         eventListener?.onAudioInputFormatChanged(format)
@@ -167,14 +219,69 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     }
 
     override func feedInputBuffer(readStream: (ReadFlags) throws -> SampleStreamReadResult) throws -> Bool {
-        throw RendererRecoveryError.unsupportedAudioDecoding
+        guard outputMode == .decode else {
+            throw ErrorBuilder.illegalState()
+        }
+
+        switch reinitializationState {
+        case .none:
+            break
+        case .signalEndOfStream:
+            if let audioDecoder { signalEndOfStream(to: audioDecoder) }
+            return false
+        case .waitEndOfStream:
+            return false
+        }
+
+        // With enough decoded audio ahead, decoding goes on once the output took some of it.
+        if let lowWaterMarkToken {
+            try decodeBufferQueue.removeTrigger(lowWaterMarkToken)
+            self.lowWaterMarkToken = nil
+        }
+        guard decodeBufferQueue.duration < Self.decodedAudioHighWaterMark else {
+            lowWaterMarkToken = try decodeBufferQueue.installTrigger(
+                condition: .whenDurationBecomesLessThanOrEqualTo(Self.decodedAudioLowWaterMark)
+            ) { [weak self] _ in
+                guard let self else { return }
+                queue.justDispatch { [weak self] in self?.readInputStream() }
+            }
+            return false
+        }
+
+        switch try readStream([]) {
+        case .nothingRead:
+            return false
+        case let .didReadFormat(format):
+            try onInputFormatChanged(format)
+            inputFormatDidChange(format)
+            return true
+        case let .didReadBuffer(buffer):
+            // Nothing decodes the format.
+            guard let audioDecoder else {
+                throw RendererRecoveryError.unsupportedAudioDecoding
+            }
+            try audioDecoder.queueInputBuffer(buffer)
+            decoderReceivedBuffers = true
+            return true
+        }
     }
 
     /// Joins the packets that follow `buffer` and are already in the stream: see ``AudioPacketBatch``.
-    override func outputBuffer(startingWith buffer: CMSampleBuffer) throws -> CMSampleBuffer {
-        guard var batch = AudioPacketBatch(buffer) else { return buffer }
+    override func outputBuffer(startingWith buffer: CMSampleBuffer) throws -> CMSampleBuffer? {
+        var candidate = pendingPreroll
+        pendingPreroll = nil
+        if candidate?.canAppend(buffer) == true {
+            candidate?.append(buffer)
+        } else {
+            candidate = AudioPacketBatch(buffer)
+        }
+        guard var batch = candidate else { return buffer }
         while let next = try readFollowingBuffer(if: batch.canAppend) {
             batch.append(next)
+        }
+        if !batch.hasPlayableAudio {
+            pendingPreroll = batch
+            return nil
         }
         return try batch.makeSampleBuffer()
     }
@@ -235,6 +342,87 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         audioOutput.detach(from: renderSynchronizer)
         audioOutput = outputFactory()
         audioOutput.setVolume(volume, isMuted: isMuted)
+    }
+
+    // MARK: - Decoder
+
+    /// Keeps the decoder when it decodes `newFormat` too, and otherwise has the factory make one of the new format.
+    private func updateDecoder(oldFormat: AnyFormat?, newFormat: AnyFormat) throws {
+        guard let audioDecoder, let oldFormat else {
+            try initializeDecoder(for: newFormat)
+            return
+        }
+        // A decoder already waiting to be replaced is replaced by one of the latest format, once it is drained.
+        guard reinitializationState == .none else { return }
+
+        switch audioDecoder.canReuse(oldFormat: oldFormat, newFormat: newFormat) {
+        case .yesWithoutReconfiguration:
+            break
+        case .no where decoderReceivedBuffers:
+            // Drained first, so the audio it holds still plays; the factory then makes a decoder of the new format.
+            reinitializationState = .signalEndOfStream
+        case .no:
+            releaseDecoder()
+            try initializeDecoder(for: newFormat)
+        }
+    }
+
+    private func initializeDecoder(for format: AnyFormat) throws {
+        guard let decoderFactory, decoderFactory.supportsFormat(format).formatSupport == .handled else {
+            SELogger.warning(.audio, "\(name) has no decoder for \(format.sampleMimeType?.rawValue ?? "?")")
+            return
+        }
+
+        let decoder = try decoderFactory.createDecoder(
+            format: format,
+            mediaPeriodId: getMediaPeriodId(),
+            decodeQueue: queue,
+            outputBufferQueue: decodeBufferQueue
+        )
+        SELogger.info(.audio, "\(name) decodes \(format.sampleMimeType?.rawValue ?? "?") with \(decoder.name)")
+        audioDecoder = decoder
+    }
+
+    private func releaseDecoder() {
+        audioDecoder?.invalidate()
+        audioDecoder = nil
+        reinitializationState = .none
+        decoderReceivedBuffers = false
+    }
+
+    /// Drops the packets being decoded. A decoder waiting to be replaced is replaced now: nothing of it is left to play.
+    private func flushDecoder() throws {
+        guard reinitializationState == .none else {
+            releaseDecoder()
+            if let inputFormat { try initializeDecoder(for: inputFormat) }
+            return
+        }
+
+        audioDecoder?.flush()
+        decoderReceivedBuffers = false
+    }
+
+    /// Tells the decoder its input ended, and replaces it once it output all the audio it holds.
+    private func signalEndOfStream(to decoder: AudioDecoder) {
+        reinitializationState = .waitEndOfStream
+        decoder.signalEndOfStream { [weak self, weak decoder] in
+            self?.queue.justDispatch { [weak self] in self?.decoderDidEndStream(decoder) }
+        }
+    }
+
+    private func decoderDidEndStream(_ decoder: AudioDecoder?) {
+        // A flush or a reset may have replaced the decoder meanwhile.
+        guard reinitializationState == .waitEndOfStream, let decoder, decoder === audioDecoder else {
+            return
+        }
+
+        releaseDecoder()
+        do {
+            if let inputFormat { try initializeDecoder(for: inputFormat) }
+            readInputStream()
+        } catch {
+            reportFailure(error)
+        }
     }
 
     // MARK: - Format changes
@@ -312,6 +500,7 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     /// A flush or a seek drops a kept sample: the samples come again from the source.
     private func forgetAudioFormat() {
         heldSample = nil
+        pendingPreroll = nil
         enqueuedAudioFormat = nil
         try? renderSynchronizer.timebase.setTimerNextFireTime(heldSampleTimer, fireTime: .invalid)
     }
@@ -323,4 +512,8 @@ private extension AVFAudioRenderer {
     static let newFormatLead: CFTimeInterval = 0.06
     /// How long after the kept sample is due the host-time backup of its timer fires.
     static let heldSampleTimerSlack: CFTimeInterval = 0.01
+    /// The duration of decoded audio at which decoding goes on.
+    static let decodedAudioLowWaterMark = CMTime(value: 1, timescale: 2)
+    /// The duration of decoded audio at which decoding pauses.
+    static let decodedAudioHighWaterMark = CMTime(value: 1, timescale: 1)
 }

@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.metadata.icy.IcyDecoder
+//  Copyright (C) 2018 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import Foundation
 import SEPlayerCommon
@@ -13,7 +19,9 @@ public struct IcyDecoder: MetadataDecoder {
     public init() {}
 
     public func decode(_ data: BlockBufferReader) -> Metadata? {
-        guard let rawMetadata = try? data.getData(at: data.readerIndex, length: data.readableBytes) else { return nil }
+        guard let rawMetadata = try? data.getData(at: data.readerIndex, length: data.readableBytes) else {
+            return nil
+        }
         // The ICY protocol names no character encoding and has no way to send one: UTF-8 is tried first, then
         // ISO-8859-1, which any bytes are.
         let string = data.getString(at: data.readerIndex, length: data.readableBytes, encoding: .utf8)
@@ -39,7 +47,9 @@ public struct IcyDecoder: MetadataDecoder {
         while let separator = remainder.range(of: "='") {
             let key = remainder[..<separator.lowerBound]
             let valueStart = separator.upperBound
-            guard let end = remainder.range(of: "';", range: valueStart ..< remainder.endIndex) else { break }
+            guard let end = remainder.range(of: "';", range: valueStart ..< remainder.endIndex) else {
+                break
+            }
             if !key.isEmpty {
                 elements.append((String(key), String(remainder[valueStart ..< end.lowerBound])))
             }

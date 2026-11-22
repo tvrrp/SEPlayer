@@ -6,9 +6,18 @@
 import CoreGraphics
 import Foundation
 
-/// Parses CSS colors: `#rrggbb`, `#rrggbbaa`, `#rgb`, `rgb()`, `rgba()` and color names.
+/// Parses CSS and TTML colors: `#rrggbb`, `#rrggbbaa`, `#rgb`, `rgb()`, `rgba()` and color names.
 enum CssColorParser {
     static func parseCssColor(_ value: String) -> CGColor? {
+        parseColor(value, isAlphaFraction: true)
+    }
+
+    /// A TTML color, whose `rgba()` alpha is from 0 to 255.
+    static func parseTtmlColor(_ value: String) -> CGColor? {
+        parseColor(value, isAlphaFraction: false)
+    }
+
+    private static func parseColor(_ value: String, isAlphaFraction: Bool) -> CGColor? {
         let value = value.replacingOccurrences(of: " ", with: "").lowercased()
         guard !value.isEmpty else { return nil }
 
@@ -22,7 +31,7 @@ enum CssColorParser {
             let channels = arguments.prefix(3).compactMap { Double($0) }
             guard channels.count == 3 else { return nil }
             // The alpha of CSS colors is a fraction.
-            let alpha = isRgba ? Double(arguments[3]) : 1
+            let alpha = isRgba ? Double(arguments[3]).map { isAlphaFraction ? $0 : $0 / 255 } : 1
             guard let alpha else { return nil }
             return makeColor(red: channels[0] / 255, green: channels[1] / 255, blue: channels[2] / 255, alpha: alpha)
         }

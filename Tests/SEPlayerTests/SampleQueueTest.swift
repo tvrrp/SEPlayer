@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 03.11.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.SampleQueueTest
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -47,8 +53,8 @@ class SampleQueueTest {
     ]
 
     private let sampleTimestamps: [Int64] = [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]
-    private let sampleFlags: [SampleFlags] = [.keyframe, [], [], [], .keyframe, [], [], []]
-    private lazy var sampleFlagsSyncSamplesOnly = [SampleFlags](repeating: .keyframe, count: sampleFlags.count)
+    private let sampleFlags: [SampleProperties.Flags] = [.keyframe, [], [], [], .keyframe, [], [], []]
+    private lazy var sampleFlagsSyncSamplesOnly = [SampleProperties.Flags](repeating: .keyframe, count: sampleFlags.count)
     private lazy var sampleFormats: [AnyFormat] = [format1, format1, format1, format1, format2, format2, format2, format2]
     private let dataSecondKeyframeIndex = 4
     private lazy var sampleFormatsSyncSamplesOnly: [AnyFormat] = [
@@ -105,6 +111,53 @@ class SampleQueueTest {
             #expect(sampleQueue.getReadIndex() == 6)
             sampleQueue.skip(count: 2)
         }
+    }
+
+    @Test(arguments: [true, false])
+    func audioSeekKeepsPrerollAndTrimsThePacketAtTheTarget(buffered: Bool) throws {
+        let format = SEPlayerTestRunner.audioFormat
+        let target = CMTime(value: 25, timescale: 1000)
+        let duration = CMTime(value: 10, timescale: 1000)
+        sampleQueue.setFormat(format)
+        if !buffered { sampleQueue.setStartTime(target) }
+        for index in 0 ..< 4 {
+            try sampleQueue.sampleData(data: [UInt8(index)], length: 1, isolation: TestableSyncPlayerActor.shared)
+            let time = CMTime(value: Int64(index * 10), timescale: 1000)
+            let timing = CMSampleTimingInfo(
+                duration: duration,
+                presentationTimeStamp: time,
+                decodeTimeStamp: .invalid
+            )
+            try sampleQueue.sampleMetadata(
+                SampleProperties(
+                    timingInfo: timing,
+                    dataRange: 0 ..< 1,
+                    flags: [.keyframe, .decodeOnly]
+                )
+            )
+        }
+        if buffered { #expect(sampleQueue.seek(time: target, allowTimeBeyondBuffer: false)) }
+        try assertReadFormat(formatRequired: false, format: format)
+        func readPacket() throws -> CMSampleBuffer {
+            guard case let .didReadBuffer(buffer) = try sampleQueue.read(readFlags: [], loadingFinished: false) else {
+                throw SampleBufferError.requiredParameterMissing
+            }
+            return buffer
+        }
+        let prime = try readPacket()
+        let first = try readPacket()
+        #expect(prime.presentationTimeStamp == duration)
+        #expect(prime.outputDuration == .zero)
+        #expect(first.outputPresentationTimeStamp == target)
+        #expect(first.outputDuration == CMTime(value: 5, timescale: 1000))
+        var batch = try #require(AudioPacketBatch(prime))
+        #expect(batch.canAppend(first))
+        batch.append(first)
+        let output = try batch.makeSampleBuffer()
+        #expect(output.numSamples == 2)
+        #expect(output.outputPresentationTimeStamp == target)
+        #expect(output.outputDuration == first.outputDuration)
+        #expect(output.perSampleAttachments[1].bool(for: .doNotDisplay) == true)
     }
 
     @Test
@@ -1224,7 +1277,7 @@ class SampleQueueTest {
         sampleOffsets: [Int],
         sampleTimestamps: [Int64],
         sampleFormats: [AnyFormat],
-        sampleFlags: [SampleFlags]
+        sampleFlags: [SampleProperties.Flags]
     ) throws {
         try sampleQueue.sampleData(data: data, length: data.count, isolation: TestableSyncPlayerActor.shared)
         var format: AnyFormat?
@@ -1244,7 +1297,7 @@ class SampleQueueTest {
         }
     }
 
-    private func writeSample(data: [UInt8], timestampUs: Int64, flags: SampleFlags) throws {
+    private func writeSample(data: [UInt8], timestampUs: Int64, flags: SampleProperties.Flags) throws {
         try sampleQueue.sampleData(data: data, length: data.count, isolation: TestableSyncPlayerActor.shared)
         try sampleQueue.sampleMetadata(time: timestampUs, flags: flags, size: data.count, offset: 0)
     }
@@ -1276,7 +1329,7 @@ class SampleQueueTest {
         sampleCount: Int? = nil,
         sampleOffsetUs: Int64 = 0,
         sampleFormats: [AnyFormat]? = nil,
-        sampleFlags: [SampleFlags]? = nil
+        sampleFlags: [SampleProperties.Flags]? = nil
     ) throws {
         let sampleCount = sampleCount ?? sampleTimestamps.count - firstSampleIndex
         let sampleFormats = sampleFormats ?? self.sampleFormats
@@ -1580,7 +1633,7 @@ enum TestReadResult: Equatable {
 /// Receives what a read hands out: the time, the flags and, unless omitted, the data.
 final class TestInputBuffer {
     private(set) var timeUs: Int64 = 0
-    private(set) var flags: SampleFlags = []
+    private(set) var flags: SampleProperties.Flags = []
     private var data: [UInt8]?
 
     var size: Int { data?.count ?? 0 }
@@ -1639,13 +1692,19 @@ extension SampleQueue {
         onQueue { _ in sampleData(data: blockBuffer) }
     }
 
-    func sampleMetadata(time: Int64, flags: SampleFlags, size: Int, offset: Int) throws {
+    func sampleMetadata(time: Int64, flags: SampleProperties.Flags, size: Int, offset: Int) throws {
         let time = Self.time(time)
         try onQueue { _ in
             try sampleMetadata(
-                time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
-                flags: flags,
-                range: offset ..< (offset + size)
+                SampleProperties(
+                    timingInfo: CMSampleTimingInfo(
+                        duration: .invalid,
+                        presentationTimeStamp: time,
+                        decodeTimeStamp: time
+                    ),
+                    dataRange: offset ..< (offset + size),
+                    flags: flags
+                )
             )
         }
     }

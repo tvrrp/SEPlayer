@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 04.11.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.ExoPlayerTest
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -363,13 +369,13 @@ class SEPlayerTests {
             override func createMediaPeriod(
                 id: MediaPeriodId,
                 trackGroups: TrackGroupArray,
-                allocator: Allocator,
+                bufferedBytesCounter: BufferedBytesCounter,
                 transferListener: TransferListener?
             ) throws -> FakeMediaPeriod {
                 let period = try FakeMediaPeriod(
                     queue: queue,
                     trackGroups: trackGroups,
-                    allocator: allocator,
+                    bufferedBytesCounter: bufferedBytesCounter,
                     singleSampleTimeUs: FakeTimeline.TimelineWindowDefinition
                         .defaultWindowOffsetInFirstPeriodUs,
                     deferOnPrepared: false
@@ -411,13 +417,13 @@ class SEPlayerTests {
             override func createMediaPeriod(
                 id: MediaPeriodId,
                 trackGroups: TrackGroupArray,
-                allocator: Allocator,
+                bufferedBytesCounter: BufferedBytesCounter,
                 transferListener: TransferListener?
             ) throws -> FakeMediaPeriod {
                 let mediaPeriod = try FakeMediaPeriod(
                     queue: queue,
                     trackGroups: trackGroups,
-                    allocator: allocator,
+                    bufferedBytesCounter: bufferedBytesCounter,
                     singleSampleTimeUs: FakeTimeline.TimelineWindowDefinition.defaultWindowOffsetInFirstPeriodUs
                 )
                 mediaPeriod.setDiscontinuityPositionUs(10)
@@ -452,13 +458,13 @@ class SEPlayerTests {
             override func createMediaPeriod(
                 id: MediaPeriodId,
                 trackGroups: TrackGroupArray,
-                allocator: Allocator,
+                bufferedBytesCounter: BufferedBytesCounter,
                 transferListener: TransferListener?
             ) throws -> FakeMediaPeriod {
                 let mediaPeriod = try FakeMediaPeriod(
                     queue: queue,
                     trackGroups: trackGroups,
-                    allocator: allocator,
+                    bufferedBytesCounter: bufferedBytesCounter,
                     singleSampleTimeUs: FakeTimeline.TimelineWindowDefinition.defaultWindowOffsetInFirstPeriodUs
                 )
 
@@ -532,13 +538,13 @@ class SEPlayerTests {
             override func createMediaPeriod(
                 id: MediaPeriodId,
                 trackGroups: TrackGroupArray,
-                allocator: Allocator,
+                bufferedBytesCounter: BufferedBytesCounter,
                 transferListener: TransferListener?
             ) throws -> FakeMediaPeriod {
                 let mediaPeriod = try FakeMediaPeriod(
                     queue: queue,
                     trackGroups: trackGroups,
-                    allocator: allocator,
+                    bufferedBytesCounter: bufferedBytesCounter,
                     singleSampleTimeUs: FakeTimeline.TimelineWindowDefinition.defaultWindowOffsetInFirstPeriodUs,
                     deferOnPrepared: true
                 )
@@ -1092,13 +1098,13 @@ class SEPlayerTests {
             override func createMediaPeriod(
                 id: MediaPeriodId,
                 trackGroups: TrackGroupArray,
-                allocator: Allocator,
+                bufferedBytesCounter: BufferedBytesCounter,
                 transferListener: TransferListener?
             ) throws -> FakeMediaPeriod {
                 try FakeMediaPeriod(
                     queue: queue,
                     trackGroups: trackGroups,
-                    allocator: allocator,
+                    bufferedBytesCounter: bufferedBytesCounter,
                     trackDataFactory: TestTrackDataFactory(
                         windowOffsetInFirstPeriodUs: windowOffsetInFirstPeriodUs,
                         maxBufferedPositionMs: maxBufferedPositionMs

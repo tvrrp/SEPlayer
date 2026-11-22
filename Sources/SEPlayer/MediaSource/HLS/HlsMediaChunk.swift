@@ -2,6 +2,12 @@
 //  HlsMediaChunk.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.HlsMediaChunk
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -432,14 +438,14 @@ private final class FirstSampleTrackOutput: TrackOutput {
         try output.sampleData(data: data)
     }
 
-    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws {
+    func sampleMetadata(_ properties: SampleProperties) throws {
         guard isVideo, owner.takesSamples() else { return }
-        var time = time
+        var properties = properties
         if owner.keyframeDuration.isNumeric, owner.keyframeDuration > .zero,
-           !time.duration.isNumeric || time.duration < owner.keyframeDuration {
-            time.duration = owner.keyframeDuration
+           !properties.timingInfo.duration.isNumeric || properties.timingInfo.duration < owner.keyframeDuration {
+            properties.timingInfo.duration = owner.keyframeDuration
         }
-        try output.sampleMetadata(time: time, flags: flags, range: range)
+        try output.sampleMetadata(properties)
         owner.didOutputSample()
     }
 }

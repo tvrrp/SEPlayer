@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 04.11.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.test.utils.FakeMediaSource
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -114,7 +120,7 @@ class FakeMediaSource: BaseMediaSource {
         }
     }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> MediaPeriod {
+    override func createPeriod(id: MediaPeriodId, bufferedBytesCounter: BufferedBytesCounter, startPosition: CMTime) throws -> MediaPeriod {
         #expect(preparedSource)
         #expect(!releasedSource)
         let timeline = try #require(timeline)
@@ -123,7 +129,7 @@ class FakeMediaSource: BaseMediaSource {
         let mediaPeriod = try createMediaPeriod(
             id: id,
             trackGroups: trackGroupArray,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             transferListener: transferListener
         )
         activeMediaPeriods.add(mediaPeriod)
@@ -170,7 +176,7 @@ class FakeMediaSource: BaseMediaSource {
     func createMediaPeriod(
         id: MediaPeriodId,
         trackGroups: TrackGroupArray,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         transferListener: TransferListener?
     ) throws -> FakeMediaPeriod {
         let timeline = try #require(timeline)
@@ -179,7 +185,7 @@ class FakeMediaSource: BaseMediaSource {
         return try FakeMediaPeriod(
             queue: queue,
             trackGroups: trackGroups,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             trackDataFactory: trackDataFactory ?? FakeMediaPeriod.DefaultTrackDataFactory
                 .singleSampleWithTimeUs(sampleTimeUs: defaultFirstSampleTimeUs),
             syncSampleTimestampsUs: syncSampleTimesUs,

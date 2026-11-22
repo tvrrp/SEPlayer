@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 20.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.MaskingMediaPeriod
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -29,7 +35,7 @@ final class MaskingMediaPeriod: MediaPeriod {
     var preparePositionOverride: CMTime
 
     let preparePosition: CMTime
-    private let allocator: Allocator
+    private let bufferedBytesCounter: BufferedBytesCounter
     private weak var mediaSource: MediaSource?
     private var mediaPeriod: MediaPeriod?
     /// Passed on to the period once it is created.
@@ -40,9 +46,9 @@ final class MaskingMediaPeriod: MediaPeriod {
 
     private let lock = UnfairLock()
 
-    init(id: MediaPeriodId, allocator: Allocator, preparePosition: CMTime) {
+    init(id: MediaPeriodId, bufferedBytesCounter: BufferedBytesCounter, preparePosition: CMTime) {
         self.id = id
-        self.allocator = allocator
+        self.bufferedBytesCounter = bufferedBytesCounter
         self.preparePosition = preparePosition
         preparePositionOverride = .invalid
     }
@@ -64,7 +70,7 @@ final class MaskingMediaPeriod: MediaPeriod {
         let callback = callback
         lock.unlock()
 
-        let mediaPeriod = try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: preparePosition)
+        let mediaPeriod = try mediaSource.createPeriod(id: id, bufferedBytesCounter: bufferedBytesCounter, startPosition: preparePosition)
         if callback != nil {
             mediaPeriod.prepare(callback: self, on: preparePosition)
         }

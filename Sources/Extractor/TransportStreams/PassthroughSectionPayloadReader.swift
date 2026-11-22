@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.PassthroughSectionPayloadReader
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -46,9 +52,15 @@ final class PassthroughSectionPayloadReader: SectionPayloadReader {
         }
         try output.sampleData(data: sectionData.readSlice(length: sampleSize).blockBuffer)
         try output.sampleMetadata(
-            time: CMSampleTimingInfo(duration: .zero, presentationTimeStamp: sampleTime, decodeTimeStamp: .invalid),
-            flags: .keyframe,
-            range: 0 ..< sampleSize
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: .zero,
+                    presentationTimeStamp: sampleTime,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< sampleSize,
+                flags: .keyframe
+            )
         )
     }
 }

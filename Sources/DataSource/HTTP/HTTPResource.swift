@@ -624,13 +624,15 @@ private extension HTTPResource {
     }
 
     /// Whether `fetch` should go on: a read waits for it, or its reader isn't far behind it, or its reader closed
-    /// too recently for the next reader to have opened.
+    /// too recently for the reader a seek opens next to have opened.
     func isNeeded(_ fetch: Fetch) -> Bool {
         if hasPendingReads(fetch) {
             return true
         }
         if let readerClosedAt = fetch.readerClosedAt {
-            return seconds(since: readerClosedAt) < responseTime ?? Self.defaultResponseTime
+            // A reader opening elsewhere stops it sooner. One that never opens, as after a seek away from an HLS
+            // segment, would leave it taking bandwidth from the requests the seek needs.
+            return seconds(since: readerClosedAt) < Self.fetchTimeWithoutReader
         }
         guard let reader = fetch.reader, reader.fetch === fetch else {
             return false
@@ -1062,6 +1064,8 @@ private extension HTTPResource {
     static let maxBytesToWaitFor = 1024 * 1024 // 1 MB
     /// The response time assumed until one is measured, in seconds.
     static let defaultResponseTime = 0.5
+    /// How long a fetch goes on after its reader closed, for the reader a seek opens next, in seconds.
+    static let fetchTimeWithoutReader = 0.1
     /// At most this many requests run at once: one can read on while another fetches elsewhere, as the `moov` box
     /// at the end of a file. A read needing one more waits until one stops.
     static let maxConnections = 2

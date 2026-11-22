@@ -4,6 +4,23 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.metadata.id3.Id3Frame
+//    androidx.media3.extractor.metadata.id3.TextInformationFrame
+//    androidx.media3.extractor.metadata.id3.UrlLinkFrame
+//    androidx.media3.extractor.metadata.id3.CommentFrame
+//    androidx.media3.extractor.metadata.id3.ApicFrame
+//    androidx.media3.extractor.metadata.id3.GeobFrame
+//    androidx.media3.extractor.metadata.id3.PrivFrame
+//    androidx.media3.extractor.metadata.id3.BinaryFrame
+//    androidx.media3.extractor.metadata.id3.ChapterFrame
+//    androidx.media3.extractor.metadata.id3.ChapterTocFrame
+//    androidx.media3.extractor.metadata.id3.InternalFrame
+//    androidx.media3.extractor.metadata.id3.MlltFrame
+//  Copyright (C) 2016, 2017, 2018 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -111,7 +128,9 @@ public struct TextInformationFrame: Id3Frame {
     private static func dateComponents(_ value: String) -> DateComponents? {
         let date = value.prefix { $0 != "T" }.split(separator: "-", omittingEmptySubsequences: false)
         let numbers = date.compactMap { Int($0) }
-        guard (1 ... 3).contains(date.count), numbers.count == date.count else { return nil }
+        guard (1 ... 3).contains(date.count), numbers.count == date.count else {
+            return nil
+        }
         return DateComponents(
             year: numbers[0],
             month: numbers.count > 1 ? numbers[1] : nil,

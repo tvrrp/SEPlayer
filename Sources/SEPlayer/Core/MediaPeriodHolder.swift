@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 07.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.MediaPeriodHolder
+//  Copyright (C) 2018 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -44,7 +50,7 @@ final class MediaPeriodHolder {
         rendererCapabilities: [RendererCapabilitiesResolver],
         rendererPositionOffset: CMTime,
         trackSelector: TrackSelector,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         mediaSourceList: MediaSourceList,
         info: MediaPeriodInfo,
         emptyTrackSelectorResult: TrackSelectorResult,
@@ -65,7 +71,7 @@ final class MediaPeriodHolder {
         self.mediaPeriod = try Self.createMediaPeriod(
             id: info.id,
             mediaSourceList: mediaSourceList,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             startPosition: info.startPosition,
             endPosition: info.endPosition
         )
@@ -436,13 +442,13 @@ final class MediaPeriodHolder {
     private static func createMediaPeriod(
         id: MediaPeriodId,
         mediaSourceList: MediaSourceList,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         startPosition: CMTime,
         endPosition: CMTime
     ) throws -> MediaPeriod {
         let mediaPeriod = try mediaSourceList.createPeriod(
             id: id,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             startPosition: startPosition
         )
 

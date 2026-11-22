@@ -2,6 +2,14 @@
 //  HlsExtractorFactory.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.HlsExtractorFactory
+//    androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
+//    androidx.media3.exoplayer.hls.TimestampAdjusterProvider
+//  Copyright (C) 2016, 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Extractor
@@ -31,22 +39,22 @@ final class TimestampAdjusterProvider: @unchecked Sendable {
 }
 
 /// The extractor of an HLS media chunk, which following chunks may reuse.
-final class HlsMediaChunkExtractor: @unchecked Sendable {
-    let extractor: any Extractor
+public final class HlsMediaChunkExtractor: @unchecked Sendable {
+    public let extractor: any Extractor
     /// Whether a following chunk of the same rendition and discontinuity can go on with this extractor. It keeps
     /// what it learned from the initialization section and the earlier segments.
-    let isReusable: Bool
+    public let isReusable: Bool
     /// Whether the extractor got its output.
     var isInitialized = false
 
-    init(extractor: any Extractor, isReusable: Bool) {
+    public init(extractor: any Extractor, isReusable: Bool) {
         self.extractor = extractor
         self.isReusable = isReusable
     }
 }
 
 /// Creates extractors for HLS media chunks.
-protocol HlsExtractorFactory {
+public protocol HlsExtractorFactory {
     /// Creates an extractor for the media chunk at `url`, sniffing `input` to find the container.
     ///
     /// - Parameters:
@@ -64,7 +72,7 @@ protocol HlsExtractorFactory {
 }
 
 /// Creates extractors for MPEG-TS, fragmented MP4, packed audio (ADTS, AC-3, AC-4, MP3) and WebVTT segments.
-struct DefaultHlsExtractorFactory: HlsExtractorFactory {
+public struct DefaultHlsExtractorFactory: HlsExtractorFactory {
     private let queue: Queue
     private let subtitleParserFactory: SubtitleParserFactory
 
@@ -74,13 +82,15 @@ struct DefaultHlsExtractorFactory: HlsExtractorFactory {
         $0.label = "CC1"
     }
 
-    /// - Parameter queue: The queue extractors run on.
-    init(queue: Queue, subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory()) {
+    /// - Parameters:
+    ///   - queue: The queue extractors run on.
+    ///   - subtitleParserFactory: Parses the subtitles of subtitle renditions and in segments into cues.
+    public init(queue: Queue, subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory()) {
         self.queue = queue
         self.subtitleParserFactory = subtitleParserFactory
     }
 
-    func createExtractor(
+    public func createExtractor(
         url: URL,
         format: AnyFormat,
         closedCaptionFormats: [TextFormat]?,

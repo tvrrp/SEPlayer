@@ -16,7 +16,9 @@ struct InBandParameterSets {
 
     /// Whether a track's samples carry the parameter sets: H.264 whose sample entry has none.
     static func areCarried(by format: AnyFormat) -> Bool {
-        guard let codec = format.video?.codec, codec.mimeType == .videoH264 else { return false }
+        guard let codec = format.video?.codec, codec.mimeType == .videoH264 else {
+            return false
+        }
         let h264 = codec.h264
         return h264.sequenceParameterSets?.isEmpty != false || h264.pictureParameterSets?.isEmpty != false
     }

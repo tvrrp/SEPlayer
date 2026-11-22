@@ -21,7 +21,7 @@ import Foundation
 //    func enable(delegate: MediaSourceDelegate) {}
 //    func createPeriod(
 //        id: MediaPeriodId,
-//        allocator: Allocator,
+//        bufferedBytesCounter: BufferedBytesCounter,
 //        startPosition: Int64
 //    ) throws -> MediaPeriod {}
 //    func release(mediaPeriod: MediaPeriod) {}
@@ -53,7 +53,7 @@ class MediaSourceMock: MediaSource {
     }
 
     func enable(delegate: MediaSourceDelegate) {}
-    func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> MediaPeriod { MediaPeriodMock() }
+    func createPeriod(id: MediaPeriodId, bufferedBytesCounter: BufferedBytesCounter, startPosition: CMTime) throws -> MediaPeriod { MediaPeriodMock() }
     func release(mediaPeriod: MediaPeriod) {}
     func disable(delegate: MediaSourceDelegate) {}
     func releaseSource(delegate: MediaSourceDelegate) {

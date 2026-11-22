@@ -4,16 +4,22 @@
 //
 //  Created by Damir Yackupov on 23.04.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.RendererCapabilities
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import SEPlayerCommon
 
 public enum RendererCapabilities {
     public struct Support {
-        let formatSupport: FormatSupport
-        let adaptiveSupport: AdaptiveSupport
-        let hardwareAccelerationSupport: HardwareAccelerationSupport
-        let decoderSupport: DecoderSupport
-        let tunnelingSupport: TunnelingSupport
+        public let formatSupport: FormatSupport
+        public let adaptiveSupport: AdaptiveSupport
+        public let hardwareAccelerationSupport: HardwareAccelerationSupport
+        public let decoderSupport: DecoderSupport
+        public let tunnelingSupport: TunnelingSupport
 
         public typealias FormatSupport = SEPlayerCommon.FormatSupport
 

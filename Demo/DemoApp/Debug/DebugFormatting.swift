@@ -212,7 +212,9 @@ enum DebugFormat {
 
     /// The track of a group that plays `playing`: the one with its id, or the same format.
     static func playingTrackIndex(in group: Tracks.Group, playing: AnyFormat?) -> Int? {
-        guard let playing, group.type == playing.sampleMimeType.trackType else { return nil }
+        guard let playing, group.type == playing.sampleMimeType.trackType else {
+            return nil
+        }
         let indices = 0 ..< group.length
         if let id = playing.id, let index = indices.first(where: { group.format(trackIndex: $0).id == id }) {
             return index
@@ -234,7 +236,9 @@ enum DebugFormat {
 
     static func host(of item: MediaItem) -> String {
         if let title = item.mediaMetadata.title, !title.isEmpty { return title }
-        guard let url = item.localConfiguration?.url else { return item.mediaId.isEmpty ? "—" : item.mediaId }
+        guard let url = item.localConfiguration?.url else {
+            return item.mediaId.isEmpty ? "—" : item.mediaId
+        }
         return url.host.map { "\($0)/…/\(url.lastPathComponent)" } ?? url.lastPathComponent
     }
 }

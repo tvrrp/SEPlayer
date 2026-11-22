@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 24.02.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.text.SubtitleExtractor
+//  Copyright (C) 2021 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -203,13 +209,15 @@ public final class SubtitleExtractor: Extractor {
         let trackOutput = try trackOutput.checkNotNil()
         try trackOutput.sampleData(data: sample.cues)
         try trackOutput.sampleMetadata(
-            time: CMSampleTimingInfo(
-                duration: sample.duration,
-                presentationTimeStamp: sample.time,
-                decodeTimeStamp: .invalid
-            ),
-            flags: .keyframe,
-            range: 0 ..< sample.cues.dataLength
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: sample.duration,
+                    presentationTimeStamp: sample.time,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< sample.cues.dataLength,
+                flags: .keyframe
+            )
         )
     }
 

@@ -146,7 +146,9 @@ final class DebugTimelineView: UIView, UIScrollViewDelegate {
     }
 
     private func scrollToCurrentWindow(animated: Bool) {
-        guard let index = snapshot.currentWindowIndex, !scrollView.isTracking else { return }
+        guard let index = snapshot.currentWindowIndex, !scrollView.isTracking else {
+            return
+        }
         let frame = canvas.windowFrame(at: index)
         let x = min(max(0, frame.minX - Canvas.inset), max(0, scrollView.contentSize.width - scrollView.bounds.width))
         scrollView.setContentOffset(CGPoint(x: x, y: 0), animated: animated)
@@ -155,7 +157,9 @@ final class DebugTimelineView: UIView, UIScrollViewDelegate {
     @objc
     private func didTap(_ recognizer: UITapGestureRecognizer) {
         let point = recognizer.location(in: canvas)
-        guard let (windowIndex, periodIndex) = canvas.periodAt(point) else { return }
+        guard let (windowIndex, periodIndex) = canvas.periodAt(point) else {
+            return
+        }
         onSelectPeriod?(windowIndex, periodIndex)
     }
 
@@ -273,7 +277,9 @@ private final class Canvas: UIView {
 
         for window in snapshot.windows {
             let frame = windowFrame(at: window.index)
-            guard frame.intersects(rect.insetBy(dx: -40, dy: 0)) else { continue }
+            guard frame.intersects(rect.insetBy(dx: -40, dy: 0)) else {
+                continue
+            }
             var buffered: ClosedRange<Double>?
             if window.index == snapshot.currentWindowIndex {
                 if snapshot.position.isNumeric, snapshot.bufferedPosition.isNumeric {

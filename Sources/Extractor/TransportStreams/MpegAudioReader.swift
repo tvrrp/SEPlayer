@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.MpegAudioReader
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -91,7 +97,9 @@ final class MpegAudioReader: ElementaryStreamReader {
     }
 
     private func readHeaderRemainder(_ source: inout BlockBufferReader, output: TrackOutput) throws {
-        guard try headerData.fill(from: &source, upTo: Self.headerSize) else { return }
+        guard try headerData.fill(from: &source, upTo: Self.headerSize) else {
+            return
+        }
         frameBytesRead = Self.headerSize
 
         guard try header.setForHeaderData(Int(headerData.getInt(at: 0, as: UInt32.self))) else {
@@ -128,9 +136,15 @@ final class MpegAudioReader: ElementaryStreamReader {
         // packetStarted must be called before a frame is read.
         try checkArgument(time.isNumeric)
         try output.sampleMetadata(
-            time: CMSampleTimingInfo(duration: frameDuration, presentationTimeStamp: time, decodeTimeStamp: .invalid),
-            flags: .keyframe,
-            range: 0 ..< frameSize
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: frameDuration,
+                    presentationTimeStamp: time,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< frameSize,
+                flags: .keyframe
+            )
         )
         time = time + frameDuration
         frameBytesRead = 0

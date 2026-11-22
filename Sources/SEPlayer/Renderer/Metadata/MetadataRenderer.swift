@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.metadata.MetadataRenderer
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Extractor
@@ -123,7 +129,9 @@ final class MetadataRenderer: BaseSERenderer {
     /// Reads and decodes the samples up to a little after the current position, and outputs the metadata that is due.
     private func renderMetadata() {
         assert(queue.isCurrent())
-        guard getState() != .disabled, streamFormat != nil, !outputStreamEnded else { return }
+        guard getState() != .disabled, streamFormat != nil, !outputStreamEnded else {
+            return
+        }
 
         let position = controlTimebase?.time ?? getLastResetPosition()
         do {
@@ -168,8 +176,12 @@ final class MetadataRenderer: BaseSERenderer {
                     return
                 }
 
-                guard case let .didReadBuffer(buffer) = try readSource() else { continue }
-                guard let data = buffer.dataBuffer, let metadata = decode(data) else { continue }
+                guard case let .didReadBuffer(buffer) = try readSource() else {
+                    continue
+                }
+                guard let data = buffer.dataBuffer, let metadata = decode(data) else {
+                    continue
+                }
                 insert(PendingMetadata(time: buffer.outputPresentationTimeStamp, metadata: metadata))
             }
         }

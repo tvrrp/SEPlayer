@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 23.05.2025.
 //
+//  Portions of this file are derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.datasource.DefaultDataSource
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -30,13 +36,13 @@ public extension DataSourceFactory {
 ///
 /// The data sources of one factory share an in-memory cache of the HTTP bytes they load, and optionally a
 /// ``DiskCache``.
-public final class DefaultDataSourceFactory<NetworkLoader: IPlayerSessionLoader>: DataSourceFactory {
+public final class DefaultDataSourceFactory: DataSourceFactory {
     private let syncActor: PlayerActor
     private let baseDataSourceFactory: (any DataSourceFactory)?
     private let resourcePool: HTTPResourcePool
     private let fileReadQueue: any Queue
     private let fileMemoryPool: CMMemoryPool
-    private let networkLoader: NetworkLoader
+    private let networkLoader: any IPlayerSessionLoader
 
     /// - Parameters:
     ///   - cacheSize: The memory the downloaded bytes of all resources may take. Bytes a read waits for are kept
@@ -47,7 +53,7 @@ public final class DefaultDataSourceFactory<NetworkLoader: IPlayerSessionLoader>
     ///     share both.
     public init(
         syncActor: PlayerActor,
-        networkLoader: NetworkLoader,
+        networkLoader: any IPlayerSessionLoader,
         baseDataSourceFactory: (any DataSourceFactory)? = nil,
         cacheSize: Int = 32 * 1024 * 1024, // 32 MB
         diskCache: DiskCache? = nil,

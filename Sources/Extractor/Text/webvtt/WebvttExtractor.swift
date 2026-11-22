@@ -2,6 +2,12 @@
 //  WebvttExtractor.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.WebvttExtractor
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -119,9 +125,15 @@ public final class WebvttExtractor: Extractor {
         let blockBuffer = try makeBlockBuffer(copying: [UInt8](sampleData))
         try trackOutput.sampleData(data: blockBuffer)
         try trackOutput.sampleMetadata(
-            time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: sampleTime, decodeTimeStamp: .invalid),
-            flags: .keyframe,
-            range: 0 ..< sampleData.count
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: .invalid,
+                    presentationTimeStamp: sampleTime,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< sampleData.count,
+                flags: .keyframe
+            )
         )
     }
 

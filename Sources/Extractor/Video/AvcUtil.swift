@@ -126,7 +126,9 @@ extension CodecAttributes where Scope == VideoCodec.H264 {
     ///
     /// - Parameter sampleEntryType: `avc1` or `avc3`, which starts the string.
     func codecs(sampleEntryType: MP4Box.BoxType = .avc1) -> String? {
-        guard let profile = self.profile, let level = self.level else { return nil }
+        guard let profile = self.profile, let level = self.level else {
+            return nil
+        }
         return String(
             format: "%@.%02X%02X%02X",
             sampleEntryType.rawValue.fourCharacterCode,

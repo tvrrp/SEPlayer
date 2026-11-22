@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 09.03.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.TrackSampleTable
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -25,9 +31,11 @@ public struct TrackSampleTable {
     public let durations: SampleTimes
     public let duration: CMTime
 
-    public let flags: [SampleFlags]
+    public let flags: [SampleProperties.Flags]
     public let syncSampleIndices: [Int]
     public let hasOnlySyncSamples: Bool
+    /// The attributes of the samples that have any, such as the trims of the audio samples an edit cuts.
+    public let attributes: [Int: SampleAttributes]
 
     init(
         track: Track,
@@ -38,10 +46,11 @@ public struct TrackSampleTable {
         dts: [CMTime],
         durations: [CMTime],
         duration: CMTime,
-        flags: [SampleFlags],
+        flags: [SampleProperties.Flags],
         syncSampleIndices: [Int],
         hasOnlySyncSamples: Bool,
-        sampleCount: Int
+        sampleCount: Int,
+        attributes: [Int: SampleAttributes] = [:]
     ) throws {
         try checkArgument(sizes.count == sampleCount)
         try checkArgument(offsets.count == sampleCount)
@@ -64,6 +73,7 @@ public struct TrackSampleTable {
         self.syncSampleIndices = syncSampleIndices
         self.hasOnlySyncSamples = hasOnlySyncSamples
         self.sampleCount = sampleCount
+        self.attributes = attributes
 
         var flags = flags
         if !flags.isEmpty {
@@ -90,6 +100,20 @@ public struct TrackSampleTable {
     }
 
     // MARK: - Sync sample lookup
+
+    /// The sample to read from for the sample at `sampleIndex` to decode right: compressed audio needs the packet
+    /// before it, and the packets before that one which an edit cuts whole, as an encoder's delay is.
+    func decodeStartIndex(for sampleIndex: Int) -> Int {
+        guard track.type == .audio, track.format.sampleMimeType != .audioRAW else {
+            return sampleIndex
+        }
+        var index = max(0, sampleIndex - 1)
+        while index > 0, let attributes = attributes[index - 1],
+              attributes.trimAtStart + attributes.trimAtEnd >= durations[index - 1] {
+            index -= 1
+        }
+        return index
+    }
 
     func earlierOrEqualSyncSample(for time: CMTime) -> Int? {
         if hasOnlySyncSamples {

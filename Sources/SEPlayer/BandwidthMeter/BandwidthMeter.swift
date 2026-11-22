@@ -77,16 +77,16 @@ public struct ByteTransferRates: Sendable {
 ///
 /// What was measured on one network says little about another, so the meter forgets it when the device moves between
 /// Wi-Fi, cellular and wired networks.
-final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
+public final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
     /// The initial estimate, before transfers were measured.
-    static let defaultInitialBitrateEstimate = 1_000_000
+    public static let defaultInitialBitrateEstimate = 1_000_000
     /// Enough was measured once this much was received, or ``minimumActiveTime`` passed.
     private static let minimumBytes = 262_144.0
     private static let minimumActiveTime = Int64(NSEC_PER_SEC)
     private static let varianceResolution = Int64(NSEC_PER_SEC)
 
-    let delegate = MulticastDelegate<BandwidthMeterDelegate>(isThreadSafe: true)
-    var transferListener: TransferListener { self }
+    public let delegate = MulticastDelegate<BandwidthMeterDelegate>(isThreadSafe: true)
+    public var transferListener: TransferListener { self }
 
     private let lock = UnfairLock()
     private let initialBitrateEstimate: Int
@@ -101,7 +101,7 @@ final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
 
     private let pathMonitor = NWPathMonitor()
 
-    init(initialBitrateEstimate: Int = DefaultBandwidthMeter.defaultInitialBitrateEstimate) {
+    public init(initialBitrateEstimate: Int = DefaultBandwidthMeter.defaultInitialBitrateEstimate) {
         self.initialBitrateEstimate = initialBitrateEstimate
         pathMonitor.pathUpdateHandler = { [weak self] path in
             self?.networkChanged(to: NetworkKind(path))
@@ -113,11 +113,11 @@ final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
         pathMonitor.cancel()
     }
 
-    func getBitrateEstimate() -> Int {
+    public func getBitrateEstimate() -> Int {
         predict(expectedTransferBytes: nil, algorithm: .standard)?.safeBitrate ?? initialBitrateEstimate
     }
 
-    func predict(expectedTransferBytes: Int?, algorithm: BandwidthPredictionAlgorithm) -> BandwidthPrediction? {
+    public func predict(expectedTransferBytes: Int?, algorithm: BandwidthPredictionAlgorithm) -> BandwidthPrediction? {
         predict(expectedTransferBytes: expectedTransferBytes, algorithm: algorithm, at: DispatchTime.now())
     }
 
@@ -133,7 +133,7 @@ final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
         }
     }
 
-    func transferRates() -> ByteTransferRates {
+    public func transferRates() -> ByteTransferRates {
         lock.withLock {
             let rates = byteRates.rates
             return ByteTransferRates(
@@ -199,11 +199,11 @@ final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
 }
 
 extension DefaultBandwidthMeter: TransferListener {
-    func onTransferInitializing(source: DataSource, isNetwork: Bool) {}
+    public func onTransferInitializing(source: DataSource, isNetwork: Bool) {}
 
-    func onTransferEnd(source: DataSource, isNetwork: Bool, metrics: URLSessionTaskMetrics) {}
+    public func onTransferEnd(source: DataSource, isNetwork: Bool, metrics: URLSessionTaskMetrics) {}
 
-    func onNetworkTransfer(_ event: NetworkTransferEvent) {
+    public func onNetworkTransfer(_ event: NetworkTransferEvent) {
         add(event)
     }
 }

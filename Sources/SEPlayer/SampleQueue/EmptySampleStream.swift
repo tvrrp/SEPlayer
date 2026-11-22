@@ -4,9 +4,14 @@
 //
 //  Created by Damir Yackupov on 18.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.EmptySampleStream
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
-import Decoder
 
 final class EmptySampleStream: SampleStream {
     var bufferedAheadDuration: CMTime { .invalid }
@@ -15,7 +20,7 @@ final class EmptySampleStream: SampleStream {
     func maybeThrowError() throws {}
 
     func readData(readFlags: ReadFlags) throws -> SampleStreamReadResult {
-        let sampleBuffer = try CMSampleBuffer.createEndOfStream()
+        let sampleBuffer = try CMSampleBuffer.endOfStream()
         return .didReadBuffer(sampleBuffer)
     }
 

@@ -96,5 +96,27 @@
             endingLineNumber = "293">
          </BreakpointContent>
       </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.SymbolicBreakpoint">
+         <BreakpointContent
+            uuid = "2599CB44-CEFA-438E-AF61-C9ED1171D194"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            symbolName = "swift_continuation_logFailedCheck"
+            moduleName = "">
+            <Locations>
+               <Location
+                  uuid = "2599CB44-CEFA-438E-AF61-C9ED1171D194 - 867458311625190e"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "swift_continuation_logFailedCheck"
+                  moduleName = "libswift_Concurrency.dylib"
+                  usesParentBreakpointCondition = "Yes">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
    </Breakpoints>
 </Bucket>

@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.BoxParser
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreLocation
 import CoreMedia
@@ -49,7 +55,9 @@ extension BoxParser {
         do {
             // The handler type comes after the header of the box, the version and flags, and four empty bytes.
             let handlerType = try hdlr.data.getInt(at: MP4Box.fullHeaderSize + 4, as: UInt32.self)
-            guard handlerType == MetadataUtil.Tag.mdtaHandler else { return nil }
+            guard handlerType == MetadataUtil.Tag.mdtaHandler else {
+                return nil
+            }
 
             let keyNames = try MetadataUtil.parseKeys(keys.data)
             var ilstData = ilst.data
@@ -442,7 +450,9 @@ private extension MetadataUtil {
         case 21: break // CAMCORDER_SLOW_MOTION_V2_HEVC
         default: return nil
         }
-        guard var box = try smta.readBox(), box.type == MP4Box.BoxType.srfr.rawValue else { return nil }
+        guard var box = try smta.readBox(), box.type == MP4Box.BoxType.srfr.rawValue else {
+            return nil
+        }
         // A 16.16 fixed point number.
         return try Int(box.payload.readInt(as: UInt32.self) >> 16)
     }
@@ -548,7 +558,9 @@ private extension BlockBufferReader {
 
     /// Reads the next box if it is a `data` box: its version, the type of its value, four empty bytes and the value.
     mutating func readDataBox() throws -> DataBoxContent? {
-        guard var box = try readBox(), box.type == MP4Box.BoxType.data.rawValue else { return nil }
+        guard var box = try readBox(), box.type == MP4Box.BoxType.data.rawValue else {
+            return nil
+        }
         let typeIndicator = try Int(box.payload.readInt(as: UInt32.self) & 0x00FF_FFFF)
         try box.payload.skip(4)
         return DataBoxContent(typeIndicator: typeIndicator, value: box.payload)

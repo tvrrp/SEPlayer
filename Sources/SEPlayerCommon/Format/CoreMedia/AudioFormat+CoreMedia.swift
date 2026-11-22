@@ -74,7 +74,9 @@ private extension Format where Scope == FormatAttributes.Audio {
 
     /// What the decoder of a codec needs besides the stream description, from the configuration box of the codec.
     static func magicCookie(codec: AudioCodec, boxes: [MediaBox]) throws -> BlockBufferReader? {
-        guard codec.mimeType == .audioAAC, let esds = boxes.payload(of: "esds"), esds.count > 4 else { return nil }
+        guard codec.mimeType == .audioAAC, let esds = boxes.payload(of: "esds"), esds.count > 4 else {
+            return nil
+        }
         // The `ES_Descriptor`, after the version and flags of the box.
         return try BlockBufferReader(bytes: esds.dropFirst(4))
     }

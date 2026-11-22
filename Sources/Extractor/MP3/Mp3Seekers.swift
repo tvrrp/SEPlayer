@@ -4,6 +4,17 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp3.Seeker
+//    androidx.media3.extractor.mp3.ConstantBitrateSeeker
+//    androidx.media3.extractor.mp3.XingFrame
+//    androidx.media3.extractor.mp3.XingSeeker
+//    androidx.media3.extractor.mp3.VbriSeeker
+//    androidx.media3.extractor.mp3.MlltSeeker
+//  Copyright (C) 2016, 2018, 2019, 2024 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -24,7 +35,9 @@ protocol Mp3Seeker: SeekMap {
 extension Mp3Seeker {
     /// The average bitrate of `byteCount` bytes that play for `duration`, or `nil` if it can't be computed.
     static func averageBitrate(byteCount: Int?, duration: CMTime) -> Int? {
-        guard let byteCount, byteCount > 0, duration.isNumeric, duration > .zero else { return nil }
+        guard let byteCount, byteCount > 0, duration.isNumeric, duration > .zero else {
+            return nil
+        }
         return Int(Double(byteCount) * 8 / duration.seconds)
     }
 }
@@ -144,25 +157,17 @@ struct XingFrame {
             encoderPadding = nil
             return
         }
-        let encoderIdentifier = try frame.readString(length: 9, lossyEncoding: .isoLatin1)
-        try frame.skip(2 + 8 + 2) // Revision and VBR method, lowpass; peak, radio and audiophile gain; flags, bitrate.
+        // The encoder; revision and VBR method, lowpass; peak, radio and audiophile gain; flags, bitrate.
+        try frame.skip(9 + 2 + 8 + 2)
+        // As the encoder wrote them. They fit the system's decoder, which adds no delay of its own.
         let encoderDelayAndPadding = try frame.readUInt24()
-        var encoderDelay = encoderDelayAndPadding >> 12
-        var encoderPadding = encoderDelayAndPadding & 0xFFF
-        let usesLameGaplessEncoding = ["LAME", "Lavf", "Lavc"].contains { encoderIdentifier.hasPrefix($0) }
-        if usesLameGaplessEncoding {
-            encoderDelay += Self.decoderDelay
-            encoderPadding = max(0, encoderPadding - Self.decoderDelay)
-        }
-        self.encoderDelay = encoderDelay
-        self.encoderPadding = encoderPadding
+        encoderDelay = encoderDelayAndPadding >> 12
+        encoderPadding = encoderDelayAndPadding & 0xFFF
     }
 }
 
 private extension XingFrame {
     static let tableOfContentsLength = 100
-    /// The delay of the decoder, in samples, which the encoder counts in its padding.
-    static let decoderDelay = 528 + 1
 }
 
 /// A seeker on the table of contents of a Xing frame.
@@ -225,7 +230,9 @@ struct XingSeeker: Mp3Seeker {
 
     func time(at position: Int) -> CMTime {
         let positionOffset = position - xingFramePosition
-        guard let tableOfContents, let dataSize, positionOffset > xingFrameSize else { return .zero }
+        guard let tableOfContents, let dataSize, positionOffset > xingFrameSize else {
+            return .zero
+        }
         let scaledPosition = Double(positionOffset) * Self.tableOfContentsScale / Double(dataSize)
         let index = tableOfContents.lastIndex { Double($0) <= scaledPosition } ?? 0
         let previous = Self.scaledPosition(tableOfContents, at: index)
@@ -375,5 +382,34 @@ private extension MlltSeeker {
         let yNext = yReferences[nextIndex]
         let proportion = xNext == xPrevious ? 0 : Double(x - xPrevious) / Double(xNext - xPrevious)
         return Int(proportion * Double(yNext - yPrevious)) + yPrevious
+    }
+}
+
+/// Reports audible times and loads ahead of the selected frame for synchronization and decoder preroll.
+struct Mp3PlaybackSeekMap: SeekMap {
+    let seeker: any Mp3Seeker
+    let frameDuration: CMTime
+    let delay: CMTime
+    let padding: CMTime
+
+    func isSeekable() -> Bool { seeker.isSeekable() }
+
+    func getDuration() -> CMTime {
+        let duration = seeker.getDuration()
+        return duration.isNumeric ? max(.zero, duration - delay - padding) : duration
+    }
+
+    func getSeekPoints(for time: CMTime) -> SeekPoints {
+        if time <= .zero {
+            return SeekPoints(first: .init(time: .zero, position: seeker.getSeekPoints(for: .zero).first.position))
+        }
+        let points = seeker.getSeekPoints(for: max(.zero, time + delay))
+        func playbackPoint(_ point: SeekPoints.SeekPoint) -> SeekPoints.SeekPoint {
+            // A VBR seek can land inside a frame. Allow one frame to regain sync and one to prime.
+            let readTime = max(.zero, point.time - frameDuration - frameDuration)
+            let position = seeker.getSeekPoints(for: readTime).first.position
+            return .init(time: max(.zero, point.time - delay), position: position)
+        }
+        return SeekPoints(first: playbackPoint(points.first), second: playbackPoint(points.second))
     }
 }

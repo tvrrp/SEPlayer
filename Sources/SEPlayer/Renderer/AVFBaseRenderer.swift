@@ -131,7 +131,7 @@ class AVFBaseRenderer: BaseSERenderer {
 
         // The last query asks about the codec alone, whatever the container.
         mimeTypes.append(MimeTypes.videoMP4.rawValue)
-        let parameter = Codecs.withParameterSetsOutOfBand(codecs)
+        let parameter = Codecs.forPlayabilityQuery(codecs)
         return mimeTypes.map { "\($0); codecs=\"\(parameter)\"" }
     }
 
@@ -410,6 +410,9 @@ class AVFBaseRenderer: BaseSERenderer {
         inputFormatDidChange(nil)
     }
 
+    /// The output mode the renderer is in, or changes to at the next keyframe.
+    final var targetOutputMode: OutputMode { pendingOutputMode ?? outputMode }
+
     final func changeOutputMode(to outputMode: OutputMode) {
         guard self.outputMode != outputMode else { return }
         if getState() == .disabled {
@@ -423,7 +426,7 @@ class AVFBaseRenderer: BaseSERenderer {
 
     /// The buffer to enqueue for `buffer`, just read. An output that takes several samples in one buffer joins those
     /// that follow it here, read with ``readFollowingBuffer(if:)``.
-    func outputBuffer(startingWith buffer: CMSampleBuffer) throws -> CMSampleBuffer { buffer }
+    func outputBuffer(startingWith buffer: CMSampleBuffer) throws -> CMSampleBuffer? { buffer }
 
     /// Reads the buffer that follows the last one read, if `joins` takes it. Anything else read, such as a buffer of
     /// another format or the end of the stream, is what the next pump starts with.
@@ -599,9 +602,11 @@ class AVFBaseRenderer: BaseSERenderer {
                 }
             }
 
-            let enqueued = try outputBuffer(startingWith: buffer)
+            guard let enqueued = try outputBuffer(startingWith: buffer) else {
+                return true
+            }
             let isReadyForMoreMediaData = try feedOutputBuffer(enqueued)
-            lastEnqueuedSample = .init(start: enqueued.outputPresentationTimeStamp, duration: enqueued.duration)
+            lastEnqueuedSample = .init(start: enqueued.outputPresentationTimeStamp, duration: enqueued.outputDuration)
 
             recordEnqueued(enqueued)
             markPrerollReachedIfEnoughEnqueued()
@@ -669,7 +674,7 @@ class AVFBaseRenderer: BaseSERenderer {
 
         try stallTimer.setFireTime(.invalid)
         let isReadyForMoreMediaData = try feedOutputBuffer(buffer)
-        lastEnqueuedSample = .init(start: buffer.outputPresentationTimeStamp, duration: buffer.duration)
+        lastEnqueuedSample = .init(start: buffer.outputPresentationTimeStamp, duration: buffer.outputDuration)
         recordEnqueued(buffer)
         markPrerollReachedIfEnoughEnqueued()
 
@@ -733,8 +738,8 @@ class AVFBaseRenderer: BaseSERenderer {
     private func recordEnqueued(_ buffer: CMSampleBuffer) {
         guard logsPump else { return }
         batchSampleCount += buffer.numSamples
-        if buffer.duration.isNumeric { batchDuration = batchDuration + buffer.duration }
-        let range = CMTimeRange(start: buffer.outputPresentationTimeStamp, duration: buffer.duration)
+        if buffer.outputDuration.isNumeric { batchDuration = batchDuration + buffer.outputDuration }
+        let range = CMTimeRange(start: buffer.outputPresentationTimeStamp, duration: buffer.outputDuration)
         batchRange = batchRange.isValid ? batchRange.union(range) : range
     }
 

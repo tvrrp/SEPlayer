@@ -156,8 +156,7 @@ final class TestSEPlayerFactory {
                         networkLoader: PlayerSessionLoader(configuration: .ephemeral, queue: Self.loaderOperationQueue())
                     )
                 },
-                extractorsFactory: DefaultExtractorFactory(queue: queue),
-                decryptionMemoryPool: CMMemoryPool()
+                extractorsFactory: DefaultExtractorFactory(queue: queue)
             ),
             // The tests don't touch the app's audio session.
             audioSessionController: AudioSessionController(session: UnusedAudioSession()),

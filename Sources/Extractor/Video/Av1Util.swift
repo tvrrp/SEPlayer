@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 13.10.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.Av1Config
+//  Copyright (C) 2026 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -229,7 +235,9 @@ extension CodecAttributes where Scope == VideoCodec.AV1 {
 
     /// The codec string of the AV1 ISOBMFF binding, such as `av01.0.04M.10`.
     var codecs: String? {
-        guard let profile = self.profile, let level = self.level else { return nil }
+        guard let profile = self.profile, let level = self.level else {
+            return nil
+        }
         let tier = self.tier == .high ? "H" : "M"
         return String(format: "av01.%d.%02d%@.%02d", profile.rawValue, level.rawValue, tier, self.bitDepth ?? 8)
     }

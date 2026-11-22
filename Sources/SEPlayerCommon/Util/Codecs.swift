@@ -2,6 +2,12 @@
 //  Codecs.swift
 //  SEPlayer
 //
+//  Portions of this file are derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.common.MimeTypes
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import Foundation
 
@@ -16,14 +22,15 @@ public enum Codecs {
             .filter { !$0.isEmpty }
     }
 
-    /// `codecs` with each codec that carries its parameter sets in the samples (`avc3`, `hev1`, `dvav`, `dvhe`) named
-    /// by its twin that carries them in the sample entry (`avc1`, `hvc1`, `dva1`, `dvh1`).
+    /// `codecs` spelled as the system's playability check knows them.
     ///
-    /// They are the same codec, and decode the same once the parameter sets are known, but the system's
-    /// playability check only knows the second spelling.
-    public static func withParameterSetsOutOfBand(_ codecs: String) -> String {
+    /// A codec that carries its parameter sets in the samples (`avc3`, `hev1`, `dvav`, `dvhe`) is named by its twin
+    /// that carries them in the sample entry (`avc1`, `hvc1`, `dva1`, `dvh1`): they decode the same once the parameter
+    /// sets are known. MP3 is named `mp3`, as the check rejects its MP4 names such as `mp4a.40.34`.
+    public static func forPlayabilityQuery(_ codecs: String) -> String {
         let twins = ["avc3": "avc1", "hev1": "hvc1", "dvav": "dva1", "dvhe": "dvh1"]
         return split(codecs).map { codec in
+            if mediaMimeType(forCodec: codec) == .audioMPEG { return "mp3" }
             let entry = codec.prefix(4).lowercased()
             guard let twin = twins[entry] else { return codec }
             return twin + codec.dropFirst(4)
@@ -73,7 +80,7 @@ public enum Codecs {
         } else if codec.hasPrefix("hev1") || codec.hasPrefix("hvc1") {
             return .videoH265
         } else if codec.hasPrefix("dvav") || codec.hasPrefix("dva1") || codec.hasPrefix("dvhe")
-            || codec.hasPrefix("dvh1") {
+            || codec.hasPrefix("dvh1") || codec.hasPrefix("dav1") {
             return .videoDolbyVision
         } else if codec.hasPrefix("av01") {
             return .videoAV1
@@ -124,6 +131,14 @@ public enum Codecs {
             return .audioAAC
         }
         switch objectType {
+        case 0x40:
+            // MPEG-4 audio: the audio object types of MPEG-1 layers 1 to 3 aren't AAC.
+            switch parts.count > 2 ? Int(parts[2]) : nil {
+            case 32: return .audioMPEGL1
+            case 33: return .audioMPEGL2
+            case 34: return .audioMPEG
+            default: return .audioAAC
+            }
         case 0x69,
              0x6B: return .audioMPEG
         case 0xA5: return .audioAC3

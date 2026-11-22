@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 13.10.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.container.NalUnitUtil
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import Foundation
 import SEPlayerCommon
@@ -108,7 +114,9 @@ enum HevcUtil {
 
         /// The width of a pixel over its height, as the VUI tells, or 1.
         var pixelWidthHeightRatio: Float {
-            guard let ratio = vui?.sampleAspectRatio, ratio.horizontal > 0, ratio.vertical > 0 else { return 1 }
+            guard let ratio = vui?.sampleAspectRatio, ratio.horizontal > 0, ratio.vertical > 0 else {
+                return 1
+            }
             return Float(ratio.horizontal) / Float(ratio.vertical)
         }
 
@@ -539,7 +547,9 @@ extension CodecAttributes where Scope == VideoCodec.HEVC {
     ///
     /// - Parameter sampleEntryType: `hvc1` or `hev1`, which starts the string.
     func codecs(sampleEntryType: MP4Box.BoxType = .hvc1) -> String? {
-        guard let profile = self.profile, let level = self.level else { return nil }
+        guard let profile = self.profile, let level = self.level else {
+            return nil
+        }
         let constraints = self.constraintIndicatorFlags ?? 0
         let profileTierLevel = HevcUtil.ProfileTierLevel(
             profileSpace: self.profileSpace ?? 0,

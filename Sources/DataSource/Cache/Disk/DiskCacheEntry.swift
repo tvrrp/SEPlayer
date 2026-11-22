@@ -340,7 +340,9 @@ private extension DiskCacheEntry {
     /// Must be called with the lock held.
     func finishWriting(_ block: Int, reservation: SlotReservation, succeeded: Bool) {
         // The stored resource may have been replaced while the bytes were written.
-        guard reservation.storedResourceVersion == storedResourceVersion else { return }
+        guard reservation.storedResourceVersion == storedResourceVersion else {
+            return
+        }
 
         let slot = reservation.slot
         blocksBeingWritten.remove(block)

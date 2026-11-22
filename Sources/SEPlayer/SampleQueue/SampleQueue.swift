@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 04.07.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.SampleQueue
+//  Copyright (C) 2019 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Extractor
@@ -34,7 +40,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     override var minReadableTimestamp: CMTime? {
         lock.withReadLock {
             guard readPosition < length else { return nil }
-            return samples[getRelativeIndex(offset: readPosition)].time.presentationTimeStamp
+            return samples[getRelativeIndex(offset: readPosition)].timingInfo.presentationTimeStamp
         }
     }
 
@@ -64,7 +70,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     private var downstreamFormatDescription: CMFormatDescription?
 
     private var capacity: Int
-    private var samples: ContiguousArray<SampleWrapper>
+    private var samples: ContiguousArray<SampleProperties>
 
     private var length: Int = 0
     private var absoluteFirstIndex: Int = 0
@@ -97,13 +103,13 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     /// Media loaded beyond the queued samples but not extracted yet: it counts as buffered.
     private var unextractedDuration: CMTime = .zero
 
-    /// - Parameter allocator: Hears how many bytes of sample data the queue holds.
-    init(queue: Queue, allocator: Allocator? = nil) throws {
+    /// - Parameter bufferedBytesCounter: Hears how many bytes of sample data the queue holds.
+    init(queue: Queue, bufferedBytesCounter: BufferedBytesCounter? = nil) throws {
         self.queue = queue
-        sampleDataQueue = SampleDataQueue(allocator: allocator)
+        sampleDataQueue = SampleDataQueue(bufferedBytesCounter: bufferedBytesCounter)
         lock = RWLock()
         capacity = SampleQueue.sampleCapacityIncrement
-        samples = ContiguousArray(repeating: .init(), count: capacity)
+        samples = ContiguousArray(repeating: SampleProperties(timingInfo: .invalid), count: capacity)
         sharedSampleMetadata = SpannedData<AnyFormat>(removeCallback: { _ in }) // TODO: fix
         startTime = .negativeInfinity
         largestDiscardedTimestamp = .negativeInfinity
@@ -183,7 +189,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     private func queuedAheadDurationLocked() -> CMTime {
         guard readPosition < length else { return .zero }
         let readIndex = getRelativeIndex(offset: readPosition)
-        return max(.zero, largestQueuedTimestamp - samples[readIndex].time.presentationTimeStamp)
+        return max(.zero, largestQueuedTimestamp - samples[readIndex].timingInfo.presentationTimeStamp)
     }
 
     final func getWriteIndex() -> Int {
@@ -240,7 +246,9 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     }
 
     final func getFirstTimestamp() -> CMTime {
-        lock.withReadLock { length == 0 ? .negativeInfinity : samples[relativeFirstIndex].time.decodeTimeStamp }
+        lock.withReadLock {
+            length == 0 ? .negativeInfinity : samples[relativeFirstIndex].timingInfo.decodeTimeStamp
+        }
     }
 
     func isReady(loadingFinished: Bool) -> Bool {
@@ -251,68 +259,58 @@ class SampleQueue: TriggerableQueue, TrackOutput {
                     || (upstreamFormat != nil && upstreamFormat != downstreamFormat)
             }
 
-            if sharedSampleMetadata.get(getReadIndexLocked()) != downstreamFormat {
-                return true
-            }
-
             return true
         }
     }
 
     func read(readFlags: ReadFlags, loadingFinished: Bool) throws -> SampleStreamReadResult {
-        var dataRange: Range<Int>?
-        var performBackBufferDiscard = false
         var backBufferDiscardPosition: Int?
 
-        let result: SampleStreamReadResult = try lock.withWriteLock {
-            let (result, range) = try peekSampleMetadataLocked(
+        let item = try lock.withWriteLock {
+            let item = try peekLocked(
                 formatRequired: readFlags.contains(.requireFormat),
                 loadingFinished: loadingFinished
             )
-
-            if case let .didReadBuffer(sampleBuffer) = result, let range,
-               !sampleBuffer.flags.contains(.endOfStream) {
-                let peek = readFlags.contains(.peek)
-                if !readFlags.contains(.omitSampleData) {
-                    dataRange = range
-                }
-
-                if !peek { readPosition += 1 }
-
-                if !peek,
-                   let backBuffer = _backBufferDuration,
-                   sampleBuffer.presentationTimeStamp.isNumeric {
-                    let discardThreshold = sampleBuffer.presentationTimeStamp - backBuffer
-                    // `to: true` keeps samples up to the keyframe that anchors the back buffer,
-                    // ensuring seeks into the retained window always have a valid decode point.
-                    performBackBufferDiscard = true
-                    backBufferDiscardPosition = discardSampleMetadataLocked(
-                        toTime: discardThreshold, to: true, stopAtReadPosition: false
-                    )
-                }
+            guard case let .sample(sample, _) = item, !readFlags.contains(.peek) else {
+                return item
             }
 
-            return result
+            readPosition += 1
+            let time = sample.timingInfo.presentationTimeStamp
+            if let backBuffer = _backBufferDuration, time.isNumeric {
+                // `to: true` keeps samples up to the keyframe that anchors the back buffer,
+                // ensuring seeks into the retained window always have a valid decode point.
+                backBufferDiscardPosition = discardSampleMetadataLocked(
+                    toTime: time - backBuffer, to: true, stopAtReadPosition: false
+                )
+            }
+            return item
         }
 
-        // SampleDataQueue calls stay outside the metadata lock, matching the original
-        // locking granularity: readBuffer first, then the downstream discard.
-        if case let .didReadBuffer(sampleBuffer) = result, let dataRange,
-           !sampleBuffer.flags.contains(.endOfStream) {
-            try sampleBuffer.setDataBuffer(
-                to: sampleDataQueue.readBuffer(range: dataRange)
+        // SampleDataQueue calls stay outside the metadata lock: the data is read first, then discarded downstream.
+        let buffer: CMSampleBuffer
+        switch item {
+        case .nothing:
+            return .nothingRead
+        case let .format(format):
+            return .didReadFormat(format: format)
+        case .endOfStream:
+            buffer = try .endOfStream()
+        case let .sample(sample, formatDescription):
+            buffer = try CMSampleBuffer(
+                dataBuffer: readFlags.contains(.omitSampleData)
+                    ? nil
+                    : sampleDataQueue.readBuffer(range: sample.dataRange),
+                formatDescription: formatDescription,
+                properties: sample
             )
+            if let backBufferDiscardPosition {
+                sampleDataQueue.discardDownstreamTo(absolutePosition: backBufferDiscardPosition)
+            }
         }
 
-        if performBackBufferDiscard {
-            sampleDataQueue.discardDownstreamTo(absolutePosition: backBufferDiscardPosition)
-        }
-
-        if case .didReadBuffer = result {
-            evaluateTriggers()
-        }
-
-        return result
+        evaluateTriggers()
+        return .didReadBuffer(buffer)
     }
 
     @discardableResult
@@ -334,7 +332,13 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         let result: Bool = lock.withWriteLock {
             let relativeReadIndex = getRelativeIndex(offset: 0)
 
-            if !time.isNumeric || length == 0 || time < samples[relativeReadIndex].time.presentationTimeStamp
+            if let offset = partialStartOffsetLocked(for: time) {
+                startTime = time
+                readPosition = offset
+                return true
+            }
+
+            if !time.isNumeric || length == 0 || time < samples[relativeReadIndex].timingInfo.presentationTimeStamp
                 || time > largestQueuedTimestamp && !allowTimeBeyondBuffer {
                 return false
             }
@@ -379,18 +383,50 @@ class SampleQueue: TriggerableQueue, TrackOutput {
             readPosition = offset
             startTime = time
             downstreamFormat = nil
-            return .success(startPosition: samples[getRelativeIndex(offset: offset)].time.presentationTimeStamp)
+            let sample = samples[getRelativeIndex(offset: offset)]
+            return .success(startPosition: sample.timingInfo.presentationTimeStamp)
         }
         if case .success = result { queue.async { self.evaluateTriggers() } }
         return result
     }
 
-    private func recoverySeekOffsetLocked(time: CMTime) -> Int? {
-        guard time.isNumeric, length > 0,
-              time >= samples[getRelativeIndex(offset: 0)].time.presentationTimeStamp else {
+    /// The sample to read from to play from `time`, for samples that play in part: the one playing then, the samples
+    /// before it that its format's decoder needs, and the samples before those which are trimmed whole.
+    ///
+    /// - Returns: `nil` when the samples play whole, or none of known duration plays at `time`.
+    private func partialStartOffsetLocked(for time: CMTime) -> Int? {
+        guard time.isNumeric, length > 0, upstreamFormat?.playsSamplesInPart == true else {
             return nil
         }
-        let last = samples[getRelativeIndex(offset: length - 1)].time
+        let offset = findSampleBefore(
+            relativeStartIndex: relativeFirstIndex,
+            length: length,
+            time: time,
+            keyframe: false
+        )
+        guard offset >= 0 else { return nil }
+        let timingInfo = samples[getRelativeIndex(offset: offset)].timingInfo
+        guard timingInfo.duration.isNumeric, time < timingInfo.presentationTimeStamp + timingInfo.duration else {
+            return nil
+        }
+
+        let format = sharedSampleMetadata.get(absoluteFirstIndex + offset)
+        let prerollStart = offset - format.decoderPrerollSampleCount
+        var start = offset
+        while start > 0, sharedSampleMetadata.get(absoluteFirstIndex + start - 1) == format,
+              start > prerollStart || !samples[getRelativeIndex(offset: start - 1)].hasOutput {
+            start -= 1
+        }
+        return start
+    }
+
+    private func recoverySeekOffsetLocked(time: CMTime) -> Int? {
+        if let offset = partialStartOffsetLocked(for: time) { return offset }
+        guard time.isNumeric, length > 0,
+              time >= samples[getRelativeIndex(offset: 0)].timingInfo.presentationTimeStamp else {
+            return nil
+        }
+        let last = samples[getRelativeIndex(offset: length - 1)].timingInfo
         let lastEnd = last.presentationTimeStamp + (last.duration.isNumeric ? last.duration : .zero)
         guard time <= max(largestQueuedTimestamp, lastEnd) else { return nil }
         // Retain the packet/frame spanning the playhead; video also needs a valid decode point.
@@ -406,7 +442,7 @@ class SampleQueue: TriggerableQueue, TrackOutput {
     final func getSkipCount(time: CMTime, allowEndOfQueue: Bool) -> Int {
         lock.withReadLock {
             let relativeReadIndex = getRelativeIndex(offset: readPosition)
-            if !hasNextSample() || time < samples[relativeReadIndex].time.presentationTimeStamp {
+            if !hasNextSample() || time < samples[relativeReadIndex].timingInfo.presentationTimeStamp {
                 return .zero
             }
             if time > largestQueuedTimestamp && allowEndOfQueue {
@@ -488,10 +524,10 @@ class SampleQueue: TriggerableQueue, TrackOutput {
         lock.withWriteLock { upstreamFormatAdjustmentRequired = true }
     }
 
-    func sampleMetadata(time: CMSampleTimingInfo, flags: SampleFlags, range: Range<Int>) throws {
-//        print("SAMPLE METADATA, pts = \(time.presentationTimeStamp.seconds), range = \(range)")
+    func sampleMetadata(_ properties: SampleProperties) throws {
         // Only the extractor writes, and the upstream is discarded only while nothing loads: the value holds until the
         // sample is committed, and is taken before the lock (avoids calling into SampleDataQueue while locked).
+        let range = properties.dataRange
         let absoluteOffset = sampleDataQueue.getTotalBytesWritten() - range.count - range.startIndex
 
         let committed: Bool = lock.withWriteLock {
@@ -499,33 +535,34 @@ class SampleQueue: TriggerableQueue, TrackOutput {
                 setFormatLocked(unadjustedUpstreamFormat)
             }
 
-            let isKeyframe = flags.contains(.keyframe)
-            var flags = flags
+            var sample = properties
             if upstreamKeyframeRequired {
-                guard isKeyframe else { return false }
+                guard sample.isKeyframe else { return false }
                 upstreamKeyframeRequired = false
             }
 
-            let time = CMSampleTimingInfo(
-                duration: time.duration,
-                presentationTimeStamp: time.presentationTimeStamp + sampleOffset,
+            // In the queue, a sample's bytes are where the data queue has them.
+            sample.dataRange = absoluteOffset ..< absoluteOffset + range.count
+            let presentationTime = sample.timingInfo.presentationTimeStamp + sampleOffset
+            sample.timingInfo.presentationTimeStamp = presentationTime
+            if sample.timingInfo.decodeTimeStamp.isNumeric {
                 // Shifted with the presentation time: the output decode time keeps their difference.
-                decodeTimeStamp: time.decodeTimeStamp.isNumeric ? time.decodeTimeStamp + sampleOffset : time.decodeTimeStamp
-            )
+                sample.timingInfo.decodeTimeStamp = sample.timingInfo.decodeTimeStamp + sampleOffset
+            }
             if allSamplesAreSyncSamples {
-                if time.presentationTimeStamp < startTime { return false }
+                if isBeforeStartLocked(sample.timingInfo) { return false }
                 // TODO: log bad data
-                flags.insert(.keyframe)
+                sample.isKeyframe = true
             }
 
             if pendingSplice {
-                if !isKeyframe || !attemptSpliceLocked(time: time.presentationTimeStamp) {
+                if !properties.isKeyframe || !attemptSpliceLocked(time: presentationTime) {
                     return false
                 }
                 pendingSplice = false
             }
 
-            commitSampleLocked(time: time, sampleFlags: flags, offset: absoluteOffset, size: range.count)
+            commitSampleLocked(sample)
             return true
         }
 
@@ -570,7 +607,7 @@ private extension SampleQueue {
     }
 
     func discardSampleMetadataLocked(toTime: CMTime, to keyframe: Bool, stopAtReadPosition: Bool) -> Int? {
-        if length == 0 || toTime < samples[relativeFirstIndex].time.presentationTimeStamp { return nil }
+        if length == 0 || toTime < samples[relativeFirstIndex].timingInfo.presentationTimeStamp { return nil }
 
         let searchLength = stopAtReadPosition && readPosition != length ? readPosition + 1 : length
         let discardCount = findSampleBefore(
@@ -583,47 +620,58 @@ private extension SampleQueue {
         return discardCount == -1 ? nil : discardSamples(discardCount: discardCount)
     }
 
-    func peekSampleMetadataLocked(
-        formatRequired: Bool,
-        loadingFinished: Bool
-    ) throws -> (result: SampleStreamReadResult, range: Range<Int>?) {
+    /// What a read finds at the read position.
+    enum ReadItem {
+        case nothing
+        case format(AnyFormat)
+        case sample(SampleProperties, CMFormatDescription)
+        case endOfStream
+    }
+
+    func peekLocked(formatRequired: Bool, loadingFinished: Bool) throws -> ReadItem {
         if !hasNextSample() {
             if loadingFinished || isLastSampleQueued {
-                return try (.didReadBuffer(.createEndOfStream()), nil)
+                return .endOfStream
             } else if let upstreamFormat, formatRequired || upstreamFormat != downstreamFormat {
                 downstreamFormat = upstreamFormat
-                return (.didReadFormat(format: upstreamFormat), nil)
+                return .format(upstreamFormat)
             } else {
-                return (.nothingRead, nil)
+                return .nothing
             }
         }
 
         let format = sharedSampleMetadata.get(getReadIndexLocked())
         if formatRequired || format != downstreamFormat {
             downstreamFormat = format
-            return (.didReadFormat(format: format), nil)
+            return .format(format)
         }
 
-        let relativeReadIndex = getRelativeIndex(offset: readPosition)
-        let sampleInfo = samples[relativeReadIndex]
-        var flags = sampleInfo.flags
+        var sample = samples[getRelativeIndex(offset: readPosition)]
         if readPosition == (length - 1) && (loadingFinished || isLastSampleQueued) {
-            flags.insert(.lastSample)
+            sample.isLastSample = true
+        }
+        if format.playsSamplesInPart, startTime.isNumeric {
+            // The sample playing at the start time plays from it, and those before it only prime the decoder.
+            sample.trim(to: CMTimeRange(start: startTime, end: .positiveInfinity))
         }
 
         let formatDescription = try downstreamFormatDescription ?? format.formatDescription()
         downstreamFormatDescription = formatDescription
-        let sampleBuffer = try CMSampleBuffer(
-            dataBuffer: nil,
-            formatDescription: formatDescription,
-            numSamples: 1,
-            sampleTimings: [sampleInfo.time],
-            sampleSizes: [sampleInfo.size]
+        return .sample(sample, formatDescription)
+    }
+
+    /// Whether a sample that decoding can start at isn't needed to play from the start time: it starts before it, or,
+    /// when samples play in part, it ends before the samples the decoder needs ahead of the start time.
+    func isBeforeStartLocked(_ timingInfo: CMSampleTimingInfo) -> Bool {
+        guard let upstreamFormat, upstreamFormat.playsSamplesInPart,
+              timingInfo.duration.isNumeric, timingInfo.duration > .zero else {
+            return timingInfo.presentationTimeStamp < startTime
+        }
+        let preroll = CMTimeMultiply(
+            timingInfo.duration,
+            multiplier: Int32(upstreamFormat.decoderPrerollSampleCount)
         )
-
-        sampleBuffer.flags = flags
-
-        return (.didReadBuffer(sampleBuffer), sampleInfo.offset ..< (sampleInfo.offset + sampleInfo.size))
+        return timingInfo.presentationTimeStamp + timingInfo.duration + preroll <= startTime
     }
 
     func setUpstreamFormatLocked(_ format: AnyFormat) -> Bool {
@@ -644,17 +692,17 @@ private extension SampleQueue {
         return true
     }
 
-    func commitSampleLocked(time: CMSampleTimingInfo, sampleFlags: SampleFlags, offset: Int, size: Int) {
+    func commitSampleLocked(_ sample: SampleProperties) {
         if length > 0 {
             let previousSampleRelativeIndex = getRelativeIndex(offset: length - 1)
-            assert(samples[previousSampleRelativeIndex].offset + samples[previousSampleRelativeIndex].size <= offset)
+            assert(samples[previousSampleRelativeIndex].dataRange.upperBound <= sample.dataRange.lowerBound)
         }
 
-        isLastSampleQueued = sampleFlags.contains(.lastSample)
-        largestQueuedTimestamp = max(largestQueuedTimestamp, time.presentationTimeStamp)
+        isLastSampleQueued = sample.isLastSample
+        largestQueuedTimestamp = max(largestQueuedTimestamp, sample.timingInfo.presentationTimeStamp)
 
         let relativeEndIndex = getRelativeIndex(offset: length)
-        samples[relativeEndIndex] = .init(offset: offset, size: size, flags: sampleFlags, time: time)
+        samples[relativeEndIndex] = sample
 
         if sharedSampleMetadata.isEmpty || sharedSampleMetadata.getEndValue() != upstreamFormat {
             if let upstreamFormat {
@@ -666,7 +714,10 @@ private extension SampleQueue {
 
         if length == capacity {
             let newCapacity = capacity + SampleQueue.sampleCapacityIncrement
-            var newArray = ContiguousArray<SampleWrapper>(repeating: .init(), count: newCapacity)
+            var newArray = ContiguousArray(
+                repeating: SampleProperties(timingInfo: .invalid),
+                count: newCapacity
+            )
 
             let beforeWrap = capacity - relativeFirstIndex
             let afterWrap = relativeFirstIndex
@@ -698,7 +749,7 @@ private extension SampleQueue {
         sharedSampleMetadata.discard(from: discardFromIndex)
         if length != 0 {
             let relativeLastWriteIndex = getRelativeIndex(offset: length - 1)
-            return samples[relativeLastWriteIndex].offset + samples[relativeLastWriteIndex].size
+            return samples[relativeLastWriteIndex].dataRange.upperBound
         }
         return 0
     }
@@ -713,11 +764,11 @@ private extension SampleQueue {
 
         for i in 0 ..< length {
             // Samples are in decode order: one after a later one can still be before `time`.
-            if samples[searchIndex].time.presentationTimeStamp <= time,
-               !keyframe || samples[searchIndex].flags.contains(.keyframe) {
+            if samples[searchIndex].timingInfo.presentationTimeStamp <= time,
+               !keyframe || samples[searchIndex].isKeyframe {
                 sampleCountToTarget = i
 
-                if samples[searchIndex].time.presentationTimeStamp == time {
+                if samples[searchIndex].timingInfo.presentationTimeStamp == time {
                     break
                 }
             }
@@ -734,7 +785,7 @@ private extension SampleQueue {
     func findSampleAfter(relativeStartIndex: Int, length: Int, time: CMTime, allowTimeBeyondBuffer: Bool) -> Int {
         var searchIndex = relativeStartIndex
         for i in 0 ..< length {
-            if samples[searchIndex].time.presentationTimeStamp >= time {
+            if samples[searchIndex].timingInfo.presentationTimeStamp >= time {
                 return i
             }
             searchIndex += 1
@@ -749,7 +800,7 @@ private extension SampleQueue {
         var count = length
         var relativeSampleIndex = getRelativeIndex(offset: length - 1)
 
-        while count > readPosition, samples[relativeSampleIndex].time.presentationTimeStamp >= time {
+        while count > readPosition, samples[relativeSampleIndex].timingInfo.presentationTimeStamp >= time {
             count -= 1
             relativeSampleIndex -= 1
             if relativeSampleIndex == -1 {
@@ -774,9 +825,9 @@ private extension SampleQueue {
 
         if length == 0 {
             let relativeLastDiscardIndex = (relativeFirstIndex == 0 ? capacity : relativeFirstIndex) - 1
-            return samples[relativeLastDiscardIndex].offset + samples[relativeLastDiscardIndex].size
+            return samples[relativeLastDiscardIndex].dataRange.upperBound
         } else {
-            return samples[relativeFirstIndex].offset
+            return samples[relativeFirstIndex].dataRange.lowerBound
         }
     }
 
@@ -787,8 +838,8 @@ private extension SampleQueue {
         var relativeSampleIndex = getRelativeIndex(offset: length - 1)
 
         for _ in 0 ..< length {
-            largestTimestamp = max(largestTimestamp, samples[relativeSampleIndex].time.presentationTimeStamp)
-            if samples[relativeSampleIndex].flags.contains(.keyframe) {
+            largestTimestamp = max(largestTimestamp, samples[relativeSampleIndex].timingInfo.presentationTimeStamp)
+            if samples[relativeSampleIndex].isKeyframe {
                 break
             }
             relativeSampleIndex -= 1
@@ -808,25 +859,6 @@ private extension SampleQueue {
 
 extension SampleQueue {
     static let sampleCapacityIncrement: Int = 1000
-
-    private struct SampleWrapper {
-        let offset: Int
-        let size: Int
-        let flags: SampleFlags
-        let time: CMSampleTimingInfo
-
-        init(
-            offset: Int = 0,
-            size: Int = 0,
-            flags: SampleFlags = .init(),
-            time: CMSampleTimingInfo = .invalid
-        ) {
-            self.offset = offset
-            self.size = size
-            self.flags = flags
-            self.time = time
-        }
-    }
 }
 
 extension SampleQueue: CustomDebugStringConvertible {

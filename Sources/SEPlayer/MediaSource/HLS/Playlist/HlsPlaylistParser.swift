@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 20.08.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.playlist.HlsPlaylistParser
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -357,7 +363,9 @@ private extension HlsPlaylistParser {
     /// compatibility brands (`dvh1.08.07/db4h`), if it is a Dolby Vision layer that agrees with the video range.
     func supplementalCodecs(_ attribute: String?, videoRange: String?) -> String? {
         // Only the first codec is read.
-        guard let first = attribute?.split(separator: ",").first else { return nil }
+        guard let first = attribute?.split(separator: ",").first else {
+            return nil
+        }
         let parts = first.split(separator: "/", omittingEmptySubsequences: false)
         let supplementalCodec = parts[0].trimmingCharacters(in: .whitespaces)
         let profiles = parts.count > 1 ? String(parts[1]) : nil

@@ -4,37 +4,48 @@
 //
 //  Created by tvrrp on 19.02.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.trackselection.BaseTrackSelection
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Dispatch
 import SEPlayerCommon
 
-class BaseTrackSelection: SETrackSelection, Hashable {
-    let trackGroup: TrackGroup
-    let length: Int
-    let tracks: [Int?]
-    let type: TrackSelectionType
-    let formats: [AnyFormat]
+/// The part ``SETrackSelection`` implementations share: the tracks of a group from the highest bitrate down, and the
+/// tracks excluded for a while.
+///
+/// Subclasses provide the selected index, reason and data, and update the selection in
+/// ``updateSelectedTrack(playbackPosition:bufferedDuration:availableDuration:queue:mediaChunkIterators:)``.
+open class BaseTrackSelection: SETrackSelection, Hashable {
+    public let trackGroup: TrackGroup
+    public let length: Int
+    public let tracks: [Int?]
+    public let type: TrackSelectionType
+    public let formats: [AnyFormat]
 
-    var selectedFormat: AnyFormat { formats[selectedIndex] }
-    var selectedIndexInTrackGroup: Int? { tracks[selectedIndex] }
-    var selectedIndex: Int { fatalError("To override") }
-    var selectedReason: TrackSelectionReason { fatalError("To override") }
-    var selectionData: Any? { fatalError("To override") }
+    public final var selectedFormat: AnyFormat { formats[selectedIndex] }
+    public final var selectedIndexInTrackGroup: Int? { tracks[selectedIndex] }
+    open var selectedIndex: Int { fatalError("To override") }
+    open var selectedReason: TrackSelectionReason { fatalError("To override") }
+    open var selectionData: Any? { fatalError("To override") }
 
-    var measuredBitrate: Int? {
+    open var measuredBitrate: Int? {
         guard let loaded = loadedMedia[selectedIndex], loaded.seconds > 0 else {
             return nil
         }
         return Int(loaded.bits / loaded.seconds)
     }
 
-    private(set) var playWhenReady: Bool
+    public private(set) var playWhenReady: Bool
     private var excludeUntilTimes: [CMTime]
     /// The bits and seconds of the loaded chunks of formats without a bitrate, by index.
     private var loadedMedia: [Int: (bits: Double, seconds: Double)] = [:]
 
-    init(group: TrackGroup, tracks: [Int], type: TrackSelectionType = .unset) {
+    public init(group: TrackGroup, tracks: [Int], type: TrackSelectionType = .unset) {
         precondition(!tracks.isEmpty)
         self.trackGroup = group
         self.length = tracks.count
@@ -51,28 +62,28 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         playWhenReady = false
     }
 
-    func format(for index: Int) -> AnyFormat {
+    public final func format(for index: Int) -> AnyFormat {
         formats[index]
     }
 
-    func indexInTrackGroup(_ index: Int) -> Int? {
+    public final func indexInTrackGroup(_ index: Int) -> Int? {
         tracks[index]
     }
 
-    func indexOf(format: AnyFormat) -> Int? {
+    public final func indexOf(format: AnyFormat) -> Int? {
         formats.firstIndex(where: { $0 == format })
     }
 
-    func indexOf(indexInTrackGroup: Int) -> Int? {
+    public final func indexOf(indexInTrackGroup: Int) -> Int? {
         tracks.firstIndex(where: { $0 == indexInTrackGroup })
     }
 
-    func enable() {}
-    func disable() {}
-    func playbackSpeedDidChange(_ playbackSpeed: Float) {}
-    func loadsQuickly(bits: Double) -> Bool? { nil }
+    open func enable() {}
+    open func disable() {}
+    open func playbackSpeedDidChange(_ playbackSpeed: Float) {}
+    open func loadsQuickly(bits: Double) -> Bool? { nil }
 
-    func updateSelectedTrack(
+    open func updateSelectedTrack(
         playbackPosition: CMTime,
         bufferedDuration: CMTime,
         availableDuration: CMTime,
@@ -82,11 +93,11 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         fatalError("To override")
     }
 
-    func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int {
+    open func evaluateQueueSize(playbackPosition: CMTime, queue: [MediaChunk]) -> Int {
         queue.count
     }
 
-    func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool {
+    public final func excludeTrack(index: Int, exclusionDuration: CMTime) -> Bool {
         let now = CMClock.hostTimeClock.time
         // An excluded track can stay excluded for longer; otherwise another track has to be left to play.
         let canExclude = isTrackExcluded(index: index, now: now)
@@ -104,11 +115,11 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         return true
     }
 
-    func isTrackExcluded(index: Int, now: CMTime) -> Bool {
+    public final func isTrackExcluded(index: Int, now: CMTime) -> Bool {
         excludeUntilTimes[index] > now
     }
 
-    func chunkLoaded(_ chunk: MediaChunk) {
+    open func chunkLoaded(_ chunk: MediaChunk) {
         guard let format = chunk.trackFormat, format.bitrate == nil, let index = indexOf(format: format),
               chunk.endTime.isNumeric, chunk.startTime.isNumeric, chunk.endTime > chunk.startTime,
               chunk.bytesLoaded > 0 else {
@@ -120,11 +131,11 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         loadedMedia[index] = loaded
     }
 
-    func playWhenReadyChanged(_ playWhenReady: Bool) {
+    open func playWhenReadyChanged(_ playWhenReady: Bool) {
         self.playWhenReady = playWhenReady
     }
 
-    func isEquals(to other: SETrackSelection) -> Bool {
+    public final func isEquals(to other: SETrackSelection) -> Bool {
         guard let other = other as? BaseTrackSelection else {
             return false
         }
@@ -132,14 +143,14 @@ class BaseTrackSelection: SETrackSelection, Hashable {
         return trackGroup == other.trackGroup && tracks == other.tracks
     }
 
-    func hash(into hasher: inout Hasher) {
+    public final func hash(into hasher: inout Hasher) {
         hasher.combine(trackGroup)
         hasher.combine(tracks)
     }
 }
 
 extension BaseTrackSelection: Equatable {
-    static func == (lhs: BaseTrackSelection, rhs: BaseTrackSelection) -> Bool {
+    public static func == (lhs: BaseTrackSelection, rhs: BaseTrackSelection) -> Bool {
         lhs.isEquals(to: rhs)
     }
 }

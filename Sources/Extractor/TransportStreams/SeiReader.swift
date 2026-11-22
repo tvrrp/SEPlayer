@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 11.08.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.SeiReader
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -77,9 +83,15 @@ final class SeiReader {
             for output in outputs {
                 try output.sampleData(data: data.packets.blockBuffer)
                 try output.sampleMetadata(
-                    time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: data.presentationTime, decodeTimeStamp: .invalid),
-                    flags: .keyframe,
-                    range: 0 ..< data.packets.readableBytes
+                    SampleProperties(
+                        timingInfo: CMSampleTimingInfo(
+                            duration: .invalid,
+                            presentationTimeStamp: data.presentationTime,
+                            decodeTimeStamp: .invalid
+                        ),
+                        dataRange: 0 ..< data.packets.readableBytes,
+                        flags: .keyframe
+                    )
                 )
             }
         }

@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.BoxParser
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -118,7 +124,7 @@ extension BoxParser {
         var ptsValues = [CMTime]()
         var dtsValues = [CMTime]()
         var sampleDurations = [CMTime]()
-        var samplesFlags = [SampleFlags]()
+        var samplesFlags = [SampleProperties.Flags]()
         var syncSampleIndicesList = [Int]()
         let hasOnlySyncSamples = stss == nil
         var dtsAccumulator: Int64 = 0 // running DTS in track timescale units
@@ -307,6 +313,37 @@ extension BoxParser {
 
         guard let editListDurations = track.editListDurations,
               let editListMediaTimes = track.editListMediaTimes else {
+            // Without an edit list, the encoder delay and padding of the iTunes metadata are its edit.
+            if let mapping = gaplessEdit(
+                track: track,
+                gaplessInfoHolder: gaplessInfoHolder,
+                firstSampleTime: ptsValues.first,
+                duration: totalDuration
+            ) {
+                let edited = movedTimes(
+                    pts: ptsValues,
+                    dts: dtsValues,
+                    durations: sampleDurations,
+                    by: mapping.target.start - mapping.source.start,
+                    keeping: mapping.source
+                )
+                return try TrackSampleTable(
+                    track: track,
+                    offsets: offsets,
+                    sizes: sizes,
+                    maximumSize: maximumSize,
+                    pts: edited.pts,
+                    dts: edited.dts,
+                    durations: sampleDurations,
+                    duration: mapping.target.duration,
+                    flags: samplesFlags,
+                    syncSampleIndices: syncSampleIndicesList,
+                    hasOnlySyncSamples: hasOnlySyncSamples,
+                    sampleCount: sampleCount,
+                    attributes: edited.attributes
+                )
+            }
+
             return try TrackSampleTable(
                 track: track,
                 offsets: offsets,
@@ -400,19 +437,31 @@ extension BoxParser {
                         encoderPadding: Int(encoderPadding)
                     )
 
+                    MetadataUtil.setFormatGaplessInfo(gaplessInfoHolder: gaplessInfoHolder, format: &track.format)
+
+                    // All samples stay: those of the delay prime the decoder. Their output and the padding's are
+                    // trimmed.
+                    let edited = movedTimes(
+                        pts: ptsValues,
+                        dts: dtsValues,
+                        durations: sampleDurations,
+                        by: mapping.target.start - mapping.source.start,
+                        keeping: mapping.source
+                    )
                     return try TrackSampleTable(
                         track: track,
                         offsets: offsets,
                         sizes: sizes,
                         maximumSize: maximumSize,
-                        pts: ptsValues,
-                        dts: dtsValues,
+                        pts: edited.pts,
+                        dts: edited.dts,
                         durations: sampleDurations,
                         duration: mapping.target.duration,
                         flags: samplesFlags,
                         syncSampleIndices: syncSampleIndicesList,
                         hasOnlySyncSamples: hasOnlySyncSamples,
-                        sampleCount: sampleCount
+                        sampleCount: sampleCount,
+                        attributes: edited.attributes
                     )
                 }
             }
@@ -425,23 +474,29 @@ extension BoxParser {
             let editStartTime = trackTime(editListMediaTimes[0])
             let editedDuration = totalDuration - editStartTime
 
-            let editedPts = ptsValues.map { $0 - editStartTime }
-            let editedDts = dtsValues.map { $0 - editStartTime }
-            // Per-sample durations are unaffected by a uniform shift.
+            // Per-sample durations are unaffected by a uniform shift. Audio before the edit is trimmed.
+            let edited = movedTimes(
+                pts: ptsValues,
+                dts: dtsValues,
+                durations: sampleDurations,
+                by: .zero - editStartTime,
+                keeping: track.type == .audio ? CMTimeRange(start: editStartTime, end: .positiveInfinity) : nil
+            )
 
             return try TrackSampleTable(
                 track: track,
                 offsets: offsets,
                 sizes: sizes,
                 maximumSize: maximumSize,
-                pts: editedPts,
-                dts: editedDts,
+                pts: edited.pts,
+                dts: edited.dts,
                 durations: sampleDurations,
                 duration: editedDuration,
                 flags: samplesFlags,
                 syncSampleIndices: syncSampleIndicesList,
                 hasOnlySyncSamples: hasOnlySyncSamples,
-                sampleCount: sampleCount
+                sampleCount: sampleCount,
+                attributes: edited.attributes
             )
         }
 
@@ -533,7 +588,7 @@ extension BoxParser {
         var editedSizes = copyMetadata ? Array(repeating: 0, count: editedSampleCount) : sizes
         var editedMaximumSize = copyMetadata ? 0 : maximumSize
         var editedFlags = copyMetadata
-            ? Array(repeating: SampleFlags(), count: editedSampleCount) : samplesFlags
+            ? Array(repeating: SampleProperties.Flags(), count: editedSampleCount) : samplesFlags
         var editedSyncSampleIndicesList = copyMetadata ? [Int]() : syncSampleIndicesList
         var editedPts = copyMetadata
             ? Array(repeating: CMTime.zero, count: editedSampleCount) : ptsValues
@@ -542,6 +597,7 @@ extension BoxParser {
         var editedDurations = copyMetadata
             ? Array(repeating: CMTime.zero, count: editedSampleCount) : sampleDurations
 
+        var editedAttributes = [Int: SampleAttributes]()
         var sampleIndex = 0
 
         for (index, mapping) in editMappings.enumerated() {
@@ -580,6 +636,14 @@ extension BoxParser {
                 if copyMetadata, !hasOnlySyncSamples, editedFlags[sampleIndex].contains(.keyframe) {
                     editedSyncSampleIndicesList.append(sampleIndex)
                 }
+                // The audio of a sample cut by the edit is trimmed to it, in the track's own times.
+                if track.type == .audio {
+                    editedAttributes[sampleIndex] = trim(
+                        keeping: mapping.source,
+                        pts: ptsValues[j],
+                        duration: sampleDurations[j]
+                    )
+                }
                 sampleIndex += 1
             }
         }
@@ -598,8 +662,64 @@ extension BoxParser {
             flags: editedFlags,
             syncSampleIndices: editedSyncSampleIndicesList,
             hasOnlySyncSamples: hasOnlySyncSamples,
-            sampleCount: editedOffsets.count
+            sampleCount: editedOffsets.count,
+            attributes: editedAttributes
         )
+    }
+
+    /// The edit that the encoder delay and padding make of an audio track that has none.
+    private func gaplessEdit(
+        track: Track,
+        gaplessInfoHolder: GaplessInfoHolder,
+        firstSampleTime: CMTime?,
+        duration: CMTime
+    ) -> CMTimeMapping? {
+        guard track.type == .audio, gaplessInfoHolder.hasGaplessInfo, let firstSampleTime,
+              let sampleRate = track.format.audio?.sampleRate, sampleRate > 0 else {
+            return nil
+        }
+
+        let timescale = CMTimeScale(sampleRate)
+        let delay = CMTime(value: CMTimeValue(gaplessInfoHolder.encoderDelay ?? 0), timescale: timescale)
+        let padding = CMTime(value: CMTimeValue(gaplessInfoHolder.encoderPadding ?? 0), timescale: timescale)
+        let source = CMTimeRange(start: firstSampleTime + delay, end: duration - padding)
+        guard source.duration > .zero else { return nil }
+
+        return CMTimeMapping(source: source, target: CMTimeRange(start: .zero, duration: source.duration))
+    }
+
+    /// The times of samples moved by `offset`, and the trims of the samples that aren't wholly within `kept`, a range
+    /// of their unmoved times.
+    private func movedTimes(
+        pts: [CMTime],
+        dts: [CMTime],
+        durations: [CMTime],
+        by offset: CMTime,
+        keeping kept: CMTimeRange?
+    ) -> (pts: [CMTime], dts: [CMTime], attributes: [Int: SampleAttributes]) {
+        let movedPts = pts.map { $0 + offset }
+        let movedDts = dts == pts ? movedPts : dts.map { $0 + offset }
+        var attributes = [Int: SampleAttributes]()
+        if let kept {
+            for index in pts.indices {
+                attributes[index] = trim(keeping: kept, pts: pts[index], duration: durations[index])
+            }
+        }
+        return (movedPts, movedDts, attributes)
+    }
+
+    /// The trims of a sample to what of it is within `kept`, a range of the times `pts` is in; `nil` when all of it
+    /// is.
+    private func trim(keeping kept: CMTimeRange, pts: CMTime, duration: CMTime) -> SampleAttributes? {
+        var sample = SampleProperties(
+            timingInfo: CMSampleTimingInfo(
+                duration: duration,
+                presentationTimeStamp: pts,
+                decodeTimeStamp: .invalid
+            )
+        )
+        sample.trim(to: kept)
+        return sample.attributes.isEmpty ? nil : sample.attributes
     }
 
     private func canApplyEditWithGaplessInfo(

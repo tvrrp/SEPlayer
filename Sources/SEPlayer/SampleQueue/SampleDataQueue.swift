@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 04.07.2026.
 //
+//  Portions of this file are derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.SampleDataQueue
+//  Copyright (C) 2019 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -34,7 +40,7 @@ final class SampleDataQueue: @unchecked Sendable {
 
     private let lock = UnfairLock()
     /// Hears how many bytes the queue holds.
-    private let allocator: Allocator?
+    private let bufferedBytesCounter: BufferedBytesCounter?
 
     /// The written buffers, from `firstChunk` on; the ones before it are discarded, and dropped from the array in
     /// batches.
@@ -43,15 +49,15 @@ final class SampleDataQueue: @unchecked Sendable {
     /// The position before which the bytes are discarded.
     private var baseOffset = 0
     private var totalBytesWritten = 0
-    /// The bytes reported to the allocator.
+    /// The bytes reported to the bufferedBytesCounter.
     private var reportedBytes = 0
 
-    init(allocator: Allocator? = nil) {
-        self.allocator = allocator
+    init(bufferedBytesCounter: BufferedBytesCounter? = nil) {
+        self.bufferedBytesCounter = bufferedBytesCounter
     }
 
     deinit {
-        allocator?.release(bytes: reportedBytes)
+        bufferedBytesCounter?.remove(bytes: reportedBytes)
     }
 
     func reset() {
@@ -180,14 +186,14 @@ final class SampleDataQueue: @unchecked Sendable {
         return low
     }
 
-    /// Tells the allocator how much the held bytes changed since the last report.
+    /// Tells the bufferedBytesCounter how much the held bytes changed since the last report.
     private func reportHeldBytes() {
-        guard let allocator else { return }
+        guard let bufferedBytesCounter else { return }
         let heldBytes = totalBytesWritten - baseOffset
         if heldBytes > reportedBytes {
-            allocator.allocate(bytes: heldBytes - reportedBytes)
+            bufferedBytesCounter.add(bytes: heldBytes - reportedBytes)
         } else if heldBytes < reportedBytes {
-            allocator.release(bytes: reportedBytes - heldBytes)
+            bufferedBytesCounter.remove(bytes: reportedBytes - heldBytes)
         }
         reportedBytes = heldBytes
     }

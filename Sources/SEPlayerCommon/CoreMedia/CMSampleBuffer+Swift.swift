@@ -248,6 +248,15 @@ public struct SampleBufferAttachments: @unchecked Sendable {
         cfBoolValue(CMGetAttachment(buffer, key: key.rawValue, attachmentModeOut: nil))
     }
 
+    /// The value of `key` as a time, attached as a dictionary; `nil` when there is none or it isn't one.
+    public func time(for key: Key) -> CMTime? {
+        guard let dictionary = CMGetAttachment(buffer, key: key.rawValue, attachmentModeOut: nil) as? NSDictionary else {
+            return nil
+        }
+        let time = CMTimeMakeFromDictionary(dictionary as CFDictionary)
+        return time.isValid ? time : nil
+    }
+
     /// Whether the attachment of `key` propagates, if there is one.
     public func mode(of key: Key) -> Mode? {
         var mode = CMAttachmentMode()
@@ -304,6 +313,15 @@ public struct PerSampleAttachments: RandomAccessCollection, @unchecked Sendable 
         public static let earlierDisplayTimesAllowed = Self(rawValue: kCMSampleAttachmentKey_EarlierDisplayTimesAllowed)
         public static let displayImmediately = Self(rawValue: kCMSampleAttachmentKey_DisplayImmediately)
         public static let doNotDisplay = Self(rawValue: kCMSampleAttachmentKey_DoNotDisplay)
+        public static let hevcTemporalLevelInfo = Self(rawValue: kCMSampleAttachmentKey_HEVCTemporalLevelInfo)
+        public static let hevcSyncSampleNALUnitType = Self(rawValue: kCMSampleAttachmentKey_HEVCSyncSampleNALUnitType)
+        public static let hevcTemporalSubLayerAccess = Self(rawValue: kCMSampleAttachmentKey_HEVCTemporalSubLayerAccess)
+        public static let hevcStepwiseTemporalSubLayerAccess = Self(
+            rawValue: kCMSampleAttachmentKey_HEVCStepwiseTemporalSubLayerAccess
+        )
+        public static let audioIndependentSampleDecoderRefreshCount = Self(
+            rawValue: kCMSampleAttachmentKey_AudioIndependentSampleDecoderRefreshCount
+        )
     }
 
     /// The attachments of one sample.

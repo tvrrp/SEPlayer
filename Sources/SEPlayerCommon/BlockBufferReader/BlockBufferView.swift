@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 21.06.2026.
 //
+//  Derived from SwiftNIO (https://github.com/apple/swift-nio):
+//    NIOCore/ByteBuffer-views.swift
+//  Copyright (c) 2017-2018 Apple Inc. and the SwiftNIO project authors
+//  Licensed under the Apache License, Version 2.0; see LICENSE and NOTICE.
+//  Changed from the original: rewritten to view a BlockBufferReader.
+//
 
 import CoreMedia
 

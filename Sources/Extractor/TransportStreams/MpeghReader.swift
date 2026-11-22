@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.MpeghReader
+//  Copyright (C) 2024 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -168,7 +174,9 @@ final class MpeghReader: ElementaryStreamReader {
 
     private func parseHeader() throws -> Bool {
         var bits = BlockBufferBitReader(reader: headerData)
-        guard try MpeghUtil.parseMhasPacketHeader(&bits, header: &header) else { return false }
+        guard try MpeghUtil.parseMhasPacketHeader(&bits, header: &header) else {
+            return false
+        }
         payloadBytesRead = 0
         frameBytes += header.packetLength + headerData.capacity
         return true
@@ -206,9 +214,15 @@ final class MpeghReader: ElementaryStreamReader {
             time = time + duration
         }
         try output.sampleMetadata(
-            time: CMSampleTimingInfo(duration: duration, presentationTimeStamp: frameTime, decodeTimeStamp: .invalid),
-            flags: configFound ? .keyframe : [],
-            range: 0 ..< frameBytes
+            SampleProperties(
+                timingInfo: CMSampleTimingInfo(
+                    duration: duration,
+                    presentationTimeStamp: frameTime,
+                    decodeTimeStamp: .invalid
+                ),
+                dataRange: 0 ..< frameBytes,
+                flags: configFound ? .keyframe : []
+            )
         )
         if configFound {
             randomAccessPointPending = false

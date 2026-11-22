@@ -30,7 +30,9 @@ struct UsacConfig {
         }
         guard sampleRate != 0 else { throw AudioConfigError() }
         coreSbrFrameLengthIndex = try bits.readBits(3)
-        guard coreSbrFrameLengthIndex < Self.framesPerPacket.count else { throw AudioConfigError() }
+        guard coreSbrFrameLengthIndex < Self.framesPerPacket.count else {
+            throw AudioConfigError()
+        }
         let hasSbr = coreSbrFrameLengthIndex >= 2
 
         // UsacChannelConfig: bsOutputChannelPos of each channel.
@@ -70,7 +72,9 @@ struct UsacConfig {
                 let length = try bits.readEscapedValue(4, 8, 16)
                 if type == Self.fillExtension {
                     for _ in 0 ..< length {
-                        guard try bits.readBits(8) == Self.fillByte else { throw AudioConfigError() }
+                        guard try bits.readBits(8) == Self.fillByte else {
+                            throw AudioConfigError()
+                        }
                     }
                 } else {
                     try bits.skip(bits: 8 * length)

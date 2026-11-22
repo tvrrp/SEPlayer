@@ -4,6 +4,13 @@
 //
 //  Created by Damir Yackupov on 25.05.2025.
 //
+//  Portions of this file are derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.LoadControl
+//    androidx.media3.exoplayer.DefaultLoadControl
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation.NSUUID
@@ -15,7 +22,7 @@ public protocol LoadControl {
     func onTracksSelected(parameters: LoadControlParams, trackGroups: TrackGroupArray, trackSelections: [SETrackSelection?])
     func onStopped(playerId: UUID)
     func onReleased(playerId: UUID)
-    func getAllocator() -> Allocator
+    func getBufferedBytesCounter() -> BufferedBytesCounter
     func getBackBufferDuration(playerId: UUID) -> CMTime
     /// Loading restarts once less than this is buffered.
     func getMinBufferDuration(playerId: UUID) -> CMTime
@@ -48,16 +55,17 @@ public struct LoadControlParams {
 /// - Loading: up to a high water level of 50 s, or the preferred forward buffer duration, then not again until less
 ///   than the low water level of 20 s is buffered: the buffer refills in bursts, and the network is idle in between.
 ///   A full buffer pauses loading only if playback is likely to keep up; otherwise loading goes on.
-/// - Playback of HLS starts with one target duration buffered, or a third of it when the predicted bandwidth is three
-///   times what the stream needs. Low-latency streams start with their part hold-back.
+/// - Playback of a segmented stream, such as HLS, starts with one target segment duration buffered, or a third of it
+///   when the predicted bandwidth is three times what the stream needs. Low-latency streams start with the buffer
+///   their manifest asks for, the part hold-back in HLS.
 /// - Progressive playback starts once the buffer and the measured transfer rate are likely to keep up with the media
 ///   to the end.
 /// - After a stall the same rules apply: there is no separate rebuffer duration.
 ///
 /// Each player needs its own load control.
-final class DefaultLoadControl: LoadControl {
-    let queue: Queue
-    private let allocator: DefaultAllocator
+public final class DefaultLoadControl: LoadControl {
+    public let queue: Queue
+    private let bufferedBytesCounter: DefaultBufferedBytesCounter
     private let bandwidthMeter: BandwidthMeter?
 
     private let preferredForwardBufferDuration: CMTime
@@ -74,22 +82,29 @@ final class DefaultLoadControl: LoadControl {
     private var trackSelections: [SETrackSelection?] = []
 
     /// - Parameters:
+    ///   - queue: The work queue of the player.
     ///   - bandwidthMeter: Measures the network for the playback decisions. Without it playback starts as soon as
     ///     a little is buffered.
+    ///   - bufferedBytesCounter: Counts the bytes the player buffers.
     ///   - preferredForwardBufferDuration: How much to buffer ahead. Zero for the default.
-    init(
+    ///   - backBufferDuration: How much to keep buffered behind the playback position.
+    ///   - retainBackBufferFromKeyframe: Whether the back buffer starts at a keyframe, to seek back into it.
+    ///   - targetBufferBytes: The most memory the buffer takes; by default, as much as the selected tracks need.
+    ///   - prioritizeTimeOverSizeThresholds: Whether the buffer durations win over the memory limit: with it, a full
+    ///     memory neither stops loading nor starts playback.
+    public init(
         queue: Queue,
         bandwidthMeter: BandwidthMeter? = nil,
-        allocator: DefaultAllocator? = nil,
+        bufferedBytesCounter: DefaultBufferedBytesCounter? = nil,
         preferredForwardBufferDuration: CMTime = .zero,
-        backBufferDuration: CMTime = DefaultConstants.backBufferDuration,
-        retainBackBufferFromKeyframe: Bool = DefaultConstants.retainBackBufferFromKeyframe,
+        backBufferDuration: CMTime = .zero,
+        retainBackBufferFromKeyframe: Bool = true,
         targetBufferBytes: Int? = nil,
         prioritizeTimeOverSizeThresholds: Bool = false
     ) {
         self.queue = queue
         self.bandwidthMeter = bandwidthMeter
-        self.allocator = allocator ?? DefaultAllocator()
+        self.bufferedBytesCounter = bufferedBytesCounter ?? DefaultBufferedBytesCounter()
         self.preferredForwardBufferDuration = preferredForwardBufferDuration
         self.backBufferDuration = backBufferDuration
         self.retainBackBufferFromKeyframe = retainBackBufferFromKeyframe
@@ -97,14 +112,14 @@ final class DefaultLoadControl: LoadControl {
         self.prioritizeTimeOverSizeThresholds = prioritizeTimeOverSizeThresholds
     }
 
-    func onPrepared(playerId: UUID) {
+    public func onPrepared(playerId: UUID) {
         assertQueue()
         assert(self.playerId == nil || self.playerId == playerId, "Each player needs its own DefaultLoadControl")
         self.playerId = playerId
         resetLoadingState()
     }
 
-    func onTracksSelected(
+    public func onTracksSelected(
         parameters: LoadControlParams,
         trackGroups: TrackGroupArray,
         trackSelections: [SETrackSelection?]
@@ -114,41 +129,41 @@ final class DefaultLoadControl: LoadControl {
         targetBufferBytes = targetBufferBytesOverwrite ?? calculateTargetBufferBytes(trackSelectionArray: trackSelections)
     }
 
-    func onStopped(playerId: UUID) {
+    public func onStopped(playerId: UUID) {
         assertQueue()
         resetLoadingState()
     }
 
-    func onReleased(playerId: UUID) {
+    public func onReleased(playerId: UUID) {
         assertQueue()
         resetLoadingState()
         self.playerId = nil
     }
 
-    func getAllocator() -> Allocator {
-        allocator
+    public func getBufferedBytesCounter() -> BufferedBytesCounter {
+        bufferedBytesCounter
     }
 
-    func getBackBufferDuration(playerId: UUID) -> CMTime {
+    public func getBackBufferDuration(playerId: UUID) -> CMTime {
         backBufferDuration
     }
 
-    func getMinBufferDuration(playerId: UUID) -> CMTime {
+    public func getMinBufferDuration(playerId: UUID) -> CMTime {
         waterLevels().low
     }
 
-    func getMaxBufferDuration(playerId: UUID) -> CMTime {
+    public func getMaxBufferDuration(playerId: UUID) -> CMTime {
         waterLevels().high
     }
 
-    func retainBackBufferFromKeyframe(playerId: UUID) -> Bool {
+    public func retainBackBufferFromKeyframe(playerId: UUID) -> Bool {
         retainBackBufferFromKeyframe
     }
 
-    func shouldContinueLoading(with parameters: LoadControlParams) -> Bool {
+    public func shouldContinueLoading(with parameters: LoadControlParams) -> Bool {
         assertQueue()
         let levels = waterLevels()
-        let targetBufferSizeReached = targetBufferBytes > 0 && allocator.totalBytesAllocated >= targetBufferBytes
+        let targetBufferSizeReached = targetBufferBytes > 0 && bufferedBytesCounter.bufferedBytes >= targetBufferBytes
 
         // Faster playback drains the buffer faster: the low level holds as much playback time.
         var low = levels.low
@@ -169,13 +184,13 @@ final class DefaultLoadControl: LoadControl {
         }
 
         if isLoading != wasLoading {
-            SELogger.debug(.loadControl, "\(isLoading ? "Loading" : "Not loading"): buffered \(parameters.bufferedDuration.seconds)s, levels \(low.seconds)–\(levels.high.seconds)s, \(allocator.totalBytesAllocated >> 10) of \(targetBufferBytes >> 10) KiB")
+            SELogger.debug(.loadControl, "\(isLoading ? "Loading" : "Not loading"): buffered \(parameters.bufferedDuration.seconds)s, levels \(low.seconds)–\(levels.high.seconds)s, \(bufferedBytesCounter.bufferedBytes >> 10) of \(targetBufferBytes >> 10) KiB")
         }
         isBufferFull = !isLoading
         return isLoading
     }
 
-    func shouldStartPlayback(parameters: LoadControlParams) -> Bool {
+    public func shouldStartPlayback(parameters: LoadControlParams) -> Bool {
         assertQueue()
         // A seek empties the buffer before loading is asked about again: only a buffer that is still full counts.
         if isBufferFull, parameters.bufferedDuration >= waterLevels().low {
@@ -187,8 +202,8 @@ final class DefaultLoadControl: LoadControl {
             SELogger.debug(.loadControl, "Playback can start: buffered to the end, \(parameters.bufferedDuration.seconds)s")
             return true
         }
-        if !prioritizeTimeOverSizeThresholds, targetBufferBytes > 0, allocator.totalBytesAllocated >= targetBufferBytes {
-            SELogger.debug(.loadControl, "Playback can start: the memory for the buffer is used up, \(allocator.totalBytesAllocated / 1024) KB")
+        if !prioritizeTimeOverSizeThresholds, targetBufferBytes > 0, bufferedBytesCounter.bufferedBytes >= targetBufferBytes {
+            SELogger.debug(.loadControl, "Playback can start: the memory for the buffer is used up, \(bufferedBytesCounter.bufferedBytes / 1024) KB")
             return true
         }
         let keepsUp = isLikelyToKeepUp(parameters)
@@ -196,18 +211,17 @@ final class DefaultLoadControl: LoadControl {
         return keepsUp
     }
 
-    func bufferedDurationToCheckPlayback(parameters: LoadControlParams) -> CMTime {
+    public func bufferedDurationToCheckPlayback(parameters: LoadControlParams) -> CMTime {
         assertQueue()
         let buffered = parameters.bufferedDuration.seconds
         let step = DefaultConstants.playbackCheckStep.seconds
-        guard let manifest = window(of: parameters)?.manifest as? HlsManifest else {
+        guard let manifest = window(of: parameters)?.manifest as? SegmentedManifest else {
             // The progressive prediction changes with every bit buffered: check again a little later.
             return CMTime(seconds: buffered + step, preferredTimescale: 1000)
         }
 
-        let thresholds = HlsStartupThresholds(
-            targetDuration: manifest.mediaPlaylist.targetDuration,
-            serverControl: manifest.mediaPlaylist.serverControl,
+        let thresholds = StartupThresholds(
+            manifest: manifest,
             requiredBitrate: requiredBitrate(),
             rate: Double(max(abs(parameters.playbackSpeed), 1))
         )
@@ -220,7 +234,7 @@ final class DefaultLoadControl: LoadControl {
         return CMTime(seconds: next ?? buffered + step, preferredTimescale: 1000)
     }
 
-    func shouldContinuePreloading(
+    public func shouldContinuePreloading(
         timeline: Timeline,
         mediaPeriodId: MediaPeriodId,
         bufferedDuration: CMTime
@@ -233,19 +247,18 @@ final class DefaultLoadControl: LoadControl {
 
     private func isLikelyToKeepUp(_ parameters: LoadControlParams) -> Bool {
         let window = window(of: parameters)
-        if let manifest = window?.manifest as? HlsManifest {
-            return isLikelyToKeepUp(parameters, playlist: manifest.mediaPlaylist)
+        if let manifest = window?.manifest as? SegmentedManifest {
+            return isLikelyToKeepUp(parameters, manifest: manifest)
         }
         return isLikelyToKeepUpProgressive(parameters, window: window)
     }
 
-    /// Whether HLS playback is likely to keep up with what is buffered.
-    private func isLikelyToKeepUp(_ parameters: LoadControlParams, playlist: HlsMediaPlaylist) -> Bool {
+    /// Whether playback of a segmented stream is likely to keep up with what is buffered.
+    private func isLikelyToKeepUp(_ parameters: LoadControlParams, manifest: SegmentedManifest) -> Bool {
         let rate = Double(max(abs(parameters.playbackSpeed), 1))
         let buffered = parameters.bufferedDuration.seconds
-        let thresholds = HlsStartupThresholds(
-            targetDuration: playlist.targetDuration,
-            serverControl: playlist.serverControl,
+        let thresholds = StartupThresholds(
+            manifest: manifest,
             requiredBitrate: requiredBitrate(),
             rate: rate
         )
@@ -407,16 +420,14 @@ private extension DefaultLoadControl {
 
 extension DefaultLoadControl {
     enum DefaultConstants {
-        static let backBufferDuration: CMTime = .zero
-        static let retainBackBufferFromKeyframe: Bool = true
         /// How much more to buffer before asking again whether to start, when no threshold says.
         static let playbackCheckStep: CMTime = .init(seconds: 0.5, preferredTimescale: 1000)
     }
 }
 
-/// The buffer HLS playback waits for: a target duration, or a third of it, and at least a second, when the bandwidth is
-/// three times what the stream needs. In seconds and bits per second.
-struct HlsStartupThresholds {
+/// The buffer playback of a segmented stream waits for: a target segment duration, or a third of it, and at least a
+/// second, when the bandwidth is three times what the stream needs. In seconds and bits per second.
+struct StartupThresholds {
     static let maxTargetDuration = 15
     static let fastStartTargetDurations = 0.33
     static let fastStartMinimumBuffer = 1.0
@@ -432,24 +443,16 @@ struct HlsStartupThresholds {
     let lowLatency: Double?
     let requiredBitrate: Int
 
-    init(
-        targetDuration: CMTime,
-        serverControl: HlsMediaPlaylist.ServerControl,
-        requiredBitrate: Int,
-        rate: Double
-    ) {
-        // The target duration is an integer number of seconds.
-        let seconds = targetDuration.isNumeric ? Int(targetDuration.seconds.rounded(.down)) : 0
-        let target = Double(min(seconds, Self.maxTargetDuration))
+    init(manifest: SegmentedManifest, requiredBitrate: Int, rate: Double) {
+        let targetDuration = manifest.targetSegmentDuration
+        let seconds = targetDuration.isNumeric ? targetDuration.seconds : 0
+        let target = min(seconds, Double(Self.maxTargetDuration))
         normal = target
         fast = min(normal, max(Self.fastStartMinimumBuffer, Self.fastStartTargetDurations * target))
         fastBitrate = Self.fastStartBandwidthMultiplier * Double(requiredBitrate) * rate
         self.requiredBitrate = requiredBitrate
 
-        // Without part durations, the part hold-back alone: the specification makes it at least three parts.
-        lowLatency = serverControl.canBlockReload && serverControl.partHoldBack.isNumeric
-            ? serverControl.partHoldBack.seconds
-            : nil
+        lowLatency = manifest.lowLatencyStartBuffer.map(\.seconds)
     }
 }
 

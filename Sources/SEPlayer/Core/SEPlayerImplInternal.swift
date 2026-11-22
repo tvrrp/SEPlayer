@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.ExoPlayerImplInternal
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -181,7 +187,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 rendererCapabilities: renderers.map { $0.getCapabilities() },
                 rendererPositionOffset: rendererPositionOffset,
                 trackSelector: trackSelector,
-                allocator: loadControl.getAllocator(),
+                bufferedBytesCounter: loadControl.getBufferedBytesCounter(),
                 mediaSourceList: mediaSourceList,
                 info: info,
                 emptyTrackSelectorResult: emptyTrackSelectorResult,
@@ -337,11 +343,13 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     }
 
     nonisolated func release() async {
+        // An earlier release invalidated the queue: the player is released already.
+        guard !workQueue.isInvalidated else { return }
+
         await withCheckedContinuation { continuation in
-            // Outside `perform`: nothing is published after the release.
-            workQueue.post { [weak self] in
+            workQueue.post { [self] in
                 SELogger.verbose(.scheduling, "Runs release")
-                self?.releaseInternal(continuation: continuation)
+                releaseInternal(continuation: continuation)
             }
         }
     }
@@ -1778,6 +1786,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
 
     private func releaseInternal(continuation: CheckedContinuation<Void, Never>) {
         assert(queue.isCurrent())
+        defer { continuation.resume() }
         do {
             resetInternal(
                 resetRenderers: true,
@@ -1786,15 +1795,15 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 resetError: false
             )
             try outboundTimebase.setRate(to: 1.0)
-            releaseRenderers()
-            loadControl.onReleased(playerId: identifier)
-            trackSelector.release()
-            setState(.idle)
-            // Nothing runs after the release, posted already or later.
-            released = true
-            workQueue.invalidate()
-            continuation.resume()
-        } catch {}
+        } catch {
+            SELogger.error(.lifecycle, "Error resetting timebase during release: \(error)")
+        }
+        releaseRenderers()
+        loadControl.onReleased(playerId: identifier)
+        trackSelector.release()
+        setState(.idle)
+        released = true
+        workQueue.invalidate()
     }
 
     private func resetInternal(

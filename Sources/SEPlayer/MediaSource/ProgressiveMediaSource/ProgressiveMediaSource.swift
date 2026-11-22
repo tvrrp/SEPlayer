@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.ProgressiveMediaSource
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -71,7 +77,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
 
     override func createPeriod(
         id: MediaPeriodId,
-        allocator: Allocator,
+        bufferedBytesCounter: BufferedBytesCounter,
         startPosition: CMTime
     ) throws -> MediaPeriod {
         SELogger.debug(.progressive, "Creating a period \(id) at \(startPosition.seconds)")
@@ -90,7 +96,7 @@ final class ProgressiveMediaSource: BaseMediaSource, ProgressiveMediaPeriod.List
                 extractorsFactory: extractorsFactory
             ),
             listener: self,
-            allocator: allocator,
+            bufferedBytesCounter: bufferedBytesCounter,
             continueLoadingCheckIntervalBytes: continueLoadingCheckIntervalBytes,
             loadErrorHandlingPolicy: loadErrorHandlingPolicy
         )

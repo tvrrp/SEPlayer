@@ -134,7 +134,7 @@ final class PlayerDebugView: UIView {
             refreshSection()
         }, for: .primaryActionTriggered)
         speedButton.showsMenuAsPrimaryAction = true
-        speedButton.menu = UIMenu(children: [0.5, 1, 1.25, 1.5, 2].map { (speed: Float) in
+        speedButton.menu = UIMenu(children: [0.5, 1, 1.25, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map { (speed: Float) in
             UIAction(title: "\(speed)×") { [weak self] _ in self?.player.setPlaybackSpeed(new: speed) }
         })
         controlsStack.isHidden = true
@@ -307,7 +307,9 @@ final class PlayerDebugView: UIView {
     /// The bitrate of a single selected track, which the graph compares with the bandwidth.
     private func selectedBitrate(of type: TrackType) -> Int? {
         let selected = selectedFormats(of: type)
-        guard selected.count == 1, selected[0].bitrateValue > 0 else { return nil }
+        guard selected.count == 1, selected[0].bitrateValue > 0 else {
+            return nil
+        }
         return selected[0].bitrateValue
     }
 
@@ -618,7 +620,9 @@ private final class BandwidthGraphView: UIView {
             let path = UIBezierPath()
             var drawing = false
             for (index, sample) in samples.enumerated() {
-                guard let value = value(sample) else { drawing = false; continue }
+                guard let value = value(sample) else {
+                    drawing = false; continue
+                }
                 let point = CGPoint(x: start + CGFloat(index) * step,
                                     y: plot.maxY - plot.height * CGFloat(Double(value) / top))
                 if drawing { path.addLine(to: point) } else { path.move(to: point) }

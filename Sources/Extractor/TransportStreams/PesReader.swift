@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 11.08.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.ts.PesReader
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -138,13 +144,22 @@ final class PesReader: TsPayload.Reader {
     }
 
     func canConsumeSynthesizedEmptyPusi(isModeHls: Bool) throws -> Bool {
-        // A payload unit start without a payload ends the sample data only for a PES without a length field
-        // whose body is being read.
-        guard state == .readingBody, payloadSize == nil else { return false }
+        // In HLS, a PES of MPEG-2 video may go on in the next segment: ending it here would commit part of an
+        // access unit.
+        if isModeHls, reader is H262Reader { return false }
 
-        // Only call parseHeader if isModeHls is true and can parse header as some HLS streams may
-        // contain packages.
-        return try !isModeHls || parseHeader()
+        switch state {
+        case .readingBody where payloadSize == nil:
+            // The end of input ends the body of a PES without a length field. Only call parseHeader if isModeHls
+            // is true and can parse header as some HLS streams may contain packages.
+            return try !isModeHls || parseHeader()
+        case .readingHeader:
+            // The last PES ended at its length, and no next one will start: the reader still has to learn that
+            // the input ended, as for the single PES of an I-frame chunk.
+            return true
+        default:
+            return false
+        }
     }
 
     private func setState(_ state: State) throws {

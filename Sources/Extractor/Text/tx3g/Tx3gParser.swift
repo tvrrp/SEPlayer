@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 25.02.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.text.tx3g.Tx3gParser
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreGraphics
 import CoreMedia

@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 23.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.GaplessInfoHolder
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import SEPlayerCommon
 
@@ -48,7 +54,9 @@ public struct GaplessInfoHolder {
         guard fields.count >= 4, fields[0].isEmpty else { return false }
 
         let hexFields = fields[1 ... 3]
-        guard hexFields.allSatisfy({ $0.count >= Self.hexFieldLength }) else { return false }
+        guard hexFields.allSatisfy({ $0.count >= Self.hexFieldLength }) else {
+            return false
+        }
         guard let encoderDelay = Int(fields[2].prefix(Self.hexFieldLength), radix: 16),
               let encoderPadding = Int(fields[3].prefix(Self.hexFieldLength), radix: 16) else {
             return false

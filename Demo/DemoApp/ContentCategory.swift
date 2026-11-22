@@ -53,6 +53,7 @@ extension ContentCategory {
         ]),
         ContentCategory("On demand", format: .hlsOnDemand, urls: [
             "https://devstreaming-cdn.apple.com/videos/wwdc/2026/382/1/a1dfe905-059c-45b1-b109-e68230f76399/cmaf.m3u8?25626",
+            "https://d3mfda3gpj3dw1.cloudfront.net/vn2LvEps745ShGtQ/master.m3u8",
             "https://d3rlna7iyyu8wu.cloudfront.net/DolbyVision_Atmos/profile5_HLS/master.m3u8",
             "https://devstreaming-cdn.apple.com/videos/streaming/examples/av1-sample/av1-sample.m3u8",
             "https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8",

@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 18.02.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 // swiftlint:disable file_length
 
@@ -415,7 +421,9 @@ public class DefaultTrackSelector: MappingTrackSelector, RendererCapabilitiesLis
             for trackIndex in 0 ..< group.count {
                 let support = formatSupport[groupIndex][trackIndex]
                 let allowsExceeding = params.exceedRendererCapabilitiesIfNecessary
-                guard support.isFormatSupported(allowExceedsCapabilities: allowsExceeding) else { continue }
+                guard support.isFormatSupported(allowExceedsCapabilities: allowsExceeding) else {
+                    continue
+                }
 
                 // Being within the capabilities counts more than being a default track.
                 let isWithinCapabilities = support.isFormatSupported(allowExceedsCapabilities: false)

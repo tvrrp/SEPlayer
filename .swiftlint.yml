@@ -60,3 +60,17 @@ overridden_super_call:
     - viewDidLayoutSubviews()
     - layoutSubviews()
     - traitCollectionDidChange(_:)
+
+custom_rules:
+  guard_else_on_own_line:
+    name: "Else on its own line"
+    regex: '^[ \t]*else\b'
+    match_kinds: keyword
+    message: "Keep `else {` at the end of the last condition line, never on a line of its own."
+    severity: warning
+  long_one_line_guard:
+    name: "Long one-line guard"
+    regex: '^(?=[^\n]{81,}$)[ \t]*guard [^\n]* else \{[^\n]*\}[ \t]*$'
+    message: "A guard longer than 80 columns puts its body on separate lines: `else {`, the body, then `}`."
+    severity: warning
+

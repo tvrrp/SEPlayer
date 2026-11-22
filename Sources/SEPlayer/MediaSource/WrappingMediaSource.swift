@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 20.05.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.source.WrappingMediaSource
+//  Copyright (C) 2022 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -38,8 +44,8 @@ class WrappingMediaSource: CompositeMediaSource<NSObject> {
 
     override func updateMediaItem(new item: MediaItem) throws { try mediaSource.updateMediaItem(new: item) }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> any MediaPeriod {
-        try mediaSource.createPeriod(id: id, allocator: allocator, startPosition: startPosition)
+    override func createPeriod(id: MediaPeriodId, bufferedBytesCounter: BufferedBytesCounter, startPosition: CMTime) throws -> any MediaPeriod {
+        try mediaSource.createPeriod(id: id, bufferedBytesCounter: bufferedBytesCounter, startPosition: startPosition)
     }
 
     override func release(mediaPeriod: MediaPeriod) {

@@ -2,6 +2,12 @@
 //  HlsMediaPeriod.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.HlsMediaPeriod
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -35,7 +41,7 @@ final class HlsMediaPeriod: MediaPeriod {
     private let loadErrorHandlingPolicy: LoadErrorHandlingPolicy
     private let transferListener: TransferListener?
     /// Hears how many bytes the sample queues hold.
-    private let allocator: Allocator?
+    private let bufferedBytesCounter: BufferedBytesCounter?
 
     private var callback: (any MediaPeriodCallback)?
     private var wrappers: [HlsSampleStreamWrapper] = []
@@ -65,9 +71,9 @@ final class HlsMediaPeriod: MediaPeriod {
         allowChunklessPreparation: Bool = true,
         loadErrorHandlingPolicy: LoadErrorHandlingPolicy = DefaultLoadErrorHandlingPolicy(),
         transferListener: TransferListener? = nil,
-        allocator: Allocator? = nil
+        bufferedBytesCounter: BufferedBytesCounter? = nil
     ) {
-        self.allocator = allocator
+        self.bufferedBytesCounter = bufferedBytesCounter
         self.transferListener = transferListener
         self.playlistTracker = playlistTracker
         self.extractorFactory = extractorFactory
@@ -492,14 +498,16 @@ final class HlsMediaPeriod: MediaPeriod {
             queue: queue,
             loaderQueue: loaderQueue,
             loadErrorHandlingPolicy: loadErrorHandlingPolicy,
-            allocator: allocator
+            bufferedBytesCounter: bufferedBytesCounter
         )
     }
 
     /// The format of the cues parsed from subtitles or captions of the format, when they can be parsed: the samples
     /// are then the cues.
     private func cuesFormat(of format: AnyFormat) throws -> AnyFormat {
-        guard let text = format.text, subtitleParserFactory.supportsFormat(text) else { return format }
+        guard let text = format.text, subtitleParserFactory.supportsFormat(text) else {
+            return format
+        }
         let behavior = try subtitleParserFactory.getCueReplacementBehavior(format: text)
         // The cues of the samples are timed relative to them.
         return AnyFormat(text.cuesFormat(cueReplacementBehavior: behavior).with { $0.subsampleOffset = nil })

@@ -190,13 +190,21 @@ class PlayerViewController: UIViewController {
 
         playerView.playerLayer.videoGravity = .resizeAspect
 
-        player.set(mediaItems: videoUrls.map { MediaItem.Builder().setUrl($0).build() })
+        player.set(mediaItems: videoUrls.map {
+            MediaItem.Builder()
+                .setUrl($0)
+                .build()
+        })
         if videoUrls.count == 1 {
             player.repeatMode = .one
             backwardsButton.isHidden = true
             forwardsButton.isHidden = true
         }
         player.delegate.addDelegate(self)
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setPreferredTextLanguages(Locale.preferredLanguages)
+            .build()
         player.prepare()
         player.playWhenReady = true
 
@@ -271,6 +279,7 @@ class PlayerViewController: UIViewController {
         displayLink?.isPaused = true
         playWhenReadyBeforeSlider = player.playWhenReady
         player.pause()
+        player.scrubbingModeEnabled = true
 
         Task {
             let (stream, continuation) = AsyncStream<(Float, SeekParameters)>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -281,7 +290,7 @@ class PlayerViewController: UIViewController {
                 let time = CMTime(seconds: Double(value), preferredTimescale: 1000)
                 print("🌈 WIIIL SEEEK TO position \(time.seconds)")
                 await withCheckedContinuation { seekCont in
-                    player.seek(to: time, seekParameters: .exact) { _ in
+                    player.seek(to: time, seekParameters: .closestSync) { _ in
                         print("🌈 seek position FINISHHHHHH")
                         seekCont.resume()
                     }
@@ -302,6 +311,7 @@ class PlayerViewController: UIViewController {
         seekContinuation?.finish()
         seekContinuation = nil
         let time = CMTime(seconds: Double(sender.value), preferredTimescale: 1000)
+        player.scrubbingModeEnabled = false
         player.seek(to: time, seekParameters: .exact)
         print("🌈 seek position EEEEEEEEEEEENDNDNNDNDNDNND")
 

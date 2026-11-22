@@ -4,24 +4,31 @@
 //
 //  Created by Damir Yackupov on 06.01.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.mp4.Mp4Extractor
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia.CMTime
 import SEPlayerCommon
 
 /// #if ExtractorMP4
-final class MP4Extractor: Extractor {
-    struct Flags: OptionSet {
-        let rawValue: UInt8
+public final class MP4Extractor: Extractor {
+    public struct Flags: OptionSet {
+        public let rawValue: UInt8
+        public init(rawValue: UInt8) { self.rawValue = rawValue }
 
-        static let workaroundIgnoreEditLists = Flags(rawValue: 1)
-        static let emitRawSubtitleData = Flags(rawValue: 1 << 1)
-        static let markFirstVideoTrackWithMainRole = Flags(rawValue: 1 << 2)
-        static let readWithinGopSampleDependencies = Flags(rawValue: 1 << 3)
-        static let readAuxiliaryTracks = Flags(rawValue: 1 << 4)
-        static let readWithinGopSampleDependenciesH265 = Flags(rawValue: 1 << 5)
-        static let omitTrackSampleTable = Flags(rawValue: 1 << 6)
+        public static let workaroundIgnoreEditLists = Flags(rawValue: 1)
+        public static let emitRawSubtitleData = Flags(rawValue: 1 << 1)
+        public static let markFirstVideoTrackWithMainRole = Flags(rawValue: 1 << 2)
+        public static let readWithinGopSampleDependencies = Flags(rawValue: 1 << 3)
+        public static let readAuxiliaryTracks = Flags(rawValue: 1 << 4)
+        public static let readWithinGopSampleDependenciesH265 = Flags(rawValue: 1 << 5)
+        public static let omitTrackSampleTable = Flags(rawValue: 1 << 6)
         /// Leaves the cover art out of the metadata.
-        static let disableArtworkMetadata = Flags(rawValue: 1 << 7)
+        public static let disableArtworkMetadata = Flags(rawValue: 1 << 7)
     }
 
     private let queue: Queue
@@ -57,7 +64,7 @@ final class MP4Extractor: Extractor {
     private var accumulatedSampleSizes: [[Int]]? = []
     private var fileType: FileType = .mp4
 
-    init(
+    public init(
         queue: Queue,
         subtitleParserFactory: SubtitleParserFactory = DefaultSubtitleParserFactory(),
         flags: Flags = []
@@ -69,7 +76,7 @@ final class MP4Extractor: Extractor {
         extractorOutput = PlaceholderExtractorOutput()
     }
 
-    static func codecsToParseWithinGopSampleDependenciesAsFlags(_ videoCodecFlags: VideoCodecFlags) -> Flags {
+    public static func codecsToParseWithinGopSampleDependenciesAsFlags(_ videoCodecFlags: VideoCodecFlags) -> Flags {
         var flags = Flags()
         if videoCodecFlags.contains(.h264) {
             flags.insert(.readWithinGopSampleDependencies)
@@ -81,7 +88,7 @@ final class MP4Extractor: Extractor {
         return flags
     }
 
-    func initialize(output: ExtractorOutput, _ isolation: isolated any Actor) async throws {
+    public func initialize(output: ExtractorOutput, _ isolation: isolated any Actor) async throws {
         assert(queue.isCurrent())
         extractorOutput = if flags.contains(.emitRawSubtitleData) {
             output
@@ -93,7 +100,7 @@ final class MP4Extractor: Extractor {
         }
     }
 
-    func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
+    public func sniff(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> Bool {
         assert(queue.isCurrent())
         let sniffFailures = try await Sniffer().sniffUnfragmented(input: input, isolation)
         if let sniffFailures {
@@ -102,11 +109,11 @@ final class MP4Extractor: Extractor {
         return sniffFailures == nil
     }
 
-    func getSniffFailureDetails(isolation: isolated any Actor) -> [SniffFailure] {
+    public func getSniffFailureDetails(_ isolation: isolated any Actor) -> [SniffFailure] {
         lastSniffFailures
     }
 
-    func read(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> ExtractorReadResult {
+    public func read(input: any ExtractorInput, _ isolation: isolated any Actor) async throws -> ExtractorReadResult {
         assert(queue.isCurrent())
         if omitTrackSampleTable, moovAtomProcessed {
             return .endOfInput
@@ -129,7 +136,7 @@ final class MP4Extractor: Extractor {
         }
     }
 
-    func seek(to position: Int, time: CMTime, _ isolation: isolated any Actor) throws {
+    public func seek(to position: Int, time: CMTime, _ isolation: isolated any Actor) throws {
         containerAtoms.removeAll()
         atomHeaderBytesRead = 0
         sampleTrackIndex = nil
@@ -147,7 +154,7 @@ final class MP4Extractor: Extractor {
                     ?? track.sampleTable.laterOrEqualSyncSample(for: time)
 
                 if let sampleIndex {
-                    track.sampleIndex = sampleIndex
+                    track.sampleIndex = track.sampleTable.decodeStartIndex(for: sampleIndex)
                 }
             }
         }
@@ -308,15 +315,19 @@ private extension MP4Extractor {
             sampleFlags.insert(.notDependedOn)
         }
 
-        try trackOutput.sampleMetadata(
-            time: .init(
+        var sample = SampleProperties(
+            timingInfo: CMSampleTimingInfo(
                 duration: duration,
                 presentationTimeStamp: pts,
                 decodeTimeStamp: dts
             ),
-            flags: sampleFlags,
-            range: 0 ..< sampleSize
+            dataRange: 0 ..< sampleSize,
+            flags: sampleFlags
         )
+        if let attributes = track.sampleTable.attributes[sampleIndex] {
+            sample.attributes = attributes
+        }
+        try trackOutput.sampleMetadata(sample)
 
         track.sampleIndex += 1
         self.sampleTrackIndex = nil
@@ -368,7 +379,10 @@ private extension MP4Extractor {
                     trackType: track.type
                 )
             )
-            let trackDuration = track.duration.isValid ? track.duration : trackSampleTable.duration
+            // Trimmed samples last as long as they play; without an edit list, the track's header counts them whole.
+            let trackDuration = track.duration.isValid && trackSampleTable.attributes.isEmpty
+                ? track.duration
+                : trackSampleTable.duration
             mp4Track.trackOutput.setDuration(trackDuration)
             if duration.isValid {
                 duration = max(duration, trackDuration)
@@ -386,7 +400,6 @@ private extension MP4Extractor {
                     // TODO: the type of the auxiliary track
                 }
             }
-            MetadataUtil.setFormatGaplessInfo(gaplessInfoHolder: gaplessInfoHolder, format: &format)
             MetadataUtil.setFormatMetadata(
                 mdtaMetadata: mdtaMetadata,
                 format: &format,
@@ -661,13 +674,13 @@ private extension MP4Extractor {
 
                 let sampleTime = sampleTable.pts[sampleIndex]
                 firstTime = sampleTime
-                firstOffset = sampleTable.offsets[sampleIndex]
+                firstOffset = sampleTable.offsets[sampleTable.decodeStartIndex(for: sampleIndex)]
 
                 if sampleTime < time && sampleIndex < sampleTable.sampleCount - 1 {
                     let secondSampleIndex = sampleTable.laterOrEqualSyncSample(for: time)
                     if let secondSampleIndex, secondSampleIndex != sampleIndex {
                         secondTime = sampleTable.pts[secondSampleIndex]
-                        secondOffset = sampleTable.offsets[secondSampleIndex]
+                        secondOffset = sampleTable.offsets[sampleTable.decodeStartIndex(for: secondSampleIndex)]
                     }
                 }
             } else {
@@ -703,7 +716,7 @@ private extension MP4Extractor {
                 return offset
             }
 
-            let sampleOffset = sampleTable.offsets[sampleIndex]
+            let sampleOffset = sampleTable.offsets[sampleTable.decodeStartIndex(for: sampleIndex)]
             return min(sampleOffset, offset)
         }
 

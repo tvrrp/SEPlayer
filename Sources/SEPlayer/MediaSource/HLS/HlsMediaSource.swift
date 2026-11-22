@@ -2,6 +2,12 @@
 //  HlsMediaSource.swift
 //  SEPlayer
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.exoplayer.hls.HlsMediaSource
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import DataSource
@@ -15,6 +21,21 @@ public struct HlsManifest {
     public let multivariantPlaylist: HlsMultivariantPlaylist
     /// The primary media playlist the timeline is built from.
     public let mediaPlaylist: HlsMediaPlaylist
+}
+
+extension HlsManifest: SegmentedManifest {
+    public var targetSegmentDuration: CMTime { mediaPlaylist.targetDuration }
+
+    /// The part hold-back, when the server blocks playlist reloads. Without part durations, the hold-back alone: the
+    /// specification makes it at least three parts.
+    public var lowLatencyStartBuffer: CMTime? {
+        let serverControl = mediaPlaylist.serverControl
+        guard serverControl.canBlockReload, serverControl.partHoldBack.isNumeric else {
+            return nil
+        }
+
+        return serverControl.partHoldBack
+    }
 }
 
 /// An HLS ``MediaSource``.
@@ -89,7 +110,7 @@ final class HlsMediaSource: BaseMediaSource, HlsPlaylistTracker.PrimaryPlaylistL
         try playlistTracker?.maybeThrowPrimaryPlaylistRefreshError()
     }
 
-    override func createPeriod(id: MediaPeriodId, allocator: Allocator, startPosition: CMTime) throws -> MediaPeriod {
+    override func createPeriod(id: MediaPeriodId, bufferedBytesCounter: BufferedBytesCounter, startPosition: CMTime) throws -> MediaPeriod {
         guard let playlistTracker else { throw ErrorBuilder.illegalState() }
         return HlsMediaPeriod(
             playlistTracker: playlistTracker,
@@ -103,7 +124,7 @@ final class HlsMediaSource: BaseMediaSource, HlsPlaylistTracker.PrimaryPlaylistL
             allowChunklessPreparation: allowChunklessPreparation,
             loadErrorHandlingPolicy: loadErrorHandlingPolicy,
             transferListener: mediaTransferListener,
-            allocator: allocator
+            bufferedBytesCounter: bufferedBytesCounter
         )
     }
 

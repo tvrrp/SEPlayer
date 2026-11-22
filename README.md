@@ -4,7 +4,7 @@ SEPlayer (Swift ExoPlayer) is a userspace framework for building media players o
 
 > SEPlayer is in active development. The API changes without notice, and it is not ready for production.
 
-## A framework, not a player
+## Why SEPlayer
 
 A player such as VLC is a finished implementation: you give it media and it plays. That is enough until playback becomes part of your own product. Then you need to decide how bytes are loaded, how much is buffered, when playback starts, which quality is picked, what gets measured, and what happens on an error. A finished player lets you adjust some of that, but it was not built for it.
 
@@ -91,3 +91,14 @@ The `Demo` folder has an app that plays a catalog of streams and shows a debug o
 - Offline downloads.
 - A dedicated analytics API on top of the existing listeners.
 - A stable API, documentation and wider test coverage.
+
+## Acknowledgements
+
+SEPlayer is built on the design and much of the code of [AndroidX Media3](https://github.com/androidx/media), translated
+to Swift. Media3 is licensed under the Apache License, Version 2.0; the files derived from it say so in their headers.
+The reader of `CMBlockBuffer` bytes is derived from the `ByteBuffer` of [SwiftNIO](https://github.com/apple/swift-nio),
+also Apache 2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [NOTICE](NOTICE).
+
+## License
+
+SEPlayer is licensed under the Apache License, Version 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).

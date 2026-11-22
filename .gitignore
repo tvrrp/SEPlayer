@@ -16,6 +16,9 @@ Package.resolved
 !/.swiftformat
 !/.swiftlint.yml
 !/README.md
+!/LICENSE
+!/NOTICE
+!/THIRD_PARTY_NOTICES.md
 
 .DS_Store
 

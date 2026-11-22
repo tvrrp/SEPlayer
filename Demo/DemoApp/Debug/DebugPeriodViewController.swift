@@ -107,7 +107,9 @@ final class DebugPeriodViewController: UIViewController {
             text.row("buffered", "\(player.bufferedPercentage)%")
         }
 
-        guard let periodIndex, periodIndex < timeline.periodCount() else { return text }
+        guard let periodIndex, periodIndex < timeline.periodCount() else {
+            return text
+        }
         let period = timeline.getPeriod(periodIndex: periodIndex, period: Period(), setIds: true)
         let isCurrentPeriod = periodIndex == player.currentPeriodIndex
         text.header("Period \(periodIndex)\(isCurrentPeriod ? " · playing" : "")")

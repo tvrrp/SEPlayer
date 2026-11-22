@@ -4,6 +4,12 @@
 //
 //  Created by tvrrp on 19.11.2026.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.extractor.metadata.id3.Id3Decoder
+//  Copyright (C) 2016 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import SEPlayerCommon
@@ -35,9 +41,13 @@ public struct Id3Decoder: MetadataDecoder {
         guard let header = Self.readHeader(&data) else { return nil }
 
         let framesSize = min(header.framesSize, data.readableBytes)
-        guard var frames = try? data.readSlice(length: max(framesSize, 0)) else { return nil }
+        guard var frames = try? data.readSlice(length: max(framesSize, 0)) else {
+            return nil
+        }
         if header.isUnsynchronized {
-            guard let synchronized = try? Self.removingUnsynchronization(from: frames) else { return nil }
+            guard let synchronized = try? Self.removingUnsynchronization(from: frames) else {
+                return nil
+            }
             frames = synchronized
         }
 
@@ -198,7 +208,9 @@ private extension Id3Decoder.Tag {
     func hasValidFrames(_ frames: BlockBufferReader) -> Bool {
         var frames = frames
         while frames.readableBytes >= frameHeaderLength {
-            guard let header = try? readFrameHeader(&frames) else { return false }
+            guard let header = try? readFrameHeader(&frames) else {
+                return false
+            }
             if header.isPadding { return true }
             guard header.size >= header.flags.prefixLength, (try? frames.skip(header.size)) != nil else {
                 return false

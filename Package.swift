@@ -9,7 +9,6 @@ let package = Package(
         .library(name: "SEPlayerCommon", targets: ["SEPlayerCommon"]),
         .library(name: "DataSource", targets: ["DataSource"]),
         .library(name: "Extractor", targets: ["Extractor"]),
-        .library(name: "Decoder", targets: ["Decoder"]),
         .library(name: "SEPlayer", targets: ["SEPlayer"]),
     ],
     traits: createExtractorTraits(),
@@ -48,22 +47,11 @@ let package = Package(
             ]
         ),
         .target(
-            name: "Decoder",
-            dependencies: [
-                "SEPlayerCommon",
-            ],
-            swiftSettings: [
-                .swiftLanguageMode(.v5),
-//                .enableUpcomingFeature("MemberImportVisibility"),
-            ]
-        ),
-        .target(
             name: "SEPlayer",
             dependencies: [
                 "SEPlayerCommon",
                 "DataSource",
                 "Extractor",
-                "Decoder",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

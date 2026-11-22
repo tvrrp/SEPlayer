@@ -4,6 +4,12 @@
 //
 //  Created by Damir Yackupov on 06.11.2025.
 //
+//  Derived from AndroidX Media3 (https://github.com/androidx/media):
+//    androidx.media3.test.utils.FakeSampleStream
+//  Copyright (C) 2017 The Android Open Source Project
+//  Licensed under the Apache License, Version 2.0; see LICENSE.
+//  Changed from the original: translated to Swift and adapted to SEPlayer.
+//
 
 import CoreMedia
 import Foundation
@@ -72,9 +78,15 @@ final class FakeSampleStream: SampleStream {
                 let time = CMTime.time(us: sampleInfo.timeUs)
                 try sampleQueue.sampleData(data: Self.makeBlockBuffer(sampleInfo.data))
                 try sampleQueue.sampleMetadata(
-                    time: CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: time),
-                    flags: sampleInfo.flags,
-                    range: 0 ..< sampleInfo.data.count
+                    SampleProperties(
+                        timingInfo: CMSampleTimingInfo(
+                            duration: .invalid,
+                            presentationTimeStamp: time,
+                            decodeTimeStamp: time
+                        ),
+                        dataRange: 0 ..< sampleInfo.data.count,
+                        flags: sampleInfo.flags
+                    )
                 )
             }
         }
@@ -178,11 +190,11 @@ extension FakeSampleStream {
             self.init(format: format, sampleInfo: nil)
         }
 
-        init(oneByteSample timeUs: Int64, flags: SampleFlags = []) {
+        init(oneByteSample timeUs: Int64, flags: SampleProperties.Flags = []) {
             self.init(sampleInfo: .init(data: [0], flags: flags, timeUs: timeUs))
         }
 
-        init(sample data: [UInt8], flags: SampleFlags, timeUs: Int64) {
+        init(sample data: [UInt8], flags: SampleProperties.Flags, timeUs: Int64) {
             self.init(sampleInfo: .init(data: data, flags: flags, timeUs: timeUs))
         }
 
@@ -195,7 +207,7 @@ extension FakeSampleStream {
 
     fileprivate struct SampleInfo {
         fileprivate let data: [UInt8]
-        fileprivate let flags: SampleFlags
+        fileprivate let flags: SampleProperties.Flags
         fileprivate let timeUs: Int64
     }
 }

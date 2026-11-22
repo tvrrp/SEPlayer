@@ -7,10 +7,20 @@
 
 import CoreMedia
 import SEPlayerCommon
+import VideoToolbox
 
 final class AVFVideoRenderer: AVFBaseRenderer {
     private let displayLayers: DisplayLayersStorage
-    private let videoDecoder: VTDecoder
+    /// Makes the decoders of the decode output mode.
+    private let decoderFactory: VideoDecoderFactory?
+    /// The decoder of the decode output mode, or `nil` when nothing decodes the input format.
+    private var videoDecoder: VideoDecoder?
+    /// The format of the samples read last.
+    private var inputFormat: AnyFormat?
+    private var reinitializationState = DecoderReinitializationState.none
+    /// Whether the decoder got samples since it was made or flushed: a decoder that did is drained before it is
+    /// replaced, so the frames it holds still show.
+    private var decoderReceivedBuffers = false
     private let decodeBufferQueue: TypedCMBufferQueue<CMSampleBuffer>
 
     private var currentOutputFormat: CMFormatDescription?
@@ -29,6 +39,18 @@ final class AVFVideoRenderer: AVFBaseRenderer {
     private var decodingFailuresWithoutFrame = 0
     /// Decode times of the compressed samples given out so far: enqueued as they are, or sent to the decoder.
     private var compressedSampleTimes = DecodeOrderTimes()
+    /// When the position last reset, until a frame shows: for the logs of how long the frame took.
+    private var resetTime: DispatchTime?
+    /// Samples sent to the decoder since the position reset.
+    private var samplesReadSinceReset = 0
+    /// Frames given to the layers since the position reset or the output recovered. Until one is, the layers can still
+    /// say they are ready for display from the frame shown before the flush.
+    private var framesEnqueuedSinceReset = 0
+
+    /// Whether the layers show a frame enqueued since the position reset.
+    private var showsEnqueuedFrame: Bool {
+        framesEnqueuedSinceReset > 0 && displayLayers.isReadyForDisplay
+    }
 
     override var defersRecoveryInBackground: Bool { true }
 
@@ -39,12 +61,13 @@ final class AVFVideoRenderer: AVFBaseRenderer {
     init(
         queue: any Queue,
         clock: any SEClock,
-        eventListener: VideoRendererEventListener? = nil
+        eventListener: VideoRendererEventListener? = nil,
+        decoderFactory: VideoDecoderFactory? = nil
     ) throws {
         self.eventListener = eventListener
+        self.decoderFactory = decoderFactory
         displayLayers = DisplayLayersStorage(queue: queue)
         decodeBufferQueue = try .init()
-        videoDecoder = VTDecoder(decodeQueue: queue, outputBufferQueue: decodeBufferQueue)
         super.init(queue: queue, trackType: .video, clock: clock)
         displayLayers.delegate = self
     }
@@ -54,7 +77,17 @@ final class AVFVideoRenderer: AVFBaseRenderer {
             return .create(formatSupport: .unsupportedType)
         }
 
-        return try super.supportsFormat(format)
+        // The system plays what it can, and a decoder of the factory decodes the rest.
+        let systemSupport = try super.supportsFormat(format)
+        if systemSupport.formatSupport == .handled {
+            return systemSupport
+        }
+        // Only the system output decrypts protected samples: a decoder of the factory can't.
+        if format.encryption != nil {
+            return .create(formatSupport: .unsupportedDrm)
+        }
+        guard let decoderFactory else { return systemSupport }
+        return decoderFactory.supportsFormat(format)
     }
 
     override func handleMessage(_ message: RendererMessage) throws {
@@ -78,7 +111,7 @@ final class AVFVideoRenderer: AVFBaseRenderer {
     /// Ready once a second of frames is enqueued, or the output is full, and the frame at the current position is on
     /// screen, so a seek completes only when its frame is shown. A stream that ended has nothing more to show.
     override func isReady() -> Bool {
-        isEnded() || isOutputDirty || (super.isReady() && displayLayers.isReadyForDisplay)
+        isEnded() || isOutputDirty || (super.isReady() && showsEnqueuedFrame)
     }
 
     /// A layer that failed or waits for a flush needs one; a decoder lost in the background, a new one from a
@@ -88,16 +121,19 @@ final class AVFVideoRenderer: AVFBaseRenderer {
     }
 
     override func hasPresentedOutput() -> Bool {
-        isEnded() || displayLayers.isReadyForDisplay
+        isEnded() || showsEnqueuedFrame
     }
 
     override func onPositionReset(position: CMTime, joining: Bool) throws {
         try super.onPositionReset(position: position, joining: joining)
         renderedFirstFrame = false
-        videoDecoder.flush()
+        try flushDecoder()
         try decodeBufferQueue.reset()
         displayLayers.flush()
         compressedSampleTimes.reset()
+        resetTime = .now()
+        samplesReadSinceReset = 0
+        framesEnqueuedSinceReset = 0
     }
 
     override func onStreamChanged(
@@ -131,7 +167,16 @@ final class AVFVideoRenderer: AVFBaseRenderer {
 
     override func onDisabled() {
         super.onDisabled()
+        releaseDecoder()
+        inputFormat = nil
         displayLayers.flush(removeImage: !preservesDisplayedImageOnDisable)
+        displayLayers.setTimeSource(nil)
+    }
+
+    override func onRelease() {
+        super.onRelease()
+
+        displayLayers.flush(removeImage: true)
         displayLayers.setTimeSource(nil)
     }
 
@@ -145,27 +190,57 @@ final class AVFVideoRenderer: AVFBaseRenderer {
         try resetOutputPipeline()
         if reason == .outputFailed {
             // The system may have taken the decoder away: the next keyframe starts a new one.
-            videoDecoder.invalidate()
-        } else {
-            videoDecoder.flush()
+            videoDecoder?.invalidate()
         }
+        try flushDecoder()
         try decodeBufferQueue.reset()
         displayLayers.flush()
         compressedSampleTimes.reset()
+        framesEnqueuedSinceReset = 0
         beginOutputRecovery()
         resumeMediaData()
         return true
     }
 
-    override func onInputFormatChanged(_ format: AnyFormat) throws {}
+    /// Keeps the output mode: passing through goes on while the system plays the format, and a format it doesn't
+    /// play is decoded from the next keyframe; decoding goes on, with the decoder or one of the new format.
+    override func onInputFormatChanged(_ format: AnyFormat) throws {
+        let oldFormat = inputFormat
+        inputFormat = format
+        switch targetOutputMode {
+        case .passthrough:
+            guard try super.supportsFormat(format).formatSupport != .handled else {
+                return
+            }
+            try updateDecoder(oldFormat: oldFormat, newFormat: format)
+            changeOutputMode(to: .decode)
+        case .decode:
+            // TODO: pass a format protected by DRM through to the system output, which alone decrypts it, once DRM is
+            // supported.
+            try updateDecoder(oldFormat: oldFormat, newFormat: format)
+        }
+    }
 
     override func getDecodeBufferQueue() throws -> TypedCMBufferQueue<CMSampleBuffer>? {
         outputMode == .decode ? decodeBufferQueue : nil
     }
 
     override func feedInputBuffer(readStream: (ReadFlags) throws -> SampleStreamReadResult) throws -> Bool {
-        guard outputMode == .decode else { throw ErrorBuilder.illegalState() }
-        guard videoDecoder.getNumberOfFramesBeingDecoded() < Self.maxFramesBeingDecoded else {
+        guard outputMode == .decode else {
+            throw ErrorBuilder.illegalState()
+        }
+
+        switch reinitializationState {
+        case .none:
+            break
+        case .signalEndOfStream:
+            if let videoDecoder { signalEndOfStream(to: videoDecoder) }
+            return false
+        case .waitEndOfStream:
+            return false
+        }
+
+        if let videoDecoder, videoDecoder.getNumberOfFramesBeingDecoded() >= Self.maxFramesBeingDecoded {
             return false
         }
 
@@ -178,11 +253,26 @@ final class AVFVideoRenderer: AVFBaseRenderer {
         case .nothingRead:
             return false
         case let .didReadFormat(format):
+            try onInputFormatChanged(format)
             inputFormatDidChange(format)
             return true
         case let .didReadBuffer(buffer):
-            try videoDecoder.queueInputBuffer(buffer: buffer, flags: [])
+            guard let videoDecoder else {
+                // Nothing decodes the format.
+                throw VideoDecoderError.failed(kVTVideoDecoderUnsupportedDataFormatErr)
+            }
+
+            try videoDecoder.queueInputBuffer(buffer)
+            decoderReceivedBuffers = true
             compressedSampleTimes.add(buffer)
+            samplesReadSinceReset += 1
+            if samplesReadSinceReset == 1, let resetTime {
+                SELogger.debug(
+                    .video,
+                    "\(name) decodes its first sample after the reset, at \(buffer.outputPresentationTimeStamp.seconds), "
+                        + "\(resetTime.distance(to: .now()).totalMilliseconds)ms after it"
+                )
+            }
 
             let maxPts = videoDecoder.getMaxOutputPtsOfFramesBeingDecoded()
             let minPts = videoDecoder.getMinOutputPtsOfFramesBeingDecoded()
@@ -215,6 +305,14 @@ final class AVFVideoRenderer: AVFBaseRenderer {
 
         maybeReportVideoSize(of: buffer)
         displayLayers.enqueue(buffer)
+        framesEnqueuedSinceReset += 1
+        if framesEnqueuedSinceReset == 1, let resetTime {
+            SELogger.debug(
+                .video,
+                "\(name) enqueues its first frame after the reset, at \(buffer.outputPresentationTimeStamp.seconds), "
+                    + "\(resetTime.distance(to: .now()).totalMilliseconds)ms after it"
+            )
+        }
         if outputMode == .passthrough {
             compressedSampleTimes.add(buffer)
         }
@@ -288,7 +386,7 @@ final class AVFVideoRenderer: AVFBaseRenderer {
         guard var bound = compressedSampleTimes.minimumUpcomingPresentationTime else {
             return
         }
-        if outputMode == .decode {
+        if outputMode == .decode, let videoDecoder {
             // Frames still decoding, or decoded and not yet shown, come out in their own order.
             let decoding = videoDecoder.getMinOutputPtsOfFramesBeingDecoded()
             if decoding.isNumeric { bound = min(bound, decoding) }
@@ -296,6 +394,87 @@ final class AVFVideoRenderer: AVFBaseRenderer {
             if decoded.isNumeric { bound = min(bound, decoded) }
         }
         displayLayers.expectMinimumUpcomingPresentationTime(bound)
+    }
+
+    // MARK: - Decoder
+
+    /// Keeps the decoder when it decodes `newFormat` too, and otherwise has the factory make one of the new format.
+    private func updateDecoder(oldFormat: AnyFormat?, newFormat: AnyFormat) throws {
+        guard let videoDecoder, let oldFormat else {
+            try initializeDecoder(for: newFormat)
+            return
+        }
+        // A decoder already waiting to be replaced is replaced by one of the latest format, once it is drained.
+        guard reinitializationState == .none else { return }
+
+        switch videoDecoder.canReuse(oldFormat: oldFormat, newFormat: newFormat) {
+        case .yesWithoutReconfiguration:
+            break
+        case .no where decoderReceivedBuffers:
+            // Drained first, so the frames it holds still show; the factory then makes a decoder of the new format.
+            reinitializationState = .signalEndOfStream
+        case .no:
+            releaseDecoder()
+            try initializeDecoder(for: newFormat)
+        }
+    }
+
+    private func initializeDecoder(for format: AnyFormat) throws {
+        guard let decoderFactory, decoderFactory.supportsFormat(format).formatSupport == .handled else {
+            SELogger.warning(.video, "\(name) has no decoder for \(format.sampleMimeType?.rawValue ?? "?")")
+            return
+        }
+
+        let decoder = try decoderFactory.createDecoder(
+            format: format,
+            mediaPeriodId: getMediaPeriodId(),
+            decodeQueue: queue,
+            outputBufferQueue: decodeBufferQueue
+        )
+        SELogger.info(.video, "\(name) decodes \(format.sampleMimeType?.rawValue ?? "?") with \(decoder.name)")
+        videoDecoder = decoder
+    }
+
+    private func releaseDecoder() {
+        videoDecoder?.invalidate()
+        videoDecoder = nil
+        reinitializationState = .none
+        decoderReceivedBuffers = false
+    }
+
+    /// Drops the frames being decoded. A decoder waiting to be replaced is replaced now: nothing of it is left to show.
+    private func flushDecoder() throws {
+        guard reinitializationState == .none else {
+            releaseDecoder()
+            if let inputFormat { try initializeDecoder(for: inputFormat) }
+            return
+        }
+
+        videoDecoder?.flush()
+        decoderReceivedBuffers = false
+    }
+
+    /// Tells the decoder its input ended, and replaces it once it output every frame it holds.
+    private func signalEndOfStream(to decoder: VideoDecoder) {
+        reinitializationState = .waitEndOfStream
+        decoder.signalEndOfStream { [weak self, weak decoder] in
+            self?.queue.justDispatch { [weak self] in self?.decoderDidEndStream(decoder) }
+        }
+    }
+
+    private func decoderDidEndStream(_ decoder: VideoDecoder?) {
+        // A flush or a reset may have replaced the decoder meanwhile.
+        guard reinitializationState == .waitEndOfStream, let decoder, decoder === videoDecoder else {
+            return
+        }
+
+        releaseDecoder()
+        do {
+            if let inputFormat { try initializeDecoder(for: inputFormat) }
+            readInputStream()
+        } catch {
+            reportFailure(error)
+        }
     }
 
     private func installLowWaterMarkToken() throws {
@@ -356,6 +535,8 @@ extension AVFVideoRenderer: VideoSampleBufferRendererDelegate {
     ) {
         guard didChangeReadyForDisplay else { return }
         displayLayers.readyForDisplayDidChange()
+        // A change that comes after a flush, about the frame shown before it, isn't the frame of the new position.
+        guard framesEnqueuedSinceReset > 0 else { return }
         if !renderedFirstFrame, getState() != .disabled {
             SELogger.info(.video, "\(name) shows its first frame")
             renderedFirstFrame = true
@@ -363,6 +544,14 @@ extension AVFVideoRenderer: VideoSampleBufferRendererDelegate {
         }
         if displayLayers.isReadyForDisplay {
             SELogger.verbose(.display, "A frame shows")
+            if let resetTime {
+                SELogger.debug(
+                    .video,
+                    "\(name) shows a frame \(resetTime.distance(to: .now()).totalMilliseconds)ms after the reset, "
+                        + "\(samplesReadSinceReset) samples decoded, \(framesEnqueuedSinceReset) frames enqueued"
+                )
+                self.resetTime = nil
+            }
             decodingFailuresWithoutFrame = 0
             delegate?.rendererDidPresentOutput(self)
         }

@@ -30,7 +30,9 @@ extension CodecAttributes where Scope == VideoCodec.DolbyVision {
     ///
     /// - Parameter sampleEntryType: The sample entry of the stream, such as `dvh1` or `dvhe`.
     func codecs(sampleEntryType: MP4Box.BoxType) -> String? {
-        guard let profile = self.profile, let level = self.level else { return nil }
+        guard let profile = self.profile, let level = self.level else {
+            return nil
+        }
         return String(format: "%@.%02d.%02d", sampleEntryType.rawValue.fourCharacterCode, profile, level)
     }
 }
