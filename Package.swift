@@ -13,11 +13,15 @@ let package = Package(
     ],
     traits: createExtractorTraits(),
     dependencies: [
+        .package(url: "https://github.com/apple/swift-atomics.git", .upToNextMajor(from: "1.3.0")),
         .package(url: "https://github.com/apple/swift-collections.git", .upToNextMajor(from: "1.6.0")),
     ],
     targets: [
         .target(
             name: "SEPlayerCommon",
+            dependencies: [
+                .product(name: "Atomics", package: "swift-atomics"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .enableExperimentalFeature("Lifetimes"),

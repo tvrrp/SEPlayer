@@ -186,12 +186,18 @@ private struct MockRenderersFactory: RenderersFactory {
 
 /// An audio session that accepts any setup and does nothing.
 private final class UnusedAudioSession: AudioSessionInterface {
+    private(set) var category = AVAudioSession.Category.playback
+    private(set) var mode = AVAudioSession.Mode.default
+
     func setCategory(
         _ category: AVAudioSession.Category,
         mode: AVAudioSession.Mode,
         policy: AVAudioSession.RouteSharingPolicy,
         options: AVAudioSession.CategoryOptions
-    ) throws {}
+    ) throws {
+        self.category = category
+        self.mode = mode
+    }
 
     func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {}
 }

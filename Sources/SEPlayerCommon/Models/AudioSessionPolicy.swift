@@ -11,8 +11,9 @@ import AVFAudio
 ///
 /// The players of an app share one audio session. The player that needs the most of it decides how it is set up:
 /// audible playback that stops other audio wins over audible playback that ducks it, which wins over playback that
-/// mixes with it, as muted playback does. A player that stops being audible, as when it pauses or is muted, can give
-/// its share back, so that the audio of other apps resumes.
+/// mixes with it, as muted playback does. A player takes its share once it plays, not while it buffers to start, and
+/// keeps it while it stalls, seeks or scrubs. Paused on request or muted, it can give its share back, so that the
+/// audio of other apps resumes.
 public struct AudioSessionPolicy: Hashable, @unchecked Sendable {
     /// What audible playback does to the audio of other apps.
     public enum Audibility: Hashable, Sendable {
@@ -34,7 +35,8 @@ public struct AudioSessionPolicy: Hashable, @unchecked Sendable {
 
     /// What audible playback does to other audio.
     public var audibility: Audibility
-    /// What happens when the player pauses or reaches the end.
+    /// What happens when the player is paused on request or reaches the end. A pause while scrubbing, or because the
+    /// audio route went away, keeps the share.
     public var whenPaused: Release
     /// What happens when the player is muted, or its volume is zero.
     public var whenMuted: Release

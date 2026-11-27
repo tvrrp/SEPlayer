@@ -60,7 +60,7 @@ public extension DataSource {
 
 public final class DataSourceOpaque: @unchecked Sendable {
     fileprivate let isNetwork: Bool
-    fileprivate let transferListeners = MulticastDelegate<TransferListener>(isThreadSafe: true)
+    fileprivate let transferListeners = MulticastDelegate<TransferListener>()
 
     public init(isNetwork: Bool) { self.isNetwork = isNetwork }
 

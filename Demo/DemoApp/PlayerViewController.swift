@@ -109,7 +109,6 @@ class PlayerViewController: UIViewController {
         navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         player.stop()
         player.release()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         displayLink?.invalidate()
     }
 
@@ -184,10 +183,6 @@ class PlayerViewController: UIViewController {
         speedGestureRecogniser.minimumPressDuration = 0.3
         speedGestureRecogniser.addTarget(self, action: #selector(handleLongPress))
 
-        // Playback still works with the default session if these fail.
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
-        try? AVAudioSession.sharedInstance().setActive(true)
-
         playerView.playerLayer.videoGravity = .resizeAspect
 
         player.set(mediaItems: videoUrls.map {
@@ -201,6 +196,14 @@ class PlayerViewController: UIViewController {
             forwardsButton.isHidden = true
         }
         player.delegate.addDelegate(self)
+        player.audioSessionPolicy = .init(
+            audibility: .exclusive,
+            whenPaused: .shareWithOthers,
+            whenMuted: .shareWithOthers,
+            mode: .moviePlayback,
+            routeSharingPolicy: .default,
+            pausesWhenRouteIsLost: true
+        )
         player.trackSelectionParameters = player.trackSelectionParameters
             .buildUpon()
             .setPreferredTextLanguages(Locale.preferredLanguages)
@@ -278,8 +281,9 @@ class PlayerViewController: UIViewController {
         shouldObserveTimer = false
         displayLink?.isPaused = true
         playWhenReadyBeforeSlider = player.playWhenReady
-        player.pause()
+        // Scrubbing first: the pause is part of the seek, so other audio stays stopped.
         player.scrubbingModeEnabled = true
+        player.pause()
 
         Task {
             let (stream, continuation) = AsyncStream<(Float, SeekParameters)>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -311,6 +315,8 @@ class PlayerViewController: UIViewController {
         seekContinuation?.finish()
         seekContinuation = nil
         let time = CMTime(seconds: Double(sender.value), preferredTimescale: 1000)
+        // Playback resumes before scrubbing ends, so the scrub's pause never counts as the user's.
+        player.playWhenReady = playWhenReadyBeforeSlider
         player.scrubbingModeEnabled = false
         player.seek(to: time, seekParameters: .exact)
         print("🌈 seek position EEEEEEEEEEEENDNDNNDNDNDNND")

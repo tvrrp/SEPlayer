@@ -129,7 +129,11 @@ final class MediaPeriodQueue {
     }
 
     func invalidatePreloadPool(timeline: Timeline) throws {
-        guard preloadConfiguration.targetPreloadDuration.isValid, let loading else {
+        // Nothing preloads past a period of unknown duration, as nothing loads past it: its source may not be prepared
+        // yet, and an unprepared source holds one period, which a preload of the same window would replace.
+        guard preloadConfiguration.targetPreloadDuration.isValid,
+              let loading,
+              loading.info.duration.isValid else {
             releasePreloadPool()
             return
         }

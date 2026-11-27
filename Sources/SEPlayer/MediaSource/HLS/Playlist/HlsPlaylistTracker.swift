@@ -59,7 +59,7 @@ final class HlsPlaylistTracker {
     }
 
     /// The listeners of playlist changes and errors. A listener adds itself.
-    let listeners = MulticastDelegate<Listener>(isThreadSafe: false)
+    let listeners = MulticastDelegate<Listener>()
 
     /// The multivariant playlist, once loaded.
     private(set) var multivariantPlaylist: HlsMultivariantPlaylist?

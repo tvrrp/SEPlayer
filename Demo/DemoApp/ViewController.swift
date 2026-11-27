@@ -101,6 +101,16 @@ struct UrlListScreen: View {
                                 Spacer()
                                 Text(category.format.rawValue)
                                     .foregroundStyle(.secondary)
+                                Button {
+                                    openPlayer(urls: category.playlistUrls)
+                                } label: {
+                                    Image(systemName: "play.circle.fill")
+                                        .font(.title3)
+                                }
+                                // Only the button takes the tap, not the whole header.
+                                .buttonStyle(.borderless)
+                                .disabled(category.items.isEmpty)
+                                .accessibilityLabel("Play \(category.title)")
                             }
                         }
                     }
@@ -128,7 +138,7 @@ struct UrlListScreen: View {
 
     /// The urls of every item of every category, in order.
     private var allUrls: [String] {
-        categories.flatMap(\.items).flatMap(\.playlistUrls)
+        categories.flatMap(\.playlistUrls)
     }
 
     /// Adds the typed url to the category of added urls, which comes first once there is one.

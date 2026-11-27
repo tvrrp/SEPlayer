@@ -68,7 +68,7 @@ open class BaseMediaSource: MediaSource {
 
     public init(queue: Queue) {
         self.queue = queue
-        mediaSourceDelegates = MulticastDelegate<MediaSourceDelegate>(isThreadSafe: false)
+        mediaSourceDelegates = MulticastDelegate<MediaSourceDelegate>()
         enabledMediaSourceDelegates = NSHashTable()
     }
 

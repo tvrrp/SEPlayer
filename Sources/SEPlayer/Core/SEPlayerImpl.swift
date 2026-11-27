@@ -19,7 +19,7 @@ import SEPlayerCommon
 /// Usable from any thread. A lock guards its state: each call runs at once, under it, and so do the updates from the
 /// playback queue. The delegates hear the changes on the main queue, in order.
 final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
-    @MainActor let delegate = MulticastDelegate<SEPlayerDelegate>(isThreadSafe: false)
+    @MainActor let delegate = MulticastDelegate<SEPlayerDelegate>()
 
     let clock: SEClock
     let timebase: CMTimebase
@@ -169,6 +169,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
                 guard _scrubbingModeEnabled != newValue else { return }
                 _scrubbingModeEnabled = newValue
                 internalPlayer.setScrubbingModeEnabled(newValue)
+                reportAudioSessionUsage()
             }
         }
     }
@@ -290,6 +291,7 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
             emptyTrackSelectorResult: emptyTrackSelectorResult,
             loadControl: loadControl,
             bandwidthMeter: bandwidthMeter,
+            audioSessionController: audioSessionController,
             repeatMode: _repeatMode,
             shuffleModeEnabled: _shuffleModeEnabled,
             pauseAtEndOfWindow: pauseAtTheEndOfMediaItem,
@@ -1578,10 +1580,16 @@ final class SEPlayerImpl: BasePlayer, SEPlayer, @unchecked Sendable {
     /// Tells the audio session controller how the player uses the session now.
     private func reportAudioSessionUsage() {
         let state = playbackInfo.state
+        // Only a pause the app asks for gives the session back. One while scrubbing is part of the seek.
+        let pausedOnRequest = !playbackInfo.playWhenReady
+            && !_scrubbingModeEnabled
+            && [.userRequest, .endOfMediaItem].contains(playbackInfo.playWhenReadyChangeReason)
         let usage = AudioSessionUsage(
             policy: _audioSessionPolicy,
             hasMedia: state != .idle,
             wantsToPlay: playbackInfo.playWhenReady && (state == .buffering || state == .ready),
+            isPlaying: playbackInfo.isPlaying,
+            isPaused: pausedOnRequest || state == .ended,
             isInaudible: internalPlayer.isMuted || internalPlayer.volume == 0
         )
         guard usage != reportedAudioSessionUsage else { return }

@@ -66,6 +66,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     private let emptyTrackSelectorResult: TrackSelectorResult
     private let loadControl: LoadControl
     private let bandwidthMeter: BandwidthMeter
+    private let audioSessionController: AudioSessionController
     private var window: Window
     private var period: Period
     private let backBufferDuration: CMTime
@@ -101,6 +102,8 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
     private var rendererRecoveryBackoffs: [ObjectIdentifier: RendererRecoveryBackoff] = [:]
     /// Renderers whose pending recovery already waited for its delay.
     private var delayedRendererRecoveries: Set<ObjectIdentifier> = []
+    /// Recoveries asked for a period the renderers read but that doesn't play yet: they run once it plays.
+    private var recoveriesAwaitingPeriod: [ObjectIdentifier: RendererRecoveryRequest] = [:]
     /// A renderer error that may pass, while the player selects tracks and seeks again to get past it.
     private var pendingRecoverableRendererError: SEPlaybackError?
     private var rendererRecoveryTimeouts: [ObjectIdentifier: DispatchWorkItem] = [:]
@@ -131,6 +134,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         emptyTrackSelectorResult: TrackSelectorResult,
         loadControl: LoadControl,
         bandwidthMeter: BandwidthMeter,
+        audioSessionController: AudioSessionController,
         repeatMode: RepeatMode,
         shuffleModeEnabled: Bool,
         pauseAtEndOfWindow: Bool,
@@ -151,6 +155,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         self.emptyTrackSelectorResult = emptyTrackSelectorResult
         self.loadControl = loadControl
         self.bandwidthMeter = bandwidthMeter
+        self.audioSessionController = audioSessionController
         self.repeatMode = repeatMode
         self.shuffleModeEnabled = shuffleModeEnabled
         self.pauseAtEndOfWindow = pauseAtEndOfWindow
@@ -711,11 +716,9 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             try stopRenderers()
             try updatePlaybackPositionsInternal()
             periodQueue.reevaluateBuffer(rendererPosition: rendererPosition)
-        } else {
-            if playbackInfo.state == .ready {
-                try mediaClock.start()
-                try startRenderers()
-            }
+        } else if playbackInfo.state == .ready, audioSessionAllowsPlayback() {
+            try mediaClock.start()
+            try startRenderers()
         }
     }
 
@@ -802,6 +805,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         }
     }
 
+    /// Configures the audio session before playback starts, so other audio stops first. When it can't, playback
+    /// doesn't start, and the session controller tells the player to pause or wait.
+    private func audioSessionAllowsPlayback() -> Bool {
+        audioSessionController.activateForPlayback(id: identifier)
+    }
+
     private func startRenderers() throws {
         SELogger.debug(.lifecycle, "Starting renderers at \(rendererPosition.seconds)")
         guard let playingPeriodHolder = periodQueue.playing else {
@@ -868,6 +877,12 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         guard canRecover(renderer, with: request), let playingPeriod = periodQueue.playing else {
             return
         }
+        // A renderer can ask about the period it reads next while the one before still plays.
+        if let mediaPeriodId = request.context.mediaPeriodId, mediaPeriodId != playingPeriod.info.id,
+           isQueued(mediaPeriodId, after: playingPeriod) {
+            recoveriesAwaitingPeriod[key] = request
+            return
+        }
 
         // A recovery that already waited for its delay goes straight to the rebuffer.
         let wasDelayed = delayedRendererRecoveries.remove(key) != nil
@@ -916,6 +931,30 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             periodPosition: restartPosition
         )
         startRecoveryTimeout(for: renderer, request: request)
+    }
+
+    /// Whether a period after `playingPeriod` in the queue has the id.
+    private func isQueued(_ mediaPeriodId: MediaPeriodId, after playingPeriod: MediaPeriodHolder) -> Bool {
+        var holder = playingPeriod.next
+        while let current = holder {
+            if current.info.id == mediaPeriodId { return true }
+            holder = current.next
+        }
+        return false
+    }
+
+    /// Runs the recoveries that waited for the period that now plays.
+    private func postRecoveriesAwaitingPeriod(_ mediaPeriodId: MediaPeriodId) {
+        let candidates = renderers.flatMap { [$0.primaryRenderer] + [$0.secondaryRenderer].compactMap { $0 } }
+        for renderer in candidates {
+            let key = ObjectIdentifier(renderer)
+            guard let request = recoveriesAwaitingPeriod[key], request.context.mediaPeriodId == mediaPeriodId else {
+                continue
+            }
+            recoveriesAwaitingPeriod[key] = nil
+            pendingRendererRecoveries[key] = request
+            postRecovery(of: renderer)
+        }
     }
 
     /// Whether `renderer` reads a stream of the playing period. Reading can already be in the next period, and only
@@ -1059,11 +1098,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
 
     func rendererDidFinishReading(_ renderer: any SERenderer) {
         SELogger.debug(.lifecycle, "\(type(of: renderer)) read its stream to the end")
-        workQueue.requestUpdate()
-    }
-
-    @objc
-    func rendererDidReadSampleAtBoundaries(notification: Notification) {
         workQueue.requestUpdate()
     }
 
@@ -1266,7 +1300,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             cancelRecoveryTimeouts()
             pendingRecoverableRendererError = nil
 
-            if shouldPlayWhenReady() {
+            if shouldPlayWhenReady(), audioSessionAllowsPlayback() {
                 SELogger.debug(.playback, "Starting playback")
                 updateRebufferingState(
                     isRebuffering: false,
@@ -1816,6 +1850,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
         pendingRendererRecoveries.removeAll()
         rendererRecoveryBackoffs.removeAll()
         delayedRendererRecoveries.removeAll()
+        recoveriesAwaitingPeriod.removeAll()
         cancelRecoveryTimeouts()
         updateRebufferingState(isRebuffering: false, resetLastRebufferRealtime: true)
         do {
@@ -2890,6 +2925,7 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
                 throw ErrorBuilder.illegalState()
             }
             SELogger.info(.periods, "Playing the next period, from \(newPlayingPeriodHolder.info.startPosition.seconds)")
+            postRecoveriesAwaitingPeriod(newPlayingPeriodHolder.info.id)
 
             playbackInfo = handlePositionDiscontinuity(
                 mediaPeriodId: newPlayingPeriodHolder.info.id,
@@ -3429,17 +3465,6 @@ final class SEPlayerImplInternal: @unchecked Sendable, MediaSourceList.Delegate,
             mediaPeriodId: periodHolder.info.id,
             mediaClock: mediaClock,
             delegate: self
-        )
-
-        // Registered once: every renderer enable used to add another observer, so each consumed
-        // buffer posted more and more `doSomeWork` messages as seeks and transitions went by.
-        let bufferConsumed = Notification.Name(kCMSampleBufferConsumerNotification_BufferConsumed as String)
-        NotificationCenter.default.removeObserver(self, name: bufferConsumed, object: nil)
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(rendererDidReadSampleAtBoundaries),
-            name: bufferConsumed,
-            object: nil
         )
 
         if playing, playingAndReadingTheSamePeriod {

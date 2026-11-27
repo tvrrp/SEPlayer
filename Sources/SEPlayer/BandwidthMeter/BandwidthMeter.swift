@@ -85,7 +85,7 @@ public final class DefaultBandwidthMeter: BandwidthMeter, @unchecked Sendable {
     private static let minimumActiveTime = Int64(NSEC_PER_SEC)
     private static let varianceResolution = Int64(NSEC_PER_SEC)
 
-    public let delegate = MulticastDelegate<BandwidthMeterDelegate>(isThreadSafe: true)
+    public let delegate = MulticastDelegate<BandwidthMeterDelegate>()
     public var transferListener: TransferListener { self }
 
     private let lock = UnfairLock()

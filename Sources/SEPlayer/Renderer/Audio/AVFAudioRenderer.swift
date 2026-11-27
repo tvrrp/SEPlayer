@@ -22,12 +22,18 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     private weak var eventListener: AudioRendererEventListener?
     /// Whether the renderer was started and the clock hasn't moved yet.
     private var isAwaitingPlaybackStart = false
+    /// Whether the clock ran faster than real time over AirPlay since the renderer started: AirPlay then loses the
+    /// sync of audio and video.
+    private var playedFasterOverAirPlay = false
     /// Sample rate and channel count of the last sample enqueued.
     private var enqueuedAudioFormat: (sampleRate: Float64, channels: UInt32)?
     /// The first sample of a new format, kept until just before it plays; see ``holdsBackNewFormat(_:)``.
     private var pendingPreroll: AudioPacketBatch?
     private var heldSample: CMSampleBuffer?
     private let heldSampleTimer: DispatchSourceTimer
+    /// When the stream held until it plays starts, in renderer time; see ``nextStreamDidStartPlaying()``.
+    private var nextStreamStart: CMTime?
+    private let nextStreamTimer: DispatchSourceTimer
     private var volume: Float = 1
     private var isMuted = false
 
@@ -46,11 +52,15 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         audioOutput = outputFactory()
         decodeBufferQueue = try .init()
         heldSampleTimer = DispatchSource.makeTimerSource(queue: queue.queue)
+        nextStreamTimer = DispatchSource.makeTimerSource(queue: queue.queue)
         super.init(queue: queue, trackType: .audio, clock: clock)
 
         heldSampleTimer.setEventHandler { [weak self] in self?.enqueueHeldSample() }
         heldSampleTimer.activate()
         try renderSynchronizer.timebase.addTimer(heldSampleTimer)
+        nextStreamTimer.setEventHandler { [weak self] in self?.nextStreamDidStartPlaying() }
+        nextStreamTimer.activate()
+        try renderSynchronizer.timebase.addTimer(nextStreamTimer)
 
         // The synchronizer may hold its clock after the rate is set; the clock's own rate tells when it moves.
         effectiveRateObserver = NotificationCenter.default.addObserver(
@@ -66,6 +76,8 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         effectiveRateObserver.map(NotificationCenter.default.removeObserver)
         try? renderSynchronizer.timebase.removeTimer(heldSampleTimer)
         heldSampleTimer.cancel()
+        try? renderSynchronizer.timebase.removeTimer(nextStreamTimer)
+        nextStreamTimer.cancel()
     }
 
     override func onEnabled(joining: Bool, mayRenderStartOfStream: Bool) throws {
@@ -82,6 +94,7 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         inputFormat = nil
         try? decodeBufferQueue.reset()
         forgetAudioFormat()
+        cancelNextStreamStart()
     }
 
     override func onRelease() {
@@ -121,6 +134,13 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     override func onStopped() {
         super.onStopped()
         isAwaitingPlaybackStart = false
+
+        // A flush at the pause has the player preroll every track again with the clock stopped, as after an automatic
+        // flush on AirPlay, so playback resumes in sync.
+        if playedFasterOverAirPlay {
+            playedFasterOverAirPlay = false
+            requestRecovery(.automaticFlush, position: renderSynchronizer.currentTime())
+        }
     }
 
     /// Leaves the synchronizer's time alone: enabled ahead for the next item, the renderer must not move the time of
@@ -131,6 +151,34 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         try decodeBufferQueue.reset()
         audioOutput.flush()
         forgetAudioFormat()
+        // The stream starts from a preroll now, not by following the one before it.
+        cancelNextStreamStart()
+    }
+
+    override func onStreamChanged(
+        formats: [AnyFormat],
+        startPosition: CMTime,
+        offset: CMTime,
+        mediaPeriodId: MediaPeriodId
+    ) throws {
+        try super.onStreamChanged(
+            formats: formats,
+            startPosition: startPosition,
+            offset: offset,
+            mediaPeriodId: mediaPeriodId
+        )
+        // AirPlay plays no audio of a stream that follows another, enqueued while the clock runs faster than real
+        // time. Its audio waits, and once it starts, the player prerolls every track again from there. A first stream
+        // isn't started yet: it starts from a preroll anyway.
+        guard getState() == .started, startPosition.isNumeric, renderSynchronizer.rate > 1,
+              audioOutput.isAirPlayActive else {
+            return
+        }
+
+        SELogger.info(.audio, "\(name) holds the next stream, at \(startPosition.seconds), until it plays")
+        suspendMediaData()
+        nextStreamStart = startPosition
+        try renderSynchronizer.timebase.setTimerNextFireTime(nextStreamTimer, fireTime: startPosition)
     }
 
     override func handleMessage(_ message: RendererMessage) throws {
@@ -301,7 +349,12 @@ final class AVFAudioRenderer: AVFBaseRenderer {
     // MARK: - Output
 
     private func effectiveRateDidChange() {
-        guard isAwaitingPlaybackStart, getState() == .started, renderSynchronizer.timebase.effectiveRate > 0 else {
+        let effectiveRate = renderSynchronizer.timebase.effectiveRate
+        if getState() == .started, effectiveRate > 1, audioOutput.isAirPlayActive {
+            playedFasterOverAirPlay = true
+        }
+
+        guard isAwaitingPlaybackStart, getState() == .started, effectiveRate > 0 else {
             return
         }
         isAwaitingPlaybackStart = false
@@ -503,6 +556,28 @@ final class AVFAudioRenderer: AVFBaseRenderer {
         pendingPreroll = nil
         enqueuedAudioFormat = nil
         try? renderSynchronizer.timebase.setTimerNextFireTime(heldSampleTimer, fireTime: .invalid)
+    }
+
+    // MARK: - Stream changes
+
+    /// Flushes as the held stream starts: the player prerolls every track again from its start with the clock
+    /// stopped, as after a pause, and enqueued then, its audio plays.
+    private func nextStreamDidStartPlaying() {
+        guard let start = nextStreamStart else { return }
+        cancelNextStreamStart()
+        // Back to real time or off AirPlay meanwhile, the stream plays on, late by what wasn't enqueued.
+        guard getState() == .started, renderSynchronizer.rate > 1, audioOutput.isAirPlayActive else {
+            resumeMediaData()
+            return
+        }
+
+        SELogger.info(.audio, "\(name) flushes as the next stream plays at rate \(renderSynchronizer.rate) on AirPlay")
+        requestRecovery(.automaticFlush, position: start)
+    }
+
+    private func cancelNextStreamStart() {
+        nextStreamStart = nil
+        try? renderSynchronizer.timebase.setTimerNextFireTime(nextStreamTimer, fireTime: .invalid)
     }
 }
 

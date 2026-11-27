@@ -32,6 +32,11 @@ struct ContentCategory: Identifiable, Hashable {
     let format: ContentFormat
     var items: [ContentItem]
 
+    /// The urls of every item, in order: the playlist of the category.
+    var playlistUrls: [String] {
+        items.flatMap(\.playlistUrls)
+    }
+
     init(_ title: String, format: ContentFormat, urls: [String]) {
         self.title = title
         self.format = format
